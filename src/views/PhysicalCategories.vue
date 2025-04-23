@@ -1,0 +1,229 @@
+<template>
+  <div>
+    <div class="header">
+      <h3>实物分类管理</h3>
+      <el-button type="primary" @click="handleAdd">添加分类</el-button>
+    </div>
+
+    <el-table :data="categories" style="width: 100%">
+      <el-table-column prop="title" label="标题" />
+      <el-table-column label="图片">
+        <template #default="{ row }">
+          <el-image
+            style="width: 100px; height: 100px"
+            :src="row.image"
+            fit="cover"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column label="图标">
+        <template #default="{ row }">
+          <el-image
+            style="width: 50px; height: 50px"
+            :src="row.icon"
+            fit="cover"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column prop="count" label="作品数量" />
+      <el-table-column prop="description" label="描述" />
+      <el-table-column label="操作" width="200">
+        <template #default="{ row }">
+          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-dialog
+      v-model="dialogVisible"
+      :title="isEdit ? '编辑分类' : '添加分类'"
+      width="50%"
+    >
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="标题">
+          <el-input v-model="form.title" />
+        </el-form-item>
+        <el-form-item label="图片">
+          <el-upload
+            class="avatar-uploader"
+            action="/api/upload"
+            :show-file-list="false"
+            :on-success="handleImageSuccess"
+          >
+            <img v-if="form.image" :src="form.image" class="avatar" />
+            <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="图标">
+          <el-upload
+            class="icon-uploader"
+            action="/api/upload"
+            :show-file-list="false"
+            :on-success="handleIconSuccess"
+          >
+            <img v-if="form.icon" :src="form.icon" class="icon" />
+            <el-icon v-else class="icon-uploader-icon"><Plus /></el-icon>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="作品数量">
+          <el-input-number v-model="form.count" :min="0" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input type="textarea" v-model="form.description" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSubmit">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
+import axios from 'axios'
+
+const categories = ref([])
+const dialogVisible = ref(false)
+const isEdit = ref(false)
+const form = ref({
+  title: '',
+  image: '',
+  icon: '',
+  count: 0,
+  description: ''
+})
+
+const fetchCategories = async () => {
+  try {
+    const response = await axios.get('/api/physical-categories')
+    categories.value = response.data
+  } catch (error) {
+    ElMessage.error('获取数据失败')
+  }
+}
+
+const handleAdd = () => {
+  isEdit.value = false
+  form.value = {
+    title: '',
+    image: '',
+    icon: '',
+    count: 0,
+    description: ''
+  }
+  dialogVisible.value = true
+}
+
+const handleEdit = (row) => {
+  isEdit.value = true
+  form.value = { ...row }
+  dialogVisible.value = true
+}
+
+const handleDelete = (row) => {
+  ElMessageBox.confirm('确定要删除这个分类吗？', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(async () => {
+    try {
+      await axios.delete(`/api/physical-categories/${row.id}`)
+      ElMessage.success('删除成功')
+      fetchCategories()
+    } catch (error) {
+      ElMessage.error('删除失败')
+    }
+  })
+}
+
+const handleImageSuccess = (response) => {
+  form.value.image = response.url
+}
+
+const handleIconSuccess = (response) => {
+  form.value.icon = response.url
+}
+
+const handleSubmit = async () => {
+  try {
+    if (isEdit.value) {
+      await axios.put(`/api/physical-categories/${form.value.id}`, form.value)
+    } else {
+      await axios.post('/api/physical-categories', form.value)
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    fetchCategories()
+  } catch (error) {
+    ElMessage.error('保存失败')
+  }
+}
+
+onMounted(() => {
+  fetchCategories()
+})
+</script>
+
+<style scoped>
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.avatar-uploader,
+.icon-uploader {
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.avatar-uploader {
+  width: 178px;
+  height: 178px;
+}
+
+.icon-uploader {
+  width: 100px;
+  height: 100px;
+}
+
+.avatar-uploader:hover,
+.icon-uploader:hover {
+  border-color: #409eff;
+}
+
+.avatar-uploader-icon,
+.icon-uploader-icon {
+  font-size: 28px;
+  color: #8c939d;
+  text-align: center;
+  line-height: 178px;
+}
+
+.icon-uploader-icon {
+  line-height: 100px;
+}
+
+.avatar {
+  width: 178px;
+  height: 178px;
+  display: block;
+}
+
+.icon {
+  width: 100px;
+  height: 100px;
+  display: block;
+}
+</style> 
