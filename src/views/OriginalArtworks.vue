@@ -44,11 +44,12 @@
         <el-form-item label="图片">
           <el-upload
             class="avatar-uploader"
-            action="/api/upload"
+            :action="`${API_BASE_URL}/api/upload`"
             :show-file-list="false"
             :on-success="handleImageSuccess"
+            name="file"
           >
-            <img v-if="form.image" :src="form.image" class="avatar" />
+            <img v-if="form.image" :src="API_BASE_URL + form.image" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
@@ -71,6 +72,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
+import { API_BASE_URL } from '../config'
 
 const artworks = ref([])
 const dialogVisible = ref(false)
