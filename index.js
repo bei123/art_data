@@ -32,6 +32,9 @@ if (!fs.existsSync('uploads')) {
 
 // 文件上传接口
 app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: '没有上传文件' });
+  }
   res.json({ url: `/uploads/${req.file.filename}` });
 });
 
