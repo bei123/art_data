@@ -31,12 +31,12 @@ if (!fs.existsSync('uploads')) {
 }
 
 // 文件上传接口
-app.post('/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', upload.single('file'), (req, res) => {
   res.json({ url: `/uploads/${req.file.filename}` });
 });
 
 // 艺术家相关接口
-app.get('/artists', async (req, res) => {
+app.get('/api/artists', async (req, res) => {
   try {
     const [artists] = await db.query('SELECT * FROM artists');
     res.json(artists);
@@ -46,7 +46,7 @@ app.get('/artists', async (req, res) => {
   }
 });
 
-app.post('/artists', async (req, res) => {
+app.post('/api/artists', async (req, res) => {
   try {
     const { avatar, name, description } = req.body;
     const [result] = await db.query(
@@ -61,7 +61,7 @@ app.post('/artists', async (req, res) => {
 });
 
 // 原作艺术品相关接口
-app.get('/original-artworks', async (req, res) => {
+app.get('/api/original-artworks', async (req, res) => {
   try {
     const [artworks] = await db.query(`
       SELECT oa.*, a.avatar, a.name as artist_name, a.description as artist_description
@@ -86,7 +86,7 @@ app.get('/original-artworks', async (req, res) => {
   }
 });
 
-app.post('/original-artworks', async (req, res) => {
+app.post('/api/original-artworks', async (req, res) => {
   try {
     const { title, image, artist_id } = req.body;
     const [result] = await db.query(
@@ -100,7 +100,7 @@ app.post('/original-artworks', async (req, res) => {
   }
 });
 
-app.put('/original-artworks/:id', async (req, res) => {
+app.put('/api/original-artworks/:id', async (req, res) => {
   try {
     const { title, image, artist_id } = req.body;
     await db.query(
@@ -114,7 +114,7 @@ app.put('/original-artworks/:id', async (req, res) => {
   }
 });
 
-app.delete('/original-artworks/:id', async (req, res) => {
+app.delete('/api/original-artworks/:id', async (req, res) => {
   try {
     await db.query('DELETE FROM original_artworks WHERE id = ?', [req.params.id]);
     res.json({ message: '删除成功' });
@@ -125,7 +125,7 @@ app.delete('/original-artworks/:id', async (req, res) => {
 });
 
 // 数字艺术品相关接口
-app.get('/digital-artworks', async (req, res) => {
+app.get('/api/digital-artworks', async (req, res) => {
   try {
     const [artworks] = await db.query('SELECT * FROM digital_artworks');
     res.json(artworks);
@@ -135,7 +135,7 @@ app.get('/digital-artworks', async (req, res) => {
   }
 });
 
-app.post('/digital-artworks', async (req, res) => {
+app.post('/api/digital-artworks', async (req, res) => {
   try {
     const { title, image, author, copyright } = req.body;
     const [result] = await db.query(
@@ -149,7 +149,7 @@ app.post('/digital-artworks', async (req, res) => {
   }
 });
 
-app.put('/digital-artworks/:id', async (req, res) => {
+app.put('/api/digital-artworks/:id', async (req, res) => {
   try {
     const { title, image, author, copyright } = req.body;
     await db.query(
@@ -163,7 +163,7 @@ app.put('/digital-artworks/:id', async (req, res) => {
   }
 });
 
-app.delete('/digital-artworks/:id', async (req, res) => {
+app.delete('/api/digital-artworks/:id', async (req, res) => {
   try {
     await db.query('DELETE FROM digital_artworks WHERE id = ?', [req.params.id]);
     res.json({ message: '删除成功' });
@@ -174,7 +174,7 @@ app.delete('/digital-artworks/:id', async (req, res) => {
 });
 
 // 实物分类相关接口
-app.get('/physical-categories', async (req, res) => {
+app.get('/api/physical-categories', async (req, res) => {
   try {
     const [categories] = await db.query('SELECT * FROM physical_categories');
     res.json(categories);
@@ -184,7 +184,7 @@ app.get('/physical-categories', async (req, res) => {
   }
 });
 
-app.post('/physical-categories', async (req, res) => {
+app.post('/api/physical-categories', async (req, res) => {
   try {
     const { title, image, icon, count, description } = req.body;
     const [result] = await db.query(
@@ -198,7 +198,7 @@ app.post('/physical-categories', async (req, res) => {
   }
 });
 
-app.put('/physical-categories/:id', async (req, res) => {
+app.put('/api/physical-categories/:id', async (req, res) => {
   try {
     const { title, image, icon, count, description } = req.body;
     await db.query(
@@ -212,7 +212,7 @@ app.put('/physical-categories/:id', async (req, res) => {
   }
 });
 
-app.delete('/physical-categories/:id', async (req, res) => {
+app.delete('/api/physical-categories/:id', async (req, res) => {
   try {
     await db.query('DELETE FROM physical_categories WHERE id = ?', [req.params.id]);
     res.json({ message: '删除成功' });
