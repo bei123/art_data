@@ -224,5 +224,5 @@ app.delete('/physical-categories/:id', async (req, res) => {
 
 // 启动服务器
 app.listen(port, () => {
-  console.log(`服务器运行在 http://localhost:${port}`);
+  console.log(`服务器运行在 http://192.168.0.80:${port}`);
 }); 
