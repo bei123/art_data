@@ -88,12 +88,37 @@ app.get('/api/original-artworks', async (req, res) => {
 
 app.post('/api/original-artworks', async (req, res) => {
   try {
-    const { title, image, artist_id } = req.body;
+    const { title, image, artist_name } = req.body;
+    
+    // 先创建或查找艺术家
+    const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
+    let artist_id;
+    
+    if (existingArtists.length > 0) {
+      artist_id = existingArtists[0].id;
+    } else {
+      const [artistResult] = await db.query(
+        'INSERT INTO artists (name) VALUES (?)',
+        [artist_name]
+      );
+      artist_id = artistResult.insertId;
+    }
+    
+    // 创建艺术品
     const [result] = await db.query(
       'INSERT INTO original_artworks (title, image, artist_id) VALUES (?, ?, ?)',
       [title, image, artist_id]
     );
-    res.json({ id: result.insertId, ...req.body });
+    
+    res.json({ 
+      id: result.insertId,
+      title,
+      image,
+      artist: {
+        id: artist_id,
+        name: artist_name
+      }
+    });
   } catch (error) {
     console.error('Error creating original artwork:', error);
     res.status(500).json({ error: '创建失败' });
@@ -102,12 +127,37 @@ app.post('/api/original-artworks', async (req, res) => {
 
 app.put('/api/original-artworks/:id', async (req, res) => {
   try {
-    const { title, image, artist_id } = req.body;
+    const { title, image, artist_name } = req.body;
+    
+    // 先创建或查找艺术家
+    const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
+    let artist_id;
+    
+    if (existingArtists.length > 0) {
+      artist_id = existingArtists[0].id;
+    } else {
+      const [artistResult] = await db.query(
+        'INSERT INTO artists (name) VALUES (?)',
+        [artist_name]
+      );
+      artist_id = artistResult.insertId;
+    }
+    
+    // 更新艺术品
     await db.query(
       'UPDATE original_artworks SET title = ?, image = ?, artist_id = ? WHERE id = ?',
       [title, image, artist_id, req.params.id]
     );
-    res.json({ id: req.params.id, ...req.body });
+    
+    res.json({ 
+      id: parseInt(req.params.id),
+      title,
+      image,
+      artist: {
+        id: artist_id,
+        name: artist_name
+      }
+    });
   } catch (error) {
     console.error('Error updating original artwork:', error);
     res.status(500).json({ error: '更新失败' });
