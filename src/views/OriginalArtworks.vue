@@ -53,14 +53,7 @@
           </el-upload>
         </el-form-item>
         <el-form-item label="艺术家">
-          <el-select v-model="form.artist_id" placeholder="选择艺术家">
-            <el-option
-              v-for="artist in artists"
-              :key="artist.id"
-              :label="artist.name"
-              :value="artist.id"
-            />
-          </el-select>
+          <el-input v-model="form.artist_name" placeholder="请输入艺术家姓名" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -80,13 +73,12 @@ import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 
 const artworks = ref([])
-const artists = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const form = ref({
   title: '',
   image: '',
-  artist_id: ''
+  artist_name: ''
 })
 
 const fetchArtworks = async () => {
@@ -98,28 +90,24 @@ const fetchArtworks = async () => {
   }
 }
 
-const fetchArtists = async () => {
-  try {
-    const response = await axios.get('/api/artists')
-    artists.value = response.data
-  } catch (error) {
-    ElMessage.error('获取艺术家数据失败')
-  }
-}
-
 const handleAdd = () => {
   isEdit.value = false
   form.value = {
     title: '',
     image: '',
-    artist_id: ''
+    artist_name: ''
   }
   dialogVisible.value = true
 }
 
 const handleEdit = (row) => {
   isEdit.value = true
-  form.value = { ...row }
+  form.value = {
+    id: row.id,
+    title: row.title,
+    image: row.image,
+    artist_name: row.artist.name
+  }
   dialogVisible.value = true
 }
 
@@ -160,7 +148,6 @@ const handleSubmit = async () => {
 
 onMounted(() => {
   fetchArtworks()
-  fetchArtists()
 })
 </script>
 
