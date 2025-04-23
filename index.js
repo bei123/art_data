@@ -7,6 +7,9 @@ const db = require('./db');
 const app = express();
 const port = 3000;
 
+// 添加基础URL配置
+const BASE_URL = 'http://192.168.0.80:3000';
+
 // 配置文件上传
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -35,7 +38,8 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: '没有上传文件' });
   }
-  res.json({ url: `/uploads/${req.file.filename}` });
+  const fileUrl = `${BASE_URL}/uploads/${req.file.filename}`;
+  res.json({ url: fileUrl });
 });
 
 // 艺术家相关接口
@@ -63,35 +67,48 @@ app.post('/api/artists', async (req, res) => {
   }
 });
 
-// 原作艺术品相关接口
+// 验证图片URL的函数
+function validateImageUrl(url) {
+  if (!url) return false;
+  try {
+    const urlObj = new URL(url);
+    return urlObj.pathname.startsWith('/uploads/');
+  } catch (e) {
+    return false;
+  }
+}
+
+// 获取艺术品列表
 app.get('/api/original-artworks', async (req, res) => {
   try {
     const [artworks] = await db.query(`
-      SELECT oa.*, a.avatar, a.name as artist_name, a.description as artist_description
-      FROM original_artworks oa
-      JOIN artists a ON oa.artist_id = a.id
+      SELECT oa.*, a.name as artist_name 
+      FROM original_artworks oa 
+      LEFT JOIN artists a ON oa.artist_id = a.id
+      ORDER BY oa.created_at DESC
     `);
-    const formattedArtworks = artworks.map(artwork => ({
-      id: artwork.id,
-      title: artwork.title,
-      image: artwork.image,
-      artist: {
-        id: artwork.artist_id,
-        avatar: artwork.avatar,
-        name: artwork.artist_name,
-        description: artwork.artist_description
-      }
+    
+    // 为每个图片URL添加BASE_URL
+    const artworksWithFullUrls = artworks.map(artwork => ({
+      ...artwork,
+      image: artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`
     }));
-    res.json(formattedArtworks);
+    
+    res.json(artworksWithFullUrls);
   } catch (error) {
-    console.error('Error fetching original artworks:', error);
-    res.status(500).json({ error: '获取数据失败' });
+    console.error('获取艺术品列表失败:', error);
+    res.status(500).json({ error: '获取艺术品列表失败' });
   }
 });
 
 app.post('/api/original-artworks', async (req, res) => {
   try {
     const { title, image, artist_name } = req.body;
+    
+    // 验证图片URL
+    if (!validateImageUrl(image)) {
+      return res.status(400).json({ error: '无效的图片URL' });
+    }
     
     // 先创建或查找艺术家
     const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
