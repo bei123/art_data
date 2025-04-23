@@ -67,7 +67,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import axios from 'axios'
+import axios from '../utils/axios'
 
 const artworks = ref([])
 const dialogVisible = ref(false)

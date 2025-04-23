@@ -85,7 +85,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import axios from '../utils/axios'
 
 const stats = ref({
   originalArtworks: 0,
