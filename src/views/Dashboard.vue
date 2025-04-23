@@ -1,0 +1,151 @@
+<template>
+  <div>
+    <h3>数据概览</h3>
+    <el-row :gutter="20" class="dashboard-row">
+      <el-col :span="8">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>原作艺术品</span>
+              <el-button type="primary" link @click="$router.push('/original-artworks')">查看全部</el-button>
+            </div>
+          </template>
+          <div class="card-content">
+            <div class="stat-number">{{ stats.originalArtworks }}</div>
+            <div class="stat-desc">件作品</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>数字艺术品</span>
+              <el-button type="primary" link @click="$router.push('/digital-artworks')">查看全部</el-button>
+            </div>
+          </template>
+          <div class="card-content">
+            <div class="stat-number">{{ stats.digitalArtworks }}</div>
+            <div class="stat-desc">件作品</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>实物分类</span>
+              <el-button type="primary" link @click="$router.push('/physical-categories')">查看全部</el-button>
+            </div>
+          </template>
+          <div class="card-content">
+            <div class="stat-number">{{ stats.physicalCategories }}</div>
+            <div class="stat-desc">个分类</div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" class="dashboard-row">
+      <el-col :span="12">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>最近添加的原作艺术品</span>
+            </div>
+          </template>
+          <el-table :data="recentOriginalArtworks" style="width: 100%">
+            <el-table-column prop="title" label="标题" />
+            <el-table-column label="艺术家">
+              <template #default="{ row }">
+                {{ row.artist.name }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="添加时间" />
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col :span="12">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>最近添加的数字艺术品</span>
+            </div>
+          </template>
+          <el-table :data="recentDigitalArtworks" style="width: 100%">
+            <el-table-column prop="title" label="标题" />
+            <el-table-column prop="author" label="作者" />
+            <el-table-column prop="created_at" label="添加时间" />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import axios from 'axios'
+
+const stats = ref({
+  originalArtworks: 0,
+  digitalArtworks: 0,
+  physicalCategories: 0
+})
+
+const recentOriginalArtworks = ref([])
+const recentDigitalArtworks = ref([])
+
+const fetchStats = async () => {
+  try {
+    const [originalRes, digitalRes, categoriesRes] = await Promise.all([
+      axios.get('/api/original-artworks'),
+      axios.get('/api/digital-artworks'),
+      axios.get('/api/physical-categories')
+    ])
+    
+    stats.value = {
+      originalArtworks: originalRes.data.length,
+      digitalArtworks: digitalRes.data.length,
+      physicalCategories: categoriesRes.data.length
+    }
+    
+    recentOriginalArtworks.value = originalRes.data.slice(-5).reverse()
+    recentDigitalArtworks.value = digitalRes.data.slice(-5).reverse()
+  } catch (error) {
+    console.error('获取统计数据失败:', error)
+  }
+}
+
+onMounted(() => {
+  fetchStats()
+})
+</script>
+
+<style scoped>
+.dashboard-row {
+  margin-bottom: 20px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-content {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.stat-number {
+  font-size: 36px;
+  font-weight: bold;
+  color: #409eff;
+}
+
+.stat-desc {
+  color: #909399;
+  margin-top: 10px;
+}
+</style> 
