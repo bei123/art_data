@@ -697,6 +697,63 @@ app.get('/api/rights/detail/:id', async (req, res) => {
   }
 });
 
+// 搜索接口
+app.get('/api/search', async (req, res) => {
+  try {
+    const { keyword } = req.query;
+    if (!keyword) {
+      return res.status(400).json({ error: '请输入搜索关键词' });
+    }
+
+    const searchTerm = `%${keyword}%`;
+    
+    // 搜索艺术家
+    const [artists] = await db.query(
+      `SELECT id, name, avatar, description, 'artist' as type 
+       FROM artists 
+       WHERE name LIKE ? OR description LIKE ?`,
+      [searchTerm, searchTerm]
+    );
+
+    // 搜索原创作品
+    const [originalArtworks] = await db.query(
+      `SELECT id, title, image, description, 'original_artwork' as type 
+       FROM original_artworks 
+       WHERE title LIKE ? OR description LIKE ?`,
+      [searchTerm, searchTerm]
+    );
+
+    // 搜索数字作品
+    const [digitalArtworks] = await db.query(
+      `SELECT id, title, image_url as image, description, 'digital_artwork' as type 
+       FROM digital_artworks 
+       WHERE title LIKE ? OR description LIKE ?`,
+      [searchTerm, searchTerm]
+    );
+
+    // 合并结果并添加完整URL
+    const results = [
+      ...artists.map(item => ({
+        ...item,
+        avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : ''
+      })),
+      ...originalArtworks.map(item => ({
+        ...item,
+        image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
+      })),
+      ...digitalArtworks.map(item => ({
+        ...item,
+        image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
+      }))
+    ];
+
+    res.json(results);
+  } catch (error) {
+    console.error('搜索失败:', error);
+    res.status(500).json({ error: '搜索失败' });
+  }
+});
+
 // 启动服务器
 app.listen(port, () => {
   console.log(`服务器运行在 http://api.wx.2000gallery.art:${port}`);
