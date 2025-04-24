@@ -8,7 +8,11 @@
     <el-table :data="artists" style="width: 100%">
       <el-table-column label="头像">
         <template #default="{ row }">
-          <el-avatar :src="row.avatar" />
+          <el-image
+            style="width: 50px; height: 50px"
+            :src="API_BASE_URL + row.avatar"
+            fit="cover"
+          />
         </template>
       </el-table-column>
       <el-table-column prop="name" label="姓名" />
@@ -41,8 +45,11 @@
             :on-success="handleAvatarSuccess"
             name="file"
           >
-            <img v-if="form.avatar" :src="form.avatar" class="avatar" />
-            <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+            <el-image
+              style="width: 100%; height: 200px"
+              :src="API_BASE_URL + form.avatar"
+              fit="cover"
+            />
           </el-upload>
         </el-form-item>
         <el-form-item label="背景图">
@@ -53,8 +60,11 @@
             :on-success="handleBannerSuccess"
             name="file"
           >
-            <img v-if="form.banner" :src="form.banner" class="banner" />
-            <el-icon v-else class="banner-uploader-icon"><Plus /></el-icon>
+            <el-image
+              style="width: 100%; height: 200px"
+              :src="API_BASE_URL + form.banner"
+              fit="cover"
+            />
           </el-upload>
         </el-form-item>
         <el-form-item label="简介">
@@ -191,16 +201,17 @@ onMounted(() => {
   cursor: pointer;
   position: relative;
   overflow: hidden;
+  transition: border-color 0.3s;
 }
 
 .avatar-uploader {
-  width: 178px;
-  height: 178px;
+  width: 200px;
+  height: 200px;
 }
 
 .banner-uploader {
-  width: 300px;
-  height: 150px;
+  width: 400px;
+  height: 200px;
 }
 
 .avatar-uploader:hover,
@@ -208,27 +219,49 @@ onMounted(() => {
   border-color: #409eff;
 }
 
+.avatar-uploader :deep(.el-image),
+.banner-uploader :deep(.el-image) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-uploader :deep(.el-upload),
+.banner-uploader :deep(.el-upload) {
+  width: 100%;
+  height: 100%;
+}
+
 .avatar-uploader-icon,
 .banner-uploader-icon {
   font-size: 28px;
   color: #8c939d;
-  text-align: center;
-  line-height: 178px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
-.banner-uploader-icon {
-  line-height: 150px;
+:deep(.el-table .el-image) {
+  width: 80px;
+  height: 80px;
+  border-radius: 4px;
 }
 
-.avatar {
-  width: 178px;
-  height: 178px;
-  display: block;
+:deep(.el-dialog .el-form-item) {
+  margin-bottom: 22px;
 }
 
-.banner {
-  width: 300px;
-  height: 150px;
-  display: block;
+:deep(.el-upload:hover) {
+  border-color: #409eff;
+}
+
+:deep(.el-image) {
+  transition: transform 0.3s;
+}
+
+:deep(.el-image:hover) {
+  transform: scale(1.02);
 }
 </style> 

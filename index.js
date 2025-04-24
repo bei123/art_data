@@ -38,7 +38,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: '没有上传文件' });
   }
-  const fileUrl = `${BASE_URL}/uploads/${req.file.filename}`;
+  const fileUrl = `/uploads/${req.file.filename}`;
   res.json({ url: fileUrl });
 });
 
@@ -64,6 +64,29 @@ app.post('/api/artists', async (req, res) => {
   } catch (error) {
     console.error('Error creating artist:', error);
     res.status(500).json({ error: '创建失败' });
+  }
+});
+
+// 删除艺术家接口
+app.delete('/api/artists/:id', async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 先删除与艺术家相关的作品
+    await connection.query('DELETE FROM original_artworks WHERE artist_id = ?', [req.params.id]);
+    
+    // 然后删除艺术家
+    await connection.query('DELETE FROM artists WHERE id = ?', [req.params.id]);
+
+    await connection.commit();
+    res.json({ message: '删除成功' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error deleting artist:', error);
+    res.status(500).json({ error: '删除失败' });
+  } finally {
+    connection.release();
   }
 });
 
