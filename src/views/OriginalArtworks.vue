@@ -142,7 +142,7 @@ const beforeImageUpload = (file) => {
 
 const fetchArtworks = async () => {
   try {
-    const response = await axios.get('/api/original-artworks')
+    const response = await axios.get('/original-artworks')
     artworks.value = response.data.map(artwork => ({
       ...artwork,
       artist: {
@@ -199,7 +199,7 @@ const handleDelete = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      await axios.delete(`/api/original-artworks/${row.id}`)
+      await axios.delete(`/original-artworks/${row.id}`)
       ElMessage.success('删除成功')
       fetchArtworks()
     } catch (error) {
@@ -239,9 +239,9 @@ const handleSubmit = async () => {
     };
 
     if (isEdit.value) {
-      await axios.put(`/api/original-artworks/${form.value.id}`, submitData)
+      await axios.put(`/original-artworks/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/original-artworks', submitData)
+      await axios.post('/original-artworks', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false

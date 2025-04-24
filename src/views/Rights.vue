@@ -126,7 +126,7 @@ const form = ref({
 
 const fetchRights = async () => {
   try {
-    const response = await axios.get('/api/rights')
+    const response = await axios.get('/rights')
     rights.value = response.data.map(right => ({
       ...right,
       images: right.images ? right.images.map(image => getImageUrl(image)) : []
@@ -194,7 +194,7 @@ const handleDelete = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      await axios.delete(`/api/rights/${row.id}`)
+      await axios.delete(`/rights/${row.id}`)
       ElMessage.success('删除成功')
       fetchRights()
     } catch (error) {
@@ -260,9 +260,9 @@ const handleSubmit = async () => {
     }
 
     if (isEdit.value) {
-      await axios.put(`/api/rights/${form.value.id}`, submitData)
+      await axios.put(`/rights/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/rights', submitData)
+      await axios.post('/rights', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false

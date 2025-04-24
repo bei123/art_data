@@ -113,7 +113,7 @@ const form = ref({
 
 const fetchArtists = async () => {
   try {
-    const response = await axios.get('/api/artists')
+    const response = await axios.get('/artists')
     artists.value = response.data
   } catch (error) {
     ElMessage.error('获取艺术家列表失败')
@@ -156,7 +156,7 @@ const handleDelete = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      await axios.delete(`/api/artists/${row.id}`)
+      await axios.delete(`/artists/${row.id}`)
       ElMessage.success('删除成功')
       fetchArtists()
     } catch (error) {
@@ -193,9 +193,9 @@ const handleSubmit = async () => {
     };
 
     if (isEdit.value) {
-      await axios.put(`/api/artists/${form.value.id}`, submitData)
+      await axios.put(`/artists/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/artists', submitData)
+      await axios.post('/artists', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
