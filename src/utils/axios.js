@@ -11,10 +11,7 @@ const instance = axios.create({
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   },
-  validateStatus: function (status) {
-    return status >= 200 && status < 500;
-  },
-  withCredentials: true // 允许跨域请求携带凭证
+  withCredentials: true
 });
 
 // 请求拦截器
@@ -39,11 +36,6 @@ instance.interceptors.request.use(
       }
       config.headers.Authorization = `Bearer ${token}`;
     }
-
-    // 添加安全相关的请求头
-    config.headers['X-Requested-With'] = 'XMLHttpRequest';
-    config.headers['X-Content-Type-Options'] = 'nosniff';
-    config.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
 
     // 开发环境下打印请求信息
     if (process.env.NODE_ENV === 'development') {
