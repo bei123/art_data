@@ -133,9 +133,9 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 // 艺术家相关接口
 app.get('/api/artists', async (req, res) => {
   try {
-    const [artists] = await db.query('SELECT * FROM artists');
+    const [rows] = await db.query('SELECT * FROM artists');
     // 为每个艺术家的图片添加完整URL
-    const artistsWithFullUrls = artists.map(artist => ({
+    const artistsWithFullUrls = rows.map(artist => ({
       ...artist,
       avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
       banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
@@ -245,7 +245,7 @@ function validateImageUrl(url) {
 // 获取艺术品列表
 app.get('/api/original-artworks', async (req, res) => {
   try {
-    const [artworks] = await db.query(`
+    const [rows] = await db.query(`
       SELECT 
         oa.*,
         a.id as artist_id,
@@ -257,7 +257,7 @@ app.get('/api/original-artworks', async (req, res) => {
     `);
     
     // 为每个图片URL添加BASE_URL并构建正确的数据结构
-    const artworksWithFullUrls = artworks.map(artwork => ({
+    const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
       image: artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`,
       artist: {
@@ -445,9 +445,9 @@ app.delete('/api/original-artworks/:id', async (req, res) => {
 // 数字艺术品相关接口
 app.get('/api/digital-artworks', async (req, res) => {
   try {
-    const [artworks] = await db.query('SELECT * FROM digital_artworks');
+    const [rows] = await db.query('SELECT * FROM digital_artworks');
     // 为每个作品的图片添加完整URL
-    const artworksWithFullUrls = artworks.map(artwork => ({
+    const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
       image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : ''
     }));
@@ -499,9 +499,9 @@ app.delete('/api/digital-artworks/:id', async (req, res) => {
 // 实物分类相关接口
 app.get('/api/physical-categories', async (req, res) => {
   try {
-    const [categories] = await db.query('SELECT * FROM physical_categories');
+    const [rows] = await db.query('SELECT * FROM physical_categories');
     // 为每个分类的图片添加完整URL
-    const categoriesWithFullUrls = categories.map(category => ({
+    const categoriesWithFullUrls = rows.map(category => ({
       ...category,
       image: category.image ? (category.image.startsWith('http') ? category.image : `${BASE_URL}${category.image}`) : '',
       icon: category.icon ? (category.icon.startsWith('http') ? category.icon : `${BASE_URL}${category.icon}`) : ''
@@ -554,7 +554,7 @@ app.delete('/api/physical-categories/:id', async (req, res) => {
 // 获取作品详情
 app.get('/api/artworks/:id', async (req, res) => {
   try {
-    const [artwork] = await db.query(`
+    const [rows] = await db.query(`
       SELECT 
         oa.*,
         a.name as artist_name,
@@ -565,10 +565,11 @@ app.get('/api/artworks/:id', async (req, res) => {
       WHERE oa.id = ?
     `, [req.params.id]);
 
-    if (!artwork) {
+    if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '作品不存在' });
     }
 
+    const artwork = rows[0];
     // 处理图片URL
     artwork.image = artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : '';
     artwork.artist_avatar = artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : '';
@@ -605,32 +606,40 @@ app.get('/api/artworks/:id', async (req, res) => {
 // 获取艺术家详情
 app.get('/api/artists/:id', async (req, res) => {
   try {
-    const [artist] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
+    const [rows] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
     
-    if (!artist) {
+    if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '艺术家不存在' });
     }
 
-    const [achievements] = await db.query(
+    const artist = rows[0];
+
+    const [achievementRows] = await db.query(
       'SELECT * FROM artist_achievements WHERE artist_id = ?',
       [req.params.id]
     );
 
-    const [artworks] = await db.query(
+    const [artworkRows] = await db.query(
       'SELECT id, title, image FROM original_artworks WHERE artist_id = ?',
       [req.params.id]
     );
 
+    // 处理图片URL
+    const processedArtworks = artworkRows.map(artwork => ({
+      ...artwork,
+      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : ''
+    }));
+
     res.json({
       name: artist.name,
-      avatar: artist.avatar,
-      banner: artist.banner,
+      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
+      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : '',
       era: artist.era,
       description: artist.description,
       biography: artist.biography,
       journey: artist.journey,
-      artworks: artworks,
-      achievements: achievements
+      artworks: processedArtworks,
+      achievements: achievementRows
     });
   } catch (error) {
     console.error('获取艺术家详情失败:', error);
@@ -641,7 +650,7 @@ app.get('/api/artists/:id', async (req, res) => {
 // 获取版权实物列表
 app.get('/api/rights', async (req, res) => {
   try {
-    const [rights] = await db.query(`
+    const [rows] = await db.query(`
       SELECT r.*, GROUP_CONCAT(ri.image_url) as images
       FROM rights r
       LEFT JOIN right_images ri ON r.id = ri.right_id
@@ -649,7 +658,7 @@ app.get('/api/rights', async (req, res) => {
     `);
     
     // 为每个版权实物的图片添加完整URL
-    const rightsWithFullUrls = rights.map(right => ({
+    const rightsWithFullUrls = rows.map(right => ({
       ...right,
       images: right.images ? right.images.split(',').map(image => 
         image.startsWith('http') ? image : `${BASE_URL}${image}`
@@ -848,7 +857,7 @@ app.get('/api/search', async (req, res) => {
     const searchTerm = `%${keyword}%`;
     
     // 搜索艺术家
-    const [artists] = await db.query(
+    const [artistRows] = await db.query(
       `SELECT id, name, avatar, description, 'artist' as type 
        FROM artists 
        WHERE name LIKE ? OR description LIKE ?`,
@@ -856,7 +865,7 @@ app.get('/api/search', async (req, res) => {
     );
 
     // 搜索原创作品
-    const [originalArtworks] = await db.query(
+    const [artworkRows] = await db.query(
       `SELECT id, title, image, description, 'original_artwork' as type 
        FROM original_artworks 
        WHERE title LIKE ? OR description LIKE ?`,
@@ -864,7 +873,7 @@ app.get('/api/search', async (req, res) => {
     );
 
     // 搜索数字作品
-    const [digitalArtworks] = await db.query(
+    const [digitalRows] = await db.query(
       `SELECT id, title, image_url as image, description, 'digital_artwork' as type 
        FROM digital_artworks 
        WHERE title LIKE ? OR description LIKE ?`,
@@ -873,15 +882,15 @@ app.get('/api/search', async (req, res) => {
 
     // 合并结果并添加完整URL
     const results = [
-      ...artists.map(item => ({
+      ...artistRows.map(item => ({
         ...item,
         avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : ''
       })),
-      ...originalArtworks.map(item => ({
+      ...artworkRows.map(item => ({
         ...item,
         image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
       })),
-      ...digitalArtworks.map(item => ({
+      ...digitalRows.map(item => ({
         ...item,
         image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
       }))
