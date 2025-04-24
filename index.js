@@ -374,6 +374,153 @@ app.get('/api/artists/:id', async (req, res) => {
   }
 });
 
+// 获取版权实物列表
+app.get('/api/rights', async (req, res) => {
+  try {
+    const [rights] = await db.query(`
+      SELECT r.*, GROUP_CONCAT(ri.image_url) as images
+      FROM rights r
+      LEFT JOIN right_images ri ON r.id = ri.right_id
+      GROUP BY r.id
+    `);
+    res.json(rights);
+  } catch (error) {
+    console.error('获取版权实物列表失败:', error);
+    res.status(500).json({ error: '获取版权实物列表失败' });
+  }
+});
+
+// 创建版权实物
+app.post('/api/rights', async (req, res) => {
+  try {
+    const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images } = req.body;
+    
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 插入版权实物基本信息
+      const [result] = await connection.query(
+        'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [title, status, price, originalPrice, period, totalCount, remainingCount, description]
+      );
+
+      const rightId = result.insertId;
+
+      // 插入图片
+      if (images && images.length > 0) {
+        const imageValues = images.map(image => [rightId, image]);
+        await connection.query(
+          'INSERT INTO right_images (right_id, image_url) VALUES ?',
+          [imageValues]
+        );
+      }
+
+      await connection.commit();
+      
+      // 返回完整的版权实物信息
+      const [newRight] = await db.query(`
+        SELECT r.*, GROUP_CONCAT(ri.image_url) as images
+        FROM rights r
+        LEFT JOIN right_images ri ON r.id = ri.right_id
+        WHERE r.id = ?
+        GROUP BY r.id
+      `, [rightId]);
+
+      res.json(newRight[0]);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('创建版权实物失败:', error);
+    res.status(500).json({ error: '创建版权实物失败' });
+  }
+});
+
+// 更新版权实物
+app.put('/api/rights/:id', async (req, res) => {
+  try {
+    const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images } = req.body;
+    
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 更新版权实物基本信息
+      await connection.query(
+        'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ? WHERE id = ?',
+        [title, status, price, originalPrice, period, totalCount, remainingCount, description, req.params.id]
+      );
+
+      // 删除旧图片
+      await connection.query('DELETE FROM right_images WHERE right_id = ?', [req.params.id]);
+
+      // 插入新图片
+      if (images && images.length > 0) {
+        const imageValues = images.map(image => [req.params.id, image]);
+        await connection.query(
+          'INSERT INTO right_images (right_id, image_url) VALUES ?',
+          [imageValues]
+        );
+      }
+
+      await connection.commit();
+      
+      // 返回更新后的版权实物信息
+      const [updatedRight] = await db.query(`
+        SELECT r.*, GROUP_CONCAT(ri.image_url) as images
+        FROM rights r
+        LEFT JOIN right_images ri ON r.id = ri.right_id
+        WHERE r.id = ?
+        GROUP BY r.id
+      `, [req.params.id]);
+
+      res.json(updatedRight[0]);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('更新版权实物失败:', error);
+    res.status(500).json({ error: '更新版权实物失败' });
+  }
+});
+
+// 删除版权实物
+app.delete('/api/rights/:id', async (req, res) => {
+  try {
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 删除图片
+      await connection.query('DELETE FROM right_images WHERE right_id = ?', [req.params.id]);
+      
+      // 删除版权实物
+      await connection.query('DELETE FROM rights WHERE id = ?', [req.params.id]);
+
+      await connection.commit();
+      res.json({ message: '删除成功' });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('删除版权实物失败:', error);
+    res.status(500).json({ error: '删除版权实物失败' });
+  }
+});
+
 // 获取版权实物详情
 app.get('/api/rights/detail/:id', async (req, res) => {
   try {

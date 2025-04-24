@@ -14,6 +14,10 @@
           <el-icon><Picture /></el-icon>
           <span>原作艺术品</span>
         </el-menu-item>
+        <el-menu-item index="/artists">
+          <el-icon><User /></el-icon>
+          <span>艺术家</span>
+        </el-menu-item>
         <el-menu-item index="/digital-artworks">
           <el-icon><Monitor /></el-icon>
           <span>数字艺术品</span>
@@ -21,6 +25,10 @@
         <el-menu-item index="/physical-categories">
           <el-icon><Collection /></el-icon>
           <span>实物分类</span>
+        </el-menu-item>
+        <el-menu-item index="/rights">
+          <el-icon><Document /></el-icon>
+          <span>版权实物</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -36,7 +44,7 @@
 </template>
 
 <script setup>
-import { HomeFilled, Picture, Monitor, Collection } from '@element-plus/icons-vue'
+import { HomeFilled, Picture, Monitor, Collection, User, Document } from '@element-plus/icons-vue'
 </script>
 
 <style scoped>
