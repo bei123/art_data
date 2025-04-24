@@ -13,8 +13,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://api.wx.2000gallery.art:6000',
-        changeOrigin: true
+        target: process.env.NODE_ENV === 'development' 
+          ? 'http://localhost:2000'
+          : 'https://api.wx.2000gallery.art:2000',
+        changeOrigin: true,
+        secure: false
       }
     }
   }

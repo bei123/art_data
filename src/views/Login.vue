@@ -113,6 +113,9 @@ const handleSubmit = async () => {
     } else {
       ElMessage.success('注册成功，请登录')
       isLogin.value = true
+      form.username = ''
+      form.email = ''
+      form.password = ''
     }
   } catch (error) {
     console.error('操作失败:', error)
