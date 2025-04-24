@@ -1,0 +1,1 @@
+ALTER TABLE original_artworks ADD COLUMN year INT AFTER title; 
