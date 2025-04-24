@@ -21,10 +21,15 @@ const corsOptions = {
       'https://www.wx.ht.2000gallery.art',
       'http://www.wx.ht.2000gallery.art'
     ];
-    // 允许来自允许列表中的域名或者没有 origin（比如同源请求）
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    
+    if (!origin) {
+      // 允许没有 origin 的请求（比如同源请求）
       callback(null, true);
+    } else if (allowedOrigins.includes(origin)) {
+      // 允许白名单中的域名
+      callback(null, origin);
     } else {
+      // 拒绝其他域名
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -36,12 +41,7 @@ const corsOptions = {
     'Origin',
     'X-Requested-With',
     'Access-Control-Request-Method',
-    'Access-Control-Request-Headers',
-    'X-Content-Type-Options',
-    'X-Frame-Options',
-    'X-XSS-Protection',
-    'Strict-Transport-Security',
-    'Referrer-Policy'
+    'Access-Control-Request-Headers'
   ],
   exposedHeaders: ['Content-Length', 'X-Requested-With', 'Authorization'],
   credentials: true,
@@ -52,13 +52,13 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// 移除之前的自定义 CORS 中间件
 // 添加安全相关的响应头中间件
 app.use((req, res, next) => {
-  res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // 设置安全相关的响应头
   res.header('X-Content-Type-Options', 'nosniff');
   res.header('X-Frame-Options', 'SAMEORIGIN');
   res.header('X-XSS-Protection', '1; mode=block');
+  res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });

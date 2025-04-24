@@ -71,12 +71,15 @@ instance.interceptors.response.use(
     if (process.env.NODE_ENV === 'development') {
       console.log('收到响应:', {
         status: response.status,
+        statusText: response.statusText,
         headers: response.headers,
         data: response.data,
         config: {
           url: response.config.url,
           baseURL: response.config.baseURL,
-          method: response.config.method
+          method: response.config.method,
+          headers: response.config.headers,
+          withCredentials: response.config.withCredentials
         }
       });
     }
@@ -93,11 +96,18 @@ instance.interceptors.response.use(
     // 详细的错误日志
     console.error('响应错误:', {
       message: error.message,
-      config: error.config,
+      name: error.name,
+      config: error.config ? {
+        url: error.config.url,
+        method: error.config.method,
+        headers: error.config.headers,
+        withCredentials: error.config.withCredentials
+      } : null,
       response: error.response ? {
         status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
+        statusText: error.response.statusText,
+        headers: error.response.headers,
+        data: error.response.data
       } : null
     });
 
