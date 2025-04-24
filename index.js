@@ -12,32 +12,19 @@ const app = express();
 const port = 2000;
 
 // 在所有中间件之前添加 CORS 配置
-app.use((req, res, next) => {
-  const allowedOrigins = [
+app.use(cors({
+  origin: [
     'http://localhost:5173',
     'https://wx.ht.2000gallery.art',
     'http://wx.ht.2000gallery.art',
     'https://www.wx.ht.2000gallery.art',
     'http://www.wx.ht.2000gallery.art'
-  ];
-
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
-    res.setHeader('Access-Control-Expose-Headers', 'Authorization');
-  }
-
-  // 处理预检请求
-  if (req.method === 'OPTIONS') {
-    res.status(204).end();
-    return;
-  }
-
-  next();
-});
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  exposedHeaders: ['Authorization']
+}));
 
 // 安全相关的响应头
 app.use((req, res, next) => {
