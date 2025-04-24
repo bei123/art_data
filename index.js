@@ -5,10 +5,10 @@ const path = require('path');
 const db = require('./db');
 
 const app = express();
-const port = 3000;
+const port = 6000;
 
 // 添加基础URL配置
-const BASE_URL = 'http://api.wx.2000gallery.art:3000';
+const BASE_URL = 'http://api.wx.2000gallery.art:6000';
 
 // 配置文件上传
 const storage = multer.diskStorage({
