@@ -24,6 +24,9 @@
           </div>
         </template>
       </el-table-column>
+      <el-table-column prop="year" label="创作年份" />
+      <el-table-column prop="collection.location" label="收藏地" />
+      <el-table-column prop="collection.number" label="收藏编号" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -57,6 +60,31 @@
         <el-form-item label="艺术家">
           <el-input v-model="form.artist_name" placeholder="请输入艺术家姓名" />
         </el-form-item>
+        <el-form-item label="创作年份">
+          <el-input-number v-model="form.year" :min="1900" :max="2100" />
+        </el-form-item>
+        <el-form-item label="作品简介">
+          <el-input v-model="form.description" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="创作背景">
+          <el-input v-model="form.background" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="艺术特色">
+          <el-input v-model="form.features" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-divider>收藏信息</el-divider>
+        <el-form-item label="收藏地">
+          <el-input v-model="form.collection_location" />
+        </el-form-item>
+        <el-form-item label="收藏编号">
+          <el-input v-model="form.collection_number" />
+        </el-form-item>
+        <el-form-item label="尺寸大小">
+          <el-input v-model="form.collection_size" />
+        </el-form-item>
+        <el-form-item label="创作材料">
+          <el-input v-model="form.collection_material" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -81,7 +109,15 @@ const isEdit = ref(false)
 const form = ref({
   title: '',
   image: '',
-  artist_name: ''
+  artist_name: '',
+  year: 1900,
+  description: '',
+  background: '',
+  features: '',
+  collection_location: '',
+  collection_number: '',
+  collection_size: '',
+  collection_material: ''
 })
 
 const getImageUrl = (url) => {
@@ -124,7 +160,15 @@ const handleAdd = () => {
   form.value = {
     title: '',
     image: '',
-    artist_name: ''
+    artist_name: '',
+    year: 1900,
+    description: '',
+    background: '',
+    features: '',
+    collection_location: '',
+    collection_number: '',
+    collection_size: '',
+    collection_material: ''
   }
   dialogVisible.value = true
 }
@@ -135,7 +179,15 @@ const handleEdit = (row) => {
     id: row.id,
     title: row.title,
     image: row.image,
-    artist_name: row.artist?.name || ''
+    artist_name: row.artist?.name || '',
+    year: row.year,
+    description: row.description,
+    background: row.background,
+    features: row.features,
+    collection_location: row.collection?.location || '',
+    collection_number: row.collection?.number || '',
+    collection_size: row.collection?.size || '',
+    collection_material: row.collection?.material || ''
   }
   dialogVisible.value = true
 }
@@ -177,7 +229,13 @@ const handleSubmit = async () => {
   try {
     const submitData = {
       ...form.value,
-      image: form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image
+      image: form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image,
+      collection: {
+        location: form.value.collection_location,
+        number: form.value.collection_number,
+        size: form.value.collection_size,
+        material: form.value.collection_material
+      }
     };
 
     if (isEdit.value) {

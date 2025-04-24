@@ -209,6 +209,12 @@ app.get('/api/original-artworks', async (req, res) => {
         id: artwork.artist_id,
         name: artwork.artist_name,
         avatar: artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : ''
+      },
+      collection: {
+        location: artwork.collection_location,
+        number: artwork.collection_number,
+        size: artwork.collection_size,
+        material: artwork.collection_material
       }
     }));
     
@@ -221,7 +227,19 @@ app.get('/api/original-artworks', async (req, res) => {
 
 app.post('/api/original-artworks', async (req, res) => {
   try {
-    const { title, image, artist_name } = req.body;
+    const { 
+      title, 
+      image, 
+      artist_name,
+      year,
+      description,
+      background,
+      features,
+      collection_location,
+      collection_number,
+      collection_size,
+      collection_material
+    } = req.body;
     
     // 验证图片URL
     if (!validateImageUrl(image)) {
@@ -244,14 +262,32 @@ app.post('/api/original-artworks', async (req, res) => {
     
     // 创建艺术品
     const [result] = await db.query(
-      'INSERT INTO original_artworks (title, image, artist_id) VALUES (?, ?, ?)',
-      [title, image, artist_id]
+      `INSERT INTO original_artworks (
+        title, image, artist_id, year, description, 
+        background, features, collection_location, 
+        collection_number, collection_size, collection_material
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        title, image, artist_id, year, description,
+        background, features, collection_location,
+        collection_number, collection_size, collection_material
+      ]
     );
     
     res.json({ 
       id: result.insertId,
       title,
       image,
+      year,
+      description,
+      background,
+      features,
+      collection: {
+        location: collection_location,
+        number: collection_number,
+        size: collection_size,
+        material: collection_material
+      },
       artist: {
         id: artist_id,
         name: artist_name
@@ -265,7 +301,19 @@ app.post('/api/original-artworks', async (req, res) => {
 
 app.put('/api/original-artworks/:id', async (req, res) => {
   try {
-    const { title, image, artist_name } = req.body;
+    const { 
+      title, 
+      image, 
+      artist_name,
+      year,
+      description,
+      background,
+      features,
+      collection_location,
+      collection_number,
+      collection_size,
+      collection_material
+    } = req.body;
     
     // 先创建或查找艺术家
     const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
@@ -283,14 +331,41 @@ app.put('/api/original-artworks/:id', async (req, res) => {
     
     // 更新艺术品
     await db.query(
-      'UPDATE original_artworks SET title = ?, image = ?, artist_id = ? WHERE id = ?',
-      [title, image, artist_id, req.params.id]
+      `UPDATE original_artworks SET 
+        title = ?, 
+        image = ?, 
+        artist_id = ?,
+        year = ?,
+        description = ?,
+        background = ?,
+        features = ?,
+        collection_location = ?,
+        collection_number = ?,
+        collection_size = ?,
+        collection_material = ?
+      WHERE id = ?`,
+      [
+        title, image, artist_id, year, description,
+        background, features, collection_location,
+        collection_number, collection_size, collection_material,
+        req.params.id
+      ]
     );
     
     res.json({ 
       id: parseInt(req.params.id),
       title,
       image,
+      year,
+      description,
+      background,
+      features,
+      collection: {
+        location: collection_location,
+        number: collection_number,
+        size: collection_size,
+        material: collection_material
+      },
       artist: {
         id: artist_id,
         name: artist_name
