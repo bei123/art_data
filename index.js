@@ -22,44 +22,49 @@ const corsOptions = {
       'http://www.wx.ht.2000gallery.art'
     ];
     
-    if (!origin) {
-      // 允许没有 origin 的请求（比如同源请求）
-      callback(null, true);
-    } else if (allowedOrigins.includes(origin)) {
-      // 允许白名单中的域名
-      callback(null, origin);
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, origin || true);
     } else {
-      // 拒绝其他域名
       callback(new Error('Not allowed by CORS'));
     }
   },
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
     'Authorization',
     'Accept',
     'Origin',
-    'X-Requested-With',
-    'Access-Control-Request-Method',
-    'Access-Control-Request-Headers'
+    'X-Requested-With'
   ],
-  exposedHeaders: ['Content-Length', 'X-Requested-With', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200,
-  maxAge: 3600,
-  preflightContinue: false
+  exposedHeaders: ['Authorization'],
+  optionsSuccessStatus: 204,
+  preflightContinue: false,
+  maxAge: 86400
 };
 
 app.use(cors(corsOptions));
 
-// 添加安全相关的响应头中间件
+// 预检请求处理
+app.options('*', cors(corsOptions));
+
+// 安全相关的响应头中间件
 app.use((req, res, next) => {
-  // 设置安全相关的响应头
-  res.header('X-Content-Type-Options', 'nosniff');
-  res.header('X-Frame-Options', 'SAMEORIGIN');
-  res.header('X-XSS-Protection', '1; mode=block');
-  res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  const origin = req.headers.origin;
+  if (origin && corsOptions.origin) {
+    corsOptions.origin(origin, (err, valid) => {
+      if (valid) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+    });
+  }
+  
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
 
