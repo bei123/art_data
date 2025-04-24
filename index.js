@@ -292,6 +292,131 @@ app.delete('/api/physical-categories/:id', async (req, res) => {
   }
 });
 
+// 获取作品详情
+app.get('/api/artworks/:id', async (req, res) => {
+  try {
+    const [artwork] = await db.query(`
+      SELECT 
+        oa.*,
+        a.name as artist_name,
+        a.avatar as artist_avatar,
+        a.description as artist_description
+      FROM original_artworks oa
+      LEFT JOIN artists a ON oa.artist_id = a.id
+      WHERE oa.id = ?
+    `, [req.params.id]);
+
+    if (!artwork) {
+      return res.status(404).json({ error: '作品不存在' });
+    }
+
+    const collection = {
+      location: artwork.collection_location,
+      number: artwork.collection_number,
+      size: artwork.collection_size,
+      material: artwork.collection_material
+    };
+
+    const artist = {
+      name: artwork.artist_name,
+      avatar: artwork.artist_avatar,
+      description: artwork.artist_description
+    };
+
+    res.json({
+      title: artwork.title,
+      year: artwork.year,
+      image: artwork.image,
+      description: artwork.description,
+      background: artwork.background,
+      features: artwork.features,
+      collection: collection,
+      artist: artist
+    });
+  } catch (error) {
+    console.error('获取作品详情失败:', error);
+    res.status(500).json({ error: '获取作品详情失败' });
+  }
+});
+
+// 获取艺术家详情
+app.get('/api/artists/:id', async (req, res) => {
+  try {
+    const [artist] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
+    
+    if (!artist) {
+      return res.status(404).json({ error: '艺术家不存在' });
+    }
+
+    const [achievements] = await db.query(
+      'SELECT * FROM artist_achievements WHERE artist_id = ?',
+      [req.params.id]
+    );
+
+    const [artworks] = await db.query(
+      'SELECT id, title, image FROM original_artworks WHERE artist_id = ?',
+      [req.params.id]
+    );
+
+    res.json({
+      name: artist.name,
+      avatar: artist.avatar,
+      banner: artist.banner,
+      era: artist.era,
+      description: artist.description,
+      biography: artist.biography,
+      artworks: artworks,
+      achievements: achievements
+    });
+  } catch (error) {
+    console.error('获取艺术家详情失败:', error);
+    res.status(500).json({ error: '获取艺术家详情失败' });
+  }
+});
+
+// 获取版权实物详情
+app.get('/api/rights/detail/:id', async (req, res) => {
+  try {
+    const [right] = await db.query('SELECT * FROM rights WHERE id = ?', [req.params.id]);
+    
+    if (!right) {
+      return res.status(404).json({ error: '版权实物不存在' });
+    }
+
+    const [images] = await db.query(
+      'SELECT image_url FROM right_images WHERE right_id = ?',
+      [req.params.id]
+    );
+
+    const [details] = await db.query(
+      'SELECT title, content FROM right_details WHERE right_id = ?',
+      [req.params.id]
+    );
+
+    const [rules] = await db.query(
+      'SELECT title, content FROM right_rules WHERE right_id = ?',
+      [req.params.id]
+    );
+
+    res.json({
+      title: right.title,
+      price: right.price,
+      originalPrice: right.original_price,
+      description: right.description,
+      status: right.status,
+      period: right.period,
+      remainingCount: right.remaining_count,
+      totalCount: right.total_count,
+      images: images.map(img => img.image_url),
+      details: details,
+      rules: rules
+    });
+  } catch (error) {
+    console.error('获取版权实物详情失败:', error);
+    res.status(500).json({ error: '获取版权实物详情失败' });
+  }
+});
+
 // 启动服务器
 app.listen(port, () => {
   console.log(`服务器运行在 http://192.168.0.80:${port}`);
