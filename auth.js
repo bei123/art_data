@@ -65,26 +65,43 @@ const register = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
+  // 开启数据库事务
+  const connection = await require('./db').getConnection();
+  await connection.beginTransaction();
+
   try {
     const { username, email, password } = req.body;
     console.log('处理注册数据:', { username, email })
 
     // 检查用户名和邮箱是否已存在
-    const existingUsers = await query(
+    const [existingUsers] = await connection.query(
       'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, email]
     );
 
-    if (existingUsers[0] && existingUsers[0].length > 0) {
-      console.log('用户已存在:', existingUsers[0])
+    if (existingUsers.length > 0) {
+      console.log('用户已存在:', existingUsers)
+      await connection.rollback();
       return res.status(400).json({ error: '用户名或邮箱已存在' });
     }
 
-    // 获取普通用户角色ID
-    const roles = await query('SELECT id FROM roles WHERE name = ?', ['user']);
-    if (!roles[0] || roles[0].length === 0) {
-      console.error('角色不存在')
-      return res.status(500).json({ error: '系统错误：角色不存在' });
+    // 检查并获取用户角色ID
+    let [roles] = await connection.query('SELECT id FROM roles WHERE name = ?', ['user']);
+    
+    // 如果角色不存在，创建角色
+    if (!roles || roles.length === 0) {
+      console.log('创建用户角色');
+      const [result] = await connection.query(
+        'INSERT INTO roles (name, description) VALUES (?, ?)',
+        ['user', '普通用户']
+      );
+      roles = [{ id: result.insertId }];
+    }
+
+    if (!roles[0]?.id) {
+      console.error('获取角色ID失败');
+      await connection.rollback();
+      return res.status(500).json({ error: '系统错误：无法获取角色信息' });
     }
 
     // 加密密码
@@ -92,33 +109,47 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     // 创建用户
-    const result = await query(
-      'INSERT INTO users (username, email, password_hash, role_id) VALUES (?, ?, ?, ?)',
-      [username, email, passwordHash, roles[0][0].id]
+    const [result] = await connection.query(
+      'INSERT INTO users (username, email, password_hash, role_id, status) VALUES (?, ?, ?, ?, ?)',
+      [username, email, passwordHash, roles[0].id, 'active']
     );
 
-    console.log('用户创建成功:', result[0].insertId)
-    
     // 生成token
-    const token = generateToken(result[0].insertId);
+    const token = generateToken(result.insertId);
+
+    // 创建用户会话
+    await connection.query(
+      'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
+      [result.insertId, token]
+    );
+
+    // 提交事务
+    await connection.commit();
     
+    console.log('用户创建成功:', result.insertId);
+
     // 返回成功响应
     res.status(200).json({
       success: true,
       message: '注册成功',
       data: {
-        userId: result[0].insertId,
+        userId: result.insertId,
         username,
         email,
         token
       }
     });
   } catch (error) {
-    console.error('注册失败:', error)
+    // 回滚事务
+    await connection.rollback();
+    console.error('注册失败:', error);
     res.status(500).json({ 
       success: false,
       error: '注册失败: ' + error.message 
     });
+  } finally {
+    // 释放连接
+    connection.release();
   }
 };
 
