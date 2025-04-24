@@ -11,7 +11,7 @@
         <template #default="{ row }">
           <el-image
             style="width: 100px; height: 100px"
-            :src="API_BASE_URL + row.image"
+            :src="getImageUrl(row.image)"
             fit="cover"
           />
         </template>
@@ -20,7 +20,7 @@
         <template #default="{ row }">
           <el-image
             style="width: 50px; height: 50px"
-            :src="API_BASE_URL + row.icon"
+            :src="getImageUrl(row.icon)"
             fit="cover"
           />
         </template>
@@ -52,7 +52,7 @@
             :on-success="handleImageSuccess"
             name="file"
           >
-            <img v-if="form.image" :src="API_BASE_URL + form.image" class="avatar" />
+            <img v-if="form.image" :src="getImageUrl(form.image)" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
@@ -64,7 +64,7 @@
             :on-success="handleIconSuccess"
             name="file"
           >
-            <img v-if="form.icon" :src="API_BASE_URL + form.icon" class="icon" />
+            <img v-if="form.icon" :src="getImageUrl(form.icon)" class="icon" />
             <el-icon v-else class="icon-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
@@ -147,11 +147,16 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image = response.url
+  form.value.image = response.url;
 }
 
 const handleIconSuccess = (response) => {
-  form.value.icon = response.url
+  form.value.icon = response.url;
+}
+
+const getImageUrl = (url) => {
+  if (!url) return '';
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
 const handleSubmit = async () => {
