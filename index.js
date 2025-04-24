@@ -39,14 +39,20 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: '没有上传文件' });
   }
   const fileUrl = `/uploads/${req.file.filename}`;
-  res.json({ url: fileUrl });
+  res.json({ url: `${BASE_URL}${fileUrl}` });
 });
 
 // 艺术家相关接口
 app.get('/api/artists', async (req, res) => {
   try {
     const [artists] = await db.query('SELECT * FROM artists');
-    res.json(artists);
+    // 为每个艺术家的图片添加完整URL
+    const artistsWithFullUrls = artists.map(artist => ({
+      ...artist,
+      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
+      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
+    }));
+    res.json(artistsWithFullUrls);
   } catch (error) {
     console.error('Error fetching artists:', error);
     res.status(500).json({ error: '获取数据失败' });
@@ -221,7 +227,12 @@ app.delete('/api/original-artworks/:id', async (req, res) => {
 app.get('/api/digital-artworks', async (req, res) => {
   try {
     const [artworks] = await db.query('SELECT * FROM digital_artworks');
-    res.json(artworks);
+    // 为每个作品的图片添加完整URL
+    const artworksWithFullUrls = artworks.map(artwork => ({
+      ...artwork,
+      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : ''
+    }));
+    res.json(artworksWithFullUrls);
   } catch (error) {
     console.error('Error fetching digital artworks:', error);
     res.status(500).json({ error: '获取数据失败' });
@@ -270,7 +281,13 @@ app.delete('/api/digital-artworks/:id', async (req, res) => {
 app.get('/api/physical-categories', async (req, res) => {
   try {
     const [categories] = await db.query('SELECT * FROM physical_categories');
-    res.json(categories);
+    // 为每个分类的图片添加完整URL
+    const categoriesWithFullUrls = categories.map(category => ({
+      ...category,
+      image: category.image ? (category.image.startsWith('http') ? category.image : `${BASE_URL}${category.image}`) : '',
+      icon: category.icon ? (category.icon.startsWith('http') ? category.icon : `${BASE_URL}${category.icon}`) : ''
+    }));
+    res.json(categoriesWithFullUrls);
   } catch (error) {
     console.error('Error fetching physical categories:', error);
     res.status(500).json({ error: '获取数据失败' });
@@ -332,6 +349,10 @@ app.get('/api/artworks/:id', async (req, res) => {
     if (!artwork) {
       return res.status(404).json({ error: '作品不存在' });
     }
+
+    // 处理图片URL
+    artwork.image = artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : '';
+    artwork.artist_avatar = artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : '';
 
     const collection = {
       location: artwork.collection_location,
@@ -406,7 +427,16 @@ app.get('/api/rights', async (req, res) => {
       LEFT JOIN right_images ri ON r.id = ri.right_id
       GROUP BY r.id
     `);
-    res.json(rights);
+    
+    // 为每个版权实物的图片添加完整URL
+    const rightsWithFullUrls = rights.map(right => ({
+      ...right,
+      images: right.images ? right.images.split(',').map(image => 
+        image.startsWith('http') ? image : `${BASE_URL}${image}`
+      ) : []
+    }));
+    
+    res.json(rightsWithFullUrls);
   } catch (error) {
     console.error('获取版权实物列表失败:', error);
     res.status(500).json({ error: '获取版权实物列表失败' });
