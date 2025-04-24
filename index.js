@@ -116,7 +116,7 @@ app.post('/api/artists', async (req, res) => {
 // 更新艺术家接口
 app.put('/api/artists/:id', async (req, res) => {
   try {
-    const { name, era, avatar, banner, description, biography } = req.body;
+    const { name, era, avatar, banner, description, biography, journey } = req.body;
     
     // 验证图片URL
     if (avatar && !validateImageUrl(avatar)) {
@@ -128,8 +128,8 @@ app.put('/api/artists/:id', async (req, res) => {
 
     // 更新艺术家信息
     await db.query(
-      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ? WHERE id = ?',
-      [name, era, avatar, banner, description, biography, req.params.id]
+      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ?, journey = ? WHERE id = ?',
+      [name, era, avatar, banner, description, biography, journey, req.params.id]
     );
 
     // 获取更新后的艺术家信息
@@ -580,6 +580,7 @@ app.get('/api/artists/:id', async (req, res) => {
       era: artist.era,
       description: artist.description,
       biography: artist.biography,
+      journey: artist.journey,
       artworks: artworks,
       achievements: achievements
     });

@@ -63,6 +63,10 @@
           <el-input v-model="form.biography" type="textarea" :rows="6" />
         </el-form-item>
 
+        <el-form-item label="艺术历程">
+          <el-input v-model="form.journey" type="textarea" :rows="6" placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等" />
+        </el-form-item>
+
         <el-divider>成就列表</el-divider>
 
         <div v-for="(achievement, index) in form.achievements" :key="index" class="achievement-item">
@@ -110,6 +114,7 @@ const form = ref({
   era: '',
   description: '',
   biography: '',
+  journey: '',
   achievements: []
 })
 
