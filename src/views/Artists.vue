@@ -159,11 +159,16 @@ const handleDelete = (row) => {
 }
 
 const handleAvatarSuccess = (response) => {
-  form.value.avatar = response.url
+  form.value.avatar = response.url;
 }
 
 const handleBannerSuccess = (response) => {
-  form.value.banner = response.url
+  form.value.banner = response.url;
+}
+
+const getImageUrl = (url) => {
+  if (!url) return '';
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
 const handleSubmit = async () => {

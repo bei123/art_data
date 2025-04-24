@@ -16,11 +16,33 @@ const storage = multer.diskStorage({
     cb(null, 'uploads/');
   },
   filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
+    // 获取文件扩展名
+    const ext = path.extname(file.originalname).toLowerCase();
+    // 生成文件名
+    cb(null, Date.now() + ext);
   }
 });
 
-const upload = multer({ storage: storage });
+// 文件类型验证
+const fileFilter = (req, file, cb) => {
+  // 允许的文件类型
+  const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  
+  if (allowedTypes.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('不支持的文件类型'));
+  }
+};
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 限制文件大小为5MB
+  }
+});
 
 // 配置中间件
 app.use(cors());
@@ -35,11 +57,22 @@ if (!fs.existsSync('uploads')) {
 
 // 文件上传接口
 app.post('/api/upload', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: '没有上传文件' });
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: '没有上传文件' });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    const fullUrl = `${BASE_URL}${fileUrl}`;
+    res.json({ 
+      url: fileUrl,
+      fullUrl: fullUrl,
+      filename: req.file.filename,
+      size: req.file.size
+    });
+  } catch (error) {
+    console.error('文件上传失败:', error);
+    res.status(500).json({ error: '文件上传失败' });
   }
-  const fileUrl = `/uploads/${req.file.filename}`;
-  res.json({ url: `${BASE_URL}${fileUrl}` });
 });
 
 // 艺术家相关接口
