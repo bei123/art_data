@@ -5,6 +5,8 @@ const path = require('path');
 const db = require('./db');
 const https = require('https');
 const fs = require('fs');
+const { body } = require('express-validator');
+const auth = require('./auth');
 
 const app = express();
 const port = 2000;
@@ -845,6 +847,31 @@ app.get('/api/search', async (req, res) => {
     res.status(500).json({ error: '搜索失败' });
   }
 });
+
+// 认证相关路由
+app.post('/api/auth/register', [
+  body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
+  body('email').isEmail().withMessage('请输入有效的邮箱地址'),
+  body('password').isLength({ min: 6 }).withMessage('密码至少6个字符')
+], auth.register);
+
+app.post('/api/auth/login', [
+  body('username').notEmpty().withMessage('请输入用户名'),
+  body('password').notEmpty().withMessage('请输入密码')
+], auth.login);
+
+app.get('/api/auth/me', auth.authenticateToken, auth.getCurrentUser);
+
+app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
+
+// 保护需要认证的路由
+app.use('/api/artists', auth.authenticateToken);
+app.use('/api/original-artworks', auth.authenticateToken);
+app.use('/api/digital-artworks', auth.authenticateToken);
+app.use('/api/rights', auth.authenticateToken);
+
+// 保护需要管理员权限的路由
+app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
