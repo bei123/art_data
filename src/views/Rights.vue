@@ -125,7 +125,7 @@ const form = ref({
 
 const fetchRights = async () => {
   try {
-    const response = await axios.get('/api/rights/detail')
+    const response = await axios.get('/api/rights')
     rights.value = response.data
   } catch (error) {
     ElMessage.error('获取版权实物列表失败')
@@ -167,7 +167,20 @@ const handleAdd = () => {
 }
 
 const handleEdit = (row) => {
-  router.push(`/rights/${row.id}`)
+  isEdit.value = true
+  form.value = {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    price: row.price,
+    originalPrice: row.original_price,
+    period: row.period,
+    totalCount: row.total_count,
+    remainingCount: row.remaining_count,
+    description: row.description,
+    images: row.images ? row.images.split(',') : []
+  }
+  dialogVisible.value = true
 }
 
 const handleDelete = (row) => {
@@ -200,9 +213,9 @@ const handleImageRemove = (file) => {
 const handleSubmit = async () => {
   try {
     if (isEdit.value) {
-      await axios.put(`/api/rights/detail/${form.value.id}`, form.value)
+      await axios.put(`/api/rights/${form.value.id}`, form.value)
     } else {
-      await axios.post('/api/rights/detail', form.value)
+      await axios.post('/api/rights', form.value)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
