@@ -3,9 +3,17 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const db = require('./db');
+const https = require('https');
+const fs = require('fs');
 
 const app = express();
 const port = 6000;
+
+// SSL证书配置
+const sslOptions = {
+  key: fs.readFileSync('api.wx.2000gallery.art.key'),
+  cert: fs.readFileSync('api.wx.2000gallery.art.pem')
+};
 
 // 添加基础URL配置
 const BASE_URL = 'http://api.wx.2000gallery.art';
@@ -838,7 +846,8 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// 启动服务器
-app.listen(port, () => {
-  console.log(`服务器运行在 http://api.wx.2000gallery.art:${port}`);
+// 启动HTTPS服务器
+const PORT = process.env.PORT || 443;
+https.createServer(sslOptions, app).listen(PORT, () => {
+  console.log(`HTTPS服务器运行在端口 ${PORT}`);
 }); 
