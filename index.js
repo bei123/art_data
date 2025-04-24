@@ -8,7 +8,7 @@ const app = express();
 const port = 6000;
 
 // 添加基础URL配置
-const BASE_URL = 'http://api.wx.2000gallery.art:6000';
+const BASE_URL = 'http://api.wx.2000gallery.art';
 
 // 配置文件上传
 const storage = multer.diskStorage({
