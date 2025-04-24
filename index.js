@@ -132,6 +132,13 @@ app.delete('/api/artists/:id', async (req, res) => {
 // 验证图片URL的函数
 function validateImageUrl(url) {
   if (!url) return false;
+  
+  // 如果是相对路径，直接验证是否以 /uploads/ 开头
+  if (url.startsWith('/uploads/')) {
+    return true;
+  }
+  
+  // 如果是完整URL，解析并验证
   try {
     const urlObj = new URL(url);
     return urlObj.pathname.startsWith('/uploads/');

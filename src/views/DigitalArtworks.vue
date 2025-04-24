@@ -41,6 +41,7 @@
             :action="`${API_BASE_URL}/api/upload`"
             :show-file-list="false"
             :on-success="handleImageSuccess"
+            :before-upload="beforeImageUpload"
             name="file"
           >
             <img v-if="form.image" :src="getImageUrl(form.image)" class="avatar" />
@@ -84,7 +85,10 @@ const form = ref({
 const fetchArtworks = async () => {
   try {
     const response = await axios.get('/api/digital-artworks')
-    artworks.value = response.data
+    artworks.value = response.data.map(artwork => ({
+      ...artwork,
+      image: getImageUrl(artwork.image)
+    }))
   } catch (error) {
     ElMessage.error('获取数据失败')
   }
@@ -127,17 +131,54 @@ const handleImageSuccess = (response) => {
   form.value.image = response.url;
 }
 
+const beforeImageUpload = (file) => {
+  const isImage = file.type.startsWith('image/');
+  const isLt5M = file.size / 1024 / 1024 < 5;
+
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件！');
+    return false;
+  }
+  if (!isLt5M) {
+    ElMessage.error('图片大小不能超过 5MB！');
+    return false;
+  }
+  return true;
+}
+
 const getImageUrl = (url) => {
   if (!url) return '';
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
 const handleSubmit = async () => {
+  if (!form.value.title.trim()) {
+    ElMessage.warning('请输入作品标题');
+    return;
+  }
+  if (!form.value.image) {
+    ElMessage.warning('请上传作品图片');
+    return;
+  }
+  if (!form.value.author.trim()) {
+    ElMessage.warning('请输入作者名称');
+    return;
+  }
+  if (!form.value.copyright.trim()) {
+    ElMessage.warning('请输入版权信息');
+    return;
+  }
+
   try {
+    const submitData = {
+      ...form.value,
+      image: form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image
+    };
+
     if (isEdit.value) {
-      await axios.put(`/api/digital-artworks/${form.value.id}`, form.value)
+      await axios.put(`/api/digital-artworks/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/digital-artworks', form.value)
+      await axios.post('/api/digital-artworks', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false

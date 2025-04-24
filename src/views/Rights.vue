@@ -10,7 +10,7 @@
         <template #default="{ row }">
           <el-image 
             style="width: 100px; height: 100px"
-            :src="row.images[0]"
+            :src="getImageUrl(row.images?.[0])"
             fit="cover"
           />
         </template>
@@ -82,6 +82,7 @@
             list-type="picture-card"
             :on-success="handleImageSuccess"
             :on-remove="handleImageRemove"
+            :before-upload="beforeImageUpload"
             name="file"
           >
             <el-icon><Plus /></el-icon>
@@ -126,7 +127,10 @@ const form = ref({
 const fetchRights = async () => {
   try {
     const response = await axios.get('/api/rights')
-    rights.value = response.data
+    rights.value = response.data.map(right => ({
+      ...right,
+      images: right.images ? right.images.map(image => getImageUrl(image)) : []
+    }))
   } catch (error) {
     ElMessage.error('获取版权实物列表失败')
   }
@@ -210,7 +214,44 @@ const handleImageRemove = (file) => {
   }
 }
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+}
+
+const beforeImageUpload = (file) => {
+  const isImage = file.type.startsWith('image/');
+  const isLt5M = file.size / 1024 / 1024 < 5;
+
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件！');
+    return false;
+  }
+  if (!isLt5M) {
+    ElMessage.error('图片大小不能超过 5MB！');
+    return false;
+  }
+  return true;
+}
+
 const handleSubmit = async () => {
+  if (!form.value.title.trim()) {
+    ElMessage.warning('请输入标题');
+    return;
+  }
+  if (!form.value.status) {
+    ElMessage.warning('请选择状态');
+    return;
+  }
+  if (form.value.images.length === 0) {
+    ElMessage.warning('请上传至少一张图片');
+    return;
+  }
+  if (form.value.totalCount < form.value.remainingCount) {
+    ElMessage.warning('剩余数量不能大于总数量');
+    return;
+  }
+
   try {
     if (isEdit.value) {
       await axios.put(`/api/rights/${form.value.id}`, form.value)
