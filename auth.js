@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { validationResult } = require('express-validator');
-const { query } = require('./db');
+const { pool, query } = require('./db');
 
 // JWT密钥
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -68,7 +68,8 @@ const register = async (req, res) => {
   let connection;
   try {
     // 获取数据库连接
-    connection = await require('./db').getConnection();
+    const db = require('./db');
+    connection = await db.pool.getConnection();
     await connection.beginTransaction();
 
     const { username, email, password } = req.body;
@@ -165,29 +166,36 @@ const login = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
+  let connection;
   try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
     const { username, password } = req.body;
 
     // 查找用户
-    const users = await query(
+    const [users] = await connection.query(
       'SELECT u.*, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.username = ?',
       [username]
     );
 
-    if (!users[0] || users[0].length === 0) {
+    if (!users || users.length === 0) {
+      await connection.rollback();
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
-    const user = users[0][0];
+    const user = users[0];
 
     // 验证密码
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
+      await connection.rollback();
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
     // 检查用户状态
     if (user.status !== 'active') {
+      await connection.rollback();
       return res.status(403).json({ error: '账户已被禁用' });
     }
 
@@ -195,13 +203,18 @@ const login = async (req, res) => {
     const token = generateToken(user.id);
 
     // 更新最后登录时间
-    await query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+    await connection.query(
+      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
+      [user.id]
+    );
 
     // 创建会话记录
-    await query(
+    await connection.query(
       'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
       [user.id, token]
     );
+
+    await connection.commit();
 
     res.json({
       success: true,
@@ -217,11 +230,18 @@ const login = async (req, res) => {
       }
     });
   } catch (error) {
+    if (connection) {
+      await connection.rollback();
+    }
     console.error('登录失败:', error);
     res.status(500).json({ 
       success: false,
       error: '登录失败: ' + error.message 
     });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
