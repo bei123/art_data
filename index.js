@@ -16,7 +16,7 @@ const sslOptions = {
 };
 
 // 添加基础URL配置
-const BASE_URL = 'http://api.wx.2000gallery.art';
+const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 配置文件上传
 const storage = multer.diskStorage({
