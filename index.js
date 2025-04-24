@@ -8,7 +8,7 @@ const app = express();
 const port = 3000;
 
 // 添加基础URL配置
-const BASE_URL = 'http://192.168.0.80:3000';
+const BASE_URL = 'http://api.wx.2000gallery.art:3000';
 
 // 配置文件上传
 const storage = multer.diskStorage({
@@ -699,5 +699,5 @@ app.get('/api/rights/detail/:id', async (req, res) => {
 
 // 启动服务器
 app.listen(port, () => {
-  console.log(`服务器运行在 http://192.168.0.80:${port}`);
+  console.log(`服务器运行在 http://api.wx.2000gallery.art:${port}`);
 }); 
