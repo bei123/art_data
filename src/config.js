@@ -1,7 +1,7 @@
 // API配置
 export const API_BASE_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:2000/api'
-  : 'https://api.wx.2000gallery.art:2000/api';
+  : 'https://wx.ht.2000gallery.art/api';
 
 // 其他配置
 export const CONFIG = {

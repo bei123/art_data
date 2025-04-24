@@ -13,14 +13,47 @@ const port = 2000;
 
 // CORS配置
 const corsOptions = {
-  origin: ['http://localhost:5173', 'https://wx.ht.2000gallery.art'],
+  origin: [
+    'http://localhost:5173',
+    'https://wx.ht.2000gallery.art',
+    'http://wx.ht.2000gallery.art',
+    'https://www.wx.ht.2000gallery.art',
+    'http://www.wx.ht.2000gallery.art'
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+    'Origin',
+    'X-Requested-With',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers'
+  ],
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  maxAge: 3600
 };
 
 app.use(cors(corsOptions));
+
+// 添加预检请求处理
+app.options('*', cors(corsOptions));
+
+// 添加自定义响应头
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+  );
+  res.header(
+    'Access-Control-Allow-Methods',
+    'GET, POST, PUT, DELETE, OPTIONS'
+  );
+  next();
+});
 
 // 解析JSON请求体
 app.use(express.json());
