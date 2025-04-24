@@ -1,29 +1,26 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
+// 创建连接池
 const pool = mysql.createPool({
     host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'data',
-    password: process.env.DB_PASSWORD || '5z24cJEiMd34jAtt',
-    database: process.env.DB_NAME || 'data',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'art_data',
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 0
+    queueLimit: 0
 });
 
-// 测试数据库连接
-const testConnection = async () => {
-    try {
-        const connection = await pool.getConnection();
+// 测试连接
+pool.getConnection()
+    .then(connection => {
         console.log('数据库连接成功');
         connection.release();
-    } catch (error) {
-        console.error('数据库连接失败:', error);
-        process.exit(1);
-    }
-};
+    })
+    .catch(err => {
+        console.error('数据库连接失败:', err);
+    });
 
 // 执行查询的包装函数
 const query = async (sql, params) => {
@@ -35,9 +32,6 @@ const query = async (sql, params) => {
         throw error;
     }
 };
-
-// 初始化时测试连接
-testConnection();
 
 module.exports = {
     pool,
