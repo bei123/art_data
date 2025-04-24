@@ -11,15 +11,23 @@ const auth = require('./auth');
 const app = express();
 const port = 2000;
 
-// 在所有中间件之前添加 CORS 配置
+// CORS 配置
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://wx.ht.2000gallery.art',
-    'http://wx.ht.2000gallery.art',
-    'https://www.wx.ht.2000gallery.art',
-    'http://www.wx.ht.2000gallery.art'
-  ],
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'https://wx.ht.2000gallery.art',
+      'http://wx.ht.2000gallery.art',
+      'https://www.wx.ht.2000gallery.art',
+      'http://www.wx.ht.2000gallery.art'
+    ];
+    
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, origin);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
@@ -94,7 +102,6 @@ const upload = multer({
 });
 
 // 配置中间件
-app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
