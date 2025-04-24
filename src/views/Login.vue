@@ -94,7 +94,11 @@ const handleSubmit = async () => {
     loading.value = true
     
     const endpoint = isLogin.value ? '/api/auth/login' : '/api/auth/register'
+    console.log('发送请求到:', endpoint)
+    console.log('请求数据:', form)
+    
     const response = await axios.post(endpoint, form)
+    console.log('响应数据:', response.data)
     
     if (isLogin.value) {
       // 保存token和用户信息
@@ -108,10 +112,16 @@ const handleSubmit = async () => {
       isLogin.value = true
     }
   } catch (error) {
+    console.error('操作失败:', error)
     if (error.response) {
+      console.error('错误响应:', error.response.data)
       ElMessage.error(error.response.data.error || '操作失败')
+    } else if (error.request) {
+      console.error('请求错误:', error.request)
+      ElMessage.error('网络请求失败，请检查网络连接')
     } else {
-      ElMessage.error('操作失败')
+      console.error('其他错误:', error.message)
+      ElMessage.error('操作失败: ' + error.message)
     }
   } finally {
     loading.value = false
