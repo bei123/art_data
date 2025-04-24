@@ -23,10 +23,6 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# 环境变量文件
-.env
-.env.local
-.env.*.local
 
 # 系统文件
 .DS_Store
