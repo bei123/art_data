@@ -119,7 +119,17 @@ const handleAdd = () => {
 }
 
 const handleEdit = (row) => {
-  router.push(`/artists/${row.id}`)
+  isEdit.value = true
+  form.value = {
+    id: row.id,
+    name: row.name,
+    era: row.era,
+    avatar: row.avatar,
+    banner: row.banner,
+    description: row.description,
+    biography: row.biography
+  }
+  dialogVisible.value = true
 }
 
 const handleDelete = (row) => {
