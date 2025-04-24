@@ -13,13 +13,21 @@ const port = 2000;
 
 // CORS配置
 const corsOptions = {
-  origin: [
-    'http://localhost:5173',
-    'https://wx.ht.2000gallery.art',
-    'http://wx.ht.2000gallery.art',
-    'https://www.wx.ht.2000gallery.art',
-    'http://www.wx.ht.2000gallery.art'
-  ],
+  origin: function(origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'https://wx.ht.2000gallery.art',
+      'http://wx.ht.2000gallery.art',
+      'https://www.wx.ht.2000gallery.art',
+      'http://www.wx.ht.2000gallery.art'
+    ];
+    // 允许来自允许列表中的域名
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -42,21 +50,22 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// 添加预检请求处理
-app.options('*', cors(corsOptions));
-
-// 添加自定义响应头
+// 修改自定义响应头处理
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin);
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header(
-    'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Strict-Transport-Security, Referrer-Policy'
-  );
-  res.header(
-    'Access-Control-Allow-Methods',
-    'GET, POST, PUT, DELETE, OPTIONS'
-  );
+  const origin = req.headers.origin;
+  if (origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header(
+      'Access-Control-Allow-Headers',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Strict-Transport-Security, Referrer-Policy'
+    );
+    res.header(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, OPTIONS'
+    );
+  }
+  
   // 添加安全相关的响应头
   res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.header('X-Content-Type-Options', 'nosniff');
