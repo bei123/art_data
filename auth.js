@@ -65,11 +65,12 @@ const register = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  // 开启数据库事务
-  const connection = await require('./db').getConnection();
-  await connection.beginTransaction();
-
+  let connection;
   try {
+    // 获取数据库连接
+    connection = await require('./db').getConnection();
+    await connection.beginTransaction();
+
     const { username, email, password } = req.body;
     console.log('处理注册数据:', { username, email })
 
@@ -141,7 +142,9 @@ const register = async (req, res) => {
     });
   } catch (error) {
     // 回滚事务
-    await connection.rollback();
+    if (connection) {
+      await connection.rollback();
+    }
     console.error('注册失败:', error);
     res.status(500).json({ 
       success: false,
@@ -149,7 +152,9 @@ const register = async (req, res) => {
     });
   } finally {
     // 释放连接
-    connection.release();
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
