@@ -10,7 +10,7 @@
         <template #default="{ row }">
           <el-image
             style="width: 50px; height: 50px"
-            :src="API_BASE_URL + row.avatar"
+            :src="getImageUrl(row.avatar)"
             fit="cover"
           />
         </template>
@@ -47,7 +47,7 @@
           >
             <el-image
               style="width: 100%; height: 200px"
-              :src="API_BASE_URL + form.avatar"
+              :src="getImageUrl(form.avatar)"
               fit="cover"
             />
           </el-upload>
@@ -62,7 +62,7 @@
           >
             <el-image
               style="width: 100%; height: 200px"
-              :src="API_BASE_URL + form.banner"
+              :src="getImageUrl(form.banner)"
               fit="cover"
             />
           </el-upload>
