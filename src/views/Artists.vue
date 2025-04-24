@@ -1,0 +1,224 @@
+<template>
+  <div>
+    <div class="header">
+      <h3>艺术家管理</h3>
+      <el-button type="primary" @click="handleAdd">添加艺术家</el-button>
+    </div>
+
+    <el-table :data="artists" style="width: 100%">
+      <el-table-column label="头像">
+        <template #default="{ row }">
+          <el-avatar :src="row.avatar" />
+        </template>
+      </el-table-column>
+      <el-table-column prop="name" label="姓名" />
+      <el-table-column prop="era" label="时代" />
+      <el-table-column label="操作" width="200">
+        <template #default="{ row }">
+          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-dialog
+      v-model="dialogVisible"
+      :title="isEdit ? '编辑艺术家' : '添加艺术家'"
+      width="50%"
+    >
+      <el-form :model="form" label-width="120px">
+        <el-form-item label="艺术家姓名">
+          <el-input v-model="form.name" />
+        </el-form-item>
+        <el-form-item label="所属时代">
+          <el-input v-model="form.era" />
+        </el-form-item>
+        <el-form-item label="头像">
+          <el-upload
+            class="avatar-uploader"
+            :action="`${API_BASE_URL}/api/upload`"
+            :show-file-list="false"
+            :on-success="handleAvatarSuccess"
+            name="file"
+          >
+            <img v-if="form.avatar" :src="form.avatar" class="avatar" />
+            <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="背景图">
+          <el-upload
+            class="banner-uploader"
+            :action="`${API_BASE_URL}/api/upload`"
+            :show-file-list="false"
+            :on-success="handleBannerSuccess"
+            name="file"
+          >
+            <img v-if="form.banner" :src="form.banner" class="banner" />
+            <el-icon v-else class="banner-uploader-icon"><Plus /></el-icon>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="简介">
+          <el-input v-model="form.description" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="传记">
+          <el-input v-model="form.biography" type="textarea" :rows="6" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSubmit">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
+import axios from '../utils/axios'
+import { API_BASE_URL } from '../config'
+
+const router = useRouter()
+const artists = ref([])
+const dialogVisible = ref(false)
+const isEdit = ref(false)
+
+const form = ref({
+  name: '',
+  era: '',
+  avatar: '',
+  banner: '',
+  description: '',
+  biography: ''
+})
+
+const fetchArtists = async () => {
+  try {
+    const response = await axios.get('/api/artists')
+    artists.value = response.data
+  } catch (error) {
+    ElMessage.error('获取艺术家列表失败')
+  }
+}
+
+const handleAdd = () => {
+  isEdit.value = false
+  form.value = {
+    name: '',
+    era: '',
+    avatar: '',
+    banner: '',
+    description: '',
+    biography: ''
+  }
+  dialogVisible.value = true
+}
+
+const handleEdit = (row) => {
+  router.push(`/artists/${row.id}`)
+}
+
+const handleDelete = (row) => {
+  ElMessageBox.confirm('确定要删除这个艺术家吗？', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(async () => {
+    try {
+      await axios.delete(`/api/artists/${row.id}`)
+      ElMessage.success('删除成功')
+      fetchArtists()
+    } catch (error) {
+      ElMessage.error('删除失败')
+    }
+  })
+}
+
+const handleAvatarSuccess = (response) => {
+  form.value.avatar = response.url
+}
+
+const handleBannerSuccess = (response) => {
+  form.value.banner = response.url
+}
+
+const handleSubmit = async () => {
+  try {
+    if (isEdit.value) {
+      await axios.put(`/api/artists/${form.value.id}`, form.value)
+    } else {
+      await axios.post('/api/artists', form.value)
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    fetchArtists()
+  } catch (error) {
+    ElMessage.error('保存失败')
+  }
+}
+
+onMounted(() => {
+  fetchArtists()
+})
+</script>
+
+<style scoped>
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.avatar-uploader,
+.banner-uploader {
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.avatar-uploader {
+  width: 178px;
+  height: 178px;
+}
+
+.banner-uploader {
+  width: 300px;
+  height: 150px;
+}
+
+.avatar-uploader:hover,
+.banner-uploader:hover {
+  border-color: #409eff;
+}
+
+.avatar-uploader-icon,
+.banner-uploader-icon {
+  font-size: 28px;
+  color: #8c939d;
+  text-align: center;
+  line-height: 178px;
+}
+
+.banner-uploader-icon {
+  line-height: 150px;
+}
+
+.avatar {
+  width: 178px;
+  height: 178px;
+  display: block;
+}
+
+.banner {
+  width: 300px;
+  height: 150px;
+  display: block;
+}
+</style> 
