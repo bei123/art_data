@@ -191,16 +191,25 @@ function validateImageUrl(url) {
 app.get('/api/original-artworks', async (req, res) => {
   try {
     const [artworks] = await db.query(`
-      SELECT oa.*, a.name as artist_name 
+      SELECT 
+        oa.*,
+        a.id as artist_id,
+        a.name as artist_name,
+        a.avatar as artist_avatar
       FROM original_artworks oa 
       LEFT JOIN artists a ON oa.artist_id = a.id
       ORDER BY oa.created_at DESC
     `);
     
-    // 为每个图片URL添加BASE_URL
+    // 为每个图片URL添加BASE_URL并构建正确的数据结构
     const artworksWithFullUrls = artworks.map(artwork => ({
       ...artwork,
-      image: artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`
+      image: artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`,
+      artist: {
+        id: artwork.artist_id,
+        name: artwork.artist_name,
+        avatar: artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : ''
+      }
     }));
     
     res.json(artworksWithFullUrls);
