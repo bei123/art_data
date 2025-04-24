@@ -58,7 +58,6 @@ app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
 // 创建上传目录
-const fs = require('fs');
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
 }
