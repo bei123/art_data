@@ -1,1 +1,1 @@
-export const API_BASE_URL = 'http://api.wx.2000gallery.art:3000'; 
+export const API_BASE_URL = 'http://api.wx.2000gallery.art:6000'; 
