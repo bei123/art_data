@@ -1,12 +1,12 @@
 import axios from 'axios';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, CONFIG } from '../config';
 import { ElMessage } from 'element-plus';
 import router from '../router';
 
 // 创建axios实例
 const instance = axios.create({
   baseURL: `${API_BASE_URL}/api`,
-  timeout: 10000,
+  timeout: CONFIG.api.timeout,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
@@ -45,13 +45,16 @@ instance.interceptors.request.use(
     config.headers['X-Content-Type-Options'] = 'nosniff';
     config.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
 
-    console.log('发送请求:', {
-      url: config.url,
-      method: config.method,
-      baseURL: config.baseURL,
-      headers: config.headers,
-      data: config.data
-    });
+    // 开发环境下打印请求信息
+    if (process.env.NODE_ENV === 'development') {
+      console.log('发送请求:', {
+        url: config.url,
+        method: config.method,
+        baseURL: config.baseURL,
+        headers: config.headers,
+        data: config.data
+      });
+    }
     
     return config;
   },
@@ -64,16 +67,19 @@ instance.interceptors.request.use(
 // 响应拦截器
 instance.interceptors.response.use(
   response => {
-    console.log('收到响应:', {
-      status: response.status,
-      headers: response.headers,
-      data: response.data,
-      config: {
-        url: response.config.url,
-        baseURL: response.config.baseURL,
-        method: response.config.method
-      }
-    });
+    // 开发环境下打印响应信息
+    if (process.env.NODE_ENV === 'development') {
+      console.log('收到响应:', {
+        status: response.status,
+        headers: response.headers,
+        data: response.data,
+        config: {
+          url: response.config.url,
+          baseURL: response.config.baseURL,
+          method: response.config.method
+        }
+      });
+    }
     
     // 处理特定的状态码
     if (response.status === 405) {
@@ -84,16 +90,22 @@ instance.interceptors.response.use(
     return response;
   },
   error => {
+    // 详细的错误日志
     console.error('响应错误:', {
       message: error.message,
       config: error.config,
-      response: error.response
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null
     });
 
     if (error.response) {
       switch (error.response.status) {
         case 401:
           localStorage.removeItem('token');
+          localStorage.removeItem('tokenExpiry');
           localStorage.removeItem('user');
           router.push('/login');
           ElMessage.error('登录已过期，请重新登录');
@@ -103,6 +115,9 @@ instance.interceptors.response.use(
           break;
         case 405:
           ElMessage.error('请求方法不被允许，请检查API配置');
+          break;
+        case 429:
+          ElMessage.error('请求过于频繁，请稍后再试');
           break;
         default:
           ElMessage.error(error.response.data?.error || '操作失败');
