@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { validationResult } = require('express-validator');
-const db = require('./db');
+const { query } = require('./db');
 
 // JWT密钥
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -22,7 +22,7 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const [users] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
+    const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
     
     if (users.length === 0) {
       return res.status(401).json({ error: '用户不存在' });
@@ -42,7 +42,7 @@ const checkRole = (roles) => {
       return res.status(401).json({ error: '未认证' });
     }
 
-    const [userRoles] = await db.query(
+    const [userRoles] = await query(
       'SELECT r.name FROM roles r JOIN users u ON r.id = u.role_id WHERE u.id = ?',
       [req.user.id]
     );
@@ -57,27 +57,33 @@ const checkRole = (roles) => {
 
 // 注册用户
 const register = async (req, res) => {
+  console.log('收到注册请求:', req.body)
+  
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.log('验证错误:', errors.array())
     return res.status(400).json({ errors: errors.array() });
   }
 
   try {
     const { username, email, password } = req.body;
+    console.log('处理注册数据:', { username, email })
 
     // 检查用户名和邮箱是否已存在
-    const [existingUsers] = await db.query(
+    const existingUsers = await query(
       'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, email]
     );
 
     if (existingUsers.length > 0) {
+      console.log('用户已存在:', existingUsers)
       return res.status(400).json({ error: '用户名或邮箱已存在' });
     }
 
     // 获取普通用户角色ID
-    const [roles] = await db.query('SELECT id FROM roles WHERE name = ?', ['user']);
+    const roles = await query('SELECT id FROM roles WHERE name = ?', ['user']);
     if (roles.length === 0) {
+      console.error('角色不存在')
       return res.status(500).json({ error: '系统错误：角色不存在' });
     }
 
@@ -86,18 +92,19 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     // 创建用户
-    const [result] = await db.query(
+    const result = await query(
       'INSERT INTO users (username, email, password_hash, role_id) VALUES (?, ?, ?, ?)',
       [username, email, passwordHash, roles[0].id]
     );
 
+    console.log('用户创建成功:', result.insertId)
     res.status(201).json({
       message: '注册成功',
       userId: result.insertId
     });
   } catch (error) {
-    console.error('注册失败:', error);
-    res.status(500).json({ error: '注册失败' });
+    console.error('注册失败:', error)
+    res.status(500).json({ error: '注册失败: ' + error.message });
   }
 };
 
@@ -112,7 +119,7 @@ const login = async (req, res) => {
     const { username, password } = req.body;
 
     // 查找用户
-    const [users] = await db.query(
+    const users = await query(
       'SELECT u.*, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.username = ?',
       [username]
     );
@@ -138,10 +145,10 @@ const login = async (req, res) => {
     const token = generateToken(user.id);
 
     // 更新最后登录时间
-    await db.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+    await query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
 
     // 创建会话记录
-    await db.query(
+    await query(
       'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
       [user.id, token]
     );
@@ -157,14 +164,14 @@ const login = async (req, res) => {
     });
   } catch (error) {
     console.error('登录失败:', error);
-    res.status(500).json({ error: '登录失败' });
+    res.status(500).json({ error: '登录失败: ' + error.message });
   }
 };
 
 // 获取当前用户信息
 const getCurrentUser = async (req, res) => {
   try {
-    const [users] = await db.query(
+    const users = await query(
       'SELECT u.id, u.username, u.email, r.name as role FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
       [req.user.id]
     );
@@ -176,7 +183,7 @@ const getCurrentUser = async (req, res) => {
     res.json(users[0]);
   } catch (error) {
     console.error('获取用户信息失败:', error);
-    res.status(500).json({ error: '获取用户信息失败' });
+    res.status(500).json({ error: '获取用户信息失败: ' + error.message });
   }
 };
 
@@ -185,12 +192,12 @@ const logout = async (req, res) => {
   try {
     const token = req.headers['authorization']?.split(' ')[1];
     if (token) {
-      await db.query('DELETE FROM user_sessions WHERE token = ?', [token]);
+      await query('DELETE FROM user_sessions WHERE token = ?', [token]);
     }
     res.json({ message: '退出成功' });
   } catch (error) {
     console.error('退出失败:', error);
-    res.status(500).json({ error: '退出失败' });
+    res.status(500).json({ error: '退出失败: ' + error.message });
   }
 };
 
