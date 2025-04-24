@@ -54,7 +54,7 @@
           </el-upload>
         </el-form-item>
         <el-form-item label="艺术家">
-          <el-input v-model="form.artist_name" placeholder="请输入艺术家姓名" />
+          <el-input v-model="form.artist_name" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -108,8 +108,7 @@ const handleEdit = (row) => {
     id: row.id,
     title: row.title,
     image: row.image,
-    artist_name: row.artist.name,
-    artist_id: row.artist.id
+    artist_name: row.artist.name
   }
   dialogVisible.value = true
 }
