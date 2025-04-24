@@ -106,6 +106,21 @@ app.post('/api/artists', async (req, res) => {
   }
 });
 
+// 更新艺术家接口
+app.put('/api/artists/:id', async (req, res) => {
+  try {
+    const { name, era, avatar, banner, description, biography } = req.body;
+    await db.query(
+      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ? WHERE id = ?',
+      [name, era, avatar, banner, description, biography, req.params.id]
+    );
+    res.json({ id: parseInt(req.params.id), ...req.body });
+  } catch (error) {
+    console.error('Error updating artist:', error);
+    res.status(500).json({ error: '更新失败' });
+  }
+});
+
 // 删除艺术家接口
 app.delete('/api/artists/:id', async (req, res) => {
   const connection = await db.getConnection();
