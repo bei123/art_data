@@ -110,11 +110,36 @@ app.post('/api/artists', async (req, res) => {
 app.put('/api/artists/:id', async (req, res) => {
   try {
     const { name, era, avatar, banner, description, biography } = req.body;
+    
+    // 验证图片URL
+    if (avatar && !validateImageUrl(avatar)) {
+      return res.status(400).json({ error: '无效的头像URL' });
+    }
+    if (banner && !validateImageUrl(banner)) {
+      return res.status(400).json({ error: '无效的背景图URL' });
+    }
+
+    // 更新艺术家信息
     await db.query(
       'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ? WHERE id = ?',
       [name, era, avatar, banner, description, biography, req.params.id]
     );
-    res.json({ id: parseInt(req.params.id), ...req.body });
+
+    // 获取更新后的艺术家信息
+    const [artists] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
+    if (artists.length === 0) {
+      return res.status(404).json({ error: '艺术家不存在' });
+    }
+
+    const artist = artists[0];
+    // 处理图片URL
+    const artistWithFullUrls = {
+      ...artist,
+      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
+      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
+    };
+
+    res.json(artistWithFullUrls);
   } catch (error) {
     console.error('Error updating artist:', error);
     res.status(500).json({ error: '更新失败' });
