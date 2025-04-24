@@ -70,19 +70,19 @@ const register = async (req, res) => {
     console.log('处理注册数据:', { username, email })
 
     // 检查用户名和邮箱是否已存在
-    const [existingUsers] = await query(
+    const existingUsers = await query(
       'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, email]
     );
 
-    if (existingUsers.length > 0) {
-      console.log('用户已存在:', existingUsers)
+    if (existingUsers[0] && existingUsers[0].length > 0) {
+      console.log('用户已存在:', existingUsers[0])
       return res.status(400).json({ error: '用户名或邮箱已存在' });
     }
 
     // 获取普通用户角色ID
-    const [roles] = await query('SELECT id FROM roles WHERE name = ?', ['user']);
-    if (roles.length === 0) {
+    const roles = await query('SELECT id FROM roles WHERE name = ?', ['user']);
+    if (!roles[0] || roles[0].length === 0) {
       console.error('角色不存在')
       return res.status(500).json({ error: '系统错误：角色不存在' });
     }
@@ -92,22 +92,22 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     // 创建用户
-    const [result] = await query(
+    const result = await query(
       'INSERT INTO users (username, email, password_hash, role_id) VALUES (?, ?, ?, ?)',
-      [username, email, passwordHash, roles[0].id]
+      [username, email, passwordHash, roles[0][0].id]
     );
 
-    console.log('用户创建成功:', result.insertId)
+    console.log('用户创建成功:', result[0].insertId)
     
     // 生成token
-    const token = generateToken(result.insertId);
+    const token = generateToken(result[0].insertId);
     
     // 返回成功响应
     res.status(200).json({
       success: true,
       message: '注册成功',
       data: {
-        userId: result.insertId,
+        userId: result[0].insertId,
         username,
         email,
         token
@@ -138,11 +138,11 @@ const login = async (req, res) => {
       [username]
     );
 
-    if (users.length === 0) {
+    if (!users[0] || users[0].length === 0) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
-    const user = users[0];
+    const user = users[0][0];
 
     // 验证密码
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
@@ -168,17 +168,24 @@ const login = async (req, res) => {
     );
 
     res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role_name
+      success: true,
+      message: '登录成功',
+      data: {
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role_name
+        }
       }
     });
   } catch (error) {
     console.error('登录失败:', error);
-    res.status(500).json({ error: '登录失败: ' + error.message });
+    res.status(500).json({ 
+      success: false,
+      error: '登录失败: ' + error.message 
+    });
   }
 };
 
