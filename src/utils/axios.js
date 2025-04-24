@@ -3,8 +3,9 @@ import { API_BASE_URL } from '../config';
 import { ElMessage } from 'element-plus';
 import router from '../router';
 
+// 创建axios实例
 const instance = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: `${API_BASE_URL}/api`,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -12,23 +13,46 @@ const instance = axios.create({
   },
   validateStatus: function (status) {
     return status >= 200 && status < 500;
-  }
+  },
+  withCredentials: true // 允许跨域请求携带凭证
 });
 
 // 请求拦截器
 instance.interceptors.request.use(
   config => {
+    // 确保在生产环境使用https
+    if (process.env.NODE_ENV === 'production' && !config.url.startsWith('https://')) {
+      config.url = config.url.replace('http://', 'https://');
+    }
+
+    // 检查 token 是否过期
+    const token = localStorage.getItem('token');
+    const tokenExpiry = localStorage.getItem('tokenExpiry');
+    if (token) {
+      if (tokenExpiry && Date.now() > parseInt(tokenExpiry)) {
+        // token 已过期，清除并重定向到登录页面
+        localStorage.removeItem('token');
+        localStorage.removeItem('tokenExpiry');
+        localStorage.removeItem('user');
+        router.push('/login');
+        return Promise.reject(new Error('Token expired'));
+      }
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // 添加安全相关的请求头
+    config.headers['X-Requested-With'] = 'XMLHttpRequest';
+    config.headers['X-Content-Type-Options'] = 'nosniff';
+    config.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
+
     console.log('发送请求:', {
       url: config.url,
       method: config.method,
+      baseURL: config.baseURL,
       headers: config.headers,
       data: config.data
     });
     
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
     return config;
   },
   error => {
@@ -43,7 +67,12 @@ instance.interceptors.response.use(
     console.log('收到响应:', {
       status: response.status,
       headers: response.headers,
-      data: response.data
+      data: response.data,
+      config: {
+        url: response.config.url,
+        baseURL: response.config.baseURL,
+        method: response.config.method
+      }
     });
     
     // 处理特定的状态码
@@ -55,7 +84,12 @@ instance.interceptors.response.use(
     return response;
   },
   error => {
-    console.error('响应错误:', error);
+    console.error('响应错误:', {
+      message: error.message,
+      config: error.config,
+      response: error.response
+    });
+
     if (error.response) {
       switch (error.response.status) {
         case 401:

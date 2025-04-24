@@ -103,6 +103,9 @@ const handleSubmit = async () => {
     if (isLogin.value) {
       // 保存token和用户信息
       localStorage.setItem('token', response.data.token)
+      // 设置 token 过期时间（24小时）
+      const expiryTime = Date.now() + (24 * 60 * 60 * 1000)
+      localStorage.setItem('tokenExpiry', expiryTime.toString())
       localStorage.setItem('user', JSON.stringify(response.data.user))
       
       ElMessage.success('登录成功')
