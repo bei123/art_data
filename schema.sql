@@ -4,18 +4,37 @@ USE art_data;
 CREATE TABLE IF NOT EXISTS artists (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
+  avatar VARCHAR(255),
+  banner VARCHAR(255),
+  era VARCHAR(100),
   description TEXT,
+  biography TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS artist_achievements (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  artist_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (artist_id) REFERENCES artists(id)
 );
 
 CREATE TABLE IF NOT EXISTS original_artworks (
   id INT AUTO_INCREMENT PRIMARY KEY,
   artist_id INT NOT NULL,
   title VARCHAR(200) NOT NULL,
+  year INT,
+  image VARCHAR(255),
   description TEXT,
-  image_url VARCHAR(255),
-  price DECIMAL(10,2),
+  background TEXT,
+  features TEXT,
+  collection_location VARCHAR(255),
+  collection_number VARCHAR(100),
+  collection_size VARCHAR(100),
+  collection_material VARCHAR(100),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (artist_id) REFERENCES artists(id)
@@ -39,4 +58,44 @@ CREATE TABLE IF NOT EXISTS physical_categories (
   description TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rights (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  price DECIMAL(10,2),
+  original_price DECIMAL(10,2),
+  description TEXT,
+  status VARCHAR(50),
+  period VARCHAR(100),
+  remaining_count INT,
+  total_count INT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS right_images (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  right_id INT NOT NULL,
+  image_url VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (right_id) REFERENCES rights(id)
+);
+
+CREATE TABLE IF NOT EXISTS right_details (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  right_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  content TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (right_id) REFERENCES rights(id)
+);
+
+CREATE TABLE IF NOT EXISTS right_rules (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  right_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  content TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (right_id) REFERENCES rights(id)
 ); 
