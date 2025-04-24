@@ -135,6 +135,9 @@ app.get('/api/artists', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM artists');
     // 为每个艺术家的图片添加完整URL
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
     const artistsWithFullUrls = rows.map(artist => ({
       ...artist,
       avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
@@ -256,10 +259,14 @@ app.get('/api/original-artworks', async (req, res) => {
       ORDER BY oa.created_at DESC
     `);
     
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
+    
     // 为每个图片URL添加BASE_URL并构建正确的数据结构
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
-      image: artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`,
+      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : '',
       artist: {
         id: artwork.artist_id,
         name: artwork.artist_name,
@@ -656,6 +663,10 @@ app.get('/api/rights', async (req, res) => {
       LEFT JOIN right_images ri ON r.id = ri.right_id
       GROUP BY r.id
     `);
+    
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
     
     // 为每个版权实物的图片添加完整URL
     const rightsWithFullUrls = rows.map(right => ({
