@@ -172,11 +172,23 @@ const getImageUrl = (url) => {
 }
 
 const handleSubmit = async () => {
+  if (!form.value.name.trim()) {
+    ElMessage.warning('请输入艺术家姓名');
+    return;
+  }
+
   try {
+    // 确保提交的图片URL是相对路径
+    const submitData = {
+      ...form.value,
+      avatar: form.value.avatar ? (form.value.avatar.startsWith('http') ? form.value.avatar.replace(API_BASE_URL, '') : form.value.avatar) : '',
+      banner: form.value.banner ? (form.value.banner.startsWith('http') ? form.value.banner.replace(API_BASE_URL, '') : form.value.banner) : ''
+    };
+
     if (isEdit.value) {
-      await axios.put(`/api/artists/${form.value.id}`, form.value)
+      await axios.put(`/api/artists/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/artists', form.value)
+      await axios.post('/api/artists', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
