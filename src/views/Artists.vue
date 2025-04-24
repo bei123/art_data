@@ -17,6 +17,7 @@
       </el-table-column>
       <el-table-column prop="name" label="姓名" />
       <el-table-column prop="era" label="时代" />
+      <el-table-column prop="journey" label="艺术历程" :show-overflow-tooltip="true" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -73,6 +74,9 @@
         <el-form-item label="传记">
           <el-input v-model="form.biography" type="textarea" :rows="6" />
         </el-form-item>
+        <el-form-item label="艺术历程">
+          <el-input v-model="form.journey" type="textarea" :rows="6" placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -103,7 +107,8 @@ const form = ref({
   avatar: '',
   banner: '',
   description: '',
-  biography: ''
+  biography: '',
+  journey: ''
 })
 
 const fetchArtists = async () => {
@@ -123,7 +128,8 @@ const handleAdd = () => {
     avatar: '',
     banner: '',
     description: '',
-    biography: ''
+    biography: '',
+    journey: ''
   }
   dialogVisible.value = true
 }
@@ -137,7 +143,8 @@ const handleEdit = (row) => {
     avatar: row.avatar,
     banner: row.banner,
     description: row.description,
-    biography: row.biography
+    biography: row.biography,
+    journey: row.journey
   }
   dialogVisible.value = true
 }
