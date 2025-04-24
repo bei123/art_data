@@ -453,6 +453,11 @@ app.delete('/api/original-artworks/:id', async (req, res) => {
 app.get('/api/digital-artworks', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM digital_artworks');
+    
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
+    
     // 为每个作品的图片添加完整URL
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
@@ -507,6 +512,11 @@ app.delete('/api/digital-artworks/:id', async (req, res) => {
 app.get('/api/physical-categories', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM physical_categories');
+    
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
+    
     // 为每个分类的图片添加完整URL
     const categoriesWithFullUrls = rows.map(category => ({
       ...category,
