@@ -99,9 +99,9 @@ const recentDigitalArtworks = ref([])
 const fetchStats = async () => {
   try {
     const [originalRes, digitalRes, categoriesRes] = await Promise.all([
-      axios.get('/api/original-artworks'),
-      axios.get('/api/digital-artworks'),
-      axios.get('/api/physical-categories')
+      axios.get('/original-artworks'),
+      axios.get('/digital-artworks'),
+      axios.get('/physical-categories')
     ])
     
     stats.value = {

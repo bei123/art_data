@@ -121,7 +121,7 @@ const form = ref({
 const fetchArtistDetail = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`/api/artists/${route.params.id}`)
+    const response = await axios.get(`/artists/${route.params.id}`)
     const data = response.data
     form.value = {
       ...data,
@@ -155,7 +155,7 @@ const removeAchievement = (index) => {
 
 const handleEdit = async () => {
   try {
-    await axios.put(`/api/artists/${route.params.id}`, form.value)
+    await axios.put(`/artists/${route.params.id}`, form.value)
     ElMessage.success('更新成功')
   } catch (error) {
     ElMessage.error('更新失败')

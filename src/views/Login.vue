@@ -93,7 +93,7 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     loading.value = true
     
-    const endpoint = isLogin.value ? '/api/auth/login' : '/api/auth/register'
+    const endpoint = isLogin.value ? '/auth/login' : '/auth/register'
     console.log('发送请求到:', endpoint)
     console.log('请求数据:', form)
     
