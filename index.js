@@ -11,55 +11,36 @@ const auth = require('./auth');
 const app = express();
 const port = 2000;
 
-// CORS配置
-const corsOptions = {
-  origin: function(origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'https://wx.ht.2000gallery.art',
-      'http://wx.ht.2000gallery.art',
-      'https://www.wx.ht.2000gallery.art',
-      'http://www.wx.ht.2000gallery.art'
-    ];
-    
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, origin || true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'Accept',
-    'Origin',
-    'X-Requested-With'
-  ],
-  exposedHeaders: ['Authorization'],
-  optionsSuccessStatus: 204,
-  preflightContinue: false,
-  maxAge: 86400
-};
-
-app.use(cors(corsOptions));
-
-// 预检请求处理
-app.options('*', cors(corsOptions));
-
-// 安全相关的响应头中间件
+// 在所有中间件之前添加 CORS 配置
 app.use((req, res, next) => {
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'https://wx.ht.2000gallery.art',
+    'http://wx.ht.2000gallery.art',
+    'https://www.wx.ht.2000gallery.art',
+    'http://www.wx.ht.2000gallery.art'
+  ];
+
   const origin = req.headers.origin;
-  if (origin && corsOptions.origin) {
-    corsOptions.origin(origin, (err, valid) => {
-      if (valid) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-      }
-    });
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+    res.setHeader('Access-Control-Expose-Headers', 'Authorization');
   }
-  
+
+  // 处理预检请求
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
+  next();
+});
+
+// 安全相关的响应头
+app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');

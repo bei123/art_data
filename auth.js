@@ -70,7 +70,7 @@ const register = async (req, res) => {
     console.log('处理注册数据:', { username, email })
 
     // 检查用户名和邮箱是否已存在
-    const existingUsers = await query(
+    const [existingUsers] = await query(
       'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, email]
     );
@@ -81,7 +81,7 @@ const register = async (req, res) => {
     }
 
     // 获取普通用户角色ID
-    const roles = await query('SELECT id FROM roles WHERE name = ?', ['user']);
+    const [roles] = await query('SELECT id FROM roles WHERE name = ?', ['user']);
     if (roles.length === 0) {
       console.error('角色不存在')
       return res.status(500).json({ error: '系统错误：角色不存在' });
@@ -92,19 +92,33 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, salt);
 
     // 创建用户
-    const result = await query(
+    const [result] = await query(
       'INSERT INTO users (username, email, password_hash, role_id) VALUES (?, ?, ?, ?)',
       [username, email, passwordHash, roles[0].id]
     );
 
     console.log('用户创建成功:', result.insertId)
-    res.status(201).json({
+    
+    // 生成token
+    const token = generateToken(result.insertId);
+    
+    // 返回成功响应
+    res.status(200).json({
+      success: true,
       message: '注册成功',
-      userId: result.insertId
+      data: {
+        userId: result.insertId,
+        username,
+        email,
+        token
+      }
     });
   } catch (error) {
     console.error('注册失败:', error)
-    res.status(500).json({ error: '注册失败: ' + error.message });
+    res.status(500).json({ 
+      success: false,
+      error: '注册失败: ' + error.message 
+    });
   }
 };
 
