@@ -11,6 +11,31 @@ const auth = require('./auth');
 const app = express();
 const port = 2000;
 
+// CORS配置
+const corsOptions = {
+  origin: ['http://localhost:5173', 'https://wx.ht.2000gallery.art'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// 解析JSON请求体
+app.use(express.json());
+
+// 解析URL编码的请求体
+app.use(express.urlencoded({ extended: true }));
+
+// 静态文件服务
+app.use('/uploads', express.static('uploads'));
+
+// 创建上传目录
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
+
 // SSL证书配置
 const sslOptions = {
   key: fs.readFileSync(path.join(__dirname, 'api.wx.2000gallery.art.key')),
