@@ -7,7 +7,7 @@ const https = require('https');
 const fs = require('fs');
 
 const app = express();
-const port = 6000;
+const port = 2000;
 
 // SSL证书配置
 const sslOptions = {
@@ -847,7 +847,7 @@ app.get('/api/search', async (req, res) => {
 });
 
 // 启动HTTPS服务器
-const PORT = process.env.PORT || 443;
+const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS服务器运行在端口 ${PORT}`);
 }); 
