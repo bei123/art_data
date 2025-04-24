@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import Login from '../views/Login.vue'
 
 const routes = [
   {
@@ -51,12 +52,30 @@ const routes = [
         component: () => import('@/views/RightDetail.vue')
       }
     ]
+  },
+  {
+    path: '/login',
+    name: 'Login',
+    component: Login,
+    meta: { requiresAuth: false }
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+// 路由守卫
+router.beforeEach((to, from, next) => {
+  const token = localStorage.getItem('token')
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
+
+  if (requiresAuth && !token) {
+    next('/login')
+  } else {
+    next()
+  }
 })
 
 export default router 
