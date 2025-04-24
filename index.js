@@ -134,8 +134,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 app.get('/api/artists', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM artists');
-    // 为每个艺术家的图片添加完整URL
+    console.log('Artists query result:', rows);
+    
     if (!rows || !Array.isArray(rows)) {
+      console.log('Invalid artists data:', rows);
       return res.json([]);
     }
     const artistsWithFullUrls = rows.map(artist => ({
@@ -258,8 +260,10 @@ app.get('/api/original-artworks', async (req, res) => {
       LEFT JOIN artists a ON oa.artist_id = a.id
       ORDER BY oa.created_at DESC
     `);
+    console.log('Original artworks query result:', rows);
     
     if (!rows || !Array.isArray(rows)) {
+      console.log('Invalid original artworks data:', rows);
       return res.json([]);
     }
     
@@ -453,8 +457,10 @@ app.delete('/api/original-artworks/:id', async (req, res) => {
 app.get('/api/digital-artworks', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM digital_artworks');
+    console.log('Digital artworks query result:', rows);
     
     if (!rows || !Array.isArray(rows)) {
+      console.log('Invalid digital artworks data:', rows);
       return res.json([]);
     }
     
@@ -512,8 +518,10 @@ app.delete('/api/digital-artworks/:id', async (req, res) => {
 app.get('/api/physical-categories', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM physical_categories');
+    console.log('Physical categories query result:', rows);
     
     if (!rows || !Array.isArray(rows)) {
+      console.log('Invalid physical categories data:', rows);
       return res.json([]);
     }
     
