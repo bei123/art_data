@@ -176,13 +176,13 @@ const handleEdit = (row) => {
     id: row.id,
     title: row.title,
     status: row.status,
-    price: row.price,
-    originalPrice: row.original_price,
+    price: parseFloat(row.price),
+    originalPrice: parseFloat(row.original_price),
     period: row.period,
-    totalCount: row.total_count,
-    remainingCount: row.remaining_count,
+    totalCount: parseInt(row.total_count),
+    remainingCount: parseInt(row.remaining_count),
     description: row.description,
-    images: row.images ? row.images.split(',') : []
+    images: row.images || []
   }
   dialogVisible.value = true
 }
@@ -204,6 +204,9 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
+  if (!form.value.images) {
+    form.value.images = []
+  }
   form.value.images.push(response.url)
 }
 
@@ -215,53 +218,57 @@ const handleImageRemove = (file) => {
 }
 
 const getImageUrl = (url) => {
-  if (!url) return '';
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+  if (!url) return ''
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
 }
 
 const beforeImageUpload = (file) => {
-  const isImage = file.type.startsWith('image/');
-  const isLt5M = file.size / 1024 / 1024 < 5;
+  const isImage = file.type.startsWith('image/')
+  const isLt5M = file.size / 1024 / 1024 < 5
 
   if (!isImage) {
-    ElMessage.error('只能上传图片文件！');
-    return false;
+    ElMessage.error('只能上传图片文件！')
+    return false
   }
   if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB！');
-    return false;
+    ElMessage.error('图片大小不能超过 5MB！')
+    return false
   }
-  return true;
+  return true
 }
 
 const handleSubmit = async () => {
   if (!form.value.title.trim()) {
-    ElMessage.warning('请输入标题');
-    return;
+    ElMessage.warning('请输入标题')
+    return
   }
   if (!form.value.status) {
-    ElMessage.warning('请选择状态');
-    return;
+    ElMessage.warning('请选择状态')
+    return
   }
   if (form.value.images.length === 0) {
-    ElMessage.warning('请上传至少一张图片');
-    return;
-  }
-  if (form.value.totalCount < form.value.remainingCount) {
-    ElMessage.warning('剩余数量不能大于总数量');
-    return;
+    ElMessage.warning('请上传至少一张图片')
+    return
   }
 
   try {
+    const submitData = {
+      ...form.value,
+      images: form.value.images.map(image => 
+        image.startsWith('http') ? image.replace(API_BASE_URL, '') : image
+      )
+    }
+
     if (isEdit.value) {
-      await axios.put(`/api/rights/${form.value.id}`, form.value)
+      await axios.put(`/api/rights/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/rights', form.value)
+      await axios.post('/api/rights', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
     fetchRights()
   } catch (error) {
+    console.error('保存失败:', error)
     ElMessage.error('保存失败')
   }
 }
