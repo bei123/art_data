@@ -11,7 +11,7 @@
         <template #default="{ row }">
           <el-image
             style="width: 100px; height: 100px"
-            :src="row.image"
+            :src="API_BASE_URL + row.image"
             fit="cover"
           />
         </template>
@@ -49,12 +49,12 @@
             :on-success="handleImageSuccess"
             name="file"
           >
-            <img v-if="form.image" :src="form.image" class="avatar" />
+            <img v-if="form.image" :src="API_BASE_URL + form.image" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
         <el-form-item label="艺术家">
-          <el-input v-model="form.artist_name" />
+          <el-input v-model="form.artist_name" placeholder="请输入艺术家姓名" />
         </el-form-item>
       </el-form>
       <template #footer>

@@ -11,7 +11,7 @@
         <template #default="{ row }">
           <el-image
             style="width: 100px; height: 100px"
-            :src="row.image"
+            :src="API_BASE_URL + row.image"
             fit="cover"
           />
         </template>
