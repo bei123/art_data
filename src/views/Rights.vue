@@ -126,12 +126,22 @@ const form = ref({
 
 const fetchRights = async () => {
   try {
-    const response = await axios.get('/rights')
-    rights.value = response.data.map(right => ({
-      ...right,
-      images: right.images ? right.images.map(image => getImageUrl(image)) : []
-    }))
+    const data = await axios.get('/rights')
+    console.log('API返回的原始数据：', data)
+    if (Array.isArray(data)) {
+      rights.value = data.map(right => ({
+        ...right,
+        images: right.images ? right.images.map(image => getImageUrl(image)) : []
+      }))
+      console.log('设置后的版权实物数据：', rights.value)
+    } else {
+      console.error('返回的数据不是数组：', data)
+      rights.value = []
+      ElMessage.error('获取数据格式不正确')
+    }
   } catch (error) {
+    console.error('获取版权实物列表失败：', error)
+    rights.value = []
     ElMessage.error('获取版权实物列表失败')
   }
 }
