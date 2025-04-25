@@ -21,14 +21,15 @@ instance.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('发送请求:', {
-        url: config.url,
-        method: config.method,
-        headers: config.headers,
-        data: config.data
-      });
-    }
+    // 添加调试日志
+    console.log('发送请求:', {
+      url: config.url,
+      method: config.method,
+      headers: config.headers,
+      data: config.data,
+      baseURL: config.baseURL,
+      withCredentials: config.withCredentials
+    });
     
     return config;
   },
@@ -41,21 +42,36 @@ instance.interceptors.request.use(
 // 响应拦截器
 instance.interceptors.response.use(
   response => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('收到响应:', {
-        status: response.status,
-        data: response.data,
-        headers: response.headers
-      });
+    // 添加调试日志
+    console.log('收到响应:', {
+      status: response.status,
+      statusText: response.statusText,
+      data: response.data,
+      headers: response.headers,
+      config: {
+        url: response.config.url,
+        method: response.config.method,
+        baseURL: response.config.baseURL,
+        withCredentials: response.config.withCredentials
+      }
+    });
+
+    // 如果响应数据是空数组，添加警告日志
+    if (Array.isArray(response.data) && response.data.length === 0) {
+      console.warn('警告: 响应数据是空数组');
     }
+
     return response.data;
   },
   error => {
     console.error('响应错误:', {
       message: error.message,
+      config: error.config,
       response: error.response ? {
         status: error.response.status,
-        data: error.response.data
+        statusText: error.response.statusText,
+        data: error.response.data,
+        headers: error.response.headers
       } : null
     });
 
@@ -74,8 +90,12 @@ instance.interceptors.response.use(
         default:
           ElMessage.error(data?.error || '操作失败');
       }
-    } else {
+    } else if (error.request) {
+      console.error('请求未收到响应:', error.request);
       ElMessage.error('网络请求失败，请检查网络连接');
+    } else {
+      console.error('请求配置错误:', error.message);
+      ElMessage.error('请求配置错误');
     }
     return Promise.reject(error);
   }

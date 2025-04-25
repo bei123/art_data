@@ -142,15 +142,25 @@ const beforeImageUpload = (file) => {
 
 const fetchArtworks = async () => {
   try {
-    const response = await axios.get('/original-artworks')
-    artworks.value = response.data.map(artwork => ({
-      ...artwork,
-      artist: {
-        ...artwork.artist,
-        avatar: artwork.artist?.avatar ? getImageUrl(artwork.artist.avatar) : ''
-      }
-    }))
+    const data = await axios.get('/original-artworks')
+    console.log('API返回的原始数据：', data)
+    if (Array.isArray(data)) {
+      artworks.value = data.map(artwork => ({
+        ...artwork,
+        artist: {
+          ...artwork.artist,
+          avatar: artwork.artist?.avatar ? getImageUrl(artwork.artist.avatar) : ''
+        }
+      }))
+      console.log('设置后的艺术品数据：', artworks.value)
+    } else {
+      console.error('返回的数据不是数组：', data)
+      artworks.value = []
+      ElMessage.error('获取数据格式不正确')
+    }
   } catch (error) {
+    console.error('获取艺术品列表失败：', error)
+    artworks.value = []
     ElMessage.error('获取数据失败')
   }
 }

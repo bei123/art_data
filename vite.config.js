@@ -17,7 +17,29 @@ export default defineConfig({
           ? 'http://localhost:2000'
           : 'https://api.wx.2000gallery.art:2000',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/api/, '/api'),
+        configure: (proxy, options) => {
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            console.log('代理请求:', {
+              url: req.url,
+              method: req.method,
+              headers: req.headers
+            });
+          });
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            console.log('代理响应:', {
+              url: req.url,
+              method: req.method,
+              statusCode: proxyRes.statusCode,
+              headers: proxyRes.headers
+            });
+          });
+          proxy.on('error', (err, req, res) => {
+            console.error('代理错误:', err);
+          });
+        }
       }
     }
   }

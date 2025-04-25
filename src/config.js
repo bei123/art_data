@@ -10,12 +10,16 @@ export const CONFIG = {
   // 允许上传的文件类型
   allowedFileTypes: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
   // 请求超时时间（毫秒）
-  requestTimeout: 10000,
+  requestTimeout: 30000,
   // API相关配置
   api: {
     baseURL: API_BASE_URL,
-    timeout: 10000,
-    withCredentials: true
+    timeout: 30000,
+    withCredentials: true,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
   }
 };
 

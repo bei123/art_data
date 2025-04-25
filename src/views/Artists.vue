@@ -10,14 +10,14 @@
         <template #default="{ row }">
           <el-image
             style="width: 50px; height: 50px"
-            :src="getImageUrl(row.avatar)"
+            :src="row.avatar"
             fit="cover"
           />
         </template>
       </el-table-column>
       <el-table-column prop="name" label="姓名" />
       <el-table-column prop="era" label="时代" />
-      <el-table-column prop="journey" label="艺术历程" :show-overflow-tooltip="true" />
+      <el-table-column prop="description" label="艺术历程" :show-overflow-tooltip="true" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -113,9 +113,19 @@ const form = ref({
 
 const fetchArtists = async () => {
   try {
-    const response = await axios.get('/artists')
-    artists.value = response.data
+    const data = await axios.get('/artists')
+    console.log('API返回的原始数据：', data)
+    if (Array.isArray(data)) {
+      artists.value = data
+      console.log('设置后的艺术家数据：', artists.value)
+    } else {
+      console.error('返回的数据不是数组：', data)
+      artists.value = []
+      ElMessage.error('获取数据格式不正确')
+    }
   } catch (error) {
+    console.error('获取艺术家列表失败：', error)
+    artists.value = []
     ElMessage.error('获取艺术家列表失败')
   }
 }
@@ -205,6 +215,7 @@ const handleSubmit = async () => {
   }
 }
 
+// 页面加载时获取数据
 onMounted(() => {
   fetchArtists()
 })

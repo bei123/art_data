@@ -107,7 +107,7 @@ const form = ref({
 
 const fetchCategories = async () => {
   try {
-    const response = await axios.get('/api/physical-categories')
+    const response = await axios.get('/physical-categories')
     categories.value = response.data.map(category => ({
       ...category,
       image: getImageUrl(category.image),
@@ -143,7 +143,7 @@ const handleDelete = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      await axios.delete(`/api/physical-categories/${row.id}`)
+      await axios.delete(`/physical-categories/${row.id}`)
       ElMessage.success('删除成功')
       fetchCategories()
     } catch (error) {
@@ -198,9 +198,9 @@ const handleSubmit = async () => {
     };
 
     if (isEdit.value) {
-      await axios.put(`/api/physical-categories/${form.value.id}`, submitData)
+      await axios.put(`/physical-categories/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/physical-categories', submitData)
+      await axios.post('/physical-categories', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
