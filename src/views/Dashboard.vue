@@ -104,16 +104,34 @@ const fetchStats = async () => {
       axios.get('/physical-categories')
     ])
     
+    console.log('Dashboard数据:', {
+      original: originalRes,
+      digital: digitalRes,
+      categories: categoriesRes
+    })
+
+    // 确保响应数据是数组
+    const originalArtworks = Array.isArray(originalRes) ? originalRes : []
+    const digitalArtworks = Array.isArray(digitalRes) ? digitalRes : []
+    const categories = Array.isArray(categoriesRes) ? categoriesRes : []
+    
     stats.value = {
-      originalArtworks: originalRes.data.length,
-      digitalArtworks: digitalRes.data.length,
-      physicalCategories: categoriesRes.data.length
+      originalArtworks: originalArtworks.length,
+      digitalArtworks: digitalArtworks.length,
+      physicalCategories: categories.length
     }
     
-    recentOriginalArtworks.value = originalRes.data.slice(-5).reverse()
-    recentDigitalArtworks.value = digitalRes.data.slice(-5).reverse()
+    recentOriginalArtworks.value = originalArtworks.slice(-5).reverse()
+    recentDigitalArtworks.value = digitalArtworks.slice(-5).reverse()
   } catch (error) {
     console.error('获取统计数据失败:', error)
+    stats.value = {
+      originalArtworks: 0,
+      digitalArtworks: 0,
+      physicalCategories: 0
+    }
+    recentOriginalArtworks.value = []
+    recentDigitalArtworks.value = []
   }
 }
 
