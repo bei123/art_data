@@ -50,6 +50,11 @@ const routes = [
         path: 'rights/:id',
         name: 'RightDetail',
         component: () => import('@/views/RightDetail.vue')
+      },
+      {
+        path: 'banners',
+        name: 'Banners',
+        component: () => import('@/views/Banners.vue')
       }
     ]
   },
