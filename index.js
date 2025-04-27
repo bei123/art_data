@@ -957,6 +957,74 @@ app.use('/api/rights', auth.authenticateToken);
 // 保护需要管理员权限的路由
 app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
 
+// 获取轮播图列表
+app.get('/api/banners', async (req, res) => {
+  try {
+    const [banners] = await db.query(
+      'SELECT * FROM banners WHERE status = "active" ORDER BY sort_order ASC'
+    );
+    res.json(banners);
+  } catch (error) {
+    console.error('获取轮播图列表失败:', error);
+    res.status(500).json({ error: '获取轮播图列表失败' });
+  }
+});
+
+// 添加轮播图
+app.post('/api/banners', auth.authenticateToken, async (req, res) => {
+  try {
+    const { title, image_url, link_url, sort_order } = req.body;
+    
+    if (!title || !image_url) {
+      return res.status(400).json({ error: '标题和图片URL不能为空' });
+    }
+
+    const [result] = await db.query(
+      'INSERT INTO banners (title, image_url, link_url, sort_order) VALUES (?, ?, ?, ?)',
+      [title, image_url, link_url || null, sort_order || 0]
+    );
+
+    const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [result.insertId]);
+    res.json(banner[0]);
+  } catch (error) {
+    console.error('添加轮播图失败:', error);
+    res.status(500).json({ error: '添加轮播图失败' });
+  }
+});
+
+// 更新轮播图
+app.put('/api/banners/:id', auth.authenticateToken, async (req, res) => {
+  try {
+    const { title, image_url, link_url, sort_order, status } = req.body;
+    
+    if (!title || !image_url) {
+      return res.status(400).json({ error: '标题和图片URL不能为空' });
+    }
+
+    await db.query(
+      'UPDATE banners SET title = ?, image_url = ?, link_url = ?, sort_order = ?, status = ? WHERE id = ?',
+      [title, image_url, link_url || null, sort_order || 0, status || 'active', req.params.id]
+    );
+
+    const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [req.params.id]);
+    res.json(banner[0]);
+  } catch (error) {
+    console.error('更新轮播图失败:', error);
+    res.status(500).json({ error: '更新轮播图失败' });
+  }
+});
+
+// 删除轮播图
+app.delete('/api/banners/:id', auth.authenticateToken, async (req, res) => {
+  try {
+    await db.query('DELETE FROM banners WHERE id = ?', [req.params.id]);
+    res.json({ message: '删除成功' });
+  } catch (error) {
+    console.error('删除轮播图失败:', error);
+    res.status(500).json({ error: '删除轮播图失败' });
+  }
+});
+
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {

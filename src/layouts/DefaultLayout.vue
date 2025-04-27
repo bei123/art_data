@@ -30,6 +30,10 @@
           <el-icon><Document /></el-icon>
           <span>版权实物</span>
         </el-menu-item>
+        <el-menu-item index="/banners">
+          <el-icon><Picture /></el-icon>
+          <span>轮播图管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
