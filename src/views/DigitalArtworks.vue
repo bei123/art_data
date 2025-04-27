@@ -186,9 +186,9 @@ const handleSubmit = async () => {
     };
 
     if (isEdit.value) {
-      await axios.put(`/api/digital-artworks/${form.value.id}`, submitData)
+      await axios.put(`/digital-artworks/${form.value.id}`, submitData)
     } else {
-      await axios.post('/api/digital-artworks', submitData)
+      await axios.post('/digital-artworks', submitData)
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
