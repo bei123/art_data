@@ -11,23 +11,6 @@ const auth = require('./auth');
 const app = express();
 const port = 2000;
 
-// 静态文件服务
-const rootPath = '/www/wwwroot/wx.ht.2000gallery.art';
-console.log('静态文件目录:', rootPath);
-app.use(express.static(rootPath));
-
-// 所有路由都返回 index.html
-app.get('*', (req, res) => {
-  const indexPath = path.join(rootPath, 'index.html');
-  console.log('尝试访问 index.html:', indexPath);
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    console.error('index.html 文件不存在:', indexPath);
-    res.status(404).send('index.html not found');
-  }
-});
-
 // CORS 配置
 app.use(cors({
   origin: function(origin, callback) {
@@ -724,7 +707,7 @@ app.post('/api/rights', async (req, res) => {
     const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images } = req.body;
     
     // 开始事务
-    const connection = await db.pool.getConnection();
+    const connection = await db.getConnection();
     await connection.beginTransaction();
 
     try {
@@ -775,7 +758,7 @@ app.put('/api/rights/:id', async (req, res) => {
     const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images } = req.body;
     
     // 开始事务
-    const connection = await db.pool.getConnection();
+    const connection = await db.getConnection();
     await connection.beginTransaction();
 
     try {
@@ -825,7 +808,7 @@ app.put('/api/rights/:id', async (req, res) => {
 app.delete('/api/rights/:id', async (req, res) => {
   try {
     // 开始事务
-    const connection = await db.pool.getConnection();
+    const connection = await db.getConnection();
     await connection.beginTransaction();
 
     try {
