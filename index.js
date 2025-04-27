@@ -957,20 +957,27 @@ app.use('/api/rights', auth.authenticateToken);
 // 保护需要管理员权限的路由
 app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
 
-// 获取轮播图列表
+// 获取轮播图列表（公开接口）
 app.get('/api/banners', async (req, res) => {
   try {
     const [banners] = await db.query(
       'SELECT * FROM banners WHERE status = "active" ORDER BY sort_order ASC'
     );
-    res.json(banners);
+    
+    // 处理图片URL
+    const bannersWithFullUrls = banners.map(banner => ({
+      ...banner,
+      image_url: banner.image_url ? (banner.image_url.startsWith('http') ? banner.image_url : `${BASE_URL}${banner.image_url}`) : ''
+    }));
+    
+    res.json(bannersWithFullUrls);
   } catch (error) {
     console.error('获取轮播图列表失败:', error);
     res.status(500).json({ error: '获取轮播图列表失败' });
   }
 });
 
-// 添加轮播图
+// 添加轮播图（需要认证）
 app.post('/api/banners', auth.authenticateToken, async (req, res) => {
   try {
     const { title, image_url, link_url, sort_order } = req.body;
@@ -992,7 +999,7 @@ app.post('/api/banners', auth.authenticateToken, async (req, res) => {
   }
 });
 
-// 更新轮播图
+// 更新轮播图（需要认证）
 app.put('/api/banners/:id', auth.authenticateToken, async (req, res) => {
   try {
     const { title, image_url, link_url, sort_order, status } = req.body;
@@ -1014,7 +1021,7 @@ app.put('/api/banners/:id', auth.authenticateToken, async (req, res) => {
   }
 });
 
-// 删除轮播图
+// 删除轮播图（需要认证）
 app.delete('/api/banners/:id', auth.authenticateToken, async (req, res) => {
   try {
     await db.query('DELETE FROM banners WHERE id = ?', [req.params.id]);

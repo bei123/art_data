@@ -98,11 +98,12 @@ const form = ref({
 
 const fetchBanners = async () => {
   try {
-    const { data } = await axios.get('/banners')
-    banners.value = data.map(banner => ({
-      ...banner,
-      image_url: getImageUrl(banner.image_url)
-    }))
+    const { data } = await axios.get('/banners', { 
+      headers: { 
+        Authorization: `Bearer ${localStorage.getItem('token')}` 
+      }
+    })
+    banners.value = data
   } catch (error) {
     console.error('获取轮播图列表失败：', error)
     ElMessage.error('获取轮播图列表失败')
