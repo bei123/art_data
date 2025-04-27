@@ -12,11 +12,20 @@ const app = express();
 const port = 2000;
 
 // 静态文件服务
-app.use(express.static(path.join(__dirname, 'dist')));
+const rootPath = '/www/wwwroot/wx.ht.2000gallery.art';
+console.log('静态文件目录:', rootPath);
+app.use(express.static(rootPath));
 
 // 所有路由都返回 index.html
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const indexPath = path.join(rootPath, 'index.html');
+  console.log('尝试访问 index.html:', indexPath);
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    console.error('index.html 文件不存在:', indexPath);
+    res.status(404).send('index.html not found');
+  }
 });
 
 // CORS 配置
