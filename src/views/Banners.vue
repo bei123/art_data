@@ -98,12 +98,17 @@ const form = ref({
 
 const fetchBanners = async () => {
   try {
-    const { data } = await axios.get('/banners', { 
-      headers: { 
-        Authorization: `Bearer ${localStorage.getItem('token')}` 
+    const res = await axios.get('/banners/all')
+    console.log('原始数据:', res)
+    const arr = Array.isArray(res) ? res : []
+    banners.value = arr.map(banner => {
+      console.log('处理单个banner:', banner)
+      return {
+        ...banner,
+        image_url: getImageUrl(banner.image_url)
       }
     })
-    banners.value = data
+    console.log('处理后的banners:', banners.value)
   } catch (error) {
     console.error('获取轮播图列表失败：', error)
     ElMessage.error('获取轮播图列表失败')
@@ -164,8 +169,13 @@ const beforeImageUpload = (file) => {
 }
 
 const getImageUrl = (url) => {
-  if (!url) return ''
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  if (!url) {
+    console.log('图片URL为空')
+    return ''
+  }
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  console.log('生成的完整图片URL:', fullUrl)
+  return fullUrl
 }
 
 const handleSubmit = async () => {

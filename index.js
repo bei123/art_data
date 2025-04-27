@@ -977,6 +977,24 @@ app.get('/api/banners', async (req, res) => {
   }
 });
 
+// 新增：获取所有轮播图（管理后台用）
+app.get('/api/banners/all', async (req, res) => {
+  try {
+    const [banners] = await db.query(
+      'SELECT * FROM banners ORDER BY sort_order ASC'
+    );
+    // 处理图片URL
+    const bannersWithFullUrls = banners.map(banner => ({
+      ...banner,
+      image_url: banner.image_url ? (banner.image_url.startsWith('http') ? banner.image_url : `${BASE_URL}${banner.image_url}`) : ''
+    }));
+    res.json(bannersWithFullUrls);
+  } catch (error) {
+    console.error('获取所有轮播图失败:', error);
+    res.status(500).json({ error: '获取所有轮播图失败' });
+  }
+});
+
 // 添加轮播图（需要认证）
 app.post('/api/banners', auth.authenticateToken, async (req, res) => {
   try {
