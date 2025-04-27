@@ -7,6 +7,7 @@ const https = require('https');
 const fs = require('fs');
 const { body } = require('express-validator');
 const auth = require('./auth');
+const axios = require('axios');
 
 const app = express();
 const port = 2000;
@@ -1047,6 +1048,45 @@ app.delete('/api/banners/:id', auth.authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('删除轮播图失败:', error);
     res.status(500).json({ error: '删除轮播图失败' });
+  }
+});
+
+// 微信小程序获取手机号接口
+async function getAccessToken(appid, secret) {
+  const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${appid}&secret=${secret}`;
+  const res = await axios.get(url);
+  return res.data.access_token;
+}
+
+async function getPhoneNumberFromWx(code, access_token) {
+  const url = `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${access_token}`;
+  const res = await axios.post(url, { code });
+  return res.data;
+}
+
+// 新增：获取手机号接口
+app.post('/api/wx/getPhoneNumber', async (req, res) => {
+  const { code } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少 code' });
+  }
+
+  // 你的微信小程序 appid 和 appsecret
+  const appid = 'wx96a502c78c9156d0'; // TODO: 替换为你自己的
+  const secret = 'bf47d45e6b0a96b1d1b73b186860c4cb'; // TODO: 替换为你自己的
+
+  try {
+    // 1. 获取 access_token
+    const access_token = await getAccessToken(appid, secret);
+    // 2. 用 code 换手机号
+    const result = await getPhoneNumberFromWx(code, access_token);
+    if (result.errcode === 0) {
+      res.json(result); // result.phone_info.phoneNumber 就是手机号
+    } else {
+      res.status(400).json({ error: result.errmsg });
+    }
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
   }
 });
 
