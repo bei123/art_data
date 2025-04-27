@@ -49,7 +49,18 @@ const query = async (sql, params) => {
     }
 };
 
+// 获取连接的包装函数
+const getConnection = async () => {
+    try {
+        return await pool.getConnection();
+    } catch (error) {
+        console.error('获取数据库连接失败:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     pool,
-    query
+    query,
+    getConnection
 }; 
