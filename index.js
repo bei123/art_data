@@ -1208,9 +1208,22 @@ app.get('/api/wx/userInfo', async (req, res) => {
 });
 
 // 获取购物车列表
-app.get('/api/cart', auth.authenticateToken, async (req, res) => {
+app.get('/api/cart', async (req, res) => {
   try {
-    const userId = req.user.id;
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+      payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+      return res.status(401).json({ error: 'token无效' });
+    }
+
+    const userId = payload.userId;
     
     const [cartItems] = await db.query(`
       SELECT 
@@ -1244,9 +1257,22 @@ app.get('/api/cart', auth.authenticateToken, async (req, res) => {
 });
 
 // 添加商品到购物车
-app.post('/api/cart', auth.authenticateToken, async (req, res) => {
+app.post('/api/cart', async (req, res) => {
   try {
-    const userId = req.user.id;
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+      payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+      return res.status(401).json({ error: 'token无效' });
+    }
+
+    const userId = payload.userId;
     const { right_id, quantity = 1 } = req.body;
 
     if (!right_id) {
@@ -1292,9 +1318,22 @@ app.post('/api/cart', auth.authenticateToken, async (req, res) => {
 });
 
 // 更新购物车商品数量
-app.put('/api/cart/:id', auth.authenticateToken, async (req, res) => {
+app.put('/api/cart/:id', async (req, res) => {
   try {
-    const userId = req.user.id;
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+      payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+      return res.status(401).json({ error: 'token无效' });
+    }
+
+    const userId = payload.userId;
     const { quantity } = req.body;
 
     if (!quantity || quantity < 1) {
@@ -1330,9 +1369,22 @@ app.put('/api/cart/:id', auth.authenticateToken, async (req, res) => {
 });
 
 // 从购物车中删除商品
-app.delete('/api/cart/:id', auth.authenticateToken, async (req, res) => {
+app.delete('/api/cart/:id', async (req, res) => {
   try {
-    const userId = req.user.id;
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+      payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+      return res.status(401).json({ error: 'token无效' });
+    }
+
+    const userId = payload.userId;
 
     const [result] = await db.query(
       'DELETE FROM cart_items WHERE id = ? AND user_id = ?',
@@ -1351,9 +1403,22 @@ app.delete('/api/cart/:id', auth.authenticateToken, async (req, res) => {
 });
 
 // 清空购物车
-app.delete('/api/cart', auth.authenticateToken, async (req, res) => {
+app.delete('/api/cart', async (req, res) => {
   try {
-    const userId = req.user.id;
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+      payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+      return res.status(401).json({ error: 'token无效' });
+    }
+
+    const userId = payload.userId;
 
     await db.query('DELETE FROM cart_items WHERE user_id = ?', [userId]);
 
