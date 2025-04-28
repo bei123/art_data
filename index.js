@@ -9,6 +9,8 @@ const { body } = require('express-validator');
 const auth = require('./auth');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const xml2js = require('xml2js');
 
 const app = express();
 const port = 2000;
@@ -1458,6 +1460,496 @@ app.delete('/api/cart', async (req, res) => {
   } catch (error) {
     console.error('清空购物车失败:', error);
     res.status(500).json({ error: '清空购物车失败' });
+  }
+});
+
+// 微信支付V3配置
+const WX_PAY_CONFIG = {
+  appId: 'wx96a502c78c9156d0', // 小程序appid
+  mchId: '1360639602', // 商户号
+  key: 'e0v3TF5sgZS82fk1ylb4oNqczZbKqeYk', // API密钥
+  serialNo: '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
+  privateKey: fs.readFileSync(path.join(__dirname, 'apiclient_key.pem')), // 商户私钥
+  notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
+  spbillCreateIp: '127.0.0.1' // 终端IP
+};
+
+// 生成随机字符串
+function generateNonceStr() {
+  return Math.random().toString(36).substr(2, 15);
+}
+
+// 生成签名
+function generateSignV3(method, url, timestamp, nonceStr, body) {
+  const message = `${method}\n${url}\n${timestamp}\n${nonceStr}\n${body}\n`;
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(message);
+  return sign.sign(WX_PAY_CONFIG.privateKey, 'base64');
+}
+
+// 验证签名
+function verifySignV3(timestamp, nonceStr, body, signature) {
+  const message = `${timestamp}\n${nonceStr}\n${body}\n`;
+  const verify = crypto.createVerify('RSA-SHA256');
+  verify.update(message);
+  return verify.verify(WX_PAY_CONFIG.privateKey, signature, 'base64');
+}
+
+// 解密回调数据
+function decryptCallbackData(associatedData, nonce, ciphertext) {
+  const key = Buffer.from(WX_PAY_CONFIG.key, 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(nonce, 'base64'));
+  decipher.setAuthTag(Buffer.from(associatedData, 'base64'));
+  let decrypted = decipher.update(Buffer.from(ciphertext, 'base64'));
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+// 统一下单接口
+app.post('/api/wx/pay/unifiedorder', async (req, res) => {
+  try {
+    const { openid, total_fee, body, out_trade_no, cart_items } = req.body;
+
+    if (!openid || !total_fee || !body || !out_trade_no || !cart_items) {
+      return res.status(400).json({ error: '参数不完整' });
+    }
+
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 创建订单
+      const [orderResult] = await connection.query(
+        'INSERT INTO orders (user_id, out_trade_no, total_fee, body) VALUES (?, ?, ?, ?)',
+        [openid, out_trade_no, total_fee, body]
+      );
+
+      const orderId = orderResult.insertId;
+
+      // 创建订单项
+      const orderItems = cart_items.map(item => [
+        orderId,
+        item.right_id,
+        item.quantity,
+        item.price
+      ]);
+
+      await connection.query(
+        'INSERT INTO order_items (order_id, right_id, quantity, price) VALUES ?',
+        [orderItems]
+      );
+
+      // 构建统一下单参数
+      const params = {
+        appid: WX_PAY_CONFIG.appId,
+        mch_id: WX_PAY_CONFIG.mchId,
+        nonce_str: generateNonceStr(),
+        body: body,
+        out_trade_no: out_trade_no,
+        total_fee: total_fee,
+        spbill_create_ip: WX_PAY_CONFIG.spbillCreateIp,
+        notify_url: WX_PAY_CONFIG.notifyUrl,
+        trade_type: 'JSAPI',
+        openid: openid
+      };
+
+      // 生成签名
+      params.sign = generateSignV3('POST', '/api/wx/pay/unifiedorder', Date.now(), params.nonce_str, JSON.stringify(params));
+
+      // 发送请求到微信支付
+      const response = await axios.post('https://api.mch.weixin.qq.com/pay/unifiedorder', params, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.data.return_code === 'SUCCESS' && response.data.result_code === 'SUCCESS') {
+        await connection.commit();
+        res.json({
+          success: true,
+          data: response.data
+        });
+      } else {
+        await connection.rollback();
+        res.status(400).json({
+          success: false,
+          error: response.data.return_msg || '统一下单失败'
+        });
+      }
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('统一下单失败:', error);
+    res.status(500).json({ error: '统一下单失败' });
+  }
+});
+
+// 支付回调接口
+app.post('/api/wx/pay/notify', async (req, res) => {
+  try {
+    // 获取回调数据
+    const {
+      id, // 通知ID
+      create_time, // 通知创建时间
+      event_type, // 通知类型
+      resource_type, // 通知数据类型
+      resource, // 通知数据
+      summary // 回调摘要
+    } = req.body;
+
+    // 验证签名
+    const timestamp = req.headers['wechatpay-timestamp'];
+    const nonce = req.headers['wechatpay-nonce'];
+    const signature = req.headers['wechatpay-signature'];
+    const serial = req.headers['wechatpay-serial'];
+
+    if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
+      return res.status(401).json({
+        code: 'FAIL',
+        message: '签名验证失败'
+      });
+    }
+
+    // 解密回调数据
+    const decryptedData = decryptCallbackData(
+      resource.associated_data,
+      resource.nonce,
+      resource.ciphertext
+    );
+
+    const callbackData = JSON.parse(decryptedData);
+
+    // 处理支付结果
+    if (callbackData.trade_state === 'SUCCESS') {
+      const { 
+        out_trade_no, // 商户订单号
+        transaction_id, // 微信支付订单号
+        trade_type, // 交易类型
+        trade_state, // 交易状态
+        trade_state_desc, // 交易状态描述
+        success_time, // 支付完成时间
+        amount // 订单金额
+      } = callbackData;
+
+      // 开始事务
+      const connection = await db.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // 更新订单状态
+        await connection.query(
+          `UPDATE orders SET 
+            transaction_id = ?,
+            trade_type = ?,
+            trade_state = ?,
+            trade_state_desc = ?,
+            success_time = ?
+          WHERE out_trade_no = ?`,
+          [transaction_id, trade_type, trade_state, trade_state_desc, success_time, out_trade_no]
+        );
+
+        // 获取订单项
+        const [orderItems] = await connection.query(
+          'SELECT * FROM order_items WHERE order_id = (SELECT id FROM orders WHERE out_trade_no = ?)',
+          [out_trade_no]
+        );
+
+        // 更新商品库存
+        for (const item of orderItems) {
+          await connection.query(
+            'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
+            [item.quantity, item.right_id]
+          );
+        }
+
+        await connection.commit();
+        res.json({
+          code: 'SUCCESS',
+          message: 'OK'
+        });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } else {
+      res.json({
+        code: 'FAIL',
+        message: callbackData.trade_state_desc || '支付失败'
+      });
+    }
+  } catch (error) {
+    console.error('支付回调处理失败:', error);
+    res.status(500).json({
+      code: 'FAIL',
+      message: '处理失败'
+    });
+  }
+});
+
+// 关闭订单接口
+app.post('/api/wx/pay/close', async (req, res) => {
+  try {
+    const { out_trade_no } = req.body;
+
+    if (!out_trade_no) {
+      return res.status(400).json({ error: '缺少商户订单号' });
+    }
+
+    // 构建请求参数
+    const params = {
+      out_trade_no: out_trade_no,
+      mchid: WX_PAY_CONFIG.mchId
+    };
+
+    // 生成签名
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonceStr = generateNonceStr();
+    const signature = generateSignV3('POST', '/v3/pay/transactions/out-trade-no/' + out_trade_no + '/close', timestamp, nonceStr, JSON.stringify(params));
+
+    // 发送请求到微信支付
+    const response = await axios.post(
+      `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${out_trade_no}/close`,
+      params,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `WECHATPAY2-SHA256-RSA2048 ${signature}`,
+          'Wechatpay-Serial': WX_PAY_CONFIG.serialNo,
+          'Wechatpay-Timestamp': timestamp,
+          'Wechatpay-Nonce': nonceStr
+        }
+      }
+    );
+
+    if (response.status === 204) {
+      res.json({
+        success: true,
+        message: '订单关闭成功'
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: '订单关闭失败'
+      });
+    }
+  } catch (error) {
+    console.error('关闭订单失败:', error);
+    if (error.response) {
+      res.status(error.response.status).json({
+        success: false,
+        error: error.response.data.message || '关闭订单失败'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: '关闭订单失败'
+      });
+    }
+  }
+});
+
+// 申请退款接口
+app.post('/api/wx/pay/refund', async (req, res) => {
+  try {
+    const { 
+      transaction_id, // 微信支付订单号
+      out_trade_no,  // 商户订单号
+      out_refund_no, // 商户退款单号
+      reason,        // 退款原因
+      notify_url,    // 退款结果回调url
+      funds_account, // 退款资金来源
+      amount         // 金额信息
+    } = req.body;
+
+    // 参数验证
+    if (!out_refund_no || !amount || !amount.refund || !amount.total || !amount.currency) {
+      return res.status(400).json({ error: '参数不完整' });
+    }
+
+    // 构建请求参数
+    const params = {
+      out_refund_no,
+      reason,
+      notify_url,
+      funds_account,
+      amount: {
+        refund: amount.refund,
+        total: amount.total,
+        currency: amount.currency
+      }
+    };
+
+    // 添加微信支付订单号或商户订单号
+    if (transaction_id) {
+      params.transaction_id = transaction_id;
+    } else if (out_trade_no) {
+      params.out_trade_no = out_trade_no;
+    } else {
+      return res.status(400).json({ error: '缺少订单号' });
+    }
+
+    // 生成签名
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonceStr = generateNonceStr();
+    const signature = generateSignV3(
+      'POST',
+      '/v3/refund/domestic/refunds',
+      timestamp,
+      nonceStr,
+      JSON.stringify(params)
+    );
+
+    // 发送请求到微信支付
+    const response = await axios.post(
+      'https://api.mch.weixin.qq.com/v3/refund/domestic/refunds',
+      params,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `WECHATPAY2-SHA256-RSA2048 ${signature}`,
+          'Wechatpay-Serial': WX_PAY_CONFIG.serialNo,
+          'Wechatpay-Timestamp': timestamp,
+          'Wechatpay-Nonce': nonceStr
+        }
+      }
+    );
+
+    if (response.status === 200) {
+      res.json({
+        success: true,
+        data: response.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: '申请退款失败'
+      });
+    }
+  } catch (error) {
+    console.error('申请退款失败:', error);
+    if (error.response) {
+      res.status(error.response.status).json({
+        success: false,
+        error: error.response.data.message || '申请退款失败'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: '申请退款失败'
+      });
+    }
+  }
+});
+
+// 退款回调接口
+app.post('/api/wx/pay/refund/notify', async (req, res) => {
+  try {
+    // 获取回调数据
+    const {
+      id, // 通知ID
+      create_time, // 通知创建时间
+      event_type, // 通知类型
+      resource_type, // 通知数据类型
+      resource, // 通知数据
+      summary // 回调摘要
+    } = req.body;
+
+    // 验证签名
+    const timestamp = req.headers['wechatpay-timestamp'];
+    const nonce = req.headers['wechatpay-nonce'];
+    const signature = req.headers['wechatpay-signature'];
+    const serial = req.headers['wechatpay-serial'];
+
+    if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
+      return res.status(401).json({
+        code: 'FAIL',
+        message: '签名验证失败'
+      });
+    }
+
+    // 解密回调数据
+    const decryptedData = decryptCallbackData(
+      resource.associated_data,
+      resource.nonce,
+      resource.ciphertext
+    );
+
+    const callbackData = JSON.parse(decryptedData);
+
+    // 处理退款结果
+    if (callbackData.refund_status === 'SUCCESS') {
+      const { 
+        out_refund_no, // 商户退款单号
+        out_trade_no, // 商户订单号
+        refund_id, // 微信退款单号
+        refund_status, // 退款状态
+        success_time, // 退款成功时间
+        amount // 金额信息
+      } = callbackData;
+
+      // TODO: 更新订单状态
+      // 这里需要根据你的业务逻辑来处理退款状态更新
+      // 例如：更新数据库中的订单状态为已退款
+
+      res.json({
+        code: 'SUCCESS',
+        message: 'OK'
+      });
+    } else {
+      res.json({
+        code: 'FAIL',
+        message: callbackData.refund_status || '退款失败'
+      });
+    }
+  } catch (error) {
+    console.error('退款回调处理失败:', error);
+    res.status(500).json({
+      code: 'FAIL',
+      message: '处理失败'
+    });
+  }
+});
+
+// 小程序调起支付签名接口
+app.post('/api/wx/pay/sign', async (req, res) => {
+  try {
+    const { prepay_id } = req.body;
+
+    if (!prepay_id) {
+      return res.status(400).json({ error: '缺少prepay_id' });
+    }
+
+    // 构建签名参数
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonceStr = generateNonceStr();
+    const package = `prepay_id=${prepay_id}`;
+    
+    // 构建签名串
+    const signStr = `${WX_PAY_CONFIG.appId}\n${timestamp}\n${nonceStr}\n${package}\n`;
+    
+    // 生成签名
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(signStr);
+    const signature = sign.sign(WX_PAY_CONFIG.privateKey, 'base64');
+
+    // 返回支付参数
+    res.json({
+      timeStamp: timestamp,
+      nonceStr: nonceStr,
+      package: package,
+      signType: 'RSA',
+      paySign: signature
+    });
+  } catch (error) {
+    console.error('生成支付签名失败:', error);
+    res.status(500).json({ error: '生成支付签名失败' });
   }
 });
 
