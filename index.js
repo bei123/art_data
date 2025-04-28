@@ -2181,12 +2181,12 @@ app.get('/api/wx/pay/orders', async (req, res) => {
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
         const method = 'GET';
-        const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}`;
+        const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`;
         const body = '';
         const signature = generateSignV3(method, url, timestamp, nonceStr, body);
 
         const response = await axios.get(
-          `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}`,
+          `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`,
           {
             headers: {
               'Accept': 'application/json',
