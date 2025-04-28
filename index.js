@@ -1586,7 +1586,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         [orderItems]
       );
 
-      // 构建统一下单参数
+      // 构建统一下单参数（XML格式）
       const params = {
         appid: WX_PAY_CONFIG.appId,
         mch_id: WX_PAY_CONFIG.mchId,
@@ -1603,23 +1603,33 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
       // 生成签名
       params.sign = generateSignV3('POST', '/api/wx/pay/unifiedorder', Date.now(), params.nonce_str, JSON.stringify(params));
 
-      // 发送请求到微信支付
-      const response = await axios.post('https://api.mch.weixin.qq.com/pay/unifiedorder', params, {
-        headers: { 'Content-Type': 'application/json' }
+      // 将参数转换为XML格式
+      const builder = new xml2js.Builder();
+      const xml = builder.buildObject({
+        xml: params
       });
 
-      if (response.data.return_code === 'SUCCESS' && response.data.result_code === 'SUCCESS') {
+      // 发送请求到微信支付
+      const response = await axios.post('https://api.mch.weixin.qq.com/pay/unifiedorder', xml, {
+        headers: { 'Content-Type': 'application/xml' }
+      });
+
+      // 解析XML响应
+      const parser = new xml2js.Parser({ explicitArray: false, ignoreAttrs: true });
+      const result = await parser.parseStringPromise(response.data);
+
+      if (result.xml.return_code === 'SUCCESS' && result.xml.result_code === 'SUCCESS') {
         await connection.commit();
         res.json({
           success: true,
-          data: response.data
+          data: result.xml
         });
       } else {
         await connection.rollback();
         res.status(400).json({
           success: false,
-          error: response.data.return_msg || '统一下单失败',
-          detail: response.data
+          error: result.xml.return_msg || '统一下单失败',
+          detail: result.xml
         });
       }
     } catch (error) {
