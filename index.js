@@ -1519,10 +1519,23 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
     await connection.beginTransaction();
 
     try {
+      // 根据openid获取用户id
+      const [users] = await connection.query(
+        'SELECT id FROM wx_users WHERE openid = ?',
+        [openid]
+      );
+
+      if (!users || users.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: '用户不存在' });
+      }
+
+      const userId = users[0].id;
+
       // 创建订单
       const [orderResult] = await connection.query(
         'INSERT INTO orders (user_id, out_trade_no, total_fee, body) VALUES (?, ?, ?, ?)',
-        [openid, out_trade_no, total_fee, body]
+        [userId, out_trade_no, total_fee, body]
       );
 
       const orderId = orderResult.insertId;
