@@ -827,12 +827,12 @@ app.delete('/api/rights/:id', async (req, res) => {
   }
 });
 
-// 获取版权实物详情
-app.get('/api/rights/detail/:id', async (req, res) => {
+// 获取版权实物详情（公开接口）
+app.get('/api/rights/public/:id', async (req, res) => {
   try {
     const [right] = await db.query('SELECT * FROM rights WHERE id = ?', [req.params.id]);
     
-    if (!right) {
+    if (!right || right.length === 0) {
       return res.status(404).json({ error: '版权实物不存在' });
     }
 
@@ -851,16 +851,25 @@ app.get('/api/rights/detail/:id', async (req, res) => {
       [req.params.id]
     );
 
+    // 获取分类信息
+    const [category] = await db.query(
+      'SELECT title FROM physical_categories WHERE id = ?',
+      [right[0].category_id]
+    );
+
     res.json({
-      title: right.title,
-      price: right.price,
-      originalPrice: right.original_price,
-      description: right.description,
-      status: right.status,
-      period: right.period,
-      remainingCount: right.remaining_count,
-      totalCount: right.total_count,
-      images: images.map(img => img.image_url),
+      title: right[0].title,
+      price: right[0].price,
+      originalPrice: right[0].original_price,
+      description: right[0].description,
+      status: right[0].status,
+      period: right[0].period,
+      remainingCount: right[0].remaining_count,
+      totalCount: right[0].total_count,
+      category: category[0]?.title || '',
+      images: images.map(img => 
+        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+      ),
       details: details,
       rules: rules
     });
