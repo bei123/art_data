@@ -1480,19 +1480,24 @@ function generateNonceStr() {
 }
 
 // 生成签名
-function generateSignV3(method, url, timestamp, nonceStr, body) {
-  // 构建签名串
-  const message = `${method}\n${url}\n${timestamp}\n${nonceStr}\n${body}\n`;
+function generateSignV3(params) {
+  // 1. 按字典序排序参数
+  const sortedKeys = Object.keys(params).sort();
+  const signStr = sortedKeys
+    .filter(key => params[key] !== undefined && params[key] !== '')
+    .map(key => `${key}=${params[key]}`)
+    .join('&');
   
-  // 使用SHA256-RSA2048签名
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(message);
+  // 2. 拼接API密钥
+  const stringSignTemp = `${signStr}&key=${WX_PAY_CONFIG.key}`;
   
-  // 使用私钥签名，并转换为base64格式
-  const signature = sign.sign(WX_PAY_CONFIG.privateKey, 'base64');
+  // 3. MD5签名
+  const sign = crypto.createHash('md5')
+    .update(stringSignTemp, 'utf8')
+    .digest('hex')
+    .toUpperCase();
   
-  // 返回签名
-  return signature;
+  return sign;
 }
 
 // 验证签名
