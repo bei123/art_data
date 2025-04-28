@@ -1225,6 +1225,7 @@ app.get('/api/cart', async (req, res) => {
 
     const userId = payload.userId;
     
+    // 先获取购物车商品基本信息
     const [cartItems] = await db.query(`
       SELECT 
         ci.*,
@@ -1233,7 +1234,6 @@ app.get('/api/cart', async (req, res) => {
         r.original_price,
         r.status,
         r.remaining_count,
-        r.images,
         c.title as category_title
       FROM cart_items ci
       JOIN rights r ON ci.right_id = r.id
@@ -1241,12 +1241,19 @@ app.get('/api/cart', async (req, res) => {
       WHERE ci.user_id = ?
     `, [userId]);
 
-    // 处理图片URL
-    const processedCartItems = cartItems.map(item => ({
-      ...item,
-      images: item.images ? item.images.split(',').map(image =>
-        image.startsWith('http') ? image : `${BASE_URL}${image}`
-      ) : []
+    // 获取每个商品的图片
+    const processedCartItems = await Promise.all(cartItems.map(async (item) => {
+      const [images] = await db.query(
+        'SELECT image_url FROM right_images WHERE right_id = ?',
+        [item.right_id]
+      );
+      
+      return {
+        ...item,
+        images: images.map(img => 
+          img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+        )
+      };
     }));
 
     res.json(processedCartItems);
