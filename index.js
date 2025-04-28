@@ -1480,24 +1480,16 @@ function generateNonceStr() {
 }
 
 // 生成签名
-function generateSignV3(params) {
-  // 1. 按字典序排序参数
-  const sortedKeys = Object.keys(params).sort();
-  const signStr = sortedKeys
-    .filter(key => params[key] !== undefined && params[key] !== '')
-    .map(key => `${key}=${params[key]}`)
-    .join('&');
+function generateSignV3(method, url, timestamp, nonceStr, body) {
+  // 1. 构造签名串
+  const message = `${method}\n${url}\n${timestamp}\n${nonceStr}\n${body}\n`;
   
-  // 2. 拼接API密钥
-  const stringSignTemp = `${signStr}&key=${WX_PAY_CONFIG.key}`;
+  // 2. 使用SHA256-RSA签名
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(message);
+  const signature = sign.sign(WX_PAY_CONFIG.privateKey, 'base64');
   
-  // 3. MD5签名并转换为大写
-  const sign = crypto.createHash('md5')
-    .update(stringSignTemp, 'utf8')
-    .digest('hex')
-    .toUpperCase();
-  
-  return sign;
+  return signature;
 }
 
 // 验证签名
@@ -1602,50 +1594,53 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
       // 构建统一下单参数
       const params = {
         appid: WX_PAY_CONFIG.appId,
-        mch_id: WX_PAY_CONFIG.mchId,
-        nonce_str: generateNonceStr(),
-        body: body,
+        mchid: WX_PAY_CONFIG.mchId,
+        description: body,
         out_trade_no: out_trade_no,
-        total_fee: total_fee,
-        spbill_create_ip: WX_PAY_CONFIG.spbillCreateIp,
         notify_url: WX_PAY_CONFIG.notifyUrl,
-        trade_type: 'JSAPI',
-        openid: openid
+        amount: {
+          total: total_fee,
+          currency: 'CNY'
+        },
+        scene_info: {
+          payer_client_ip: WX_PAY_CONFIG.spbillCreateIp
+        }
       };
 
-      // 生成签名
-      params.sign = generateSignV3(params);
+      // 生成签名所需的参数
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const nonceStr = generateNonceStr();
+      const method = 'POST';
+      const url = '/v3/pay/transactions/jsapi';
+      const bodyStr = JSON.stringify(params);
 
-      // 将参数转换为XML格式
-      const builder = new xml2js.Builder();
-      const xml = builder.buildObject({
-        xml: params
-      });
+      // 生成签名
+      const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
 
       // 发送请求到微信支付
-      const response = await axios.post('https://api.mch.weixin.qq.com/pay/unifiedorder', xml, {
+      const response = await axios.post('https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi', params, {
         headers: { 
-          'Content-Type': 'application/xml',
-          'Accept': 'application/xml'
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `WECHATPAY2-SHA256-RSA2048 ${signature}`,
+          'Wechatpay-Serial': WX_PAY_CONFIG.serialNo,
+          'Wechatpay-Timestamp': timestamp,
+          'Wechatpay-Nonce': nonceStr
         }
       });
 
-      // 解析XML响应
-      const parser = new xml2js.Parser({ explicitArray: false, ignoreAttrs: true });
-      const result = await parser.parseStringPromise(response.data);
-
-      if (result.xml.return_code === 'SUCCESS' && result.xml.result_code === 'SUCCESS') {
+      if (response.status === 200) {
         await connection.commit();
         res.json({
           success: true,
-          data: result.xml
+          data: response.data
         });
       } else {
         await connection.rollback();
         res.status(400).json({
           success: false,
-          error: result.xml.return_msg || '统一下单失败',
-          detail: result.xml
+          error: '统一下单失败',
+          detail: response.data
         });
       }
     } catch (error) {
