@@ -1491,7 +1491,7 @@ function generateSignV3(params) {
   // 2. 拼接API密钥
   const stringSignTemp = `${signStr}&key=${WX_PAY_CONFIG.key}`;
   
-  // 3. MD5签名
+  // 3. MD5签名并转换为大写
   const sign = crypto.createHash('md5')
     .update(stringSignTemp, 'utf8')
     .digest('hex')
@@ -1599,7 +1599,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         [orderItems]
       );
 
-      // 构建统一下单参数（XML格式）
+      // 构建统一下单参数
       const params = {
         appid: WX_PAY_CONFIG.appId,
         mch_id: WX_PAY_CONFIG.mchId,
@@ -1614,17 +1614,12 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
       };
 
       // 生成签名
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const nonceStr = generateNonceStr();
-      const signature = generateSignV3('POST', '/v3/pay/transactions/jsapi', timestamp, nonceStr, JSON.stringify(params));
+      params.sign = generateSignV3(params);
 
       // 将参数转换为XML格式
       const builder = new xml2js.Builder();
       const xml = builder.buildObject({
-        xml: {
-          ...params,
-          sign: signature
-        }
+        xml: params
       });
 
       // 发送请求到微信支付
