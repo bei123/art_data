@@ -1550,10 +1550,18 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
           return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
         }
 
-        // 验证价格
-        if (rights[0].price != item.price) {
+        // 验证价格 - 将字符串价格转换为数字进行比较
+        const itemPrice = parseFloat(item.price);
+        const dbPrice = parseFloat(rights[0].price);
+        if (Math.abs(itemPrice - dbPrice) > 0.01) { // 允许0.01的误差
           await connection.rollback();
-          return res.status(400).json({ error: `商品ID ${item.right_id} 价格不匹配` });
+          return res.status(400).json({ 
+            error: `商品ID ${item.right_id} 价格不匹配`,
+            detail: {
+              expected: dbPrice,
+              received: itemPrice
+            }
+          });
         }
       }
 
@@ -1570,7 +1578,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         orderId,
         item.right_id,
         item.quantity,
-        item.price
+        parseFloat(item.price) // 确保价格是数字类型
       ]);
 
       await connection.query(
@@ -1610,7 +1618,8 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         await connection.rollback();
         res.status(400).json({
           success: false,
-          error: response.data.return_msg || '统一下单失败'
+          error: response.data.return_msg || '统一下单失败',
+          detail: response.data
         });
       }
     } catch (error) {
@@ -1621,7 +1630,10 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
     }
   } catch (error) {
     console.error('统一下单失败:', error);
-    res.status(500).json({ error: '统一下单失败' });
+    res.status(500).json({ 
+      error: '统一下单失败',
+      detail: error.message
+    });
   }
 });
 
