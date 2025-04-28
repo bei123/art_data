@@ -1604,6 +1604,9 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         },
         scene_info: {
           payer_client_ip: WX_PAY_CONFIG.spbillCreateIp
+        },
+        payer: {
+          openid: openid
         }
       };
 
