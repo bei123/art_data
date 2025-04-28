@@ -678,24 +678,21 @@ app.get('/api/artists/:id', async (req, res) => {
 app.get('/api/rights', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT r.*, GROUP_CONCAT(ri.image_url) as images
+      SELECT r.*, c.title as category_title
       FROM rights r
-      LEFT JOIN right_images ri ON r.id = ri.right_id
-      GROUP BY r.id
+      LEFT JOIN physical_categories c ON r.category_id = c.id
+      ORDER BY r.id DESC
     `);
-    
     if (!rows || !Array.isArray(rows)) {
       return res.json([]);
     }
-    
     // 为每个版权实物的图片添加完整URL
     const rightsWithFullUrls = rows.map(right => ({
       ...right,
-      images: right.images ? right.images.split(',').map(image => 
+      images: right.images ? right.images.split(',').map(image =>
         image.startsWith('http') ? image : `${BASE_URL}${image}`
       ) : []
     }));
-    
     res.json(rightsWithFullUrls);
   } catch (error) {
     console.error('获取版权实物列表失败:', error);
@@ -703,11 +700,10 @@ app.get('/api/rights', async (req, res) => {
   }
 });
 
-// 创建版权实物
+// 新增版权实物（增加 category_id）
 app.post('/api/rights', async (req, res) => {
   try {
-    const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images } = req.body;
-    
+    const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id } = req.body;
     // 开始事务
     const connection = await db.getConnection();
     await connection.beginTransaction();
@@ -715,8 +711,8 @@ app.post('/api/rights', async (req, res) => {
     try {
       // 插入版权实物基本信息
       const [result] = await connection.query(
-        'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [title, status, price, originalPrice, period, totalCount, remainingCount, description]
+        'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [title, status, price, originalPrice, period, totalCount, remainingCount, description, category_id]
       );
 
       const rightId = result.insertId;
@@ -731,12 +727,11 @@ app.post('/api/rights', async (req, res) => {
       }
 
       await connection.commit();
-      
       // 返回完整的版权实物信息
       const [newRight] = await db.query(`
-        SELECT r.*, GROUP_CONCAT(ri.image_url) as images
+        SELECT r.*, c.title as category_title
         FROM rights r
-        LEFT JOIN right_images ri ON r.id = ri.right_id
+        LEFT JOIN physical_categories c ON r.category_id = c.id
         WHERE r.id = ?
         GROUP BY r.id
       `, [rightId]);
@@ -754,11 +749,10 @@ app.post('/api/rights', async (req, res) => {
   }
 });
 
-// 更新版权实物
+// 编辑版权实物（增加 category_id）
 app.put('/api/rights/:id', async (req, res) => {
   try {
-    const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images } = req.body;
-    
+    const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id } = req.body;
     // 开始事务
     const connection = await db.getConnection();
     await connection.beginTransaction();
@@ -766,8 +760,8 @@ app.put('/api/rights/:id', async (req, res) => {
     try {
       // 更新版权实物基本信息
       await connection.query(
-        'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ? WHERE id = ?',
-        [title, status, price, originalPrice, period, totalCount, remainingCount, description, req.params.id]
+        'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ? WHERE id = ?',
+        [title, status, price, originalPrice, period, totalCount, remainingCount, description, category_id, req.params.id]
       );
 
       // 删除旧图片
@@ -783,12 +777,11 @@ app.put('/api/rights/:id', async (req, res) => {
       }
 
       await connection.commit();
-      
       // 返回更新后的版权实物信息
       const [updatedRight] = await db.query(`
-        SELECT r.*, GROUP_CONCAT(ri.image_url) as images
+        SELECT r.*, c.title as category_title
         FROM rights r
-        LEFT JOIN right_images ri ON r.id = ri.right_id
+        LEFT JOIN physical_categories c ON r.category_id = c.id
         WHERE r.id = ?
         GROUP BY r.id
       `, [req.params.id]);
