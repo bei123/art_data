@@ -2025,6 +2025,205 @@ app.post('/api/wx/pay/sign', async (req, res) => {
   }
 });
 
+// 查询订单详情接口
+app.get('/api/wx/pay/query', async (req, res) => {
+  try {
+    const { out_trade_no } = req.query;
+
+    if (!out_trade_no) {
+      return res.status(400).json({ error: '缺少商户订单号' });
+    }
+
+    // 生成签名所需的参数
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonceStr = generateNonceStr();
+    const method = 'GET';
+    const url = `/v3/pay/transactions/out-trade-no/${out_trade_no}`;
+
+    // 生成签名
+    const signature = generateSignV3(method, url, timestamp, nonceStr, '');
+
+    // 发送请求到微信支付
+    const response = await axios.get(
+      `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${out_trade_no}`,
+      {
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+          'User-Agent': 'axios/1.9.0'
+        }
+      }
+    );
+
+    if (response.status === 200) {
+      // 同时查询数据库中的订单信息
+      const [orders] = await db.query(
+        'SELECT * FROM orders WHERE out_trade_no = ?',
+        [out_trade_no]
+      );
+
+      if (orders.length === 0) {
+        return res.status(404).json({ error: '订单不存在' });
+      }
+
+      const order = orders[0];
+
+      // 查询订单项
+      const [orderItems] = await db.query(
+        `SELECT oi.*, r.title, r.price, r.original_price, r.description, r.status, r.remaining_count
+         FROM order_items oi
+         JOIN rights r ON oi.right_id = r.id
+         WHERE oi.order_id = ?`,
+        [order.id]
+      );
+
+      // 查询订单图片
+      const orderItemsWithImages = await Promise.all(orderItems.map(async (item) => {
+        const [images] = await db.query(
+          'SELECT image_url FROM right_images WHERE right_id = ?',
+          [item.right_id]
+        );
+        return {
+          ...item,
+          images: images.map(img => 
+            img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+          )
+        };
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          ...response.data,
+          order_info: {
+            ...order,
+            items: orderItemsWithImages
+          }
+        }
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: '查询订单失败',
+        detail: response.data
+      });
+    }
+  } catch (error) {
+    console.error('查询订单失败:', error);
+    if (error.response) {
+      res.status(error.response.status).json({
+        success: false,
+        error: '查询订单失败',
+        detail: error.response.data
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: '查询订单失败',
+        detail: error.message
+      });
+    }
+  }
+});
+
+// 根据用户ID查询订单列表接口
+app.get('/api/wx/pay/orders', async (req, res) => {
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(400).json({ error: '缺少用户ID' });
+    }
+
+    // 查询用户是否存在
+    const [users] = await db.query(
+      'SELECT * FROM wx_users WHERE id = ?',
+      [user_id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    // 查询用户的订单列表
+    const [orders] = await db.query(
+      'SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC',
+      [user_id]
+    );
+
+    // 查询每个订单的订单项
+    const ordersWithItems = await Promise.all(orders.map(async (order) => {
+      // 查询订单项
+      const [orderItems] = await db.query(
+        `SELECT oi.*, r.title, r.price, r.original_price, r.description, r.status, r.remaining_count
+         FROM order_items oi
+         JOIN rights r ON oi.right_id = r.id
+         WHERE oi.order_id = ?`,
+        [order.id]
+      );
+
+      // 查询订单项图片
+      const orderItemsWithImages = await Promise.all(orderItems.map(async (item) => {
+        const [images] = await db.query(
+          'SELECT image_url FROM right_images WHERE right_id = ?',
+          [item.right_id]
+        );
+        return {
+          ...item,
+          images: images.map(img => 
+            img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+          )
+        };
+      }));
+
+      // 查询微信支付订单状态
+      try {
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const nonceStr = generateNonceStr();
+        const method = 'GET';
+        const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}`;
+        const signature = generateSignV3(method, url, timestamp, nonceStr, '');
+
+        const response = await axios.get(
+          `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}`,
+          {
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+              'User-Agent': 'axios/1.9.0'
+            }
+          }
+        );
+
+        return {
+          ...order,
+          items: orderItemsWithImages,
+          wx_pay_status: response.data
+        };
+      } catch (error) {
+        // 如果查询微信支付状态失败，只返回数据库中的订单信息
+        return {
+          ...order,
+          items: orderItemsWithImages,
+          wx_pay_status: null
+        };
+      }
+    }));
+
+    res.json({
+      success: true,
+      data: ordersWithItems
+    });
+  } catch (error) {
+    console.error('查询订单列表失败:', error);
+    res.status(500).json({
+      success: false,
+      error: '查询订单列表失败',
+      detail: error.message
+    });
+  }
+});
+
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
