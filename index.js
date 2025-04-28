@@ -1187,6 +1187,33 @@ app.post('/api/wx/bindUserInfo', async (req, res) => {
   }
 });
 
+// 获取当前小程序用户信息
+app.get('/api/wx/userInfo', async (req, res) => {
+  // 解析 token
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: '未登录' });
+  }
+  const token = authHeader.replace('Bearer ', '');
+  let payload;
+  try {
+    payload = jwt.verify(token, 'your_jwt_secret');
+  } catch (err) {
+    return res.status(401).json({ error: 'token无效' });
+  }
+
+  try {
+    const [users] = await db.query('SELECT * FROM wx_users WHERE id = ?', [payload.userId]);
+    if (!users || users.length === 0) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+    const user = users[0];
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
