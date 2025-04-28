@@ -1265,7 +1265,7 @@ app.get('/api/cart', async (req, res) => {
       FROM cart_items ci
       JOIN rights r ON ci.right_id = r.id
       LEFT JOIN physical_categories c ON r.category_id = c.id
-      WHERE ci.user_id = ?
+      WHERE ci.user_id = ? AND r.status = 'onsale'
     `, [userId]);
 
     // 获取每个商品的图片
@@ -1374,9 +1374,9 @@ app.put('/api/cart/:id', async (req, res) => {
       return res.status(400).json({ error: '数量必须大于0' });
     }
 
-    // 检查商品是否存在
+    // 检查商品是否存在且属于当前用户
     const [cartItem] = await db.query(
-      'SELECT ci.*, r.remaining_count FROM cart_items ci JOIN rights r ON ci.right_id = r.id WHERE ci.id = ? AND ci.user_id = ?',
+      'SELECT ci.*, r.remaining_count FROM cart_items ci JOIN rights r ON ci.right_id = r.id WHERE ci.id = ? AND ci.user_id = ? AND r.status = "onsale"',
       [req.params.id, userId]
     );
 
