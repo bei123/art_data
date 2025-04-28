@@ -1312,7 +1312,7 @@ app.post('/api/cart', async (req, res) => {
     }
 
     // 检查商品是否存在且状态正常
-    const [right] = await db.query('SELECT * FROM rights WHERE id = ? AND status = "active"', [right_id]);
+    const [right] = await db.query('SELECT * FROM rights WHERE id = ? AND status = "onsale"', [right_id]);
     if (!right || right.length === 0) {
       return res.status(404).json({ error: '商品不存在或已下架' });
     }
