@@ -1532,6 +1532,31 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
 
       const userId = users[0].id;
 
+      // 验证所有商品是否存在
+      for (const item of cart_items) {
+        const [rights] = await connection.query(
+          'SELECT id, price, remaining_count FROM rights WHERE id = ? AND status = "onsale"',
+          [item.right_id]
+        );
+
+        if (!rights || rights.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({ error: `商品ID ${item.right_id} 不存在或已下架` });
+        }
+
+        // 验证库存
+        if (rights[0].remaining_count < item.quantity) {
+          await connection.rollback();
+          return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
+        }
+
+        // 验证价格
+        if (rights[0].price != item.price) {
+          await connection.rollback();
+          return res.status(400).json({ error: `商品ID ${item.right_id} 价格不匹配` });
+        }
+      }
+
       // 创建订单
       const [orderResult] = await connection.query(
         'INSERT INTO orders (user_id, out_trade_no, total_fee, body) VALUES (?, ?, ?, ?)',
