@@ -1481,10 +1481,18 @@ function generateNonceStr() {
 
 // 生成签名
 function generateSignV3(method, url, timestamp, nonceStr, body) {
+  // 构建签名串
   const message = `${method}\n${url}\n${timestamp}\n${nonceStr}\n${body}\n`;
+  
+  // 使用SHA256-RSA2048签名
   const sign = crypto.createSign('RSA-SHA256');
   sign.update(message);
-  return sign.sign(WX_PAY_CONFIG.privateKey, 'base64');
+  
+  // 使用私钥签名，并转换为base64格式
+  const signature = sign.sign(WX_PAY_CONFIG.privateKey, 'base64');
+  
+  // 返回签名
+  return signature;
 }
 
 // 验证签名
@@ -1601,17 +1609,25 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
       };
 
       // 生成签名
-      params.sign = generateSignV3('POST', '/api/wx/pay/unifiedorder', Date.now(), params.nonce_str, JSON.stringify(params));
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const nonceStr = generateNonceStr();
+      const signature = generateSignV3('POST', '/v3/pay/transactions/jsapi', timestamp, nonceStr, JSON.stringify(params));
 
       // 将参数转换为XML格式
       const builder = new xml2js.Builder();
       const xml = builder.buildObject({
-        xml: params
+        xml: {
+          ...params,
+          sign: signature
+        }
       });
 
       // 发送请求到微信支付
       const response = await axios.post('https://api.mch.weixin.qq.com/pay/unifiedorder', xml, {
-        headers: { 'Content-Type': 'application/xml' }
+        headers: { 
+          'Content-Type': 'application/xml',
+          'Accept': 'application/xml'
+        }
       });
 
       // 解析XML响应
