@@ -2182,7 +2182,8 @@ app.get('/api/wx/pay/orders', async (req, res) => {
         const nonceStr = generateNonceStr();
         const method = 'GET';
         const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}`;
-        const signature = generateSignV3(method, url, timestamp, nonceStr, '');
+        const body = '';
+        const signature = generateSignV3(method, url, timestamp, nonceStr, body);
 
         const response = await axios.get(
           `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}`,
@@ -2200,27 +2201,31 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           ...order,
           items: orderItemsWithImages,
           pay_status: {
-            trade_state: wxPayData.trade_state,
-            trade_state_desc: wxPayData.trade_state_desc,
-            success_time: wxPayData.success_time,
-            amount: {
+            trade_state: wxPayData.trade_state || 'UNKNOWN',
+            trade_state_desc: wxPayData.trade_state_desc || '未知状态',
+            success_time: wxPayData.success_time || null,
+            amount: wxPayData.amount ? {
               total: wxPayData.amount.total,
               currency: wxPayData.amount.currency
-            },
-            transaction_id: wxPayData.transaction_id
+            } : null,
+            transaction_id: wxPayData.transaction_id || null
           }
         };
       } catch (error) {
+        console.error('查询微信支付状态失败:', error.response?.data || error.message);
         // 如果查询微信支付状态失败，返回数据库中的订单信息
         return {
           ...order,
           items: orderItemsWithImages,
           pay_status: {
-            trade_state: 'UNKNOWN',
-            trade_state_desc: '支付状态查询失败',
-            success_time: null,
-            amount: null,
-            transaction_id: null
+            trade_state: order.trade_state || 'UNKNOWN',
+            trade_state_desc: order.trade_state_desc || '支付状态查询失败',
+            success_time: order.success_time || null,
+            amount: order.total_fee ? {
+              total: order.total_fee,
+              currency: 'CNY'
+            } : null,
+            transaction_id: order.transaction_id || null
           }
         };
       }
