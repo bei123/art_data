@@ -2195,17 +2195,33 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           }
         );
 
+        const wxPayData = response.data;
         return {
           ...order,
           items: orderItemsWithImages,
-          wx_pay_status: response.data
+          pay_status: {
+            trade_state: wxPayData.trade_state,
+            trade_state_desc: wxPayData.trade_state_desc,
+            success_time: wxPayData.success_time,
+            amount: {
+              total: wxPayData.amount.total,
+              currency: wxPayData.amount.currency
+            },
+            transaction_id: wxPayData.transaction_id
+          }
         };
       } catch (error) {
-        // 如果查询微信支付状态失败，只返回数据库中的订单信息
+        // 如果查询微信支付状态失败，返回数据库中的订单信息
         return {
           ...order,
           items: orderItemsWithImages,
-          wx_pay_status: null
+          pay_status: {
+            trade_state: 'UNKNOWN',
+            trade_state_desc: '支付状态查询失败',
+            success_time: null,
+            amount: null,
+            transaction_id: null
+          }
         };
       }
     }));
