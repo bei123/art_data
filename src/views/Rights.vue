@@ -33,6 +33,7 @@
           {{ row.remainingCount }}/{{ row.totalCount }}
         </template>
       </el-table-column>
+      <el-table-column prop="category_title" label="所属分类" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -71,6 +72,16 @@
         </el-form-item>
         <el-form-item label="剩余数量">
           <el-input-number v-model="form.remainingCount" :min="0" :max="form.totalCount" />
+        </el-form-item>
+        <el-form-item label="所属分类">
+          <el-select v-model="form.category_id" placeholder="请选择分类">
+            <el-option
+              v-for="cat in categories"
+              :key="cat.id"
+              :label="cat.title"
+              :value="cat.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="4" />
@@ -111,6 +122,7 @@ const router = useRouter()
 const rights = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const categories = ref([])
 
 const form = ref({
   title: '',
@@ -121,7 +133,8 @@ const form = ref({
   totalCount: 0,
   remainingCount: 0,
   description: '',
-  images: []
+  images: [],
+  category_id: null
 })
 
 const fetchRights = async () => {
@@ -143,6 +156,19 @@ const fetchRights = async () => {
     console.error('获取版权实物列表失败：', error)
     rights.value = []
     ElMessage.error('获取版权实物列表失败')
+  }
+}
+
+const fetchCategories = async () => {
+  try {
+    const response = await axios.get('/physical-categories')
+    if (Array.isArray(response)) {
+      categories.value = response
+    } else {
+      categories.value = []
+    }
+  } catch (error) {
+    categories.value = []
   }
 }
 
@@ -175,7 +201,8 @@ const handleAdd = () => {
     totalCount: 0,
     remainingCount: 0,
     description: '',
-    images: []
+    images: [],
+    category_id: null
   }
   dialogVisible.value = true
 }
@@ -192,7 +219,8 @@ const handleEdit = (row) => {
     totalCount: parseInt(row.total_count),
     remainingCount: parseInt(row.remaining_count),
     description: row.description,
-    images: row.images || []
+    images: row.images || [],
+    category_id: row.category_id
   }
   dialogVisible.value = true
 }
@@ -266,7 +294,8 @@ const handleSubmit = async () => {
       ...form.value,
       images: form.value.images.map(image => 
         image.startsWith('http') ? image.replace(API_BASE_URL, '') : image
-      )
+      ),
+      category_id: form.value.category_id
     }
 
     if (isEdit.value) {
@@ -285,6 +314,7 @@ const handleSubmit = async () => {
 
 onMounted(() => {
   fetchRights()
+  fetchCategories()
 })
 </script>
 

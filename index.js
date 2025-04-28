@@ -1207,6 +1207,163 @@ app.get('/api/wx/userInfo', async (req, res) => {
   }
 });
 
+// 获取购物车列表
+app.get('/api/cart', auth.authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    const [cartItems] = await db.query(`
+      SELECT 
+        ci.*,
+        r.title,
+        r.price,
+        r.original_price,
+        r.status,
+        r.remaining_count,
+        r.images,
+        c.title as category_title
+      FROM cart_items ci
+      JOIN rights r ON ci.right_id = r.id
+      LEFT JOIN physical_categories c ON r.category_id = c.id
+      WHERE ci.user_id = ?
+    `, [userId]);
+
+    // 处理图片URL
+    const processedCartItems = cartItems.map(item => ({
+      ...item,
+      images: item.images ? item.images.split(',').map(image =>
+        image.startsWith('http') ? image : `${BASE_URL}${image}`
+      ) : []
+    }));
+
+    res.json(processedCartItems);
+  } catch (error) {
+    console.error('获取购物车失败:', error);
+    res.status(500).json({ error: '获取购物车失败' });
+  }
+});
+
+// 添加商品到购物车
+app.post('/api/cart', auth.authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { right_id, quantity = 1 } = req.body;
+
+    if (!right_id) {
+      return res.status(400).json({ error: '缺少商品ID' });
+    }
+
+    // 检查商品是否存在且状态正常
+    const [right] = await db.query('SELECT * FROM rights WHERE id = ? AND status = "active"', [right_id]);
+    if (!right || right.length === 0) {
+      return res.status(404).json({ error: '商品不存在或已下架' });
+    }
+
+    // 检查库存
+    if (right[0].remaining_count < quantity) {
+      return res.status(400).json({ error: '库存不足' });
+    }
+
+    // 检查购物车中是否已存在该商品
+    const [existingItem] = await db.query(
+      'SELECT * FROM cart_items WHERE user_id = ? AND right_id = ?',
+      [userId, right_id]
+    );
+
+    if (existingItem && existingItem.length > 0) {
+      // 更新数量
+      await db.query(
+        'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ?',
+        [quantity, userId, right_id]
+      );
+    } else {
+      // 新增商品
+      await db.query(
+        'INSERT INTO cart_items (user_id, right_id, quantity) VALUES (?, ?, ?)',
+        [userId, right_id, quantity]
+      );
+    }
+
+    res.json({ message: '添加成功' });
+  } catch (error) {
+    console.error('添加商品到购物车失败:', error);
+    res.status(500).json({ error: '添加商品到购物车失败' });
+  }
+});
+
+// 更新购物车商品数量
+app.put('/api/cart/:id', auth.authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { quantity } = req.body;
+
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({ error: '数量必须大于0' });
+    }
+
+    // 检查商品是否存在
+    const [cartItem] = await db.query(
+      'SELECT ci.*, r.remaining_count FROM cart_items ci JOIN rights r ON ci.right_id = r.id WHERE ci.id = ? AND ci.user_id = ?',
+      [req.params.id, userId]
+    );
+
+    if (!cartItem || cartItem.length === 0) {
+      return res.status(404).json({ error: '购物车商品不存在' });
+    }
+
+    // 检查库存
+    if (cartItem[0].remaining_count < quantity) {
+      return res.status(400).json({ error: '库存不足' });
+    }
+
+    // 更新数量
+    await db.query(
+      'UPDATE cart_items SET quantity = ? WHERE id = ? AND user_id = ?',
+      [quantity, req.params.id, userId]
+    );
+
+    res.json({ message: '更新成功' });
+  } catch (error) {
+    console.error('更新购物车商品数量失败:', error);
+    res.status(500).json({ error: '更新购物车商品数量失败' });
+  }
+});
+
+// 从购物车中删除商品
+app.delete('/api/cart/:id', auth.authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [result] = await db.query(
+      'DELETE FROM cart_items WHERE id = ? AND user_id = ?',
+      [req.params.id, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: '购物车商品不存在' });
+    }
+
+    res.json({ message: '删除成功' });
+  } catch (error) {
+    console.error('从购物车中删除商品失败:', error);
+    res.status(500).json({ error: '从购物车中删除商品失败' });
+  }
+});
+
+// 清空购物车
+app.delete('/api/cart', auth.authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    await db.query('DELETE FROM cart_items WHERE user_id = ?', [userId]);
+
+    res.json({ message: '清空购物车成功' });
+  } catch (error) {
+    console.error('清空购物车失败:', error);
+    res.status(500).json({ error: '清空购物车失败' });
+  }
+});
+
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
