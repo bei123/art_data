@@ -62,17 +62,14 @@ const routes = [
         component: () => import('@/views/Banners.vue')
       },
       {
-        path: '/refund/approval',
-        component: () => import('@/layouts/DefaultLayout.vue'),
-        meta: { title: '退款审批', icon: 'el-icon-money' },
-        children: [
-          {
-            path: '',
-            name: 'RefundApproval',
-            component: () => import('@/views/refund/RefundApproval.vue'),
-            meta: { title: '退款审批', roles: ['admin'] }
-          }
-        ]
+        path: '/refund-approval',
+        name: 'RefundApproval',
+        component: () => import('@/pages/RefundApproval.vue'),
+        meta: {
+          title: '退款审批',
+          requiresAuth: true,
+          roles: ['admin'] // 只有管理员可以访问
+        }
       }
     ]
   },
