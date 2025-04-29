@@ -1932,7 +1932,6 @@ app.post('/api/wx/pay/close', async (req, res) => {
 
     // 构建请求参数
     const params = {
-      out_trade_no: out_trade_no,
       mchid: WX_PAY_CONFIG.mchId
     };
 
