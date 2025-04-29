@@ -34,6 +34,10 @@
           <el-icon><Picture /></el-icon>
           <span>轮播图管理</span>
         </el-menu-item>
+        <el-menu-item index="/refund/approval">
+          <el-icon><Money /></el-icon>
+          <span>退款审批</span>
+        </el-menu-item>
         <el-menu-item index="/digital-identity/purchases/1">
           <el-icon><Document /></el-icon>
           <span>数字身份购买记录</span>
@@ -52,7 +56,7 @@
 </template>
 
 <script setup>
-import { HomeFilled, Picture, Monitor, Collection, User, Document } from '@element-plus/icons-vue'
+import { HomeFilled, Picture, Monitor, Collection, User, Document, Money } from '@element-plus/icons-vue'
 </script>
 
 <style scoped>

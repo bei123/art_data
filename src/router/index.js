@@ -60,6 +60,15 @@ const routes = [
         path: 'banners',
         name: 'Banners',
         component: () => import('@/views/Banners.vue')
+      },
+      {
+        path: '/refund/approval',
+        component: () => import('@/views/refund/RefundApproval.vue'),
+        name: 'RefundApproval',
+        meta: {
+          title: '退款审批',
+          requiresAuth: true
+        }
       }
     ]
   },
