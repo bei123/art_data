@@ -517,7 +517,7 @@ app.post('/api/digital-artworks', async (req, res) => {
 
 app.put('/api/digital-artworks/:id', async (req, res) => {
   try {
-    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright } = req.body;
+    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright, price } = req.body;
     
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
@@ -525,8 +525,8 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
     }
     
     await db.query(
-      'UPDATE digital_artworks SET title = ?, image_url = ?, author = ?, description = ?, contract_address = ?, token_id = ?, blockchain = ?, blockchain_url = ?, copyright = ? WHERE id = ?',
-      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright, req.params.id]
+      'UPDATE digital_artworks SET title = ?, image_url = ?, author = ?, description = ?, contract_address = ?, token_id = ?, blockchain = ?, blockchain_url = ?, copyright = ?, price = ? WHERE id = ?',
+      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright, price, req.params.id]
     );
     
     res.json({ 
@@ -539,7 +539,8 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
       token_id,
       blockchain,
       blockchain_url,
-      copyright
+      copyright,
+      price
     });
   } catch (error) {
     console.error('Error updating digital artwork:', error);
