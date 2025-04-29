@@ -52,6 +52,11 @@ const routes = [
         component: () => import('@/views/RightDetail.vue')
       },
       {
+        path: 'digital-identity/purchases/:user_id',
+        name: 'DigitalIdentityPurchases',
+        component: () => import('@/views/DigitalIdentityPurchases.vue')
+      },
+      {
         path: 'banners',
         name: 'Banners',
         component: () => import('@/views/Banners.vue')

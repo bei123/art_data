@@ -1537,10 +1537,19 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
 
       const userId = users[0].id;
 
+      // 获取用户可用的抵扣金额
+      const [discounts] = await connection.query(`
+        SELECT SUM(dip.discount_amount) as total_discount
+        FROM digital_identity_purchases dip
+        WHERE dip.user_id = ? AND dip.discount_amount > 0
+      `, [userId]);
+
+      const availableDiscount = discounts[0].total_discount || 0;
+
       // 验证所有商品是否存在
       for (const item of cart_items) {
         const [rights] = await connection.query(
-          'SELECT id, price, remaining_count FROM rights WHERE id = ? AND status = "onsale"',
+          'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id = ? AND status = "onsale"',
           [item.right_id]
         );
 
@@ -1570,10 +1579,13 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         }
       }
 
+      // 计算实际支付金额（考虑抵扣）
+      const actualTotalFee = Math.max(0, total_fee - availableDiscount);
+
       // 创建订单
       const [orderResult] = await connection.query(
-        'INSERT INTO orders (user_id, out_trade_no, total_fee, body) VALUES (?, ?, ?, ?)',
-        [userId, out_trade_no, total_fee, body]
+        'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, out_trade_no, total_fee, actualTotalFee, availableDiscount, body]
       );
 
       const orderId = orderResult.insertId;
@@ -1591,6 +1603,15 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         [orderItems]
       );
 
+      // 如果使用了抵扣，更新抵扣记录
+      if (availableDiscount > 0) {
+        await connection.query(`
+          UPDATE digital_identity_purchases 
+          SET discount_amount = 0 
+          WHERE user_id = ? AND discount_amount > 0
+        `, [userId]);
+      }
+
       // 构建统一下单参数
       const params = {
         appid: WX_PAY_CONFIG.appId,
@@ -1599,7 +1620,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         out_trade_no: out_trade_no,
         notify_url: WX_PAY_CONFIG.notifyUrl,
         amount: {
-          total: total_fee,
+          total: actualTotalFee,
           currency: 'CNY'
         },
         scene_info: {
@@ -2242,6 +2263,83 @@ app.get('/api/wx/pay/orders', async (req, res) => {
       error: '查询订单列表失败',
       detail: error.message
     });
+  }
+});
+
+// 记录数字身份购买
+app.post('/api/digital-identity/purchase', async (req, res) => {
+  try {
+    const { user_id, digital_artwork_id, discount_amount } = req.body;
+
+    if (!user_id || !digital_artwork_id || !discount_amount) {
+      return res.status(400).json({ error: '参数不完整' });
+    }
+
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 检查用户是否存在
+      const [users] = await connection.query(
+        'SELECT id FROM wx_users WHERE id = ?',
+        [user_id]
+      );
+
+      if (!users || users.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: '用户不存在' });
+      }
+
+      // 检查数字艺术品是否存在
+      const [artworks] = await connection.query(
+        'SELECT id FROM digital_artworks WHERE id = ?',
+        [digital_artwork_id]
+      );
+
+      if (!artworks || artworks.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: '数字艺术品不存在' });
+      }
+
+      // 记录购买
+      await connection.query(
+        'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount) VALUES (?, ?, ?)',
+        [user_id, digital_artwork_id, discount_amount]
+      );
+
+      await connection.commit();
+      res.json({ message: '购买记录创建成功' });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('记录数字身份购买失败:', error);
+    res.status(500).json({ error: '记录数字身份购买失败' });
+  }
+});
+
+// 获取用户的数字身份购买记录
+app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
+  try {
+    const [purchases] = await db.query(`
+      SELECT 
+        dip.*,
+        da.title as artwork_title,
+        da.image_url as artwork_image
+      FROM digital_identity_purchases dip
+      JOIN digital_artworks da ON dip.digital_artwork_id = da.id
+      WHERE dip.user_id = ?
+      ORDER BY dip.purchase_date DESC
+    `, [req.params.user_id]);
+
+    res.json(purchases);
+  } catch (error) {
+    console.error('获取数字身份购买记录失败:', error);
+    res.status(500).json({ error: '获取数字身份购买记录失败' });
   }
 });
 

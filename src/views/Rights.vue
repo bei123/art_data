@@ -25,7 +25,12 @@
       </el-table-column>
       <el-table-column prop="price" label="价格">
         <template #default="{ row }">
-          ¥{{ row.price }}
+          <div>
+            <div>¥{{ row.price }}</div>
+            <div v-if="row.discount_amount > 0" class="discount-info">
+              可抵扣: ¥{{ row.discount_amount }}
+            </div>
+          </div>
         </template>
       </el-table-column>
       <el-table-column prop="remainingCount" label="剩余数量">
@@ -63,6 +68,9 @@
         </el-form-item>
         <el-form-item label="原价">
           <el-input-number v-model="form.originalPrice" :precision="2" :step="0.1" :min="0" />
+        </el-form-item>
+        <el-form-item label="可抵扣金额">
+          <el-input-number v-model="form.discountAmount" :precision="2" :step="0.1" :min="0" />
         </el-form-item>
         <el-form-item label="期限">
           <el-input v-model="form.period" />
@@ -129,6 +137,7 @@ const form = ref({
   status: '',
   price: 0,
   originalPrice: 0,
+  discountAmount: 0,
   period: '',
   totalCount: 0,
   remainingCount: 0,
@@ -197,6 +206,7 @@ const handleAdd = () => {
     status: '',
     price: 0,
     originalPrice: 0,
+    discountAmount: 0,
     period: '',
     totalCount: 0,
     remainingCount: 0,
@@ -215,6 +225,7 @@ const handleEdit = (row) => {
     status: row.status,
     price: parseFloat(row.price),
     originalPrice: parseFloat(row.original_price),
+    discountAmount: parseFloat(row.discount_amount || 0),
     period: row.period,
     totalCount: parseInt(row.total_count),
     remainingCount: parseInt(row.remaining_count),
@@ -295,7 +306,8 @@ const handleSubmit = async () => {
       images: form.value.images.map(image => 
         image.startsWith('http') ? image.replace(API_BASE_URL, '') : image
       ),
-      category_id: form.value.category_id
+      category_id: form.value.category_id,
+      discount_amount: form.value.discountAmount
     }
 
     if (isEdit.value) {
@@ -330,5 +342,11 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.discount-info {
+  color: #f56c6c;
+  font-size: 12px;
+  margin-top: 4px;
 }
 </style> 
