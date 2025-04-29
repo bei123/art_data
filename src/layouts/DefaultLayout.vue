@@ -34,6 +34,10 @@
           <el-icon><Picture /></el-icon>
           <span>轮播图管理</span>
         </el-menu-item>
+        <el-menu-item index="/digital-identity/purchases/1">
+          <el-icon><Document /></el-icon>
+          <span>数字身份购买记录</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

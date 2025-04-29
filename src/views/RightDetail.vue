@@ -64,13 +64,15 @@
 
         <el-divider>图片列表</el-divider>
 
-        <el-form-item>
+        <el-form-item label="图片列表">
           <el-upload
             class="upload-list"
             :action="`${API_BASE_URL}/api/upload`"
             list-type="picture-card"
             :on-success="handleImageSuccess"
             :on-remove="handleImageRemove"
+            :before-upload="beforeImageUpload"
+            :file-list="form.images.map(url => ({ url, name: url.split('/').pop() }))"
             name="file"
           >
             <el-icon><Plus /></el-icon>
@@ -173,14 +175,36 @@ const fetchRightDetail = async () => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.images.push(response.url)
+  if (!form.value.images) {
+    form.value.images = []
+  }
+  if (response && response.url) {
+    form.value.images.push(response.url)
+  } else {
+    ElMessage.error('图片上传失败')
+  }
 }
 
 const handleImageRemove = (file) => {
-  const index = form.value.images.indexOf(file.url)
+  const index = form.value.images.findIndex(url => url === file.url)
   if (index !== -1) {
     form.value.images.splice(index, 1)
   }
+}
+
+const beforeImageUpload = (file) => {
+  const isImage = file.type.startsWith('image/')
+  const isLt5M = file.size / 1024 / 1024 < 5
+
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件！')
+    return false
+  }
+  if (!isLt5M) {
+    ElMessage.error('图片大小不能超过 5MB！')
+    return false
+  }
+  return true
 }
 
 const addDetail = () => {
