@@ -22,6 +22,7 @@
       <el-table-column prop="token_id" label="Token ID" />
       <el-table-column prop="blockchain" label="区块链" />
       <el-table-column prop="blockchain_url" label="链上信息" />
+      <el-table-column prop="price" label="价格" />
       <el-table-column prop="created_at" label="创建时间" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
@@ -74,6 +75,9 @@
         <el-form-item label="版权信息">
           <el-input v-model="form.copyright" />
         </el-form-item>
+        <el-form-item label="价格">
+          <el-input-number v-model="form.price" :precision="2" :step="0.01" :min="0" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -104,7 +108,8 @@ const form = ref({
   token_id: '',
   blockchain: '',
   blockchain_url: '',
-  copyright: ''
+  copyright: '',
+  price: 0
 })
 
 const fetchArtworks = async () => {
@@ -140,7 +145,8 @@ const handleAdd = () => {
     token_id: '',
     blockchain: '',
     blockchain_url: '',
-    copyright: ''
+    copyright: '',
+    price: 0
   }
   dialogVisible.value = true
 }
@@ -149,6 +155,7 @@ const handleEdit = (row) => {
   isEdit.value = true
   form.value = { ...row }
   if (form.value.copyright === undefined) form.value.copyright = ''
+  if (form.value.price === undefined) form.value.price = 0
   dialogVisible.value = true
 }
 
@@ -227,6 +234,10 @@ const handleSubmit = async () => {
   }
   if (!form.value.copyright.trim()) {
     ElMessage.warning('请输入版权信息');
+    return;
+  }
+  if (form.value.price === undefined || form.value.price < 0) {
+    ElMessage.warning('请输入有效的价格');
     return;
   }
 
