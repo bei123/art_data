@@ -21,7 +21,7 @@
       <el-table-column prop="out_refund_no" label="退款单号" width="180"></el-table-column>
       <el-table-column prop="amount" label="退款金额">
         <template #default="{ row }">
-          {{ JSON.parse(row.amount).refund }} 元
+          {{ (JSON.parse(row.amount).refund / 100).toFixed(2) }} 元
         </template>
       </el-table-column>
       <el-table-column prop="reason" label="退款原因"></el-table-column>
@@ -81,7 +81,7 @@
           <span>{{ approveForm.out_refund_no }}</span>
         </el-form-item>
         <el-form-item label="退款金额">
-          <span>{{ JSON.parse(approveForm.amount).refund }} 元</span>
+          <span>{{ (JSON.parse(approveForm.amount).refund / 100).toFixed(2) }} 元</span>
         </el-form-item>
         <el-form-item label="退款原因">
           <span>{{ approveForm.reason }}</span>
@@ -123,7 +123,7 @@
         <el-descriptions-item label="订单号">{{ currentRefund.out_trade_no }}</el-descriptions-item>
         <el-descriptions-item label="退款单号">{{ currentRefund.out_refund_no }}</el-descriptions-item>
         <el-descriptions-item label="退款金额">
-          {{ JSON.parse(currentRefund.amount).refund }} 元
+          {{ (JSON.parse(currentRefund.amount).refund / 100).toFixed(2) }} 元
         </el-descriptions-item>
         <el-descriptions-item label="退款原因">{{ currentRefund.reason }}</el-descriptions-item>
         <el-descriptions-item label="状态">

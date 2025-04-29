@@ -1633,6 +1633,9 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
       return res.status(400).json({ error: '参数不完整' });
     }
 
+    // 将元转换为分
+    const totalFeeInCents = Math.round(parseFloat(total_fee) * 100);
+
     // 开始事务
     const connection = await db.getConnection();
     await connection.beginTransaction();
@@ -1651,7 +1654,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
 
       const userId = users[0].id;
 
-      // 获取用户可用的抵扣金额
+      // 获取用户可用的抵扣金额(单位:分)
       const [discounts] = await connection.query(`
         SELECT SUM(dip.discount_amount) as total_discount
         FROM digital_identity_purchases dip
@@ -1675,16 +1678,16 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
             await connection.rollback();
             return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
           }
-          // 验证价格
-          const itemPrice = parseFloat(item.price);
-          const dbPrice = parseFloat(rights[0].price);
-          if (Math.abs(itemPrice - dbPrice) > 0.01) {
+          // 验证价格(转换为分进行比较)
+          const itemPriceInCents = Math.round(parseFloat(item.price) * 100);
+          const dbPriceInCents = Math.round(parseFloat(rights[0].price) * 100);
+          if (Math.abs(itemPriceInCents - dbPriceInCents) > 1) { // 允许1分钱的误差
             await connection.rollback();
             return res.status(400).json({
               error: `商品ID ${item.right_id} 价格不匹配`,
               detail: {
-                expected: dbPrice,
-                received: itemPrice
+                expected: rights[0].price,
+                received: item.price
               }
             });
           }
@@ -1716,13 +1719,13 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         }
       }
 
-      // 计算实际支付金额（考虑抵扣）
-      const actualTotalFee = Math.max(0, total_fee - availableDiscount);
+      // 计算实际支付金额（考虑抵扣）(单位:分)
+      const actualTotalFeeInCents = Math.max(0, totalFeeInCents - availableDiscount);
 
-      // 创建订单
+      // 创建订单(存储时保持分为单位)
       const [orderResult] = await connection.query(
         'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
-        [userId, out_trade_no, total_fee, actualTotalFee, availableDiscount, body]
+        [userId, out_trade_no, totalFeeInCents, actualTotalFeeInCents, availableDiscount, body]
       );
 
       const orderId = orderResult.insertId;
@@ -1749,7 +1752,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         `, [userId]);
       }
 
-      // 构建统一下单参数
+      // 构建统一下单参数(使用分为单位)
       const params = {
         appid: WX_PAY_CONFIG.appId,
         mchid: WX_PAY_CONFIG.mchId,
@@ -1757,7 +1760,7 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
         out_trade_no: out_trade_no,
         notify_url: WX_PAY_CONFIG.notifyUrl,
         amount: {
-          total: actualTotalFee,
+          total: actualTotalFeeInCents, // 使用分为单位的金额
           currency: 'CNY'
         },
         scene_info: {
