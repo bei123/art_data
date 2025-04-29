@@ -1936,10 +1936,15 @@ app.post('/api/wx/pay/close', async (req, res) => {
       mchid: WX_PAY_CONFIG.mchId
     };
 
-    // 生成签名
+    // 生成签名所需的参数
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonceStr = generateNonceStr();
-    const signature = generateSignV3('POST', '/v3/pay/transactions/out-trade-no/' + out_trade_no + '/close', timestamp, nonceStr, JSON.stringify(params));
+    const method = 'POST';
+    const url = `/v3/pay/transactions/out-trade-no/${out_trade_no}/close`;
+    const bodyStr = JSON.stringify(params);
+
+    // 生成签名
+    const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
 
     // 发送请求到微信支付
     const response = await axios.post(
@@ -2022,15 +2027,16 @@ app.post('/api/wx/pay/refund', async (req, res) => {
       return res.status(400).json({ error: '缺少订单号' });
     }
 
-    // 生成签名所需的参数
+    // 生成签名
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonceStr = generateNonceStr();
-    const method = 'POST';
-    const url = '/v3/refund/domestic/refunds';
-    const bodyStr = JSON.stringify(params);
-
-    // 生成签名
-    const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
+    const signature = generateSignV3(
+      'POST',
+      '/v3/refund/domestic/refunds',
+      timestamp,
+      nonceStr,
+      JSON.stringify(params)
+    );
 
     // 发送请求到微信支付
     const response = await axios.post(
