@@ -2196,22 +2196,37 @@ app.get('/api/wx/pay/refund/requests', async (req, res) => {
     
     const offset = (page - 1) * limit;
     
+    // 构建查询条件
     let query = 'SELECT * FROM refund_requests';
+    let countQuery = 'SELECT COUNT(*) as total FROM refund_requests';
     let params = [];
     
     if (status) {
       query += ' WHERE status = ?';
+      countQuery += ' WHERE status = ?';
       params.push(status);
     }
     
+    // 添加排序和分页
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), offset);
     
+    // 执行查询
     const [refunds] = await db.query(query, params);
+    const [[{ total }]] = await db.query(countQuery, status ? [status] : []);
+    
+    // 确保amount字段是有效的JSON字符串
+    const formattedRefunds = refunds.map(refund => ({
+      ...refund,
+      amount: typeof refund.amount === 'string' ? refund.amount : JSON.stringify(refund.amount)
+    }));
     
     res.json({
       success: true,
-      data: refunds
+      data: formattedRefunds,
+      total: parseInt(total),
+      page: parseInt(page),
+      limit: parseInt(limit)
     });
   } catch (error) {
     console.error('获取退款申请列表失败:', error);

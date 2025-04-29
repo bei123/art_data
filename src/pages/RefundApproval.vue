@@ -66,7 +66,7 @@
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next"
         @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
+        @current-change="handlePageChange"
       />
     </div>
 
@@ -173,23 +173,25 @@ const approveForm = ref({
 // 加载退款申请列表
 const loadRefunds = async () => {
   try {
-    loading.value = true
     const response = await axios.get('/api/wx/pay/refund/requests', {
       params: {
         status: filterStatus.value,
         page: currentPage.value,
         limit: pageSize.value
       }
-    })
-    refunds.value = response.data.data
-    total.value = response.data.total || 0
+    });
+    
+    if (response.data.success) {
+      refunds.value = response.data.data;
+      total.value = response.data.total;
+    } else {
+      ElMessage.error(response.data.error || '加载退款申请列表失败');
+    }
   } catch (error) {
-    ElMessage.error('加载退款申请列表失败')
-    console.error('加载退款申请列表失败:', error)
-  } finally {
-    loading.value = false
+    console.error('加载退款申请列表失败:', error);
+    ElMessage.error('加载退款申请列表失败');
   }
-}
+};
 
 // 显示审批对话框
 const showApproveDialog = (refund) => {
@@ -238,16 +240,18 @@ const handleApprove = async () => {
   }
 }
 
-// 分页处理
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  loadRefunds()
-}
+// 修改分页处理
+const handlePageChange = (page) => {
+  currentPage.value = page;
+  loadRefunds();
+};
 
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  loadRefunds()
-}
+// 修改每页条数处理
+const handleSizeChange = (size) => {
+  pageSize.value = size;
+  currentPage.value = 1;
+  loadRefunds();
+};
 
 // 状态相关方法
 const getStatusType = (status) => {
