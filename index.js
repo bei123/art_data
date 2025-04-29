@@ -1309,39 +1309,47 @@ app.get('/api/cart', async (req, res) => {
     }
 
     const userId = payload.userId;
-    
-    // 先获取购物车商品基本信息
-    const [cartItems] = await db.query(`
+    // 查询实物商品购物车项
+    const [cartRights] = await db.query(`
       SELECT 
-        ci.*,
-        r.title,
-        r.price,
-        r.original_price,
-        r.status,
-        r.remaining_count,
-        c.title as category_title
+        ci.*, 'right' as type,
+        r.title, r.price, r.original_price, r.status, r.remaining_count, c.title as category_title
       FROM cart_items ci
       JOIN rights r ON ci.right_id = r.id
       LEFT JOIN physical_categories c ON r.category_id = c.id
-      WHERE ci.user_id = ? AND r.status = 'onsale'
+      WHERE ci.user_id = ? AND ci.type = 'right' AND r.status = 'onsale'
+    `, [userId]);
+    // 查询数字艺术品购物车项
+    const [cartDigitals] = await db.query(`
+      SELECT 
+        ci.*, 'digital' as type,
+        d.title, d.price, d.image_url, d.author, d.description
+      FROM cart_items ci
+      JOIN digital_artworks d ON ci.digital_artwork_id = d.id
+      WHERE ci.user_id = ? AND ci.type = 'digital'
     `, [userId]);
 
-    // 获取每个商品的图片
-    const processedCartItems = await Promise.all(cartItems.map(async (item) => {
+    // 获取每个实物商品的图片
+    const processedCartRights = await Promise.all(cartRights.map(async (item) => {
       const [images] = await db.query(
         'SELECT image_url FROM right_images WHERE right_id = ?',
         [item.right_id]
       );
-      
       return {
         ...item,
-        images: images.map(img => 
+        images: images.map(img =>
           img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
         )
       };
     }));
 
-    res.json(processedCartItems);
+    // 处理数字艺术品图片
+    const processedCartDigitals = cartDigitals.map(item => ({
+      ...item,
+      image: item.image_url ? (item.image_url.startsWith('http') ? item.image_url : `${BASE_URL}${item.image_url}`) : ''
+    }));
+
+    res.json([...processedCartRights, ...processedCartDigitals]);
   } catch (error) {
     console.error('获取购物车失败:', error);
     res.status(500).json({ error: '获取购物车失败' });
@@ -1365,44 +1373,71 @@ app.post('/api/cart', async (req, res) => {
     }
 
     const userId = payload.userId;
-    const { right_id, quantity = 1 } = req.body;
+    const { type = 'right', right_id, digital_artwork_id, quantity = 1 } = req.body;
 
-    if (!right_id) {
-      return res.status(400).json({ error: '缺少商品ID' });
-    }
-
-    // 检查商品是否存在且状态正常
-    const [right] = await db.query('SELECT * FROM rights WHERE id = ? AND status = "onsale"', [right_id]);
-    if (!right || right.length === 0) {
-      return res.status(404).json({ error: '商品不存在或已下架' });
-    }
-
-    // 检查库存
-    if (right[0].remaining_count < quantity) {
-      return res.status(400).json({ error: '库存不足' });
-    }
-
-    // 检查购物车中是否已存在该商品
-    const [existingItem] = await db.query(
-      'SELECT * FROM cart_items WHERE user_id = ? AND right_id = ?',
-      [userId, right_id]
-    );
-
-    if (existingItem && existingItem.length > 0) {
-      // 更新数量
-      await db.query(
-        'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ?',
-        [quantity, userId, right_id]
+    if (type === 'right') {
+      if (!right_id) {
+        return res.status(400).json({ error: '缺少商品ID' });
+      }
+      // 检查商品是否存在且状态正常
+      const [right] = await db.query('SELECT * FROM rights WHERE id = ? AND status = "onsale"', [right_id]);
+      if (!right || right.length === 0) {
+        return res.status(404).json({ error: '商品不存在或已下架' });
+      }
+      // 检查库存
+      if (right[0].remaining_count < quantity) {
+        return res.status(400).json({ error: '库存不足' });
+      }
+      // 检查购物车中是否已存在该商品
+      const [existingItem] = await db.query(
+        'SELECT * FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
+        [userId, right_id]
       );
+      if (existingItem && existingItem.length > 0) {
+        // 更新数量
+        await db.query(
+          'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ? AND type = "right"',
+          [quantity, userId, right_id]
+        );
+      } else {
+        // 新增商品
+        await db.query(
+          'INSERT INTO cart_items (user_id, type, right_id, quantity) VALUES (?, "right", ?, ?)',
+          [userId, right_id, quantity]
+        );
+      }
+      res.json({ message: '添加成功' });
+    } else if (type === 'digital') {
+      if (!digital_artwork_id) {
+        return res.status(400).json({ error: '缺少数字艺术品ID' });
+      }
+      // 检查数字艺术品是否存在
+      const [digital] = await db.query('SELECT * FROM digital_artworks WHERE id = ?', [digital_artwork_id]);
+      if (!digital || digital.length === 0) {
+        return res.status(404).json({ error: '数字艺术品不存在' });
+      }
+      // 检查购物车中是否已存在该数字艺术品
+      const [existingItem] = await db.query(
+        'SELECT * FROM cart_items WHERE user_id = ? AND digital_artwork_id = ? AND type = "digital"',
+        [userId, digital_artwork_id]
+      );
+      if (existingItem && existingItem.length > 0) {
+        // 更新数量
+        await db.query(
+          'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND digital_artwork_id = ? AND type = "digital"',
+          [quantity, userId, digital_artwork_id]
+        );
+      } else {
+        // 新增数字艺术品
+        await db.query(
+          'INSERT INTO cart_items (user_id, type, digital_artwork_id, quantity) VALUES (?, "digital", ?, ?)',
+          [userId, digital_artwork_id, quantity]
+        );
+      }
+      res.json({ message: '添加成功' });
     } else {
-      // 新增商品
-      await db.query(
-        'INSERT INTO cart_items (user_id, right_id, quantity) VALUES (?, ?, ?)',
-        [userId, right_id, quantity]
-      );
+      res.status(400).json({ error: '不支持的商品类型' });
     }
-
-    res.json({ message: '添加成功' });
   } catch (error) {
     console.error('添加商品到购物车失败:', error);
     res.status(500).json({ error: '添加商品到购物车失败' });
