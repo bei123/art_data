@@ -2004,77 +2004,246 @@ app.post('/api/wx/pay/refund', async (req, res) => {
       return res.status(400).json({ error: '参数不完整' });
     }
 
-    // 构建请求参数
-    const params = {
-      out_refund_no,
-      reason,
-      notify_url,
-      funds_account,
-      amount: {
-        refund: amount.refund,
-        total: amount.total,
-        currency: amount.currency
-      }
-    };
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
 
-    // 添加微信支付订单号或商户订单号
-    if (transaction_id) {
-      params.transaction_id = transaction_id;
-    } else if (out_trade_no) {
-      params.out_trade_no = out_trade_no;
-    } else {
-      return res.status(400).json({ error: '缺少订单号' });
-    }
+    try {
+      // 创建退款申请记录
+      const [refundResult] = await connection.query(
+        `INSERT INTO refund_requests (
+          out_trade_no,
+          out_refund_no,
+          transaction_id,
+          reason,
+          amount,
+          status,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
+        [
+          out_trade_no,
+          out_refund_no,
+          transaction_id,
+          reason,
+          JSON.stringify(amount)
+        ]
+      );
 
-    // 生成签名
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const nonceStr = generateNonceStr();
-    const signature = generateSignV3(
-      'POST',
-      '/v3/refund/domestic/refunds',
-      timestamp,
-      nonceStr,
-      JSON.stringify(params)
-    );
-
-    // 发送请求到微信支付
-    const response = await axios.post(
-      'https://api.mch.weixin.qq.com/v3/refund/domestic/refunds',
-      params,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
-          'User-Agent': 'axios/1.9.0'
-        }
-      }
-    );
-
-    if (response.status === 200) {
+      await connection.commit();
+      
       res.json({
         success: true,
-        data: response.data
+        data: {
+          refund_id: refundResult.insertId,
+          status: 'PENDING',
+          message: '退款申请已提交，等待审批'
+        }
       });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: '申请退款失败'
-      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
   } catch (error) {
     console.error('申请退款失败:', error);
-    if (error.response) {
-      res.status(error.response.status).json({
-        success: false,
-        error: error.response.data.message || '申请退款失败'
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: '申请退款失败'
-      });
+    res.status(500).json({
+      success: false,
+      error: '申请退款失败',
+      detail: error.message
+    });
+  }
+});
+
+// 审批退款接口
+app.post('/api/wx/pay/refund/approve', async (req, res) => {
+  try {
+    const { refund_id, approve, reject_reason } = req.body;
+
+    if (!refund_id) {
+      return res.status(400).json({ error: '缺少退款ID' });
     }
+
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 获取退款申请信息
+      const [refunds] = await connection.query(
+        'SELECT * FROM refund_requests WHERE id = ? AND status = "PENDING"',
+        [refund_id]
+      );
+
+      if (!refunds || refunds.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: '退款申请不存在或已处理' });
+      }
+
+      const refund = refunds[0];
+
+      if (approve) {
+        // 更新退款申请状态为已批准
+        await connection.query(
+          'UPDATE refund_requests SET status = "APPROVED", approved_at = NOW() WHERE id = ?',
+          [refund_id]
+        );
+
+        // 构建请求参数
+        const params = {
+          out_refund_no: refund.out_refund_no,
+          reason: refund.reason,
+          notify_url: WX_PAY_CONFIG.notifyUrl + '/refund',
+          funds_account: 'AVAILABLE',
+          amount: JSON.parse(refund.amount)
+        };
+
+        // 添加微信支付订单号或商户订单号
+        if (refund.transaction_id) {
+          params.transaction_id = refund.transaction_id;
+        } else if (refund.out_trade_no) {
+          params.out_trade_no = refund.out_trade_no;
+        }
+
+        // 生成签名
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const nonceStr = generateNonceStr();
+        const signature = generateSignV3(
+          'POST',
+          '/v3/refund/domestic/refunds',
+          timestamp,
+          nonceStr,
+          JSON.stringify(params)
+        );
+
+        // 发送请求到微信支付
+        const response = await axios.post(
+          'https://api.mch.weixin.qq.com/v3/refund/domestic/refunds',
+          params,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+              'User-Agent': 'axios/1.9.0'
+            }
+          }
+        );
+
+        if (response.status === 200) {
+          // 更新退款申请状态为处理中
+          await connection.query(
+            'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ? WHERE id = ?',
+            [response.data.refund_id, refund_id]
+          );
+
+          await connection.commit();
+          res.json({
+            success: true,
+            data: {
+              status: 'PROCESSING',
+              message: '退款申请已批准，正在处理中'
+            }
+          });
+        } else {
+          await connection.rollback();
+          res.status(400).json({
+            success: false,
+            error: '退款申请处理失败'
+          });
+        }
+      } else {
+        // 拒绝退款申请
+        if (!reject_reason) {
+          await connection.rollback();
+          return res.status(400).json({ error: '拒绝退款必须提供原因' });
+        }
+
+        await connection.query(
+          'UPDATE refund_requests SET status = "REJECTED", reject_reason = ?, rejected_at = NOW() WHERE id = ?',
+          [reject_reason, refund_id]
+        );
+
+        await connection.commit();
+        res.json({
+          success: true,
+          data: {
+            status: 'REJECTED',
+            message: '退款申请已拒绝'
+          }
+        });
+      }
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('处理退款申请失败:', error);
+    res.status(500).json({
+      success: false,
+      error: '处理退款申请失败',
+      detail: error.message
+    });
+  }
+});
+
+// 获取退款申请列表
+app.get('/api/wx/pay/refund/requests', async (req, res) => {
+  try {
+    const { status, page = 1, limit = 10 } = req.query;
+    
+    const offset = (page - 1) * limit;
+    
+    let query = 'SELECT * FROM refund_requests';
+    let params = [];
+    
+    if (status) {
+      query += ' WHERE status = ?';
+      params.push(status);
+    }
+    
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+    
+    const [refunds] = await db.query(query, params);
+    
+    res.json({
+      success: true,
+      data: refunds
+    });
+  } catch (error) {
+    console.error('获取退款申请列表失败:', error);
+    res.status(500).json({
+      success: false,
+      error: '获取退款申请列表失败'
+    });
+  }
+});
+
+// 获取退款申请详情
+app.get('/api/wx/pay/refund/requests/:id', async (req, res) => {
+  try {
+    const [refunds] = await db.query(
+      'SELECT * FROM refund_requests WHERE id = ?',
+      [req.params.id]
+    );
+    
+    if (!refunds || refunds.length === 0) {
+      return res.status(404).json({ error: '退款申请不存在' });
+    }
+    
+    res.json({
+      success: true,
+      data: refunds[0]
+    });
+  } catch (error) {
+    console.error('获取退款申请详情失败:', error);
+    res.status(500).json({
+      success: false,
+      error: '获取退款申请详情失败'
+    });
   }
 });
 
@@ -2480,319 +2649,9 @@ app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
   }
 });
 
-// 创建退款审批表
-const createRefundApprovalTable = `
-CREATE TABLE IF NOT EXISTS refund_approvals (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  out_trade_no VARCHAR(64) NOT NULL COMMENT '商户订单号',
-  out_refund_no VARCHAR(64) NOT NULL COMMENT '商户退款单号',
-  transaction_id VARCHAR(32) COMMENT '微信支付订单号',
-  total_fee INT NOT NULL COMMENT '订单总金额',
-  refund_fee INT NOT NULL COMMENT '退款金额',
-  reason VARCHAR(80) COMMENT '退款原因',
-  status ENUM('pending', 'approved', 'rejected', 'completed', 'failed') DEFAULT 'pending' COMMENT '审批状态',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  approved_at TIMESTAMP NULL,
-  approved_by INT COMMENT '审批人ID',
-  reject_reason VARCHAR(200) COMMENT '拒绝原因',
-  refund_id VARCHAR(32) COMMENT '微信退款单号',
-  refund_status VARCHAR(32) COMMENT '退款状态',
-  UNIQUE KEY uk_out_refund_no (out_refund_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退款审批表';
-`;
-
-// 在应用启动时创建表
-app.on('ready', async () => {
-  try {
-    await db.query(createRefundApprovalTable);
-    console.log('退款审批表创建成功');
-  } catch (error) {
-    console.error('创建退款审批表失败:', error);
-  }
-});
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS服务器运行在端口 ${PORT}`);
-});
-
-// 申请退款接口
-app.post('/api/wx/pay/refund/apply', async (req, res) => {
-  try {
-    const { 
-      transaction_id, // 微信支付订单号
-      out_trade_no,  // 商户订单号
-      out_refund_no, // 商户退款单号
-      reason,        // 退款原因
-      amount         // 金额信息
-    } = req.body;
-
-    // 参数验证
-    if (!out_refund_no || !amount || !amount.refund || !amount.total || !amount.currency) {
-      return res.status(400).json({ error: '参数不完整' });
-    }
-
-    // 开始事务
-    const connection = await db.getConnection();
-    await connection.beginTransaction();
-
-    try {
-      // 检查是否已存在退款申请
-      const [existingRefunds] = await connection.query(
-        'SELECT * FROM refund_approvals WHERE out_refund_no = ?',
-        [out_refund_no]
-      );
-
-      if (existingRefunds.length > 0) {
-        await connection.rollback();
-        return res.status(400).json({ error: '退款单号已存在' });
-      }
-
-      // 创建退款申请记录
-      await connection.query(
-        `INSERT INTO refund_approvals (
-          out_trade_no, out_refund_no, transaction_id, 
-          total_fee, refund_fee, reason, status
-        ) VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-        [
-          out_trade_no,
-          out_refund_no,
-          transaction_id,
-          amount.total,
-          amount.refund,
-          reason
-        ]
-      );
-
-      await connection.commit();
-      res.json({
-        success: true,
-        message: '退款申请已提交，等待审批'
-      });
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  } catch (error) {
-    console.error('申请退款失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '申请退款失败'
-    });
-  }
-});
-
-// 审批退款接口
-app.post('/api/wx/pay/refund/approve', auth.authenticateToken, async (req, res) => {
-  try {
-    const { 
-      out_refund_no, // 商户退款单号
-      approve,       // true: 通过, false: 拒绝
-      reject_reason  // 拒绝原因
-    } = req.body;
-
-    if (!out_refund_no || approve === undefined) {
-      return res.status(400).json({ error: '参数不完整' });
-    }
-
-    // 开始事务
-    const connection = await db.getConnection();
-    await connection.beginTransaction();
-
-    try {
-      // 获取退款申请记录
-      const [refunds] = await connection.query(
-        'SELECT * FROM refund_approvals WHERE out_refund_no = ? AND status = "pending"',
-        [out_refund_no]
-      );
-
-      if (refunds.length === 0) {
-        await connection.rollback();
-        return res.status(404).json({ error: '退款申请不存在或已处理' });
-      }
-
-      const refund = refunds[0];
-
-      if (approve) {
-        // 更新审批状态
-        await connection.query(
-          `UPDATE refund_approvals SET 
-            status = 'approved',
-            approved_at = NOW(),
-            approved_by = ?
-          WHERE out_refund_no = ?`,
-          [req.user.id, out_refund_no]
-        );
-
-        // 执行退款
-        const params = {
-          out_refund_no: refund.out_refund_no,
-          reason: refund.reason,
-          amount: {
-            refund: refund.refund_fee,
-            total: refund.total_fee,
-            currency: 'CNY'
-          }
-        };
-
-        // 添加微信支付订单号或商户订单号
-        if (refund.transaction_id) {
-          params.transaction_id = refund.transaction_id;
-        } else if (refund.out_trade_no) {
-          params.out_trade_no = refund.out_trade_no;
-        }
-
-        // 生成签名
-        const timestamp = Math.floor(Date.now() / 1000).toString();
-        const nonceStr = generateNonceStr();
-        const signature = generateSignV3(
-          'POST',
-          '/v3/refund/domestic/refunds',
-          timestamp,
-          nonceStr,
-          JSON.stringify(params)
-        );
-
-        // 发送请求到微信支付
-        const response = await axios.post(
-          'https://api.mch.weixin.qq.com/v3/refund/domestic/refunds',
-          params,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
-              'User-Agent': 'axios/1.9.0'
-            }
-          }
-        );
-
-        if (response.status === 200) {
-          // 更新退款状态
-          await connection.query(
-            `UPDATE refund_approvals SET 
-              status = 'completed',
-              refund_id = ?,
-              refund_status = ?
-            WHERE out_refund_no = ?`,
-            [
-              response.data.refund_id,
-              response.data.status,
-              out_refund_no
-            ]
-          );
-
-          await connection.commit();
-          res.json({
-            success: true,
-            message: '退款审批通过并执行成功',
-            data: response.data
-          });
-        } else {
-          await connection.rollback();
-          res.status(400).json({
-            success: false,
-            error: '退款执行失败'
-          });
-        }
-      } else {
-        // 拒绝退款
-        await connection.query(
-          `UPDATE refund_approvals SET 
-            status = 'rejected',
-            approved_at = NOW(),
-            approved_by = ?,
-            reject_reason = ?
-          WHERE out_refund_no = ?`,
-          [req.user.id, reject_reason, out_refund_no]
-        );
-
-        await connection.commit();
-        res.json({
-          success: true,
-          message: '退款申请已拒绝'
-        });
-      }
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  } catch (error) {
-    console.error('审批退款失败:', error);
-    if (error.response) {
-      res.status(error.response.status).json({
-        success: false,
-        error: error.response.data.message || '审批退款失败'
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: '审批退款失败'
-      });
-    }
-  }
-});
-
-// 获取退款申请列表
-app.get('/api/wx/pay/refund/list', auth.authenticateToken, async (req, res) => {
-  try {
-    const { status, page = 1, pageSize = 10 } = req.query;
-    
-    let query = 'SELECT * FROM refund_approvals';
-    const params = [];
-    
-    if (status) {
-      query += ' WHERE status = ?';
-      params.push(status);
-    }
-    
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), (parseInt(page) - 1) * parseInt(pageSize));
-    
-    const [refunds] = await db.query(query, params);
-    
-    res.json({
-      success: true,
-      data: refunds
-    });
-  } catch (error) {
-    console.error('获取退款申请列表失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '获取退款申请列表失败'
-    });
-  }
-});
-
-// 获取退款申请详情
-app.get('/api/wx/pay/refund/detail/:out_refund_no', auth.authenticateToken, async (req, res) => {
-  try {
-    const { out_refund_no } = req.params;
-    
-    const [refunds] = await db.query(
-      'SELECT * FROM refund_approvals WHERE out_refund_no = ?',
-      [out_refund_no]
-    );
-    
-    if (refunds.length === 0) {
-      return res.status(404).json({ error: '退款申请不存在' });
-    }
-    
-    res.json({
-      success: true,
-      data: refunds[0]
-    });
-  } catch (error) {
-    console.error('获取退款申请详情失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '获取退款申请详情失败'
-    });
-  }
-});
+}); 
