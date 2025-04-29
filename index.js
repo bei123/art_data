@@ -2089,13 +2089,27 @@ app.post('/api/wx/pay/refund/approve', async (req, res) => {
           [refund_id]
         );
 
+        // 确保amount是有效的JSON字符串
+        let amountData;
+        try {
+          amountData = typeof refund.amount === 'string' ? JSON.parse(refund.amount) : refund.amount;
+        } catch (error) {
+          console.error('解析退款金额失败:', error);
+          await connection.rollback();
+          return res.status(500).json({
+            success: false,
+            error: '处理退款申请失败',
+            detail: '退款金额数据格式错误'
+          });
+        }
+
         // 构建请求参数
         const params = {
           out_refund_no: refund.out_refund_no,
           reason: refund.reason,
           notify_url: WX_PAY_CONFIG.notifyUrl + '/refund',
           funds_account: 'AVAILABLE',
-          amount: JSON.parse(refund.amount)
+          amount: amountData
         };
 
         // 添加微信支付订单号或商户订单号

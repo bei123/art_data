@@ -173,7 +173,8 @@ const approveForm = ref({
 // 加载退款申请列表
 const loadRefunds = async () => {
   try {
-    const response = await axios.get('/api/wx/pay/refund/requests', {
+    loading.value = true;
+    const response = await axios.get('https://api.wx.2000gallery.art:2000/api/wx/pay/refund/requests', {
       params: {
         status: filterStatus.value,
         page: currentPage.value,
@@ -181,15 +182,32 @@ const loadRefunds = async () => {
       }
     });
     
+    console.log('退款申请列表响应:', response.data);
+    
     if (response.data.success) {
       refunds.value = response.data.data;
       total.value = response.data.total;
     } else {
+      console.error('加载退款申请列表失败:', response.data.error);
       ElMessage.error(response.data.error || '加载退款申请列表失败');
     }
   } catch (error) {
     console.error('加载退款申请列表失败:', error);
-    ElMessage.error('加载退款申请列表失败');
+    if (error.response) {
+      // 服务器返回了错误响应
+      console.error('错误响应:', error.response.data);
+      ElMessage.error(error.response.data.error || '加载退款申请列表失败');
+    } else if (error.request) {
+      // 请求已发出但没有收到响应
+      console.error('请求错误:', error.request);
+      ElMessage.error('网络错误，请检查网络连接');
+    } else {
+      // 请求配置出错
+      console.error('配置错误:', error.message);
+      ElMessage.error('请求配置错误');
+    }
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -221,7 +239,7 @@ const handleApprove = async () => {
   }
 
   try {
-    const response = await axios.post('/api/wx/pay/refund/approve', {
+    const response = await axios.post('https://api.wx.2000gallery.art:2000/api/wx/pay/refund/approve', {
       refund_id: approveForm.value.id,
       approve: approveForm.value.approve,
       reject_reason: approveForm.value.reject_reason
@@ -235,8 +253,17 @@ const handleApprove = async () => {
       ElMessage.error(response.data.error || '审批失败')
     }
   } catch (error) {
-    ElMessage.error('审批失败')
     console.error('审批失败:', error)
+    if (error.response) {
+      console.error('错误响应:', error.response.data)
+      ElMessage.error(error.response.data.error || '审批失败')
+    } else if (error.request) {
+      console.error('请求错误:', error.request)
+      ElMessage.error('网络错误，请检查网络连接')
+    } else {
+      console.error('配置错误:', error.message)
+      ElMessage.error('请求配置错误')
+    }
   }
 }
 
