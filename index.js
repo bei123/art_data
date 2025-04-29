@@ -992,6 +992,23 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+// 公共数字艺术品列表接口（无需认证）
+app.get('/api/digital-artworks/public', async (req, res) => {
+    try {
+      const [rows] = await db.query('SELECT * FROM digital_artworks');
+      const artworksWithFullUrls = rows.map(artwork => ({
+        ...artwork,
+        image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
+        copyright: artwork.copyright || ''
+      }));
+      res.json(artworksWithFullUrls);
+    } catch (error) {
+      console.error('Error fetching digital artworks (public):', error);
+      res.status(500).json({ error: '获取数据失败' });
+    }
+  });
+  
+
 // 认证相关路由
 app.post('/api/auth/register', [
   body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
@@ -2381,21 +2398,6 @@ app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
   }
 });
 
-// 公共数字艺术品列表接口（无需认证）
-app.get('/api/digital-artworks/public', async (req, res) => {
-  try {
-    const [rows] = await db.query('SELECT * FROM digital_artworks');
-    const artworksWithFullUrls = rows.map(artwork => ({
-      ...artwork,
-      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
-      copyright: artwork.copyright || ''
-    }));
-    res.json(artworksWithFullUrls);
-  } catch (error) {
-    console.error('Error fetching digital artworks (public):', error);
-    res.status(500).json({ error: '获取数据失败' });
-  }
-});
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
