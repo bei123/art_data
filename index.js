@@ -1660,36 +1660,59 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
 
       const availableDiscount = discounts[0].total_discount || 0;
 
-      // 验证所有商品是否存在
+      // 校验所有商品
       for (const item of cart_items) {
-        const [rights] = await connection.query(
-          'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id = ? AND status = "onsale"',
-          [item.right_id]
-        );
-
-        if (!rights || rights.length === 0) {
+        if (item.type === 'right') {
+          const [rights] = await connection.query(
+            'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id = ? AND status = "onsale"',
+            [item.right_id]
+          );
+          if (!rights || rights.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: `商品ID ${item.right_id} 不存在或已下架` });
+          }
+          if (rights[0].remaining_count < item.quantity) {
+            await connection.rollback();
+            return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
+          }
+          // 验证价格
+          const itemPrice = parseFloat(item.price);
+          const dbPrice = parseFloat(rights[0].price);
+          if (Math.abs(itemPrice - dbPrice) > 0.01) {
+            await connection.rollback();
+            return res.status(400).json({
+              error: `商品ID ${item.right_id} 价格不匹配`,
+              detail: {
+                expected: dbPrice,
+                received: itemPrice
+              }
+            });
+          }
+        } else if (item.type === 'digital') {
+          const [digitals] = await connection.query(
+            'SELECT id, price FROM digital_artworks WHERE id = ?',
+            [item.digital_artwork_id]
+          );
+          if (!digitals || digitals.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: `数字艺术品ID ${item.digital_artwork_id} 不存在` });
+          }
+          // 验证价格
+          const itemPrice = parseFloat(item.price);
+          const dbPrice = parseFloat(digitals[0].price);
+          if (Math.abs(itemPrice - dbPrice) > 0.01) {
+            await connection.rollback();
+            return res.status(400).json({
+              error: `数字艺术品ID ${item.digital_artwork_id} 价格不匹配`,
+              detail: {
+                expected: dbPrice,
+                received: itemPrice
+              }
+            });
+          }
+        } else {
           await connection.rollback();
-          return res.status(404).json({ error: `商品ID ${item.right_id} 不存在或已下架` });
-        }
-
-        // 验证库存
-        if (rights[0].remaining_count < item.quantity) {
-          await connection.rollback();
-          return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
-        }
-
-        // 验证价格 - 将字符串价格转换为数字进行比较
-        const itemPrice = parseFloat(item.price);
-        const dbPrice = parseFloat(rights[0].price);
-        if (Math.abs(itemPrice - dbPrice) > 0.01) { // 允许0.01的误差
-          await connection.rollback();
-          return res.status(400).json({ 
-            error: `商品ID ${item.right_id} 价格不匹配`,
-            detail: {
-              expected: dbPrice,
-              received: itemPrice
-            }
-          });
+          return res.status(400).json({ error: `不支持的商品类型: ${item.type}` });
         }
       }
 
@@ -1704,16 +1727,16 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
 
       const orderId = orderResult.insertId;
 
-      // 创建订单项
-      const orderItems = cart_items.map(item => [
-        orderId,
-        item.right_id,
-        item.quantity,
-        parseFloat(item.price) // 确保价格是数字类型
-      ]);
-
+      // 创建订单项，支持两种类型
+      const orderItems = cart_items.map(item => {
+        if (item.type === 'right') {
+          return [orderId, 'right', item.right_id, null, item.quantity, parseFloat(item.price)];
+        } else if (item.type === 'digital') {
+          return [orderId, 'digital', null, item.digital_artwork_id, item.quantity, parseFloat(item.price)];
+        }
+      });
       await connection.query(
-        'INSERT INTO order_items (order_id, right_id, quantity, price) VALUES ?',
+        'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, quantity, price) VALUES ?',
         [orderItems]
       );
 
