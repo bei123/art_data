@@ -471,7 +471,7 @@ app.get('/api/digital-artworks', async (req, res) => {
     // 为每个作品的图片添加完整URL
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
-      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : ''
+      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : ''
     }));
     res.json(artworksWithFullUrls);
   } catch (error) {
@@ -482,12 +482,30 @@ app.get('/api/digital-artworks', async (req, res) => {
 
 app.post('/api/digital-artworks', async (req, res) => {
   try {
-    const { title, image, author, copyright } = req.body;
+    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url } = req.body;
+    
+    // 验证图片URL
+    if (!validateImageUrl(image_url)) {
+      return res.status(400).json({ error: '无效的图片URL' });
+    }
+    
     const [result] = await db.query(
-      'INSERT INTO digital_artworks (title, image, author, copyright) VALUES (?, ?, ?, ?)',
-      [title, image, author, copyright]
+      'INSERT INTO digital_artworks (title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url]
     );
-    res.json({ id: result.insertId, ...req.body });
+    
+    res.json({ 
+      id: result.insertId,
+      title,
+      image_url,
+      author,
+      description,
+      contract_address,
+      token_id,
+      blockchain,
+      blockchain_url,
+      created_at: new Date()
+    });
   } catch (error) {
     console.error('Error creating digital artwork:', error);
     res.status(500).json({ error: '创建失败' });
@@ -496,12 +514,29 @@ app.post('/api/digital-artworks', async (req, res) => {
 
 app.put('/api/digital-artworks/:id', async (req, res) => {
   try {
-    const { title, image, author, copyright } = req.body;
+    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url } = req.body;
+    
+    // 验证图片URL
+    if (!validateImageUrl(image_url)) {
+      return res.status(400).json({ error: '无效的图片URL' });
+    }
+    
     await db.query(
-      'UPDATE digital_artworks SET title = ?, image = ?, author = ?, copyright = ? WHERE id = ?',
-      [title, image, author, copyright, req.params.id]
+      'UPDATE digital_artworks SET title = ?, image_url = ?, author = ?, description = ?, contract_address = ?, token_id = ?, blockchain = ?, blockchain_url = ? WHERE id = ?',
+      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, req.params.id]
     );
-    res.json({ id: req.params.id, ...req.body });
+    
+    res.json({ 
+      id: parseInt(req.params.id),
+      title,
+      image_url,
+      author,
+      description,
+      contract_address,
+      token_id,
+      blockchain,
+      blockchain_url
+    });
   } catch (error) {
     console.error('Error updating digital artwork:', error);
     res.status(500).json({ error: '更新失败' });

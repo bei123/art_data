@@ -8,11 +8,16 @@
     <el-table :data="rights" style="width: 100%">
       <el-table-column label="图片">
         <template #default="{ row }">
-          <el-image 
-            style="width: 100px; height: 100px"
-            :src="getImageUrl(row.images?.[0])"
-            fit="cover"
-          />
+          <div class="image-preview">
+            <el-image 
+              v-for="(image, index) in row.images" 
+              :key="index"
+              style="width: 100px; height: 100px; margin-right: 10px"
+              :src="getImageUrl(image)"
+              fit="cover"
+              :preview-src-list="row.images.map(img => getImageUrl(img))"
+            />
+          </div>
         </template>
       </el-table-column>
       <el-table-column prop="title" label="标题" />
@@ -102,6 +107,7 @@
             :on-success="handleImageSuccess"
             :on-remove="handleImageRemove"
             :before-upload="beforeImageUpload"
+            :file-list="form.images.map(url => ({ url, name: url.split('/').pop() }))"
             name="file"
           >
             <el-icon><Plus /></el-icon>
@@ -256,11 +262,15 @@ const handleImageSuccess = (response) => {
   if (!form.value.images) {
     form.value.images = []
   }
-  form.value.images.push(response.url)
+  if (response && response.url) {
+    form.value.images.push(response.url)
+  } else {
+    ElMessage.error('图片上传失败')
+  }
 }
 
 const handleImageRemove = (file) => {
-  const index = form.value.images.indexOf(file.url)
+  const index = form.value.images.findIndex(url => url === file.url)
   if (index !== -1) {
     form.value.images.splice(index, 1)
   }
@@ -348,5 +358,11 @@ onMounted(() => {
   color: #f56c6c;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.image-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 </style> 

@@ -11,13 +11,18 @@
         <template #default="{ row }">
           <el-image
             style="width: 100px; height: 100px"
-            :src="getImageUrl(row.image)"
+            :src="getImageUrl(row.image_url)"
             fit="cover"
           />
         </template>
       </el-table-column>
       <el-table-column prop="author" label="作者" />
-      <el-table-column prop="copyright" label="版权信息" />
+      <el-table-column prop="description" label="描述" />
+      <el-table-column prop="contract_address" label="合约地址" />
+      <el-table-column prop="token_id" label="Token ID" />
+      <el-table-column prop="blockchain" label="区块链" />
+      <el-table-column prop="blockchain_url" label="链上信息" />
+      <el-table-column prop="created_at" label="创建时间" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -44,15 +49,27 @@
             :before-upload="beforeImageUpload"
             name="file"
           >
-            <img v-if="form.image" :src="getImageUrl(form.image)" class="avatar" />
+            <img v-if="form.image_url" :src="getImageUrl(form.image_url)" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
         <el-form-item label="作者">
           <el-input v-model="form.author" />
         </el-form-item>
-        <el-form-item label="版权信息">
-          <el-input v-model="form.copyright" />
+        <el-form-item label="描述">
+          <el-input v-model="form.description" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="合约地址">
+          <el-input v-model="form.contract_address" />
+        </el-form-item>
+        <el-form-item label="Token ID">
+          <el-input v-model="form.token_id" />
+        </el-form-item>
+        <el-form-item label="区块链">
+          <el-input v-model="form.blockchain" />
+        </el-form-item>
+        <el-form-item label="链上信息">
+          <el-input v-model="form.blockchain_url" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -77,9 +94,13 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const form = ref({
   title: '',
-  image: '',
+  image_url: '',
   author: '',
-  copyright: ''
+  description: '',
+  contract_address: '',
+  token_id: '',
+  blockchain: '',
+  blockchain_url: ''
 })
 
 const fetchArtworks = async () => {
@@ -89,7 +110,7 @@ const fetchArtworks = async () => {
     if (Array.isArray(data)) {
       artworks.value = data.map(artwork => ({
         ...artwork,
-        image: getImageUrl(artwork.image)
+        image_url: getImageUrl(artwork.image_url)
       }))
       console.log('设置后的数字艺术品数据：', artworks.value)
     } else {
@@ -108,9 +129,13 @@ const handleAdd = () => {
   isEdit.value = false
   form.value = {
     title: '',
-    image: '',
+    image_url: '',
     author: '',
-    copyright: ''
+    description: '',
+    contract_address: '',
+    token_id: '',
+    blockchain: '',
+    blockchain_url: ''
   }
   dialogVisible.value = true
 }
@@ -138,7 +163,7 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image = response.url;
+  form.value.image_url = response.url;
 }
 
 const beforeImageUpload = (file) => {
@@ -166,7 +191,7 @@ const handleSubmit = async () => {
     ElMessage.warning('请输入作品标题');
     return;
   }
-  if (!form.value.image) {
+  if (!form.value.image_url) {
     ElMessage.warning('请上传作品图片');
     return;
   }
@@ -174,15 +199,31 @@ const handleSubmit = async () => {
     ElMessage.warning('请输入作者名称');
     return;
   }
-  if (!form.value.copyright.trim()) {
-    ElMessage.warning('请输入版权信息');
+  if (!form.value.description.trim()) {
+    ElMessage.warning('请输入作品描述');
+    return;
+  }
+  if (!form.value.contract_address.trim()) {
+    ElMessage.warning('请输入合约地址');
+    return;
+  }
+  if (!form.value.token_id.trim()) {
+    ElMessage.warning('请输入Token ID');
+    return;
+  }
+  if (!form.value.blockchain.trim()) {
+    ElMessage.warning('请输入区块链信息');
+    return;
+  }
+  if (!form.value.blockchain_url.trim()) {
+    ElMessage.warning('请输入链上信息查看地址');
     return;
   }
 
   try {
     const submitData = {
       ...form.value,
-      image: form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image
+      image_url: form.value.image_url.startsWith('http') ? form.value.image_url.replace(API_BASE_URL, '') : form.value.image_url
     };
 
     if (isEdit.value) {
