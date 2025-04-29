@@ -1467,19 +1467,40 @@ app.put('/api/cart/:id', async (req, res) => {
       return res.status(400).json({ error: '数量必须大于0' });
     }
 
-    // 检查商品是否存在且属于当前用户
-    const [cartItem] = await db.query(
-      'SELECT ci.*, r.remaining_count FROM cart_items ci JOIN rights r ON ci.right_id = r.id WHERE ci.id = ? AND ci.user_id = ? AND r.status = "onsale"',
+    // 查询购物车项，判断类型
+    const [cartItemRows] = await db.query(
+      'SELECT * FROM cart_items WHERE id = ? AND user_id = ?',
       [req.params.id, userId]
     );
-
-    if (!cartItem || cartItem.length === 0) {
+    if (!cartItemRows || cartItemRows.length === 0) {
       return res.status(404).json({ error: '购物车商品不存在' });
     }
+    const cartItem = cartItemRows[0];
 
-    // 检查库存
-    if (cartItem[0].remaining_count < quantity) {
-      return res.status(400).json({ error: '库存不足' });
+    if (cartItem.type === 'right') {
+      // 检查库存
+      const [rightRows] = await db.query(
+        'SELECT remaining_count FROM rights WHERE id = ? AND status = "onsale"',
+        [cartItem.right_id]
+      );
+      if (!rightRows || rightRows.length === 0) {
+        return res.status(404).json({ error: '商品不存在或已下架' });
+      }
+      if (rightRows[0].remaining_count < quantity) {
+        return res.status(400).json({ error: '库存不足' });
+      }
+    } else if (cartItem.type === 'digital') {
+      // 检查数字艺术品是否存在
+      const [digitalRows] = await db.query(
+        'SELECT id FROM digital_artworks WHERE id = ?',
+        [cartItem.digital_artwork_id]
+      );
+      if (!digitalRows || digitalRows.length === 0) {
+        return res.status(404).json({ error: '数字艺术品不存在' });
+      }
+      // 数字艺术品一般不校验库存
+    } else {
+      return res.status(400).json({ error: '不支持的商品类型' });
     }
 
     // 更新数量
