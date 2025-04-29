@@ -63,12 +63,16 @@ const routes = [
       },
       {
         path: '/refund/approval',
-        component: () => import('@/views/refund/RefundApproval.vue'),
-        name: 'RefundApproval',
-        meta: {
-          title: '退款审批',
-          requiresAuth: true
-        }
+        component: () => import('@/layouts/DefaultLayout.vue'),
+        meta: { title: '退款审批', icon: 'el-icon-money' },
+        children: [
+          {
+            path: '',
+            name: 'RefundApproval',
+            component: () => import('@/views/refund/RefundApproval.vue'),
+            meta: { title: '退款审批', roles: ['admin'] }
+          }
+        ]
       }
     ]
   },
