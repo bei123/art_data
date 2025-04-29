@@ -2043,10 +2043,8 @@ app.post('/api/wx/pay/refund', async (req, res) => {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Authorization': `WECHATPAY2-SHA256-RSA2048 ${signature}`,
-          'Wechatpay-Serial': WX_PAY_CONFIG.serialNo,
-          'Wechatpay-Timestamp': timestamp,
-          'Wechatpay-Nonce': nonceStr
+          'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+          'User-Agent': 'axios/1.9.0'
         }
       }
     );
