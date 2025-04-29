@@ -71,6 +71,9 @@
         <el-form-item label="链上信息">
           <el-input v-model="form.blockchain_url" />
         </el-form-item>
+        <el-form-item label="版权信息">
+          <el-input v-model="form.copyright" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -100,7 +103,8 @@ const form = ref({
   contract_address: '',
   token_id: '',
   blockchain: '',
-  blockchain_url: ''
+  blockchain_url: '',
+  copyright: ''
 })
 
 const fetchArtworks = async () => {
@@ -135,7 +139,8 @@ const handleAdd = () => {
     contract_address: '',
     token_id: '',
     blockchain: '',
-    blockchain_url: ''
+    blockchain_url: '',
+    copyright: ''
   }
   dialogVisible.value = true
 }
@@ -143,6 +148,7 @@ const handleAdd = () => {
 const handleEdit = (row) => {
   isEdit.value = true
   form.value = { ...row }
+  if (form.value.copyright === undefined) form.value.copyright = ''
   dialogVisible.value = true
 }
 
@@ -217,6 +223,10 @@ const handleSubmit = async () => {
   }
   if (!form.value.blockchain_url.trim()) {
     ElMessage.warning('请输入链上信息查看地址');
+    return;
+  }
+  if (!form.value.copyright.trim()) {
+    ElMessage.warning('请输入版权信息');
     return;
   }
 
