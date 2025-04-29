@@ -472,7 +472,8 @@ app.get('/api/digital-artworks', async (req, res) => {
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
       image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
-      copyright: artwork.copyright || ''
+      copyright: artwork.copyright || '',
+      price: artwork.price || 0
     }));
     res.json(artworksWithFullUrls);
   } catch (error) {
@@ -999,7 +1000,8 @@ app.get('/api/digital-artworks/public', async (req, res) => {
       const artworksWithFullUrls = rows.map(artwork => ({
         ...artwork,
         image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
-        copyright: artwork.copyright || ''
+        copyright: artwork.copyright || '',
+        price: artwork.price || 0
       }));
       res.json(artworksWithFullUrls);
     } catch (error) {
