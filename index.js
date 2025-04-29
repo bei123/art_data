@@ -471,7 +471,8 @@ app.get('/api/digital-artworks', async (req, res) => {
     // 为每个作品的图片添加完整URL
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
-      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : ''
+      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
+      copyright: artwork.copyright || ''
     }));
     res.json(artworksWithFullUrls);
   } catch (error) {
@@ -482,7 +483,7 @@ app.get('/api/digital-artworks', async (req, res) => {
 
 app.post('/api/digital-artworks', async (req, res) => {
   try {
-    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url } = req.body;
+    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright } = req.body;
     
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
@@ -490,8 +491,8 @@ app.post('/api/digital-artworks', async (req, res) => {
     }
     
     const [result] = await db.query(
-      'INSERT INTO digital_artworks (title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url]
+      'INSERT INTO digital_artworks (title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright]
     );
     
     res.json({ 
@@ -504,6 +505,7 @@ app.post('/api/digital-artworks', async (req, res) => {
       token_id,
       blockchain,
       blockchain_url,
+      copyright,
       created_at: new Date()
     });
   } catch (error) {
@@ -514,7 +516,7 @@ app.post('/api/digital-artworks', async (req, res) => {
 
 app.put('/api/digital-artworks/:id', async (req, res) => {
   try {
-    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url } = req.body;
+    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright } = req.body;
     
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
@@ -522,8 +524,8 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
     }
     
     await db.query(
-      'UPDATE digital_artworks SET title = ?, image_url = ?, author = ?, description = ?, contract_address = ?, token_id = ?, blockchain = ?, blockchain_url = ? WHERE id = ?',
-      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, req.params.id]
+      'UPDATE digital_artworks SET title = ?, image_url = ?, author = ?, description = ?, contract_address = ?, token_id = ?, blockchain = ?, blockchain_url = ?, copyright = ? WHERE id = ?',
+      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright, req.params.id]
     );
     
     res.json({ 
@@ -535,7 +537,8 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
       contract_address,
       token_id,
       blockchain,
-      blockchain_url
+      blockchain_url,
+      copyright
     });
   } catch (error) {
     console.error('Error updating digital artwork:', error);

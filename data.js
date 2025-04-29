@@ -23,16 +23,24 @@ const originalArtworks = [
 // 数字艺术数据
 const digitalArtworks = [
     {
-        image: "https://example.com/digital1.jpg",
+        image_url: "https://example.com/digital1.jpg",
         title: "数字宇宙",
         author: "李小明",
-        copyright: "© 2023 李小明"
+        description: "探索数字世界的无限可能",
+        contract_address: "0x1234567890abcdef",
+        token_id: "1",
+        blockchain: "Ethereum",
+        blockchain_url: "https://etherscan.io/token/1"
     },
     {
-        image: "https://example.com/digital2.jpg",
+        image_url: "https://example.com/digital2.jpg",
         title: "未来城市",
         author: "王小红",
-        copyright: "© 2023 王小红"
+        description: "未来智慧城市的数字艺术呈现",
+        contract_address: "0x0987654321fedcba",
+        token_id: "2",
+        blockchain: "Ethereum",
+        blockchain_url: "https://etherscan.io/token/2"
     }
 ];
 
