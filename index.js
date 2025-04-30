@@ -1578,7 +1578,7 @@ app.post('/api/cart', async (req, res) => {
         return res.status(400).json({ error: '艺术品价格无效' });
       }
       // 确定实际价格（如果有优惠价且优惠价小于原价，则使用优惠价）
-      const actualPrice = (artwork[0].discount_price && artwork[0].discount_price < artwork[0].original_price) 
+      const actualPrice = (artwork[0].discount_price && artwork[0].discount_price > 0 && artwork[0].discount_price < artwork[0].original_price) 
         ? artwork[0].discount_price 
         : artwork[0].original_price;
       // 检查购物车中是否已存在该艺术品
