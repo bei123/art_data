@@ -849,6 +849,9 @@ app.delete('/api/rights/:id', async (req, res) => {
     await connection.beginTransaction();
 
     try {
+      // 先删除相关的订单项
+      await connection.query('DELETE FROM order_items WHERE right_id = ?', [req.params.id]);
+      
       // 删除图片
       await connection.query('DELETE FROM right_images WHERE right_id = ?', [req.params.id]);
       
@@ -2678,6 +2681,80 @@ app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
   }
 });
 
+// 获取商家列表接口
+app.get('/api/merchants', async (req, res) => {
+  try {
+    const [merchants] = await db.query(`
+      SELECT id, name, logo, description 
+      FROM merchants 
+      WHERE status = 'active'
+      ORDER BY created_at DESC
+    `);
+
+    // 处理logo URL
+    const merchantsWithFullUrls = merchants.map(merchant => ({
+      ...merchant,
+      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : ''
+    }));
+
+    res.json({
+      success: true,
+      data: merchantsWithFullUrls
+    });
+  } catch (error) {
+    console.error('获取商家列表失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '获取商家列表失败' 
+    });
+  }
+});
+
+// 获取商家详情接口
+app.get('/api/merchants/:id', async (req, res) => {
+  try {
+    // 获取商家基本信息
+    const [merchants] = await db.query(
+      'SELECT * FROM merchants WHERE id = ? AND status = "active"',
+      [req.params.id]
+    );
+
+    if (!merchants || merchants.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: '商家不存在' 
+      });
+    }
+
+    const merchant = merchants[0];
+
+    // 获取商家图片
+    const [images] = await db.query(
+      'SELECT image_url FROM merchant_images WHERE merchant_id = ?',
+      [req.params.id]
+    );
+
+    // 处理图片URL
+    const merchantWithFullUrls = {
+      ...merchant,
+      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : '',
+      images: images.map(img => 
+        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+      )
+    };
+
+    res.json({
+      success: true,
+      data: merchantWithFullUrls
+    });
+  } catch (error) {
+    console.error('获取商家详情失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '获取商家详情失败' 
+    });
+  }
+});
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
