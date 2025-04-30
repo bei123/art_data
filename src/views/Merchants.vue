@@ -202,10 +202,18 @@ const handleSubmit = async () => {
     if (valid) {
       try {
         if (dialogType.value === 'add') {
-          await axios.post(`${baseUrl}/api/merchants`, form.value)
+          await axios.post(`${baseUrl}/api/merchants`, form.value, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          })
           ElMessage.success('添加成功')
         } else {
-          await axios.put(`${baseUrl}/api/merchants/${form.value.id}`, form.value)
+          await axios.put(`${baseUrl}/api/merchants/${form.value.id}`, form.value, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          })
           ElMessage.success('更新成功')
         }
         dialogVisible.value = false
