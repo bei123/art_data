@@ -278,12 +278,12 @@ const handleImageRemove = (file) => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
-  // 如果已经是完整的URL，检查是否需要修正域名
+  // 如果已经是完整的URL，直接返回
   if (url.startsWith('http')) {
-    return url.replace('wx.ht.2000gallery.art', 'api.wx.2000gallery.art:2000');
+    return url;
   }
-  // 否则添加API基础URL
-  return `${API_BASE_URL}${url}`;
+  // 如果是相对路径，添加API基础URL
+  return `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
 const beforeImageUpload = (file) => {
@@ -318,9 +318,22 @@ const handleSubmit = async () => {
   try {
     const submitData = {
       ...form.value,
-      images: form.value.images.map(image => 
-        image.startsWith('http') ? image.replace(API_BASE_URL, '') : image
-      ),
+      images: form.value.images.map(image => {
+        if (typeof image === 'string') {
+          if (image.startsWith('http')) {
+            const url = new URL(image)
+            return url.pathname
+          }
+          return image
+        } else if (image.url) {
+          if (image.url.startsWith('http')) {
+            const url = new URL(image.url)
+            return url.pathname
+          }
+          return image.url
+        }
+        return image
+      }),
       category_id: form.value.category_id,
       discount_amount: form.value.discountAmount
     }
