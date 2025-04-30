@@ -2691,10 +2691,20 @@ app.get('/api/merchants', async (req, res) => {
       ORDER BY created_at DESC
     `);
 
+    // 查询每个商家的图片
+    for (const merchant of merchants) {
+      const [images] = await db.query(
+        'SELECT image_url FROM merchant_images WHERE merchant_id = ?',
+        [merchant.id]
+      );
+      merchant.images = images.map(img => img.image_url ? (img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`) : '').filter(Boolean);
+    }
+
     // 处理logo URL
     const merchantsWithFullUrls = merchants.map(merchant => ({
       ...merchant,
-      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : ''
+      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : '',
+      images: merchant.images
     }));
 
     res.json({

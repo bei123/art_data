@@ -60,7 +60,7 @@
             list-type="picture-card"
             :on-success="handleImagesSuccess"
             :before-upload="beforeImagesUpload"
-            name="files"
+            name="images"
             multiple
           >
             <el-icon><Plus /></el-icon>
@@ -166,7 +166,9 @@ const handleLogoSuccess = (response) => {
 
 // 商家图片上传成功的回调
 const handleImagesSuccess = (response) => {
-  form.value.images.push(response.fullUrl)
+  if (response && response.fullUrl) {
+    form.value.images.push(response.fullUrl)
+  }
 }
 
 // 显示添加对话框
