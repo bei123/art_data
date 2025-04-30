@@ -2854,7 +2854,7 @@ app.post('/api/merchants/upload-images', upload.array('images', 10), async (req,
 // 创建商家接口
 app.post('/api/merchants', auth.authenticateToken, async (req, res) => {
   try {
-    const { name, logo, description, images } = req.body;
+    const { name, logo, description, address, phone, images } = req.body;
     
     // 验证logo URL
     if (!validateImageUrl(logo)) {
@@ -2868,8 +2868,8 @@ app.post('/api/merchants', auth.authenticateToken, async (req, res) => {
     try {
       // 插入商家基本信息
       const [result] = await connection.query(
-        'INSERT INTO merchants (name, logo, description, status) VALUES (?, ?, ?, "active")',
-        [name, logo, description]
+        'INSERT INTO merchants (name, logo, description, address, phone, status) VALUES (?, ?, ?, ?, ?, "active")',
+        [name, logo, description, address, phone]
       );
 
       const merchantId = result.insertId;
@@ -2913,7 +2913,7 @@ app.post('/api/merchants', auth.authenticateToken, async (req, res) => {
 // 更新商家接口
 app.put('/api/merchants/:id', auth.authenticateToken, async (req, res) => {
   try {
-    const { name, logo, description, images } = req.body;
+    const { name, logo, description, address, phone, images } = req.body;
     
     // 验证logo URL
     if (!validateImageUrl(logo)) {
@@ -2927,8 +2927,8 @@ app.put('/api/merchants/:id', auth.authenticateToken, async (req, res) => {
     try {
       // 更新商家基本信息
       await connection.query(
-        'UPDATE merchants SET name = ?, logo = ?, description = ? WHERE id = ?',
-        [name, logo, description, req.params.id]
+        'UPDATE merchants SET name = ?, logo = ?, description = ?, address = ?, phone = ? WHERE id = ?',
+        [name, logo, description, address, phone, req.params.id]
       );
 
       // 删除旧图片
