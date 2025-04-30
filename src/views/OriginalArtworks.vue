@@ -1,95 +1,108 @@
 <template>
-  <div>
+  <div class="artworks-container">
     <div class="header">
-      <h3>原作艺术品管理</h3>
-      <el-button type="primary" @click="handleAdd">添加作品</el-button>
+      <h2>艺术品管理</h2>
+      <el-button type="primary" @click="showAddDialog">添加艺术品</el-button>
     </div>
 
     <el-table :data="artworks" style="width: 100%">
       <el-table-column prop="title" label="标题" />
-      <el-table-column label="图片">
+      <el-table-column label="图片" width="120">
         <template #default="{ row }">
-          <el-image
-            style="width: 100px; height: 100px"
-            :src="getImageUrl(row.image)"
+          <el-image 
+            :src="row.image" 
+            :preview-src-list="[row.image]"
             fit="cover"
+            style="width: 80px; height: 80px"
           />
         </template>
       </el-table-column>
-      <el-table-column label="艺术家">
+      <el-table-column prop="artist_name" label="艺术家" />
+      <el-table-column prop="year" label="年份" width="100" />
+      <el-table-column label="价格" width="200">
         <template #default="{ row }">
-          <div class="artist-info">
-            <el-avatar :src="getImageUrl(row.artist?.avatar)" />
-            <span>{{ row.artist?.name }}</span>
+          <div v-if="row.discount_price && row.discount_price < row.price">
+            <span class="original-price">¥{{ row.original_price }}</span>
+            <span class="discount-price">¥{{ row.discount_price }}</span>
           </div>
+          <span v-else>¥{{ row.price }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="year" label="创作年份" />
-      <el-table-column prop="collection.location" label="收藏地" />
-      <el-table-column prop="collection.number" label="收藏编号" />
+      <el-table-column label="库存/销量" width="150">
+        <template #default="{ row }">
+          <div>库存: {{ row.stock }}</div>
+          <div>销量: {{ row.sales }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.is_on_sale ? 'success' : 'info'">
+            {{ row.is_on_sale ? '在售' : '下架' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          <el-button type="primary" size="small" @click="editArtwork(row)">编辑</el-button>
+          <el-button type="danger" size="small" @click="deleteArtwork(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog
+    <!-- 添加/编辑对话框 -->
+    <el-dialog 
+      :title="dialogType === 'add' ? '添加艺术品' : '编辑艺术品'" 
       v-model="dialogVisible"
-      :title="isEdit ? '编辑作品' : '添加作品'"
-      width="50%"
+      width="60%"
     >
       <el-form :model="form" label-width="100px">
-        <el-form-item label="标题">
+        <el-form-item label="标题" required>
           <el-input v-model="form.title" />
         </el-form-item>
-        <el-form-item label="图片">
+        <el-form-item label="图片" required>
           <el-upload
             class="avatar-uploader"
-            :action="`${API_BASE_URL}/api/upload`"
+            :action="`${baseUrl}/api/upload`"
             :show-file-list="false"
-            :on-success="handleImageSuccess"
-            :before-upload="beforeImageUpload"
-            name="file"
+            :on-success="handleUploadSuccess"
+            :before-upload="beforeUpload"
           >
-            <img v-if="form.image" :src="getImageUrl(form.image)" class="avatar" />
+            <img v-if="form.image" :src="form.image" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
-        <el-form-item label="艺术家">
-          <el-input v-model="form.artist_name" placeholder="请输入艺术家姓名" />
+        <el-form-item label="艺术家" required>
+          <el-input v-model="form.artist_name" />
         </el-form-item>
-        <el-form-item label="创作年份">
-          <el-input-number v-model="form.year" :min="1900" :max="2100" />
+        <el-form-item label="年份">
+          <el-input v-model="form.year" />
         </el-form-item>
-        <el-form-item label="作品简介">
-          <el-input v-model="form.description" type="textarea" :rows="4" />
+        <el-form-item label="原价" required>
+          <el-input-number v-model="form.original_price" :min="0" :precision="2" />
         </el-form-item>
-        <el-form-item label="创作背景">
-          <el-input v-model="form.background" type="textarea" :rows="4" />
+        <el-form-item label="折扣价">
+          <el-input-number v-model="form.discount_price" :min="0" :precision="2" />
         </el-form-item>
-        <el-form-item label="艺术特色">
-          <el-input v-model="form.features" type="textarea" :rows="4" />
+        <el-form-item label="库存" required>
+          <el-input-number v-model="form.stock" :min="0" :precision="0" />
         </el-form-item>
-        <el-divider>收藏信息</el-divider>
-        <el-form-item label="收藏地">
-          <el-input v-model="form.collection_location" />
+        <el-form-item label="状态">
+          <el-switch
+            v-model="form.is_on_sale"
+            :active-value="1"
+            :inactive-value="0"
+            active-text="在售"
+            inactive-text="下架"
+          />
         </el-form-item>
-        <el-form-item label="收藏编号">
-          <el-input v-model="form.collection_number" />
-        </el-form-item>
-        <el-form-item label="尺寸大小">
-          <el-input v-model="form.collection_size" />
-        </el-form-item>
-        <el-form-item label="创作材料">
-          <el-input v-model="form.collection_material" />
+        <el-form-item label="描述">
+          <el-input type="textarea" v-model="form.description" rows="4" />
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit">确定</el-button>
+          <el-button type="primary" @click="submitForm">确定</el-button>
         </span>
       </template>
     </el-dialog>
@@ -100,165 +113,109 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
+import axios from 'axios'
 
+const baseUrl = import.meta.env.VITE_API_BASE_URL
 const artworks = ref([])
 const dialogVisible = ref(false)
-const isEdit = ref(false)
+const dialogType = ref('add')
 const form = ref({
   title: '',
   image: '',
   artist_name: '',
-  year: 1900,
-  description: '',
-  background: '',
-  features: '',
-  collection_location: '',
-  collection_number: '',
-  collection_size: '',
-  collection_material: ''
+  year: '',
+  original_price: 0,
+  discount_price: 0,
+  stock: 0,
+  is_on_sale: 1,
+  description: ''
 })
 
-const getImageUrl = (url) => {
-  if (!url) return '';
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
-}
-
-const beforeImageUpload = (file) => {
-  const isImage = file.type.startsWith('image/');
-  const isLt5M = file.size / 1024 / 1024 < 5;
-
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件！');
-    return false;
-  }
-  if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB！');
-    return false;
-  }
-  return true;
-}
-
+// 获取艺术品列表
 const fetchArtworks = async () => {
   try {
-    const data = await axios.get('/original-artworks')
-    console.log('API返回的原始数据：', data)
-    if (Array.isArray(data)) {
-      artworks.value = data.map(artwork => ({
-        ...artwork,
-        artist: {
-          ...artwork.artist,
-          avatar: artwork.artist?.avatar ? getImageUrl(artwork.artist.avatar) : ''
-        }
-      }))
-      console.log('设置后的艺术品数据：', artworks.value)
-    } else {
-      console.error('返回的数据不是数组：', data)
-      artworks.value = []
-      ElMessage.error('获取数据格式不正确')
-    }
+    const response = await axios.get(`${baseUrl}/api/original-artworks`)
+    artworks.value = response.data
   } catch (error) {
-    console.error('获取艺术品列表失败：', error)
-    artworks.value = []
-    ElMessage.error('获取数据失败')
+    ElMessage.error('获取艺术品列表失败')
   }
 }
 
-const handleAdd = () => {
-  isEdit.value = false
+// 显示添加对话框
+const showAddDialog = () => {
+  dialogType.value = 'add'
   form.value = {
     title: '',
     image: '',
     artist_name: '',
-    year: 1900,
-    description: '',
-    background: '',
-    features: '',
-    collection_location: '',
-    collection_number: '',
-    collection_size: '',
-    collection_material: ''
+    year: '',
+    original_price: 0,
+    discount_price: 0,
+    stock: 0,
+    is_on_sale: 1,
+    description: ''
   }
   dialogVisible.value = true
 }
 
-const handleEdit = (row) => {
-  isEdit.value = true
-  form.value = {
-    id: row.id,
-    title: row.title,
-    image: row.image,
-    artist_name: row.artist?.name || '',
-    year: row.year,
-    description: row.description,
-    background: row.background,
-    features: row.features,
-    collection_location: row.collection?.location || '',
-    collection_number: row.collection?.number || '',
-    collection_size: row.collection?.size || '',
-    collection_material: row.collection?.material || ''
-  }
+// 编辑艺术品
+const editArtwork = (row) => {
+  dialogType.value = 'edit'
+  form.value = { ...row }
   dialogVisible.value = true
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个作品吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/original-artworks/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchArtworks()
-    } catch (error) {
+// 删除艺术品
+const deleteArtwork = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这个艺术品吗？', '提示', {
+      type: 'warning'
+    })
+    await axios.delete(`${baseUrl}/api/original-artworks/${row.id}`)
+    ElMessage.success('删除成功')
+    fetchArtworks()
+  } catch (error) {
+    if (error !== 'cancel') {
       ElMessage.error('删除失败')
     }
-  })
+  }
 }
 
-const handleImageSuccess = (response) => {
-  form.value.image = response.url;
-}
-
-const handleSubmit = async () => {
-  if (!form.value.title.trim()) {
-    ElMessage.warning('请输入作品标题');
-    return;
-  }
-  if (!form.value.image) {
-    ElMessage.warning('请上传作品图片');
-    return;
-  }
-  if (!form.value.artist_name.trim()) {
-    ElMessage.warning('请输入艺术家姓名');
-    return;
-  }
-
+// 提交表单
+const submitForm = async () => {
   try {
-    const submitData = {
-      ...form.value,
-      image: form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image,
-      collection: {
-        location: form.value.collection_location,
-        number: form.value.collection_number,
-        size: form.value.collection_size,
-        material: form.value.collection_material
-      }
-    };
-
-    if (isEdit.value) {
-      await axios.put(`/original-artworks/${form.value.id}`, submitData)
+    if (dialogType.value === 'add') {
+      await axios.post(`${baseUrl}/api/original-artworks`, form.value)
+      ElMessage.success('添加成功')
     } else {
-      await axios.post('/original-artworks', submitData)
+      await axios.put(`${baseUrl}/api/original-artworks/${form.value.id}`, form.value)
+      ElMessage.success('更新成功')
     }
-    ElMessage.success('保存成功')
     dialogVisible.value = false
     fetchArtworks()
   } catch (error) {
-    ElMessage.error('保存失败')
+    ElMessage.error(dialogType.value === 'add' ? '添加失败' : '更新失败')
   }
+}
+
+// 上传图片相关方法
+const handleUploadSuccess = (response) => {
+  form.value.image = response.fullUrl
+}
+
+const beforeUpload = (file) => {
+  const isImage = file.type.startsWith('image/')
+  const isLt5M = file.size / 1024 / 1024 < 5
+
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件！')
+    return false
+  }
+  if (!isLt5M) {
+    ElMessage.error('图片大小不能超过 5MB！')
+    return false
+  }
+  return true
 }
 
 onMounted(() => {
@@ -267,17 +224,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.artworks-container {
+  padding: 20px;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-}
-
-.artist-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .avatar-uploader {
@@ -291,7 +246,7 @@ onMounted(() => {
 }
 
 .avatar-uploader:hover {
-  border-color: #409eff;
+  border-color: #409EFF;
 }
 
 .avatar-uploader-icon {
@@ -307,5 +262,16 @@ onMounted(() => {
   width: 178px;
   height: 178px;
   display: block;
+}
+
+.original-price {
+  text-decoration: line-through;
+  color: #999;
+  margin-right: 10px;
+}
+
+.discount-price {
+  color: #f56c6c;
+  font-weight: bold;
 }
 </style> 
