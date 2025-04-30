@@ -840,11 +840,11 @@ app.put('/api/rights/:id', async (req, res) => {
       `, [req.params.id]);
 
       // 获取并处理图片URL
-      const [images] = await db.query(
+      const [rightImages] = await db.query(
         'SELECT image_url FROM right_images WHERE right_id = ?',
         [req.params.id]
       );
-      updatedRight[0].images = images.map(img => 
+      updatedRight[0].images = rightImages.map(img => 
         img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
       );
 
