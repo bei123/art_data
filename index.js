@@ -1442,7 +1442,7 @@ app.get('/api/cart', async (req, res) => {
     const [cartArtworks] = await db.query(`
       SELECT 
         ci.*, 'artwork' as type,
-        oa.title, oa.image, oa.year, oa.description, oa.price,
+        oa.title, oa.image, oa.year, oa.description, oa.original_price, oa.discount_price,
         a.name as artist_name, a.avatar as artist_avatar
       FROM cart_items ci
       JOIN original_artworks oa ON ci.artwork_id = oa.id
@@ -1475,7 +1475,9 @@ app.get('/api/cart', async (req, res) => {
       ...item,
       image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
       artist_avatar: item.artist_avatar ? (item.artist_avatar.startsWith('http') ? item.artist_avatar : `${BASE_URL}${item.artist_avatar}`) : '',
-      price: item.price || 0
+      price: item.price || 0,
+      original_price: item.original_price || 0,
+      discount_price: item.discount_price || 0
     }));
 
     res.json([...processedCartRights, ...processedCartDigitals, ...processedCartArtworks]);
@@ -1864,6 +1866,34 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
               }
             });
           }
+        } else if (item.type === 'artwork') {
+          const [artworks] = await connection.query(
+            'SELECT id, original_price, discount_price, stock FROM original_artworks WHERE id = ? AND is_on_sale = 1',
+            [item.artwork_id]
+          );
+          if (!artworks || artworks.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: `艺术品ID ${item.artwork_id} 不存在或已下架` });
+          }
+          if (artworks[0].stock < item.quantity) {
+            await connection.rollback();
+            return res.status(400).json({ error: `艺术品ID ${item.artwork_id} 库存不足` });
+          }
+          // 验证价格
+          const itemPrice = parseFloat(item.price);
+          const actualPrice = (artworks[0].discount_price && artworks[0].discount_price > 0 && artworks[0].discount_price < artworks[0].original_price)
+            ? artworks[0].discount_price
+            : artworks[0].original_price;
+          if (Math.abs(itemPrice - actualPrice) > 0.01) {
+            await connection.rollback();
+            return res.status(400).json({
+              error: `艺术品ID ${item.artwork_id} 价格不匹配`,
+              detail: {
+                expected: actualPrice,
+                received: itemPrice
+              }
+            });
+          }
         } else if (item.type === 'digital') {
           const [digitals] = await connection.query(
             'SELECT id, price FROM digital_artworks WHERE id = ?',
@@ -1903,16 +1933,18 @@ app.post('/api/wx/pay/unifiedorder', async (req, res) => {
 
       const orderId = orderResult.insertId;
 
-      // 创建订单项，支持两种类型
+      // 创建订单项，支持三种类型
       const orderItems = cart_items.map(item => {
         if (item.type === 'right') {
-          return [orderId, 'right', item.right_id, null, item.quantity, parseFloat(item.price)];
+          return [orderId, 'right', item.right_id, null, null, item.quantity, parseFloat(item.price)];
         } else if (item.type === 'digital') {
-          return [orderId, 'digital', null, item.digital_artwork_id, item.quantity, parseFloat(item.price)];
+          return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, parseFloat(item.price)];
+        } else if (item.type === 'artwork') {
+          return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, parseFloat(item.price)];
         }
       });
       await connection.query(
-        'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, quantity, price) VALUES ?',
+        'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price) VALUES ?',
         [orderItems]
       );
 
