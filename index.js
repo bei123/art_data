@@ -816,9 +816,13 @@ app.put('/api/rights/:id', async (req, res) => {
       // 删除旧图片
       await connection.query('DELETE FROM right_images WHERE right_id = ?', [req.params.id]);
 
-      // 插入新图片
+      // 插入新图片，处理图片URL
       if (images && images.length > 0) {
-        const imageValues = images.map(image => [req.params.id, image]);
+        const imageValues = images.map(image => {
+          // 如果是完整URL，需要移除BASE_URL前缀
+          const imageUrl = image.startsWith(BASE_URL) ? image.substring(BASE_URL.length) : image;
+          return [req.params.id, imageUrl];
+        });
         await connection.query(
           'INSERT INTO right_images (right_id, image_url) VALUES ?',
           [imageValues]
@@ -834,6 +838,15 @@ app.put('/api/rights/:id', async (req, res) => {
         WHERE r.id = ?
         GROUP BY r.id
       `, [req.params.id]);
+
+      // 获取并处理图片URL
+      const [images] = await db.query(
+        'SELECT image_url FROM right_images WHERE right_id = ?',
+        [req.params.id]
+      );
+      updatedRight[0].images = images.map(img => 
+        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+      );
 
       res.json(updatedRight[0]);
     } catch (error) {
