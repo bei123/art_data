@@ -33,6 +33,8 @@
       </el-table-column>
       <el-table-column prop="name" label="商家名称" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
+      <el-table-column prop="address" label="地址" show-overflow-tooltip />
+      <el-table-column prop="phone" label="电话" width="120" />
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
           <el-switch
@@ -85,6 +87,14 @@
           <el-input v-model="form.name" />
         </el-form-item>
         
+        <el-form-item label="地址" prop="address">
+          <el-input v-model="form.address" />
+        </el-form-item>
+
+        <el-form-item label="电话" prop="phone">
+          <el-input v-model="form.phone" />
+        </el-form-item>
+
         <el-form-item label="Logo" prop="logo">
           <el-upload
             class="logo-uploader"
@@ -146,6 +156,41 @@ import { Plus, Search } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.wx.2000gallery.art:2000'
+
+// 创建axios实例
+const request = axios.create({
+  baseURL: baseUrl,
+  timeout: 15000
+})
+
+// 请求拦截器
+request.interceptors.request.use(
+  config => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  error => {
+    return Promise.reject(error)
+  }
+)
+
+// 响应拦截器
+request.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) {
+      ElMessage.error('登录已过期，请重新登录')
+      // 可以在这里添加重定向到登录页面的逻辑
+      localStorage.removeItem('token')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
+
 const merchants = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -155,6 +200,8 @@ const form = ref({
   name: '',
   logo: '',
   description: '',
+  address: '',
+  phone: '',
   images: []
 })
 const imagesFileList = ref([])
@@ -167,7 +214,12 @@ const total = ref(0)
 const rules = {
   name: [{ required: true, message: '请输入商家名称', trigger: 'blur' }],
   logo: [{ required: true, message: '请上传Logo', trigger: 'change' }],
-  description: [{ required: true, message: '请输入商家描述', trigger: 'blur' }]
+  description: [{ required: true, message: '请输入商家描述', trigger: 'blur' }],
+  address: [{ required: true, message: '请输入商家地址', trigger: 'blur' }],
+  phone: [
+    { required: true, message: '请输入商家电话', trigger: 'blur' },
+    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的手机号码', trigger: 'blur' }
+  ]
 }
 
 const uploadHeaders = {
@@ -178,7 +230,7 @@ const uploadHeaders = {
 const fetchMerchants = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`${baseUrl}/api/merchants`, {
+    const response = await request.get('/api/merchants', {
       params: {
         page: currentPage.value,
         limit: pageSize.value,
@@ -214,7 +266,7 @@ const handleCurrentChange = (val) => {
 // 处理状态变更
 const handleStatusChange = async (row) => {
   try {
-    await axios.patch(`${baseUrl}/api/merchants/${row.id}/status`, {
+    await request.patch(`/api/merchants/${row.id}/status`, {
       status: row.status
     })
     ElMessage.success('状态更新成功')
@@ -227,7 +279,7 @@ const handleStatusChange = async (row) => {
 // 处理排序变更
 const handleSortChange = async (row) => {
   try {
-    await axios.patch(`${baseUrl}/api/merchants/${row.id}/sort`, {
+    await request.patch(`/api/merchants/${row.id}/sort`, {
       sort_order: row.sort_order
     })
     ElMessage.success('排序更新成功')
@@ -243,7 +295,7 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
     
-    await axios.delete(`${baseUrl}/api/merchants/${row.id}`)
+    await request.delete(`/api/merchants/${row.id}`)
     ElMessage.success('删除成功')
     fetchMerchants()
   } catch (error) {
@@ -329,6 +381,8 @@ const showAddDialog = () => {
     name: '',
     logo: '',
     description: '',
+    address: '',
+    phone: '',
     images: []
   }
   dialogVisible.value = true
@@ -342,6 +396,8 @@ const handleEdit = (row) => {
     name: row.name,
     logo: row.logo,
     description: row.description,
+    address: row.address,
+    phone: row.phone,
     images: row.images || []
   }
   imagesFileList.value = (row.images || []).map(url => ({
@@ -361,18 +417,10 @@ const handleSubmit = async () => {
       console.log('提交数据:', JSON.stringify(form.value, null, 2))
       try {
         if (dialogType.value === 'add') {
-          await axios.post(`${baseUrl}/api/merchants`, form.value, {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-          })
+          await request.post('/api/merchants', form.value)
           ElMessage.success('添加成功')
         } else {
-          await axios.put(`${baseUrl}/api/merchants/${form.value.id}`, form.value, {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-          })
+          await request.put(`/api/merchants/${form.value.id}`, form.value)
           ElMessage.success('更新成功')
         }
         dialogVisible.value = false
