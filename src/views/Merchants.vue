@@ -2,7 +2,21 @@
   <div class="merchants-container">
     <div class="header">
       <h2>商家管理</h2>
-      <el-button type="primary" @click="showAddDialog">添加商家</el-button>
+      <div class="header-actions">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索商家名称或描述"
+          style="width: 300px; margin-right: 16px"
+          clearable
+          @clear="handleSearch"
+          @keyup.enter="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-button type="primary" @click="showAddDialog">添加商家</el-button>
+      </div>
     </div>
 
     <el-table :data="merchants" style="width: 100%" v-loading="loading">
@@ -19,6 +33,27 @@
       </el-table-column>
       <el-table-column prop="name" label="商家名称" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-switch
+            v-model="row.status"
+            :active-value="'active'"
+            :inactive-value="'inactive'"
+            @change="handleStatusChange(row)"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column label="排序" width="120">
+        <template #default="{ row }">
+          <el-input-number
+            v-model="row.sort_order"
+            :min="0"
+            :max="999"
+            size="small"
+            @change="handleSortChange(row)"
+          />
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
@@ -26,6 +61,18 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pagination-container">
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :page-sizes="[10, 20, 50, 100]"
+        :total="total"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+      />
+    </div>
 
     <!-- 添加/编辑商家对话框 -->
     <el-dialog
@@ -46,10 +93,14 @@
             :show-file-list="false"
             :on-success="handleLogoSuccess"
             :before-upload="beforeLogoUpload"
+            :on-progress="handleLogoProgress"
             name="file"
           >
             <img v-if="form.logo" :src="form.logo" class="logo" />
             <el-icon v-else class="logo-uploader-icon"><Plus /></el-icon>
+            <div v-if="logoUploadProgress > 0 && logoUploadProgress < 100" class="upload-progress">
+              <el-progress :percentage="logoUploadProgress" />
+            </div>
           </el-upload>
         </el-form-item>
 
@@ -59,6 +110,9 @@
             :headers="uploadHeaders"
             list-type="picture-card"
             :on-success="handleImagesSuccess"
+            :on-remove="handleImagesRemove"
+            :on-progress="handleImagesProgress"
+            :file-list="imagesFileList"
             :before-upload="beforeImagesUpload"
             name="images"
             multiple
@@ -88,7 +142,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.wx.2000gallery.art:2000'
@@ -103,6 +157,12 @@ const form = ref({
   description: '',
   images: []
 })
+const imagesFileList = ref([])
+const logoUploadProgress = ref(0)
+const searchQuery = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 
 const rules = {
   name: [{ required: true, message: '请输入商家名称', trigger: 'blur' }],
@@ -118,12 +178,91 @@ const uploadHeaders = {
 const fetchMerchants = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`${baseUrl}/api/merchants`)
+    const response = await axios.get(`${baseUrl}/api/merchants`, {
+      params: {
+        page: currentPage.value,
+        limit: pageSize.value,
+        search: searchQuery.value
+      }
+    })
     merchants.value = response.data.data
+    total.value = response.data.pagination.total
   } catch (error) {
     ElMessage.error('获取商家列表失败')
   } finally {
     loading.value = false
+  }
+}
+
+// 处理搜索
+const handleSearch = () => {
+  currentPage.value = 1
+  fetchMerchants()
+}
+
+// 处理分页
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  fetchMerchants()
+}
+
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  fetchMerchants()
+}
+
+// 处理状态变更
+const handleStatusChange = async (row) => {
+  try {
+    await axios.patch(`${baseUrl}/api/merchants/${row.id}/status`, {
+      status: row.status
+    })
+    ElMessage.success('状态更新成功')
+  } catch (error) {
+    row.status = row.status === 'active' ? 'inactive' : 'active'
+    ElMessage.error('状态更新失败')
+  }
+}
+
+// 处理排序变更
+const handleSortChange = async (row) => {
+  try {
+    await axios.patch(`${baseUrl}/api/merchants/${row.id}/sort`, {
+      sort_order: row.sort_order
+    })
+    ElMessage.success('排序更新成功')
+  } catch (error) {
+    ElMessage.error('排序更新失败')
+  }
+}
+
+// 处理删除
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该商家吗？', '提示', {
+      type: 'warning'
+    })
+    
+    await axios.delete(`${baseUrl}/api/merchants/${row.id}`)
+    ElMessage.success('删除成功')
+    fetchMerchants()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+// Logo上传进度
+const handleLogoProgress = (event, file) => {
+  logoUploadProgress.value = Math.round((event.loaded / event.total) * 100)
+}
+
+// 商家图片上传进度
+const handleImagesProgress = (event, file) => {
+  const index = imagesFileList.value.findIndex(item => item.uid === file.uid)
+  if (index !== -1) {
+    imagesFileList.value[index].progress = Math.round((event.loaded / event.total) * 100)
   }
 }
 
@@ -159,16 +298,28 @@ const beforeImagesUpload = (file) => {
   return true
 }
 
+// 商家图片上传成功的回调
+const handleImagesSuccess = (response, file, fileList) => {
+  console.log('on-success fileList:', fileList)
+  console.log('response:', response)
+  form.value.images = Array.from(fileList)
+    .map(item => item.response?.fullUrl || item.url)
+    .filter(Boolean)
+  imagesFileList.value = Array.from(fileList)
+  console.log('图片上传成功，当前图片列表:', form.value.images)
+}
+
+const handleImagesRemove = (file, fileList) => {
+  form.value.images = Array.from(fileList)
+    .filter(item => item.status === 'success' && item.response && item.response.fullUrl)
+    .map(item => item.response.fullUrl)
+  imagesFileList.value = Array.from(fileList)
+  console.log('图片移除后，当前图片列表:', form.value.images)
+}
+
 // Logo上传成功的回调
 const handleLogoSuccess = (response) => {
   form.value.logo = response.fullUrl
-}
-
-// 商家图片上传成功的回调
-const handleImagesSuccess = (response) => {
-  if (response && response.fullUrl) {
-    form.value.images.push(response.fullUrl)
-  }
 }
 
 // 显示添加对话框
@@ -193,15 +344,21 @@ const handleEdit = (row) => {
     description: row.description,
     images: row.images || []
   }
+  imagesFileList.value = (row.images || []).map(url => ({
+    name: url.split('/').pop(),
+    url,
+    status: 'success',
+    response: { fullUrl: url }
+  }))
   dialogVisible.value = true
 }
 
 // 提交表单
 const handleSubmit = async () => {
   if (!formRef.value) return
-  
   await formRef.value.validate(async (valid) => {
     if (valid) {
+      console.log('提交数据:', JSON.stringify(form.value, null, 2))
       try {
         if (dialogType.value === 'add') {
           await axios.post(`${baseUrl}/api/merchants`, form.value, {
@@ -227,23 +384,6 @@ const handleSubmit = async () => {
   })
 }
 
-// 删除商家
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除该商家吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`${baseUrl}/api/merchants/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchMerchants()
-    } catch (error) {
-      ElMessage.error('删除失败')
-    }
-  })
-}
-
 onMounted(() => {
   fetchMerchants()
 })
@@ -261,18 +401,34 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
-.logo-uploader {
-  border: 1px dashed #d9d9d9;
-  border-radius: 6px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  width: 100px;
-  height: 100px;
+.header-actions {
+  display: flex;
+  align-items: center;
 }
 
-.logo-uploader:hover {
-  border-color: #409EFF;
+.pagination-container {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.logo-uploader {
+  position: relative;
+}
+
+.upload-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 5px;
+}
+
+.logo {
+  width: 100px;
+  height: 100px;
+  display: block;
 }
 
 .logo-uploader-icon {
@@ -281,13 +437,17 @@ onMounted(() => {
   width: 100px;
   height: 100px;
   text-align: center;
-  line-height: 100px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
-.logo {
-  width: 100px;
-  height: 100px;
-  display: block;
-  object-fit: cover;
+.logo-uploader-icon:hover {
+  border-color: #409EFF;
 }
 </style> 
