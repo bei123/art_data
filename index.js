@@ -1654,6 +1654,18 @@ app.put('/api/cart/:id', async (req, res) => {
       if (rightRows[0].remaining_count < quantity) {
         return res.status(400).json({ error: '库存不足' });
       }
+    } else if (cartItem.type === 'artwork') {
+      // 检查艺术品是否存在且在售
+      const [artworkRows] = await db.query(
+        'SELECT stock FROM original_artworks WHERE id = ? AND is_on_sale = 1',
+        [cartItem.artwork_id]
+      );
+      if (!artworkRows || artworkRows.length === 0) {
+        return res.status(404).json({ error: '艺术品不存在或已下架' });
+      }
+      if (artworkRows[0].stock < quantity) {
+        return res.status(400).json({ error: '库存不足' });
+      }
     } else if (cartItem.type === 'digital') {
       // 检查数字艺术品是否存在
       const [digitalRows] = await db.query(
@@ -1663,7 +1675,6 @@ app.put('/api/cart/:id', async (req, res) => {
       if (!digitalRows || digitalRows.length === 0) {
         return res.status(404).json({ error: '数字艺术品不存在' });
       }
-      // 数字艺术品一般不校验库存
     } else {
       return res.status(400).json({ error: '不支持的商品类型' });
     }
