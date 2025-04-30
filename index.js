@@ -1574,9 +1574,13 @@ app.post('/api/cart', async (req, res) => {
         return res.status(404).json({ error: '艺术品不存在' });
       }
       // 验证价格
-      if (!artwork[0].price || artwork[0].price <= 0) {
+      if (!artwork[0].original_price || artwork[0].original_price <= 0) {
         return res.status(400).json({ error: '艺术品价格无效' });
       }
+      // 确定实际价格（如果有优惠价且优惠价小于原价，则使用优惠价）
+      const actualPrice = (artwork[0].discount_price && artwork[0].discount_price < artwork[0].original_price) 
+        ? artwork[0].discount_price 
+        : artwork[0].original_price;
       // 检查购物车中是否已存在该艺术品
       const [existingItem] = await db.query(
         'SELECT * FROM cart_items WHERE user_id = ? AND artwork_id = ? AND type = "artwork"',
@@ -1592,7 +1596,7 @@ app.post('/api/cart', async (req, res) => {
         // 新增艺术品
         await db.query(
           'INSERT INTO cart_items (user_id, type, artwork_id, quantity, price) VALUES (?, "artwork", ?, ?, ?)',
-          [userId, artwork_id, quantity, artwork[0].price]
+          [userId, artwork_id, quantity, actualPrice]
         );
       }
       res.json({ message: '添加成功' });
