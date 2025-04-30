@@ -2684,12 +2684,51 @@ app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
 // 获取商家列表接口
 app.get('/api/merchants', async (req, res) => {
   try {
-    const [merchants] = await db.query(`
-      SELECT id, name, logo, description 
-      FROM merchants 
-      WHERE status = 'active'
-      ORDER BY created_at DESC
-    `);
+    const { 
+      page = 1, 
+      limit = 10, 
+      search = '',
+      status = 'active',
+      sort_by = 'created_at',
+      sort_order = 'DESC'
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+    
+    // 构建查询条件
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+    
+    if (status) {
+      whereClause += ' AND status = ?';
+      params.push(status);
+    }
+    
+    if (search) {
+      whereClause += ' AND (name LIKE ? OR description LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    // 验证排序字段
+    const allowedSortFields = ['created_at', 'sort_order', 'name'];
+    const sortField = allowedSortFields.includes(sort_by) ? sort_by : 'created_at';
+    const orderDirection = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    // 查询总数
+    const [countResult] = await db.query(
+      `SELECT COUNT(*) as total FROM merchants ${whereClause}`,
+      params
+    );
+    const total = countResult[0].total;
+
+    // 查询商家列表
+    const [merchants] = await db.query(
+      `SELECT * FROM merchants 
+       ${whereClause}
+       ORDER BY ${sortField} ${orderDirection}
+       LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), offset]
+    );
 
     // 查询每个商家的图片
     for (const merchant of merchants) {
@@ -2697,19 +2736,26 @@ app.get('/api/merchants', async (req, res) => {
         'SELECT image_url FROM merchant_images WHERE merchant_id = ?',
         [merchant.id]
       );
-      merchant.images = images.map(img => img.image_url ? (img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`) : '').filter(Boolean);
+      merchant.images = images.map(img => 
+        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+      );
     }
 
     // 处理logo URL
     const merchantsWithFullUrls = merchants.map(merchant => ({
       ...merchant,
-      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : '',
-      images: merchant.images
+      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : ''
     }));
 
     res.json({
       success: true,
-      data: merchantsWithFullUrls
+      data: merchantsWithFullUrls,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total_pages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
     console.error('获取商家列表失败:', error);
@@ -2920,6 +2966,100 @@ app.put('/api/merchants/:id', auth.authenticateToken, async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: '更新商家失败' 
+    });
+  }
+});
+
+// 删除商家接口
+app.delete('/api/merchants/:id', auth.authenticateToken, async (req, res) => {
+  try {
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 删除商家图片
+      await connection.query('DELETE FROM merchant_images WHERE merchant_id = ?', [req.params.id]);
+      
+      // 删除商家
+      await connection.query('DELETE FROM merchants WHERE id = ?', [req.params.id]);
+
+      await connection.commit();
+      res.json({
+        success: true,
+        message: '删除成功'
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('删除商家失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '删除商家失败' 
+    });
+  }
+});
+
+// 更新商家状态接口
+app.patch('/api/merchants/:id/status', auth.authenticateToken, async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ 
+        success: false,
+        error: '无效的状态值' 
+      });
+    }
+
+    await db.query(
+      'UPDATE merchants SET status = ? WHERE id = ?',
+      [status, req.params.id]
+    );
+
+    res.json({
+      success: true,
+      message: '状态更新成功'
+    });
+  } catch (error) {
+    console.error('更新商家状态失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '更新商家状态失败' 
+    });
+  }
+});
+
+// 更新商家排序接口
+app.patch('/api/merchants/:id/sort', auth.authenticateToken, async (req, res) => {
+  try {
+    const { sort_order } = req.body;
+    
+    if (typeof sort_order !== 'number') {
+      return res.status(400).json({ 
+        success: false,
+        error: '无效的排序值' 
+      });
+    }
+
+    await db.query(
+      'UPDATE merchants SET sort_order = ? WHERE id = ?',
+      [sort_order, req.params.id]
+    );
+
+    res.json({
+      success: true,
+      message: '排序更新成功'
+    });
+  } catch (error) {
+    console.error('更新商家排序失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '更新商家排序失败' 
     });
   }
 });
