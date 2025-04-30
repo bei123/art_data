@@ -46,6 +46,7 @@
             :show-file-list="false"
             :on-success="handleLogoSuccess"
             :before-upload="beforeLogoUpload"
+            name="file"
           >
             <img v-if="form.logo" :src="form.logo" class="logo" />
             <el-icon v-else class="logo-uploader-icon"><Plus /></el-icon>
@@ -59,6 +60,7 @@
             list-type="picture-card"
             :on-success="handleImagesSuccess"
             :before-upload="beforeImagesUpload"
+            name="files"
             multiple
           >
             <el-icon><Plus /></el-icon>

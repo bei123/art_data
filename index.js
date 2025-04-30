@@ -2757,7 +2757,7 @@ app.get('/api/merchants/:id', async (req, res) => {
 });
 
 // 商家Logo上传接口
-app.post('/api/merchants/upload-logo', upload.single('logo'), async (req, res) => {
+app.post('/api/merchants/upload-logo', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '没有上传文件' });
