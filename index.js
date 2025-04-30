@@ -472,7 +472,6 @@ app.get('/api/digital-artworks', async (req, res) => {
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
       image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
-      copyright: artwork.copyright || '',
       price: artwork.price || 0
     }));
     res.json(artworksWithFullUrls);
@@ -484,7 +483,25 @@ app.get('/api/digital-artworks', async (req, res) => {
 
 app.post('/api/digital-artworks', async (req, res) => {
   try {
-    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright } = req.body;
+    const { 
+      title, 
+      image_url, 
+      author, 
+      description, 
+      registration_certificate,
+      license_rights,
+      license_period,
+      owner_rights,
+      license_items,
+      project_name,
+      product_name,
+      project_owner,
+      issuer,
+      issue_batch,
+      issue_year,
+      batch_quantity,
+      price 
+    } = req.body;
     
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
@@ -492,8 +509,18 @@ app.post('/api/digital-artworks', async (req, res) => {
     }
     
     const [result] = await db.query(
-      'INSERT INTO digital_artworks (title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright]
+      `INSERT INTO digital_artworks (
+        title, image_url, author, description, registration_certificate,
+        license_rights, license_period, owner_rights, license_items,
+        project_name, product_name, project_owner, issuer, issue_batch,
+        issue_year, batch_quantity, price
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        title, image_url, author, description, registration_certificate,
+        license_rights, license_period, owner_rights, license_items,
+        project_name, product_name, project_owner, issuer, issue_batch,
+        issue_year, batch_quantity, price
+      ]
     );
     
     res.json({ 
@@ -502,11 +529,19 @@ app.post('/api/digital-artworks', async (req, res) => {
       image_url,
       author,
       description,
-      contract_address,
-      token_id,
-      blockchain,
-      blockchain_url,
-      copyright,
+      registration_certificate,
+      license_rights,
+      license_period,
+      owner_rights,
+      license_items,
+      project_name,
+      product_name,
+      project_owner,
+      issuer,
+      issue_batch,
+      issue_year,
+      batch_quantity,
+      price,
       created_at: new Date()
     });
   } catch (error) {
@@ -517,7 +552,25 @@ app.post('/api/digital-artworks', async (req, res) => {
 
 app.put('/api/digital-artworks/:id', async (req, res) => {
   try {
-    const { title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright, price } = req.body;
+    const { 
+      title, 
+      image_url, 
+      author, 
+      description, 
+      registration_certificate,
+      license_rights,
+      license_period,
+      owner_rights,
+      license_items,
+      project_name,
+      product_name,
+      project_owner,
+      issuer,
+      issue_batch,
+      issue_year,
+      batch_quantity,
+      price 
+    } = req.body;
     
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
@@ -525,8 +578,19 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
     }
     
     await db.query(
-      'UPDATE digital_artworks SET title = ?, image_url = ?, author = ?, description = ?, contract_address = ?, token_id = ?, blockchain = ?, blockchain_url = ?, copyright = ?, price = ? WHERE id = ?',
-      [title, image_url, author, description, contract_address, token_id, blockchain, blockchain_url, copyright, price, req.params.id]
+      `UPDATE digital_artworks SET 
+        title = ?, image_url = ?, author = ?, description = ?, 
+        registration_certificate = ?, license_rights = ?, license_period = ?,
+        owner_rights = ?, license_items = ?, project_name = ?, product_name = ?,
+        project_owner = ?, issuer = ?, issue_batch = ?, issue_year = ?,
+        batch_quantity = ?, price = ?
+      WHERE id = ?`,
+      [
+        title, image_url, author, description, registration_certificate,
+        license_rights, license_period, owner_rights, license_items,
+        project_name, product_name, project_owner, issuer, issue_batch,
+        issue_year, batch_quantity, price, req.params.id
+      ]
     );
     
     res.json({ 
@@ -535,11 +599,18 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
       image_url,
       author,
       description,
-      contract_address,
-      token_id,
-      blockchain,
-      blockchain_url,
-      copyright,
+      registration_certificate,
+      license_rights,
+      license_period,
+      owner_rights,
+      license_items,
+      project_name,
+      product_name,
+      project_owner,
+      issuer,
+      issue_batch,
+      issue_year,
+      batch_quantity,
       price
     });
   } catch (error) {

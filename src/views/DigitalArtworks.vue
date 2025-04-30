@@ -18,10 +18,13 @@
       </el-table-column>
       <el-table-column prop="author" label="作者" />
       <el-table-column prop="description" label="描述" />
-      <el-table-column prop="contract_address" label="合约地址" />
-      <el-table-column prop="token_id" label="Token ID" />
-      <el-table-column prop="blockchain" label="区块链" />
-      <el-table-column prop="blockchain_url" label="链上信息" />
+      <el-table-column prop="project_name" label="项目名称" />
+      <el-table-column prop="product_name" label="产品名称" />
+      <el-table-column prop="project_owner" label="项目方" />
+      <el-table-column prop="issuer" label="发行方" />
+      <el-table-column prop="issue_batch" label="发行批次" />
+      <el-table-column prop="issue_year" label="发行年份" />
+      <el-table-column prop="batch_quantity" label="本批发行数量" />
       <el-table-column prop="price" label="价格" />
       <el-table-column prop="created_at" label="创建时间" />
       <el-table-column label="操作" width="200">
@@ -37,7 +40,7 @@
       :title="isEdit ? '编辑作品' : '添加作品'"
       width="50%"
     >
-      <el-form :model="form" label-width="100px">
+      <el-form :model="form" label-width="120px">
         <el-form-item label="标题">
           <el-input v-model="form.title" />
         </el-form-item>
@@ -60,20 +63,41 @@
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="合约地址">
-          <el-input v-model="form.contract_address" />
+        <el-form-item label="登记证书">
+          <el-input v-model="form.registration_certificate" />
         </el-form-item>
-        <el-form-item label="Token ID">
-          <el-input v-model="form.token_id" />
+        <el-form-item label="许可权利">
+          <el-input v-model="form.license_rights" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="区块链">
-          <el-input v-model="form.blockchain" />
+        <el-form-item label="许可时间">
+          <el-input v-model="form.license_period" />
         </el-form-item>
-        <el-form-item label="链上信息">
-          <el-input v-model="form.blockchain_url" />
+        <el-form-item label="所有者权益">
+          <el-input v-model="form.owner_rights" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="版权信息">
-          <el-input v-model="form.copyright" />
+        <el-form-item label="许可事项">
+          <el-input v-model="form.license_items" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="项目名称">
+          <el-input v-model="form.project_name" />
+        </el-form-item>
+        <el-form-item label="产品名称">
+          <el-input v-model="form.product_name" />
+        </el-form-item>
+        <el-form-item label="项目方">
+          <el-input v-model="form.project_owner" />
+        </el-form-item>
+        <el-form-item label="发行方">
+          <el-input v-model="form.issuer" />
+        </el-form-item>
+        <el-form-item label="发行批次">
+          <el-input v-model="form.issue_batch" />
+        </el-form-item>
+        <el-form-item label="发行年份">
+          <el-input-number v-model="form.issue_year" :min="1900" :max="2100" />
+        </el-form-item>
+        <el-form-item label="本批发行数量">
+          <el-input-number v-model="form.batch_quantity" :min="1" />
         </el-form-item>
         <el-form-item label="价格">
           <el-input-number v-model="form.price" :precision="2" :step="0.01" :min="0" />
@@ -104,11 +128,18 @@ const form = ref({
   image_url: '',
   author: '',
   description: '',
-  contract_address: '',
-  token_id: '',
-  blockchain: '',
-  blockchain_url: '',
-  copyright: '',
+  registration_certificate: '',
+  license_rights: '',
+  license_period: '',
+  owner_rights: '',
+  license_items: '',
+  project_name: '',
+  product_name: '',
+  project_owner: '',
+  issuer: '',
+  issue_batch: '',
+  issue_year: new Date().getFullYear(),
+  batch_quantity: 1,
   price: 0
 })
 
@@ -141,11 +172,18 @@ const handleAdd = () => {
     image_url: '',
     author: '',
     description: '',
-    contract_address: '',
-    token_id: '',
-    blockchain: '',
-    blockchain_url: '',
-    copyright: '',
+    registration_certificate: '',
+    license_rights: '',
+    license_period: '',
+    owner_rights: '',
+    license_items: '',
+    project_name: '',
+    product_name: '',
+    project_owner: '',
+    issuer: '',
+    issue_batch: '',
+    issue_year: new Date().getFullYear(),
+    batch_quantity: 1,
     price: 0
   }
   dialogVisible.value = true
@@ -154,7 +192,8 @@ const handleAdd = () => {
 const handleEdit = (row) => {
   isEdit.value = true
   form.value = { ...row }
-  if (form.value.copyright === undefined) form.value.copyright = ''
+  if (form.value.issue_year === undefined) form.value.issue_year = new Date().getFullYear()
+  if (form.value.batch_quantity === undefined) form.value.batch_quantity = 1
   if (form.value.price === undefined) form.value.price = 0
   dialogVisible.value = true
 }
@@ -216,24 +255,32 @@ const handleSubmit = async () => {
     ElMessage.warning('请输入作品描述');
     return;
   }
-  if (!form.value.contract_address.trim()) {
-    ElMessage.warning('请输入合约地址');
+  if (!form.value.project_name.trim()) {
+    ElMessage.warning('请输入项目名称');
     return;
   }
-  if (!form.value.token_id.trim()) {
-    ElMessage.warning('请输入Token ID');
+  if (!form.value.product_name.trim()) {
+    ElMessage.warning('请输入产品名称');
     return;
   }
-  if (!form.value.blockchain.trim()) {
-    ElMessage.warning('请输入区块链信息');
+  if (!form.value.project_owner.trim()) {
+    ElMessage.warning('请输入项目方');
     return;
   }
-  if (!form.value.blockchain_url.trim()) {
-    ElMessage.warning('请输入链上信息查看地址');
+  if (!form.value.issuer.trim()) {
+    ElMessage.warning('请输入发行方');
     return;
   }
-  if (!form.value.copyright.trim()) {
-    ElMessage.warning('请输入版权信息');
+  if (!form.value.issue_batch.trim()) {
+    ElMessage.warning('请输入发行批次');
+    return;
+  }
+  if (!form.value.issue_year) {
+    ElMessage.warning('请输入发行年份');
+    return;
+  }
+  if (!form.value.batch_quantity) {
+    ElMessage.warning('请输入本批发行数量');
     return;
   }
   if (form.value.price === undefined || form.value.price < 0) {
