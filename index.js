@@ -719,23 +719,30 @@ app.get('/api/artists/:id', async (req, res) => {
 // 获取版权实物列表
 app.get('/api/rights', async (req, res) => {
   try {
+    // 获取版权实物基本信息和分类信息
     const [rows] = await db.query(`
       SELECT r.*, c.title as category_title
       FROM rights r
       LEFT JOIN physical_categories c ON r.category_id = c.id
       ORDER BY r.id DESC
     `);
+    
     if (!rows || !Array.isArray(rows)) {
       return res.json([]);
     }
-    // 为每个版权实物的图片添加完整URL
-    const rightsWithFullUrls = rows.map(right => ({
-      ...right,
-      images: right.images ? right.images.split(',').map(image =>
-        image.startsWith('http') ? image : `${BASE_URL}${image}`
-      ) : []
-    }));
-    res.json(rightsWithFullUrls);
+
+    // 获取每个版权实物的图片
+    for (const right of rows) {
+      const [images] = await db.query(
+        'SELECT image_url FROM right_images WHERE right_id = ?',
+        [right.id]
+      );
+      right.images = images.map(img => 
+        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
+      );
+    }
+
+    res.json(rows);
   } catch (error) {
     console.error('获取版权实物列表失败:', error);
     res.status(500).json({ error: '获取版权实物列表失败' });

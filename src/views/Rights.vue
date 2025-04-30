@@ -277,8 +277,13 @@ const handleImageRemove = (file) => {
 }
 
 const getImageUrl = (url) => {
-  if (!url) return ''
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  if (!url) return '';
+  // 如果已经是完整的URL，检查是否需要修正域名
+  if (url.startsWith('http')) {
+    return url.replace('wx.ht.2000gallery.art', 'api.wx.2000gallery.art:2000');
+  }
+  // 否则添加API基础URL
+  return `${API_BASE_URL}${url}`;
 }
 
 const beforeImageUpload = (file) => {

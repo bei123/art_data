@@ -95,37 +95,30 @@
           <el-input v-model="form.phone" />
         </el-form-item>
 
-        <el-form-item label="Logo" prop="logo">
+        <el-form-item label="Logo">
           <el-upload
-            class="logo-uploader"
-            :action="`${baseUrl}/api/merchants/upload-logo`"
-            :headers="uploadHeaders"
+            class="avatar-uploader"
+            :action="uploadAction"
             :show-file-list="false"
             :on-success="handleLogoSuccess"
-            :before-upload="beforeLogoUpload"
-            :on-progress="handleLogoProgress"
+            :before-upload="beforeImageUpload"
             name="file"
           >
-            <img v-if="form.logo" :src="form.logo" class="logo" />
-            <el-icon v-else class="logo-uploader-icon"><Plus /></el-icon>
-            <div v-if="logoUploadProgress > 0 && logoUploadProgress < 100" class="upload-progress">
-              <el-progress :percentage="logoUploadProgress" />
-            </div>
+            <img v-if="form.logo" :src="getImageUrl(form.logo)" class="avatar" />
+            <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
 
         <el-form-item label="商家图片">
           <el-upload
-            :action="`${baseUrl}/api/merchants/upload-images`"
-            :headers="uploadHeaders"
+            class="upload-list"
+            :action="uploadImagesAction"
             list-type="picture-card"
             :on-success="handleImagesSuccess"
-            :on-remove="handleImagesRemove"
-            :on-progress="handleImagesProgress"
-            :file-list="imagesFileList"
-            :before-upload="beforeImagesUpload"
+            :on-remove="handleImageRemove"
+            :before-upload="beforeImageUpload"
+            :file-list="form.images.map(url => ({ url: getImageUrl(url), name: url.split('/').pop() }))"
             name="images"
-            multiple
           >
             <el-icon><Plus /></el-icon>
           </el-upload>
@@ -157,6 +150,13 @@ import axios from 'axios'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.wx.2000gallery.art:2000'
 
+// 添加getImageUrl函数
+const getImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return `${baseUrl}${url}`
+}
+
 // 创建axios实例
 const request = axios.create({
   baseURL: baseUrl,
@@ -183,13 +183,16 @@ request.interceptors.response.use(
   error => {
     if (error.response?.status === 401) {
       ElMessage.error('登录已过期，请重新登录')
-      // 可以在这里添加重定向到登录页面的逻辑
       localStorage.removeItem('token')
       window.location.href = '/login'
     }
     return Promise.reject(error)
   }
 )
+
+// 修改上传组件的action
+const uploadAction = `${baseUrl}/api/merchants/upload-logo`
+const uploadImagesAction = `${baseUrl}/api/merchants/upload-images`
 
 const merchants = ref([])
 const loading = ref(false)
@@ -319,23 +322,7 @@ const handleImagesProgress = (event, file) => {
 }
 
 // Logo上传前的验证
-const beforeLogoUpload = (file) => {
-  const isImage = file.type.startsWith('image/')
-  const isLt2M = file.size / 1024 / 1024 < 2
-
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件!')
-    return false
-  }
-  if (!isLt2M) {
-    ElMessage.error('图片大小不能超过 2MB!')
-    return false
-  }
-  return true
-}
-
-// 商家图片上传前的验证
-const beforeImagesUpload = (file) => {
+const beforeImageUpload = (file) => {
   const isImage = file.type.startsWith('image/')
   const isLt5M = file.size / 1024 / 1024 < 5
 
@@ -351,27 +338,35 @@ const beforeImagesUpload = (file) => {
 }
 
 // 商家图片上传成功的回调
-const handleImagesSuccess = (response, file, fileList) => {
-  console.log('on-success fileList:', fileList)
-  console.log('response:', response)
-  form.value.images = Array.from(fileList)
-    .map(item => item.response?.fullUrl || item.url)
-    .filter(Boolean)
-  imagesFileList.value = Array.from(fileList)
-  console.log('图片上传成功，当前图片列表:', form.value.images)
+const handleImagesSuccess = (response) => {
+  if (!form.value.images) {
+    form.value.images = [];
+  }
+  if (response && Array.isArray(response)) {
+    response.forEach(file => {
+      if (file.url) {
+        form.value.images.push(file.url);
+      }
+    });
+  } else {
+    ElMessage.error('图片上传失败');
+  }
 }
 
-const handleImagesRemove = (file, fileList) => {
-  form.value.images = Array.from(fileList)
-    .filter(item => item.status === 'success' && item.response && item.response.fullUrl)
-    .map(item => item.response.fullUrl)
-  imagesFileList.value = Array.from(fileList)
-  console.log('图片移除后，当前图片列表:', form.value.images)
+const handleImageRemove = (file) => {
+  const index = form.value.images.findIndex(url => url === file.url);
+  if (index !== -1) {
+    form.value.images.splice(index, 1);
+  }
 }
 
 // Logo上传成功的回调
 const handleLogoSuccess = (response) => {
-  form.value.logo = response.fullUrl
+  if (response && response.url) {
+    form.value.logo = response.url;
+  } else {
+    ElMessage.error('Logo上传失败');
+  }
 }
 
 // 显示添加对话框
@@ -460,7 +455,7 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.logo-uploader {
+.avatar-uploader {
   position: relative;
 }
 
@@ -473,13 +468,13 @@ onMounted(() => {
   padding: 5px;
 }
 
-.logo {
+.avatar {
   width: 100px;
   height: 100px;
   display: block;
 }
 
-.logo-uploader-icon {
+.avatar-uploader-icon {
   font-size: 28px;
   color: #8c939d;
   width: 100px;
@@ -495,7 +490,7 @@ onMounted(() => {
   align-items: center;
 }
 
-.logo-uploader-icon:hover {
+.avatar-uploader-icon:hover {
   border-color: #409EFF;
 }
 </style> 
