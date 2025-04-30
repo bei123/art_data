@@ -89,6 +89,50 @@
             />
           </el-select>
         </el-form-item>
+
+        <el-divider>价格和库存信息</el-divider>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="价格">
+              <el-input v-model="form.price" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="库存">
+              <el-input v-model="form.stock" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="折扣价格">
+              <el-input v-model="form.discount_price" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="原价">
+              <el-input v-model="form.original_price" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="销量">
+              <el-input v-model="form.sales" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="状态">
+              <el-select v-model="form.is_on_sale">
+                <el-option value="true">在售</el-option>
+                <el-option value="false">下架</el-option>
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
     </el-card>
   </div>
@@ -122,7 +166,13 @@ const form = ref({
   },
   artist: {
     id: null
-  }
+  },
+  price: '',
+  stock: '',
+  discount_price: '',
+  original_price: '',
+  sales: '',
+  is_on_sale: true
 })
 
 const fetchArtists = async () => {
@@ -137,14 +187,20 @@ const fetchArtists = async () => {
 const fetchArtworkDetail = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`/api/artworks/${route.params.id}`)
+    const response = await axios.get(`/api/original-artworks/${route.params.id}`)
     const data = response.data
     form.value = {
       ...data,
       collection: data.collection,
       artist: {
         id: data.artist.id
-      }
+      },
+      price: data.price,
+      stock: data.stock,
+      discount_price: data.discount_price,
+      original_price: data.original_price,
+      sales: data.sales,
+      is_on_sale: data.is_on_sale
     }
   } catch (error) {
     ElMessage.error('获取作品详情失败')

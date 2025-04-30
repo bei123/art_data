@@ -1422,6 +1422,17 @@ app.get('/api/cart', async (req, res) => {
       JOIN digital_artworks d ON ci.digital_artwork_id = d.id
       WHERE ci.user_id = ? AND ci.type = 'digital'
     `, [userId]);
+    // 查询艺术品购物车项
+    const [cartArtworks] = await db.query(`
+      SELECT 
+        ci.*, 'artwork' as type,
+        oa.title, oa.image, oa.year, oa.description, oa.price,
+        a.name as artist_name, a.avatar as artist_avatar
+      FROM cart_items ci
+      JOIN original_artworks oa ON ci.artwork_id = oa.id
+      LEFT JOIN artists a ON oa.artist_id = a.id
+      WHERE ci.user_id = ? AND ci.type = 'artwork'
+    `, [userId]);
 
     // 获取每个实物商品的图片
     const processedCartRights = await Promise.all(cartRights.map(async (item) => {
@@ -1443,7 +1454,15 @@ app.get('/api/cart', async (req, res) => {
       image: item.image_url ? (item.image_url.startsWith('http') ? item.image_url : `${BASE_URL}${item.image_url}`) : ''
     }));
 
-    res.json([...processedCartRights, ...processedCartDigitals]);
+    // 处理艺术品图片和艺术家头像
+    const processedCartArtworks = cartArtworks.map(item => ({
+      ...item,
+      image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
+      artist_avatar: item.artist_avatar ? (item.artist_avatar.startsWith('http') ? item.artist_avatar : `${BASE_URL}${item.artist_avatar}`) : '',
+      price: item.price || 0
+    }));
+
+    res.json([...processedCartRights, ...processedCartDigitals, ...processedCartArtworks]);
   } catch (error) {
     console.error('获取购物车失败:', error);
     res.status(500).json({ error: '获取购物车失败' });
@@ -1467,7 +1486,7 @@ app.post('/api/cart', async (req, res) => {
     }
 
     const userId = payload.userId;
-    const { type = 'right', right_id, digital_artwork_id, quantity = 1 } = req.body;
+    const { type = 'right', right_id, digital_artwork_id, artwork_id, quantity = 1 } = req.body;
 
     if (type === 'right') {
       if (!right_id) {
@@ -1526,6 +1545,38 @@ app.post('/api/cart', async (req, res) => {
         await db.query(
           'INSERT INTO cart_items (user_id, type, digital_artwork_id, quantity) VALUES (?, "digital", ?, ?)',
           [userId, digital_artwork_id, quantity]
+        );
+      }
+      res.json({ message: '添加成功' });
+    } else if (type === 'artwork') {
+      if (!artwork_id) {
+        return res.status(400).json({ error: '缺少艺术品ID' });
+      }
+      // 检查艺术品是否存在
+      const [artwork] = await db.query('SELECT * FROM original_artworks WHERE id = ?', [artwork_id]);
+      if (!artwork || artwork.length === 0) {
+        return res.status(404).json({ error: '艺术品不存在' });
+      }
+      // 验证价格
+      if (!artwork[0].price || artwork[0].price <= 0) {
+        return res.status(400).json({ error: '艺术品价格无效' });
+      }
+      // 检查购物车中是否已存在该艺术品
+      const [existingItem] = await db.query(
+        'SELECT * FROM cart_items WHERE user_id = ? AND artwork_id = ? AND type = "artwork"',
+        [userId, artwork_id]
+      );
+      if (existingItem && existingItem.length > 0) {
+        // 更新数量
+        await db.query(
+          'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND artwork_id = ? AND type = "artwork"',
+          [quantity, userId, artwork_id]
+        );
+      } else {
+        // 新增艺术品
+        await db.query(
+          'INSERT INTO cart_items (user_id, type, artwork_id, quantity, price) VALUES (?, "artwork", ?, ?, ?)',
+          [userId, artwork_id, quantity, artwork[0].price]
         );
       }
       res.json({ message: '添加成功' });
