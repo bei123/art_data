@@ -62,6 +62,24 @@ const routes = [
         component: () => import('@/views/Banners.vue')
       },
       {
+        path: 'merchants',
+        name: 'Merchants',
+        component: () => import('@/views/Merchants.vue'),
+        meta: {
+          title: '商家管理',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'merchants/:id',
+        name: 'MerchantDetail',
+        component: () => import('@/views/MerchantDetail.vue'),
+        meta: {
+          title: '商家详情',
+          requiresAuth: true
+        }
+      },
+      {
         path: '/refund-approval',
         name: 'RefundApproval',
         component: () => import('@/pages/RefundApproval.vue'),

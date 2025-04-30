@@ -2756,6 +2756,164 @@ app.get('/api/merchants/:id', async (req, res) => {
   }
 });
 
+// 商家Logo上传接口
+app.post('/api/merchants/upload-logo', upload.single('logo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: '没有上传文件' });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    const fullUrl = `${BASE_URL}${fileUrl}`;
+    res.json({ 
+      url: fileUrl,
+      fullUrl: fullUrl,
+      filename: req.file.filename,
+      size: req.file.size
+    });
+  } catch (error) {
+    console.error('商家Logo上传失败:', error);
+    res.status(500).json({ error: '商家Logo上传失败' });
+  }
+});
+
+// 商家图片上传接口
+app.post('/api/merchants/upload-images', upload.array('images', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: '没有上传文件' });
+    }
+    const files = req.files.map(file => ({
+      url: `/uploads/${file.filename}`,
+      fullUrl: `${BASE_URL}/uploads/${file.filename}`,
+      filename: file.filename,
+      size: file.size
+    }));
+    res.json(files);
+  } catch (error) {
+    console.error('商家图片上传失败:', error);
+    res.status(500).json({ error: '商家图片上传失败' });
+  }
+});
+
+// 创建商家接口
+app.post('/api/merchants', auth.authenticateToken, async (req, res) => {
+  try {
+    const { name, logo, description, images } = req.body;
+    
+    // 验证logo URL
+    if (!validateImageUrl(logo)) {
+      return res.status(400).json({ error: '无效的Logo URL' });
+    }
+
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 插入商家基本信息
+      const [result] = await connection.query(
+        'INSERT INTO merchants (name, logo, description, status) VALUES (?, ?, ?, "active")',
+        [name, logo, description]
+      );
+
+      const merchantId = result.insertId;
+
+      // 插入商家图片
+      if (images && images.length > 0) {
+        const imageValues = images.map(image => [merchantId, image]);
+        await connection.query(
+          'INSERT INTO merchant_images (merchant_id, image_url) VALUES ?',
+          [imageValues]
+        );
+      }
+
+      await connection.commit();
+
+      // 返回完整的商家信息
+      const [newMerchant] = await db.query(
+        'SELECT * FROM merchants WHERE id = ?',
+        [merchantId]
+      );
+
+      res.json({
+        success: true,
+        data: newMerchant[0]
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('创建商家失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '创建商家失败' 
+    });
+  }
+});
+
+// 更新商家接口
+app.put('/api/merchants/:id', auth.authenticateToken, async (req, res) => {
+  try {
+    const { name, logo, description, images } = req.body;
+    
+    // 验证logo URL
+    if (!validateImageUrl(logo)) {
+      return res.status(400).json({ error: '无效的Logo URL' });
+    }
+
+    // 开始事务
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+      // 更新商家基本信息
+      await connection.query(
+        'UPDATE merchants SET name = ?, logo = ?, description = ? WHERE id = ?',
+        [name, logo, description, req.params.id]
+      );
+
+      // 删除旧图片
+      await connection.query('DELETE FROM merchant_images WHERE merchant_id = ?', [req.params.id]);
+
+      // 插入新图片
+      if (images && images.length > 0) {
+        const imageValues = images.map(image => [req.params.id, image]);
+        await connection.query(
+          'INSERT INTO merchant_images (merchant_id, image_url) VALUES ?',
+          [imageValues]
+        );
+      }
+
+      await connection.commit();
+
+      // 返回更新后的商家信息
+      const [updatedMerchant] = await db.query(
+        'SELECT * FROM merchants WHERE id = ?',
+        [req.params.id]
+      );
+
+      res.json({
+        success: true,
+        data: updatedMerchant[0]
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('更新商家失败:', error);
+    res.status(500).json({ 
+      success: false,
+      error: '更新商家失败' 
+    });
+  }
+});
+
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
