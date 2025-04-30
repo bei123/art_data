@@ -95,12 +95,12 @@
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="价格">
-              <el-input v-model="form.price" />
+              <el-input-number v-model="form.price" :min="0" :precision="2" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="库存">
-              <el-input v-model="form.stock" />
+              <el-input-number v-model="form.stock" :min="0" :precision="0" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -108,12 +108,12 @@
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="折扣价格">
-              <el-input v-model="form.discount_price" />
+              <el-input-number v-model="form.discount_price" :min="0" :precision="2" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="原价">
-              <el-input v-model="form.original_price" />
+              <el-input-number v-model="form.original_price" :min="0" :precision="2" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -121,15 +121,18 @@
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="销量">
-              <el-input v-model="form.sales" />
+              <el-input-number v-model="form.sales" :min="0" :precision="0" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="状态">
-              <el-select v-model="form.is_on_sale">
-                <el-option value="true">在售</el-option>
-                <el-option value="false">下架</el-option>
-              </el-select>
+              <el-switch
+                v-model="form.is_on_sale"
+                :active-value="1"
+                :inactive-value="0"
+                active-text="在售"
+                inactive-text="下架"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -167,12 +170,12 @@ const form = ref({
   artist: {
     id: null
   },
-  price: '',
-  stock: '',
-  discount_price: '',
-  original_price: '',
-  sales: '',
-  is_on_sale: true
+  price: 0,
+  stock: 0,
+  discount_price: 0,
+  original_price: 0,
+  sales: 0,
+  is_on_sale: 1
 })
 
 const fetchArtists = async () => {

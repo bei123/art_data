@@ -382,7 +382,12 @@ app.put('/api/original-artworks/:id', async (req, res) => {
       collection_location,
       collection_number,
       collection_size,
-      collection_material
+      collection_material,
+      original_price,
+      discount_price,
+      stock,
+      sales,
+      is_on_sale
     } = req.body;
     
     // 先创建或查找艺术家
@@ -412,12 +417,18 @@ app.put('/api/original-artworks/:id', async (req, res) => {
         collection_location = ?,
         collection_number = ?,
         collection_size = ?,
-        collection_material = ?
+        collection_material = ?,
+        original_price = ?,
+        discount_price = ?,
+        stock = ?,
+        sales = ?,
+        is_on_sale = ?
       WHERE id = ?`,
       [
         title, image, artist_id, year, description,
         background, features, collection_location,
         collection_number, collection_size, collection_material,
+        original_price, discount_price, stock, sales, is_on_sale,
         req.params.id
       ]
     );
@@ -439,7 +450,12 @@ app.put('/api/original-artworks/:id', async (req, res) => {
       artist: {
         id: artist_id,
         name: artist_name
-      }
+      },
+      original_price,
+      discount_price,
+      stock,
+      sales,
+      is_on_sale
     });
   } catch (error) {
     console.error('Error updating original artwork:', error);
