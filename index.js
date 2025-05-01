@@ -2795,7 +2795,7 @@ app.get('/api/wx/pay/orders', async (req, res) => {
         FROM order_items oi
         LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
         LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
-        LEFT JOIN original_artworks oa ON oi.type = 'original' AND oi.original_artwork_id = oa.id
+        LEFT JOIN original_artworks oa ON oi.type = 'original' AND oi.artwork_id = oa.id
         WHERE oi.order_id = ?
       `;
 
