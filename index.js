@@ -2708,7 +2708,13 @@ app.get('/api/wx/pay/query', async (req, res) => {
 // 根据用户ID查询订单列表接口
 app.get('/api/wx/pay/orders', async (req, res) => {
   try {
-    const { user_id } = req.query;
+    const { 
+      user_id,
+      status,
+      type,
+      page = 1,
+      limit = 10
+    } = req.query;
 
     if (!user_id) {
       return res.status(400).json({ error: '缺少用户ID' });
@@ -2724,29 +2730,92 @@ app.get('/api/wx/pay/orders', async (req, res) => {
       return res.status(404).json({ error: '用户不存在' });
     }
 
-    // 查询用户的订单列表
-    const [orders] = await db.query(
-      'SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC',
-      [user_id]
-    );
+    // 构建查询条件
+    let query = 'SELECT * FROM orders WHERE user_id = ?';
+    let countQuery = 'SELECT COUNT(*) as total FROM orders WHERE user_id = ?';
+    let params = [user_id];
+    let countParams = [user_id];
+
+    if (status) {
+      query += ' AND trade_state = ?';
+      countQuery += ' AND trade_state = ?';
+      params.push(status);
+      countParams.push(status);
+    }
+
+    // 添加排序和分页
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    const offset = (page - 1) * limit;
+    params.push(parseInt(limit), offset);
+
+    // 执行查询
+    const [orders] = await db.query(query, params);
+    const [[{ total }]] = await db.query(countQuery, countParams);
 
     // 查询每个订单的订单项
     const ordersWithItems = await Promise.all(orders.map(async (order) => {
       // 查询订单项
-      const [orderItems] = await db.query(
-        `SELECT oi.*, r.title, r.price, r.original_price, r.description, r.status, r.remaining_count
-         FROM order_items oi
-         JOIN rights r ON oi.right_id = r.id
-         WHERE oi.order_id = ?`,
-        [order.id]
-      );
+      let orderItemsQuery = `
+        SELECT oi.*, 
+          CASE 
+            WHEN oi.type = 'right' THEN r.title
+            WHEN oi.type = 'digital' THEN da.title
+            WHEN oi.type = 'artwork' THEN a.title
+          END as title,
+          CASE 
+            WHEN oi.type = 'right' THEN r.price
+            WHEN oi.type = 'digital' THEN da.price
+            WHEN oi.type = 'artwork' THEN a.price
+          END as price,
+          CASE 
+            WHEN oi.type = 'right' THEN r.original_price
+            WHEN oi.type = 'digital' THEN da.original_price
+            WHEN oi.type = 'artwork' THEN a.original_price
+          END as original_price,
+          CASE 
+            WHEN oi.type = 'right' THEN r.description
+            WHEN oi.type = 'digital' THEN da.description
+            WHEN oi.type = 'artwork' THEN a.description
+          END as description,
+          CASE 
+            WHEN oi.type = 'right' THEN r.status
+            WHEN oi.type = 'digital' THEN da.status
+            WHEN oi.type = 'artwork' THEN a.status
+          END as status,
+          CASE 
+            WHEN oi.type = 'right' THEN r.remaining_count
+            ELSE NULL
+          END as remaining_count
+        FROM order_items oi
+        LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+        LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+        LEFT JOIN artworks a ON oi.type = 'artwork' AND oi.artwork_id = a.id
+        WHERE oi.order_id = ?
+      `;
+
+      const [orderItems] = await db.query(orderItemsQuery, [order.id]);
 
       // 查询订单项图片
       const orderItemsWithImages = await Promise.all(orderItems.map(async (item) => {
-        const [images] = await db.query(
-          'SELECT image_url FROM right_images WHERE right_id = ?',
-          [item.right_id]
-        );
+        let imagesQuery = '';
+        let imageParams = [];
+
+        switch (item.type) {
+          case 'right':
+            imagesQuery = 'SELECT image_url FROM right_images WHERE right_id = ?';
+            imageParams = [item.right_id];
+            break;
+          case 'digital':
+            imagesQuery = 'SELECT image_url FROM digital_artwork_images WHERE digital_artwork_id = ?';
+            imageParams = [item.digital_artwork_id];
+            break;
+          case 'artwork':
+            imagesQuery = 'SELECT image_url FROM artwork_images WHERE artwork_id = ?';
+            imageParams = [item.artwork_id];
+            break;
+        }
+
+        const [images] = await db.query(imagesQuery, imageParams);
         return {
           ...item,
           images: images.map(img => 
@@ -2812,15 +2881,30 @@ app.get('/api/wx/pay/orders', async (req, res) => {
 
     res.json({
       success: true,
-      data: ordersWithItems
+      data: {
+        orders: ordersWithItems,
+        pagination: {
+          total: parseInt(total),
+          page: parseInt(page),
+          limit: parseInt(limit)
+        }
+      }
     });
   } catch (error) {
     console.error('查询订单列表失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '查询订单列表失败',
-      detail: error.message
-    });
+    if (error.response) {
+      res.status(error.response.status).json({
+        success: false,
+        error: '查询订单列表失败',
+        detail: error.response.data
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: '查询订单列表失败',
+        detail: error.message
+      });
+    }
   }
 });
 
