@@ -636,12 +636,27 @@ app.put('/api/digital-artworks/:id', async (req, res) => {
 });
 
 app.delete('/api/digital-artworks/:id', async (req, res) => {
+  const connection = await db.getConnection();
   try {
-    await db.query('DELETE FROM digital_artworks WHERE id = ?', [req.params.id]);
+    await connection.beginTransaction();
+
+    // 先删除相关的数字身份购买记录
+    await connection.query('DELETE FROM digital_identity_purchases WHERE digital_artwork_id = ?', [req.params.id]);
+    
+    // 删除购物车中的相关记录
+    await connection.query('DELETE FROM cart_items WHERE digital_artwork_id = ? AND type = "digital"', [req.params.id]);
+    
+    // 删除数字艺术品
+    await connection.query('DELETE FROM digital_artworks WHERE id = ?', [req.params.id]);
+
+    await connection.commit();
     res.json({ message: '删除成功' });
   } catch (error) {
+    await connection.rollback();
     console.error('Error deleting digital artwork:', error);
     res.status(500).json({ error: '删除失败' });
+  } finally {
+    connection.release();
   }
 });
 

@@ -205,11 +205,16 @@ const handleDelete = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      await axios.delete(`/api/digital-artworks/${row.id}`)
+      await axios.delete(`/digital-artworks/${row.id}`)
       ElMessage.success('删除成功')
       fetchArtworks()
     } catch (error) {
-      ElMessage.error('删除失败')
+      console.error('删除失败:', error)
+      if (error.response) {
+        ElMessage.error(error.response.data.error || '删除失败')
+      } else {
+        ElMessage.error('删除失败')
+      }
     }
   })
 }
