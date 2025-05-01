@@ -3392,7 +3392,7 @@ app.get('/api/favorites', async (req, res) => {
       return res.status(400).json({ error: '缺少用户ID' });
     }
 
-    const offset = (page - 1) * pageSize;
+    const offset = (parseInt(page) - 1) * parseInt(pageSize);
     
     let sql = `
       SELECT f.*, 
@@ -3422,7 +3422,7 @@ app.get('/api/favorites', async (req, res) => {
     }
     
     sql += ' ORDER BY f.created_at DESC LIMIT ? OFFSET ?';
-    params.push(pageSize, offset);
+    params.push(parseInt(pageSize), offset);
     
     const [favorites] = await db.query(sql, params);
     
