@@ -2816,9 +2816,11 @@ app.get('/api/wx/pay/orders', async (req, res) => {
             imageParams = [item.right_id];
             break;
           case 'digital':
-            imagesQuery = 'SELECT image_url FROM digital_artworks_images WHERE digital_artwork_id = ?';
-            imageParams = [item.digital_artwork_id];
-            break;
+            // 数字艺术品直接使用digital_artwork_image_url
+            return {
+              ...item,
+              images: item.digital_artwork_image_url ? [item.digital_artwork_image_url] : []
+            };
           case 'original':
             imagesQuery = 'SELECT image_url FROM original_artwork_images WHERE artwork_id = ?';
             imageParams = [item.artwork_id];
