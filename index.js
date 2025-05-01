@@ -2782,7 +2782,6 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           END as description,
           CASE 
             WHEN oi.type = 'right' THEN r.status
-            WHEN oi.type = 'original' THEN oa.status
             ELSE NULL
           END as status,
           CASE 
