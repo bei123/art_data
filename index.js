@@ -3354,18 +3354,19 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
           CASE f.item_type
             WHEN 'artwork' THEN oa.title
             WHEN 'digital_art' THEN da.title
-            WHEN 'copyright_item' THEN r.title
+            WHEN 'copyright_item' THEN r.name
           END as title,
           CASE f.item_type
             WHEN 'artwork' THEN oa.image_url
             WHEN 'digital_art' THEN da.image_url
-            WHEN 'copyright_item' THEN r.image_url
+            WHEN 'copyright_item' THEN ri.image_url
           END as image_url,
           f.created_at as favorite_time
         FROM favorites f
         LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
         LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
         LEFT JOIN rights r ON f.item_type = 'copyright_item' AND f.item_id = r.id
+        LEFT JOIN right_images ri ON f.item_type = 'copyright_item' AND f.item_id = r.id AND ri.right_id = r.id
         WHERE f.user_id = ? AND f.item_type = ?
         ORDER BY f.created_at DESC
         LIMIT ? OFFSET ?
@@ -3378,18 +3379,19 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
           CASE f.item_type
             WHEN 'artwork' THEN oa.title
             WHEN 'digital_art' THEN da.title
-            WHEN 'copyright_item' THEN r.title
+            WHEN 'copyright_item' THEN r.name
           END as title,
           CASE f.item_type
             WHEN 'artwork' THEN oa.image_url
             WHEN 'digital_art' THEN da.image_url
-            WHEN 'copyright_item' THEN r.image_url
+            WHEN 'copyright_item' THEN ri.image_url
           END as image_url,
           f.created_at as favorite_time
         FROM favorites f
         LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
         LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
         LEFT JOIN rights r ON f.item_type = 'copyright_item' AND f.item_id = r.id
+        LEFT JOIN right_images ri ON f.item_type = 'copyright_item' AND f.item_id = r.id AND ri.right_id = r.id
         WHERE f.user_id = ?
         ORDER BY f.created_at DESC
         LIMIT ? OFFSET ?
