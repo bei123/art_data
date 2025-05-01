@@ -3352,20 +3352,20 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
       sql = `
         SELECT f.*, 
           CASE f.item_type
-            WHEN 'artwork' THEN a.title
+            WHEN 'artwork' THEN oa.title
             WHEN 'digital_art' THEN da.title
-            WHEN 'copyright_item' THEN ci.title
+            WHEN 'copyright_item' THEN r.title
           END as title,
           CASE f.item_type
-            WHEN 'artwork' THEN a.image_url
+            WHEN 'artwork' THEN oa.image_url
             WHEN 'digital_art' THEN da.image_url
-            WHEN 'copyright_item' THEN ci.image_url
+            WHEN 'copyright_item' THEN r.image_url
           END as image_url,
           f.created_at as favorite_time
         FROM favorites f
-        LEFT JOIN artworks a ON f.item_type = 'artwork' AND f.item_id = a.id
-        LEFT JOIN digital_arts da ON f.item_type = 'digital_art' AND f.item_id = da.id
-        LEFT JOIN copyright_items ci ON f.item_type = 'copyright_item' AND f.item_id = ci.id
+        LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
+        LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
+        LEFT JOIN rights r ON f.item_type = 'copyright_item' AND f.item_id = r.id
         WHERE f.user_id = ? AND f.item_type = ?
         ORDER BY f.created_at DESC
         LIMIT ? OFFSET ?
@@ -3376,20 +3376,20 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
       sql = `
         SELECT f.*, 
           CASE f.item_type
-            WHEN 'artwork' THEN a.title
+            WHEN 'artwork' THEN oa.title
             WHEN 'digital_art' THEN da.title
-            WHEN 'copyright_item' THEN ci.title
+            WHEN 'copyright_item' THEN r.title
           END as title,
           CASE f.item_type
-            WHEN 'artwork' THEN a.image_url
+            WHEN 'artwork' THEN oa.image_url
             WHEN 'digital_art' THEN da.image_url
-            WHEN 'copyright_item' THEN ci.image_url
+            WHEN 'copyright_item' THEN r.image_url
           END as image_url,
           f.created_at as favorite_time
         FROM favorites f
-        LEFT JOIN artworks a ON f.item_type = 'artwork' AND f.item_id = a.id
-        LEFT JOIN digital_arts da ON f.item_type = 'digital_art' AND f.item_id = da.id
-        LEFT JOIN copyright_items ci ON f.item_type = 'copyright_item' AND f.item_id = ci.id
+        LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
+        LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
+        LEFT JOIN rights r ON f.item_type = 'copyright_item' AND f.item_id = r.id
         WHERE f.user_id = ?
         ORDER BY f.created_at DESC
         LIMIT ? OFFSET ?
