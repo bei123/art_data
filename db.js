@@ -6,7 +6,7 @@ const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'data',
     password: process.env.DB_PASSWORD || '5z24cJEiMd34jAtt',
-    database: process.env.DB_NAME || 'art_data',
+    database: process.env.DB_NAME || 'data',
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
