@@ -3270,9 +3270,9 @@ app.patch('/api/merchants/:id/sort', auth.authenticateToken, async (req, res) =>
 });
 
 // 添加收藏
-app.post('/api/favorites', auth.authenticateToken, async (req, res) => {
-  const { itemId, itemType } = req.body;
-  if (!itemId || !itemType) {
+app.post('/api/favorites', async (req, res) => {
+  const { itemId, itemType, code } = req.body;
+  if (!itemId || !itemType || !code) {
     return res.status(400).json({ error: '缺少必要参数' });
   }
 
@@ -3283,7 +3283,22 @@ app.post('/api/favorites', auth.authenticateToken, async (req, res) => {
   }
 
   try {
-    const userId = req.user.userId;
+    // 获取微信access_token
+    const access_token = await getAccessToken(appid, secret);
+    // 获取用户openid
+    const { openid } = await getPhoneNumberFromWx(code, access_token);
+    
+    if (!openid) {
+      return res.status(401).json({ error: '获取用户信息失败' });
+    }
+
+    // 获取用户ID
+    const [user] = await db.query('SELECT id FROM wx_users WHERE openid = ?', [openid]);
+    if (!user) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    const userId = user.id;
     // 检查是否已经收藏
     const checkSql = 'SELECT * FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
     const [existing] = await db.query(checkSql, [userId, itemId, itemType]);
@@ -3296,16 +3311,37 @@ app.post('/api/favorites', auth.authenticateToken, async (req, res) => {
     await db.query(sql, [userId, itemId, itemType]);
     res.json({ success: true });
   } catch (err) {
+    console.error('收藏失败:', err);
     res.status(500).json({ error: '服务器错误' });
   }
 });
 
 // 取消收藏
-app.delete('/api/favorites/:itemType/:itemId', auth.authenticateToken, async (req, res) => {
+app.delete('/api/favorites/:itemType/:itemId', async (req, res) => {
   const { itemId, itemType } = req.params;
-  const userId = req.user.userId;
+  const { code } = req.body;
+
+  if (!code) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
 
   try {
+    // 获取微信access_token
+    const access_token = await getAccessToken(appid, secret);
+    // 获取用户openid
+    const { openid } = await getPhoneNumberFromWx(code, access_token);
+    
+    if (!openid) {
+      return res.status(401).json({ error: '获取用户信息失败' });
+    }
+
+    // 获取用户ID
+    const [user] = await db.query('SELECT id FROM wx_users WHERE openid = ?', [openid]);
+    if (!user) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    const userId = user.id;
     const sql = 'DELETE FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
     const result = await db.query(sql, [userId, itemId, itemType]);
     
@@ -3315,16 +3351,36 @@ app.delete('/api/favorites/:itemType/:itemId', auth.authenticateToken, async (re
     
     res.json({ success: true });
   } catch (err) {
+    console.error('取消收藏失败:', err);
     res.status(500).json({ error: '服务器错误' });
   }
 });
 
 // 获取收藏列表
-app.get('/api/favorites', auth.authenticateToken, async (req, res) => {
-  const userId = req.user.userId;
-  const { page = 1, pageSize = 10, itemType } = req.query;
+app.get('/api/favorites', async (req, res) => {
+  const { code, page = 1, pageSize = 10, itemType } = req.query;
+
+  if (!code) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
 
   try {
+    // 获取微信access_token
+    const access_token = await getAccessToken(appid, secret);
+    // 获取用户openid
+    const { openid } = await getPhoneNumberFromWx(code, access_token);
+    
+    if (!openid) {
+      return res.status(401).json({ error: '获取用户信息失败' });
+    }
+
+    // 获取用户ID
+    const [user] = await db.query('SELECT id FROM wx_users WHERE openid = ?', [openid]);
+    if (!user) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    const userId = user.id;
     const offset = (page - 1) * pageSize;
     let sql = '';
     let params = [];
@@ -3400,9 +3456,10 @@ app.get('/api/favorites', auth.authenticateToken, async (req, res) => {
       }
     });
   } catch (err) {
+    console.error('获取收藏列表失败:', err);
     res.status(500).json({ error: '服务器错误' });
   }
-}); 
+});
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
