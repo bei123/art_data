@@ -3269,6 +3269,12 @@ app.patch('/api/merchants/:id/sort', auth.authenticateToken, async (req, res) =>
   }
 });
 
+// 微信小程序配置
+const WX_CONFIG = {
+  appid: 'wx96a502c78c9156d0',
+  secret: 'bf47d45e6b0a96b1d1b73b186860c4cb'
+};
+
 // 添加收藏
 app.post('/api/favorites', async (req, res) => {
   const { itemId, itemType, code } = req.body;
@@ -3284,7 +3290,7 @@ app.post('/api/favorites', async (req, res) => {
 
   try {
     // 获取微信access_token
-    const access_token = await getAccessToken(appid, secret);
+    const access_token = await getAccessToken(WX_CONFIG.appid, WX_CONFIG.secret);
     // 获取用户openid
     const { openid } = await getPhoneNumberFromWx(code, access_token);
     
@@ -3327,7 +3333,7 @@ app.delete('/api/favorites/:itemType/:itemId', async (req, res) => {
 
   try {
     // 获取微信access_token
-    const access_token = await getAccessToken(appid, secret);
+    const access_token = await getAccessToken(WX_CONFIG.appid, WX_CONFIG.secret);
     // 获取用户openid
     const { openid } = await getPhoneNumberFromWx(code, access_token);
     
@@ -3366,7 +3372,7 @@ app.get('/api/favorites', async (req, res) => {
 
   try {
     // 获取微信access_token
-    const access_token = await getAccessToken(appid, secret);
+    const access_token = await getAccessToken(WX_CONFIG.appid, WX_CONFIG.secret);
     // 获取用户openid
     const { openid } = await getPhoneNumberFromWx(code, access_token);
     
