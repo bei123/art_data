@@ -2771,7 +2771,6 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           END as price,
           CASE 
             WHEN oi.type = 'right' THEN r.original_price
-            WHEN oi.type = 'digital' THEN da.original_price
             WHEN oi.type = 'original' THEN oa.original_price
             ELSE NULL
           END as original_price,
