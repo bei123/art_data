@@ -3411,11 +3411,11 @@ app.get('/api/favorites', async (req, res) => {
         LEFT JOIN artwork a ON f.item_type = 'artwork' AND f.item_id = a.id
         LEFT JOIN digital_art da ON f.item_type = 'digital_art' AND f.item_id = da.id
         LEFT JOIN copyright_item ci ON f.item_type = 'copyright_item' AND f.item_id = ci.id
-        WHERE f.user_id = ?
+        WHERE f.user_id = ? AND f.item_type = ?
         ORDER BY f.created_at DESC
         LIMIT ? OFFSET ?
       `;
-      params = [userId, parseInt(pageSize), offset];
+      params = [userId, itemType, parseInt(pageSize), offset];
     } else {
       // 获取所有类型的收藏
       sql = `
