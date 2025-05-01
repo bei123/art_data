@@ -3269,8 +3269,24 @@ app.patch('/api/merchants/:id/sort', auth.authenticateToken, async (req, res) =>
   }
 });
 
+// Token验证中间件
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) {
+    return res.status(401).json({ error: '未提供token' });
+  }
+  const token = authHeader.replace('Bearer ', '');
+  try {
+    const payload = jwt.verify(token, 'your_jwt_secret');
+    req.user = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'token无效' });
+  }
+};
+
 // 添加收藏
-app.post('/api/favorites', auth.authenticateToken, async (req, res) => {
+app.post('/api/favorites', authenticateToken, async (req, res) => {
   const { itemId, itemType } = req.body;
   if (!itemId || !itemType) {
     return res.status(400).json({ error: '缺少必要参数' });
@@ -3302,7 +3318,7 @@ app.post('/api/favorites', auth.authenticateToken, async (req, res) => {
 });
 
 // 取消收藏
-app.delete('/api/favorites/:itemType/:itemId', auth.authenticateToken, async (req, res) => {
+app.delete('/api/favorites/:itemType/:itemId', authenticateToken, async (req, res) => {
   const { itemId, itemType } = req.params;
   const userId = req.user.userId;
 
@@ -3322,7 +3338,7 @@ app.delete('/api/favorites/:itemType/:itemId', auth.authenticateToken, async (re
 });
 
 // 获取收藏列表
-app.get('/api/favorites', auth.authenticateToken, async (req, res) => {
+app.get('/api/favorites', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   const { page = 1, pageSize = 10, itemType } = req.query;
 
