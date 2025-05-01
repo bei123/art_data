@@ -3304,7 +3304,7 @@ app.post('/api/favorites', authenticateToken, async (req, res) => {
     const checkSql = 'SELECT * FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
     const [existing] = await db.query(checkSql, [userId, itemId, itemType]);
     
-    if (existing) {
+    if (existing && existing.length > 0) {
       return res.status(400).json({ error: '已经收藏过该物品' });
     }
 
