@@ -2760,36 +2760,45 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           CASE 
             WHEN oi.type = 'right' THEN r.title
             WHEN oi.type = 'digital' THEN da.title
-            WHEN oi.type = 'artwork' THEN a.title
+            WHEN oi.type = 'original' THEN oa.title
+            ELSE NULL
           END as title,
           CASE 
             WHEN oi.type = 'right' THEN r.price
             WHEN oi.type = 'digital' THEN da.price
-            WHEN oi.type = 'artwork' THEN a.price
+            WHEN oi.type = 'original' THEN oa.original_price
+            ELSE NULL
           END as price,
           CASE 
             WHEN oi.type = 'right' THEN r.original_price
             WHEN oi.type = 'digital' THEN da.original_price
-            WHEN oi.type = 'artwork' THEN a.original_price
+            WHEN oi.type = 'original' THEN oa.original_price
+            ELSE NULL
           END as original_price,
           CASE 
             WHEN oi.type = 'right' THEN r.description
             WHEN oi.type = 'digital' THEN da.description
-            WHEN oi.type = 'artwork' THEN a.description
+            WHEN oi.type = 'original' THEN oa.description
+            ELSE NULL
           END as description,
           CASE 
             WHEN oi.type = 'right' THEN r.status
             WHEN oi.type = 'digital' THEN da.status
-            WHEN oi.type = 'artwork' THEN a.status
+            WHEN oi.type = 'original' THEN oa.status
+            ELSE NULL
           END as status,
           CASE 
             WHEN oi.type = 'right' THEN r.remaining_count
             ELSE NULL
-          END as remaining_count
+          END as remaining_count,
+          CASE
+            WHEN oi.type = 'original' THEN oa.discount_price
+            ELSE NULL
+          END as discount_price
         FROM order_items oi
         LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
         LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
-        LEFT JOIN artworks a ON oi.type = 'artwork' AND oi.artwork_id = a.id
+        LEFT JOIN original_artworks oa ON oi.type = 'original' AND oi.original_artwork_id = oa.id
         WHERE oi.order_id = ?
       `;
 
@@ -2809,10 +2818,15 @@ app.get('/api/wx/pay/orders', async (req, res) => {
             imagesQuery = 'SELECT image_url FROM digital_artwork_images WHERE digital_artwork_id = ?';
             imageParams = [item.digital_artwork_id];
             break;
-          case 'artwork':
-            imagesQuery = 'SELECT image_url FROM artwork_images WHERE artwork_id = ?';
-            imageParams = [item.artwork_id];
+          case 'original':
+            imagesQuery = 'SELECT image_url FROM original_artwork_images WHERE original_artwork_id = ?';
+            imageParams = [item.original_artwork_id];
             break;
+          default:
+            return {
+              ...item,
+              images: []
+            };
         }
 
         const [images] = await db.query(imagesQuery, imageParams);
