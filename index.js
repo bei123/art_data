@@ -2795,7 +2795,11 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           CASE 
             WHEN oi.type = 'digital' THEN da.image_url
             ELSE NULL
-          END as digital_artwork_image_url
+          END as digital_artwork_image_url,
+          CASE 
+            WHEN oi.type = 'original' THEN oa.image
+            ELSE NULL
+          END as original_artwork_image
         FROM order_items oi
         LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
         LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
@@ -2822,9 +2826,11 @@ app.get('/api/wx/pay/orders', async (req, res) => {
               images: item.digital_artwork_image_url ? [item.digital_artwork_image_url] : []
             };
           case 'original':
-            imagesQuery = 'SELECT image_url FROM original_artwork_images WHERE artwork_id = ?';
-            imageParams = [item.artwork_id];
-            break;
+            // 原作商品直接使用original_artwork_image
+            return {
+              ...item,
+              images: item.original_artwork_image ? [item.original_artwork_image] : []
+            };
           default:
             return {
               ...item,
