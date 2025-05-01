@@ -2791,7 +2791,11 @@ app.get('/api/wx/pay/orders', async (req, res) => {
           CASE
             WHEN oi.type = 'original' THEN oa.discount_price
             ELSE NULL
-          END as discount_price
+          END as discount_price,
+          CASE 
+            WHEN oi.type = 'digital' THEN da.image_url
+            ELSE NULL
+          END as digital_artwork_image_url
         FROM order_items oi
         LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
         LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
@@ -2812,12 +2816,12 @@ app.get('/api/wx/pay/orders', async (req, res) => {
             imageParams = [item.right_id];
             break;
           case 'digital':
-            imagesQuery = 'SELECT image_url FROM digital_artwork_images WHERE digital_artwork_id = ?';
+            imagesQuery = 'SELECT image_url FROM digital_artworks_images WHERE digital_artwork_id = ?';
             imageParams = [item.digital_artwork_id];
             break;
           case 'original':
-            imagesQuery = 'SELECT image_url FROM original_artwork_images WHERE original_artwork_id = ?';
-            imageParams = [item.original_artwork_id];
+            imagesQuery = 'SELECT image_url FROM original_artwork_images WHERE artwork_id = ?';
+            imageParams = [item.artwork_id];
             break;
           default:
             return {
