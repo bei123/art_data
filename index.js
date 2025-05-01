@@ -3357,7 +3357,7 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
             WHEN 'copyright_item' THEN r.title
           END as title,
           CASE f.item_type
-            WHEN 'artwork' THEN oa.image_url
+            WHEN 'artwork' THEN oa.image
             WHEN 'digital_art' THEN da.image_url
             WHEN 'copyright_item' THEN ri.image_url
           END as image_url,
@@ -3382,7 +3382,7 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
             WHEN 'copyright_item' THEN r.title
           END as title,
           CASE f.item_type
-            WHEN 'artwork' THEN oa.image_url
+            WHEN 'artwork' THEN oa.image
             WHEN 'digital_art' THEN da.image_url
             WHEN 'copyright_item' THEN ri.image_url
           END as image_url,
