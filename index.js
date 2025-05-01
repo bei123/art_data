@@ -3275,6 +3275,13 @@ const WX_CONFIG = {
   secret: 'bf47d45e6b0a96b1d1b73b186860c4cb'
 };
 
+// 获取微信用户openid
+async function getWxOpenId(code) {
+  const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${WX_CONFIG.appid}&secret=${WX_CONFIG.secret}&js_code=${code}&grant_type=authorization_code`;
+  const res = await axios.get(url);
+  return res.data;
+}
+
 // 添加收藏
 app.post('/api/favorites', async (req, res) => {
   const { itemId, itemType, code } = req.body;
@@ -3289,10 +3296,8 @@ app.post('/api/favorites', async (req, res) => {
   }
 
   try {
-    // 获取微信access_token
-    const access_token = await getAccessToken(WX_CONFIG.appid, WX_CONFIG.secret);
     // 获取用户openid
-    const { openid } = await getPhoneNumberFromWx(code, access_token);
+    const { openid } = await getWxOpenId(code);
     
     if (!openid) {
       return res.status(401).json({ error: '获取用户信息失败' });
@@ -3332,10 +3337,8 @@ app.delete('/api/favorites/:itemType/:itemId', async (req, res) => {
   }
 
   try {
-    // 获取微信access_token
-    const access_token = await getAccessToken(WX_CONFIG.appid, WX_CONFIG.secret);
     // 获取用户openid
-    const { openid } = await getPhoneNumberFromWx(code, access_token);
+    const { openid } = await getWxOpenId(code);
     
     if (!openid) {
       return res.status(401).json({ error: '获取用户信息失败' });
@@ -3371,10 +3374,8 @@ app.get('/api/favorites', async (req, res) => {
   }
 
   try {
-    // 获取微信access_token
-    const access_token = await getAccessToken(WX_CONFIG.appid, WX_CONFIG.secret);
     // 获取用户openid
-    const { openid } = await getPhoneNumberFromWx(code, access_token);
+    const { openid } = await getWxOpenId(code);
     
     if (!openid) {
       return res.status(401).json({ error: '获取用户信息失败' });
