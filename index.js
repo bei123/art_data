@@ -3269,41 +3269,10 @@ app.patch('/api/merchants/:id/sort', auth.authenticateToken, async (req, res) =>
   }
 });
 
-// 微信小程序配置
-const WX_CONFIG = {
-  appid: 'wx96a502c78c9156d0',
-  secret: 'bf47d45e6b0a96b1d1b73b186860c4cb'
-};
-
-// 获取微信用户openid
-async function getWxOpenId(code) {
-  try {
-    const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${WX_CONFIG.appid}&secret=${WX_CONFIG.secret}&js_code=${code}&grant_type=authorization_code`;
-    console.log('请求微信接口:', url);
-    const res = await axios.get(url);
-    console.log('微信接口返回:', res.data);
-    
-    if (res.data.errcode) {
-      console.error('微信接口错误:', res.data);
-      throw new Error(`微信接口错误: ${res.data.errmsg}`);
-    }
-    
-    if (!res.data.openid) {
-      console.error('未获取到openid:', res.data);
-      throw new Error('未获取到openid');
-    }
-    
-    return res.data;
-  } catch (err) {
-    console.error('获取openid失败:', err);
-    throw err;
-  }
-}
-
 // 添加收藏
-app.post('/api/favorites', async (req, res) => {
-  const { itemId, itemType, code } = req.body;
-  if (!itemId || !itemType || !code) {
+app.post('/api/favorites', auth.authenticateToken, async (req, res) => {
+  const { itemId, itemType } = req.body;
+  if (!itemId || !itemType) {
     return res.status(400).json({ error: '缺少必要参数' });
   }
 
@@ -3314,20 +3283,7 @@ app.post('/api/favorites', async (req, res) => {
   }
 
   try {
-    // 获取用户openid
-    const { openid } = await getWxOpenId(code);
-    
-    if (!openid) {
-      return res.status(401).json({ error: '获取用户信息失败' });
-    }
-
-    // 获取用户ID
-    const [user] = await db.query('SELECT id FROM wx_users WHERE openid = ?', [openid]);
-    if (!user) {
-      return res.status(401).json({ error: '用户不存在' });
-    }
-
-    const userId = user.id;
+    const userId = req.user.userId;
     // 检查是否已经收藏
     const checkSql = 'SELECT * FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
     const [existing] = await db.query(checkSql, [userId, itemId, itemType]);
@@ -3340,35 +3296,17 @@ app.post('/api/favorites', async (req, res) => {
     await db.query(sql, [userId, itemId, itemType]);
     res.json({ success: true });
   } catch (err) {
-    console.error('收藏失败:', err);
+    console.error('添加收藏失败:', err);
     res.status(500).json({ error: '服务器错误' });
   }
 });
 
 // 取消收藏
-app.delete('/api/favorites/:itemType/:itemId', async (req, res) => {
+app.delete('/api/favorites/:itemType/:itemId', auth.authenticateToken, async (req, res) => {
   const { itemId, itemType } = req.params;
-  const { code } = req.body;
-
-  if (!code) {
-    return res.status(400).json({ error: '缺少必要参数' });
-  }
+  const userId = req.user.userId;
 
   try {
-    // 获取用户openid
-    const { openid } = await getWxOpenId(code);
-    
-    if (!openid) {
-      return res.status(401).json({ error: '获取用户信息失败' });
-    }
-
-    // 获取用户ID
-    const [user] = await db.query('SELECT id FROM wx_users WHERE openid = ?', [openid]);
-    if (!user) {
-      return res.status(401).json({ error: '用户不存在' });
-    }
-
-    const userId = user.id;
     const sql = 'DELETE FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
     const result = await db.query(sql, [userId, itemId, itemType]);
     
@@ -3384,52 +3322,88 @@ app.delete('/api/favorites/:itemType/:itemId', async (req, res) => {
 });
 
 // 获取收藏列表
-app.get('/api/favorites', async (req, res) => {
-  try {
-    const { userId, itemType, page = 1, pageSize = 10 } = req.query;
-    
-    if (!userId) {
-      return res.status(400).json({ error: '缺少用户ID' });
-    }
+app.get('/api/favorites', auth.authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  const { page = 1, pageSize = 10, itemType } = req.query;
 
-    const offset = (parseInt(page) - 1) * parseInt(pageSize);
-    
-    let sql = `
-      SELECT f.*, 
-      CASE f.item_type
-        WHEN 'artwork' THEN oa.title
-        WHEN 'digital_art' THEN da.title
-        WHEN 'copyright_item' THEN ci.title
-      END as title,
-      CASE f.item_type
-        WHEN 'artwork' THEN oa.image
-        WHEN 'digital_art' THEN da.image_url
-        WHEN 'copyright_item' THEN ci.image_url
-      END as image_url,
-      f.created_at as favorite_time
-      FROM favorites f
-      LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
-      LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
-      LEFT JOIN copyright_items ci ON f.item_type = 'copyright_item' AND f.item_id = ci.id
-      WHERE f.user_id = ?
-    `;
-    
-    const params = [userId];
+  try {
+    const offset = (page - 1) * pageSize;
+    let sql = '';
+    let params = [];
     
     if (itemType) {
-      sql += ' AND f.item_type = ?';
-      params.push(itemType);
+      // 获取特定类型的收藏
+      sql = `
+        SELECT f.*, 
+          CASE f.item_type
+            WHEN 'artwork' THEN a.title
+            WHEN 'digital_art' THEN da.title
+            WHEN 'copyright_item' THEN ci.title
+          END as title,
+          CASE f.item_type
+            WHEN 'artwork' THEN a.image_url
+            WHEN 'digital_art' THEN da.image_url
+            WHEN 'copyright_item' THEN ci.image_url
+          END as image_url,
+          f.created_at as favorite_time
+        FROM favorites f
+        LEFT JOIN artworks a ON f.item_type = 'artwork' AND f.item_id = a.id
+        LEFT JOIN digital_arts da ON f.item_type = 'digital_art' AND f.item_id = da.id
+        LEFT JOIN copyright_items ci ON f.item_type = 'copyright_item' AND f.item_id = ci.id
+        WHERE f.user_id = ? AND f.item_type = ?
+        ORDER BY f.created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      params = [userId, itemType, parseInt(pageSize), offset];
+    } else {
+      // 获取所有类型的收藏
+      sql = `
+        SELECT f.*, 
+          CASE f.item_type
+            WHEN 'artwork' THEN a.title
+            WHEN 'digital_art' THEN da.title
+            WHEN 'copyright_item' THEN ci.title
+          END as title,
+          CASE f.item_type
+            WHEN 'artwork' THEN a.image_url
+            WHEN 'digital_art' THEN da.image_url
+            WHEN 'copyright_item' THEN ci.image_url
+          END as image_url,
+          f.created_at as favorite_time
+        FROM favorites f
+        LEFT JOIN artworks a ON f.item_type = 'artwork' AND f.item_id = a.id
+        LEFT JOIN digital_arts da ON f.item_type = 'digital_art' AND f.item_id = da.id
+        LEFT JOIN copyright_items ci ON f.item_type = 'copyright_item' AND f.item_id = ci.id
+        WHERE f.user_id = ?
+        ORDER BY f.created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      params = [userId, parseInt(pageSize), offset];
     }
-    
-    sql += ' ORDER BY f.created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(pageSize), offset);
     
     const [favorites] = await db.query(sql, params);
     
-    res.json(favorites);
-  } catch (error) {
-    console.error('获取收藏列表失败:', error);
-    res.status(500).json({ error: '获取收藏列表失败' });
+    // 获取总数
+    let countSql = 'SELECT COUNT(*) as total FROM favorites WHERE user_id = ?';
+    let countParams = [userId];
+    if (itemType) {
+      countSql += ' AND item_type = ?';
+      countParams.push(itemType);
+    }
+    const [countResult] = await db.query(countSql, countParams);
+    
+    res.json({
+      success: true,
+      data: favorites,
+      pagination: {
+        total: countResult[0].total,
+        page: parseInt(page),
+        pageSize: parseInt(pageSize)
+      }
+    });
+  } catch (err) {
+    console.error('获取收藏列表失败:', err);
+    res.status(500).json({ error: '服务器错误' });
   }
 });
 
