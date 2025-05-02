@@ -7,6 +7,11 @@ const fs = require('fs');
 const { authenticateToken } = require('../auth');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
+// 创建上传目录
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
+
 // 配置文件上传
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -212,7 +217,7 @@ router.post('/merchants/upload-images', upload.array('images', 10), async (req, 
 });
 
 // 创建商家接口
-router.post('/merchants', auth.authenticateToken, async (req, res) => {
+router.post('/merchants', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
     
@@ -271,7 +276,7 @@ router.post('/merchants', auth.authenticateToken, async (req, res) => {
 });
 
 // 更新商家接口
-router.put('/merchants/:id', auth.authenticateToken, async (req, res) => {
+router.put('/merchants/:id', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
     
@@ -331,7 +336,7 @@ router.put('/merchants/:id', auth.authenticateToken, async (req, res) => {
 });
 
 // 删除商家接口
-router.delete('/merchants/:id', auth.authenticateToken, async (req, res) => {
+router.delete('/merchants/:id', authenticateToken, async (req, res) => {
   try {
     // 开始事务
     const connection = await db.getConnection();
@@ -365,7 +370,7 @@ router.delete('/merchants/:id', auth.authenticateToken, async (req, res) => {
 });
 
 // 更新商家状态接口
-router.patch('/merchants/:id/status', auth.authenticateToken, async (req, res) => {
+router.patch('/merchants/:id/status', authenticateToken, async (req, res) => {
   try {
     const { status } = req.body;
     
@@ -395,7 +400,7 @@ router.patch('/merchants/:id/status', auth.authenticateToken, async (req, res) =
 });
 
 // 更新商家排序接口
-router.patch('/merchants/:id/sort', auth.authenticateToken, async (req, res) => {
+router.patch('/merchants/:id/sort', authenticateToken, async (req, res) => {
   try {
     const { sort_order } = req.body;
     
