@@ -856,7 +856,7 @@ app.use('/api/banners', bannersRouter);
 app.use('/api/artists', artistsRouter);
 
 // 使用艺术品路由
-app.use('/api/artworks', artworksRouter);
+app.use('/api/original-artworks', artworksRouter);
 
 // 使用数字艺术品路由
 app.use('/api/digital-artworks', digitalArtworksRouter);
