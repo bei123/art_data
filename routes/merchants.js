@@ -7,6 +7,40 @@ const fs = require('fs');
 const { authenticateToken } = require('../auth');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
+// 配置文件上传
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    // 获取文件扩展名
+    const ext = path.extname(file.originalname).toLowerCase();
+    // 生成文件名
+    cb(null, Date.now() + ext);
+  }
+});
+
+// 文件类型验证
+const fileFilter = (req, file, cb) => {
+  // 允许的文件类型
+  const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  
+  if (allowedTypes.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('不支持的文件类型'));
+  }
+};
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 限制文件大小为5MB
+  }
+});
+
 // 获取商家列表接口
 router.get('/merchants', async (req, res) => {
   try {
