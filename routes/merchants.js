@@ -47,7 +47,7 @@ const upload = multer({
 });
 
 // 获取商家列表接口
-router.get('/merchants', async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { 
       page = 1, 
@@ -132,7 +132,7 @@ router.get('/merchants', async (req, res) => {
 });
 
 // 获取商家详情接口
-router.get('/merchants/:id', async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     // 获取商家基本信息
     const [merchants] = await db.query(
@@ -178,7 +178,7 @@ router.get('/merchants/:id', async (req, res) => {
 });
 
 // 商家Logo上传接口
-router.post('/merchants/upload-logo', upload.single('file'), async (req, res) => {
+router.post('/upload-logo', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '没有上传文件' });
@@ -198,7 +198,7 @@ router.post('/merchants/upload-logo', upload.single('file'), async (req, res) =>
 });
 
 // 商家图片上传接口
-router.post('/merchants/upload-images', upload.array('images', 10), async (req, res) => {
+router.post('/upload-images', upload.array('images', 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: '没有上传文件' });
@@ -217,7 +217,7 @@ router.post('/merchants/upload-images', upload.array('images', 10), async (req, 
 });
 
 // 创建商家接口
-router.post('/merchants', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
     
@@ -276,7 +276,7 @@ router.post('/merchants', authenticateToken, async (req, res) => {
 });
 
 // 更新商家接口
-router.put('/merchants/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
     
@@ -336,7 +336,7 @@ router.put('/merchants/:id', authenticateToken, async (req, res) => {
 });
 
 // 删除商家接口
-router.delete('/merchants/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     // 开始事务
     const connection = await db.getConnection();
@@ -370,7 +370,7 @@ router.delete('/merchants/:id', authenticateToken, async (req, res) => {
 });
 
 // 更新商家状态接口
-router.patch('/merchants/:id/status', authenticateToken, async (req, res) => {
+router.patch('/:id/status', authenticateToken, async (req, res) => {
   try {
     const { status } = req.body;
     
@@ -400,7 +400,7 @@ router.patch('/merchants/:id/status', authenticateToken, async (req, res) => {
 });
 
 // 更新商家排序接口
-router.patch('/merchants/:id/sort', authenticateToken, async (req, res) => {
+router.patch('/:id/sort', authenticateToken, async (req, res) => {
   try {
     const { sort_order } = req.body;
     
