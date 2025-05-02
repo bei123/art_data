@@ -13,7 +13,7 @@ const WX_PAY_CONFIG = {
     mchId: '1360639602', // 商户号
     key: 'e0v3TF5sgZS82fk1ylb4oNqczZbKqeYk', // API密钥
     serialNo: '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
-    privateKey: fs.readFileSync(path.join(__dirname, 'apiclient_key.pem')), // 商户私钥
+    privateKey: fs.readFileSync(path.join(__dirname, '../apiclient_key.pem')), // 商户私钥
     notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
     spbillCreateIp: '127.0.0.1' // 终端IP
   };
