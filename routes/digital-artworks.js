@@ -4,7 +4,7 @@ const db = require('../db');
 const { authenticateToken } = require('../auth');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
-// 获取数字艺术品列表（公开接口）
+// 数字艺术品相关接口
 router.get('/', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM digital_artworks');
@@ -24,6 +24,23 @@ router.get('/', async (req, res) => {
     res.json(artworksWithFullUrls);
   } catch (error) {
     console.error('Error fetching digital artworks:', error);
+    res.status(500).json({ error: '获取数据失败' });
+  }
+});
+
+// 公共数字艺术品列表接口（无需认证）
+router.get('/public', async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM digital_artworks');
+    const artworksWithFullUrls = rows.map(artwork => ({
+      ...artwork,
+      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
+      copyright: artwork.copyright || '',
+      price: artwork.price || 0
+    }));
+    res.json(artworksWithFullUrls);
+  } catch (error) {
+    console.error('Error fetching digital artworks (public):', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
