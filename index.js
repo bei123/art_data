@@ -17,6 +17,7 @@ const favoritesRouter = require('./routes/favorites');
 const merchantsRouter = require('./routes/merchants');
 const cartRouter = require('./routes/cart');
 const bannersRouter = require('./routes/banners');
+const artistsRouter = require('./routes/artists');
 
 const app = express();
 const port = 2000;
@@ -140,104 +141,6 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   }
 });
 
-// 艺术家相关接口
-app.get('/api/artists', async (req, res) => {
-  try {
-    const [rows] = await db.query('SELECT * FROM artists');
-    console.log('Artists query result:', rows);
-    
-    if (!rows || !Array.isArray(rows)) {
-      console.log('Invalid artists data:', rows);
-      return res.json([]);
-    }
-    const artistsWithFullUrls = rows.map(artist => ({
-      ...artist,
-      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
-      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
-    }));
-    res.json(artistsWithFullUrls);
-  } catch (error) {
-    console.error('Error fetching artists:', error);
-    res.status(500).json({ error: '获取数据失败' });
-  }
-});
-
-app.post('/api/artists', async (req, res) => {
-  try {
-    const { avatar, name, description } = req.body;
-    const [result] = await db.query(
-      'INSERT INTO artists (avatar, name, description) VALUES (?, ?, ?)',
-      [avatar, name, description]
-    );
-    res.json({ id: result.insertId, ...req.body });
-  } catch (error) {
-    console.error('Error creating artist:', error);
-    res.status(500).json({ error: '创建失败' });
-  }
-});
-
-// 更新艺术家接口
-app.put('/api/artists/:id', async (req, res) => {
-  try {
-    const { name, era, avatar, banner, description, biography, journey } = req.body;
-    
-    // 验证图片URL
-    if (avatar && !validateImageUrl(avatar)) {
-      return res.status(400).json({ error: '无效的头像URL' });
-    }
-    if (banner && !validateImageUrl(banner)) {
-      return res.status(400).json({ error: '无效的背景图URL' });
-    }
-
-    // 更新艺术家信息
-    await db.query(
-      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ?, journey = ? WHERE id = ?',
-      [name, era, avatar, banner, description, biography, journey, req.params.id]
-    );
-
-    // 获取更新后的艺术家信息
-    const [artists] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
-    if (artists.length === 0) {
-      return res.status(404).json({ error: '艺术家不存在' });
-    }
-
-    const artist = artists[0];
-    // 处理图片URL
-    const artistWithFullUrls = {
-      ...artist,
-      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
-      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
-    };
-
-    res.json(artistWithFullUrls);
-  } catch (error) {
-    console.error('Error updating artist:', error);
-    res.status(500).json({ error: '更新失败' });
-  }
-});
-
-// 删除艺术家接口
-app.delete('/api/artists/:id', async (req, res) => {
-  const connection = await db.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // 先删除与艺术家相关的作品
-    await connection.query('DELETE FROM original_artworks WHERE artist_id = ?', [req.params.id]);
-    
-    // 然后删除艺术家
-    await connection.query('DELETE FROM artists WHERE id = ?', [req.params.id]);
-
-    await connection.commit();
-    res.json({ message: '删除成功' });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Error deleting artist:', error);
-    res.status(500).json({ error: '删除失败' });
-  } finally {
-    connection.release();
-  }
-});
 
 // 验证图片URL的函数
 function validateImageUrl(url) {
@@ -1210,6 +1113,9 @@ app.use('/api/cart', cartRouter);
 
 // 使用轮播图路由
 app.use('/api/banners', bannersRouter);
+
+// 使用艺术家路由
+app.use('/api/artists', artistsRouter);
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
