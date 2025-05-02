@@ -5,7 +5,7 @@ const { authenticateToken } = require('../auth');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 获取数字艺术品列表（公开接口）
-router.get('/', async (req, res) => {
+router.get('/public', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM digital_artworks');
     console.log('Digital artworks query result:', rows);
