@@ -7,20 +7,8 @@ const fs = require('fs');
 const { authenticateToken } = require('../auth');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
-// 配置文件上传
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage: storage });
-
-// 获取商家列表
-router.get('/', async (req, res) => {
+// 获取商家列表接口
+router.get('/merchants', async (req, res) => {
   try {
     const { 
       page = 1, 
@@ -104,8 +92,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 获取商家详情
-router.get('/:id', async (req, res) => {
+// 获取商家详情接口
+router.get('/merchants/:id', async (req, res) => {
   try {
     // 获取商家基本信息
     const [merchants] = await db.query(
@@ -150,8 +138,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// 商家Logo上传
-router.post('/upload-logo', authenticateToken, upload.single('file'), async (req, res) => {
+// 商家Logo上传接口
+router.post('/merchants/upload-logo', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '没有上传文件' });
@@ -170,8 +158,8 @@ router.post('/upload-logo', authenticateToken, upload.single('file'), async (req
   }
 });
 
-// 商家图片上传
-router.post('/upload-images', authenticateToken, upload.array('images', 10), async (req, res) => {
+// 商家图片上传接口
+router.post('/merchants/upload-images', upload.array('images', 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: '没有上传文件' });
@@ -189,8 +177,8 @@ router.post('/upload-images', authenticateToken, upload.array('images', 10), asy
   }
 });
 
-// 创建商家
-router.post('/', authenticateToken, async (req, res) => {
+// 创建商家接口
+router.post('/merchants', auth.authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
     
@@ -248,8 +236,8 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// 更新商家
-router.put('/:id', authenticateToken, async (req, res) => {
+// 更新商家接口
+router.put('/merchants/:id', auth.authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
     
@@ -308,8 +296,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 删除商家
-router.delete('/:id', authenticateToken, async (req, res) => {
+// 删除商家接口
+router.delete('/merchants/:id', auth.authenticateToken, async (req, res) => {
   try {
     // 开始事务
     const connection = await db.getConnection();
@@ -342,8 +330,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 更新商家状态
-router.patch('/:id/status', authenticateToken, async (req, res) => {
+// 更新商家状态接口
+router.patch('/merchants/:id/status', auth.authenticateToken, async (req, res) => {
   try {
     const { status } = req.body;
     
@@ -372,8 +360,8 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
-// 更新商家排序
-router.patch('/:id/sort', authenticateToken, async (req, res) => {
+// 更新商家排序接口
+router.patch('/merchants/:id/sort', auth.authenticateToken, async (req, res) => {
   try {
     const { sort_order } = req.body;
     
@@ -401,23 +389,5 @@ router.patch('/:id/sort', authenticateToken, async (req, res) => {
     });
   }
 });
-
-// 验证图片URL的函数
-function validateImageUrl(url) {
-  if (!url) return false;
-  
-  // 如果是相对路径，直接验证是否以 /uploads/ 开头
-  if (url.startsWith('/uploads/')) {
-    return true;
-  }
-  
-  // 如果是完整URL，解析并验证
-  try {
-    const urlObj = new URL(url);
-    return urlObj.pathname.startsWith('/uploads/');
-  } catch (e) {
-    return false;
-  }
-}
 
 module.exports = router; 
