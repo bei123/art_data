@@ -1063,7 +1063,6 @@ app.get('/api/auth/me', auth.authenticateToken, auth.getCurrentUser);
 app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
 
 // 保护需要认证的路由
-app.use('/api/artists', auth.authenticateToken);
 app.use('/api/original-artworks', auth.authenticateToken);
 app.use('/api/digital-artworks', auth.authenticateToken);
 app.use('/api/rights', auth.authenticateToken);
