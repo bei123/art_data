@@ -19,6 +19,7 @@ const cartRouter = require('./routes/cart');
 const bannersRouter = require('./routes/banners');
 const artistsRouter = require('./routes/artists');
 const artworksRouter = require('./routes/artworks');
+const digitalArtworksRouter = require('./routes/digital-artworks');
 
 const app = express();
 const port = 2000;
@@ -801,8 +802,8 @@ app.get('/api/auth/me', auth.authenticateToken, auth.getCurrentUser);
 app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
 
 // 保护需要认证的路由
-app.use('/api/original-artworks', auth.authenticateToken);
-app.use('/api/digital-artworks', auth.authenticateToken);
+// app.use('/api/original-artworks', auth.authenticateToken);
+// app.use('/api/digital-artworks', auth.authenticateToken);
 app.use('/api/rights', auth.authenticateToken);
 
 // 保护需要管理员权限的路由
@@ -856,6 +857,9 @@ app.use('/api/artists', artistsRouter);
 
 // 使用艺术品路由
 app.use('/api/artworks', artworksRouter);
+
+// 使用数字艺术品路由
+app.use('/api/digital-artworks', digitalArtworksRouter);
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
