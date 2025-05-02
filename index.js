@@ -20,6 +20,7 @@ const bannersRouter = require('./routes/banners');
 const artistsRouter = require('./routes/artists');
 const artworksRouter = require('./routes/artworks');
 const digitalArtworksRouter = require('./routes/digital-artworks');
+const physicalCategoriesRouter = require('./routes/physical-categories');
 
 const app = express();
 const port = 2000;
@@ -209,101 +210,7 @@ app.delete('/api/physical-categories/:id', async (req, res) => {
   }
 });
 
-// 获取作品详情
-app.get('/api/artworks/:id', async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT 
-        oa.*,
-        a.name as artist_name,
-        a.avatar as artist_avatar,
-        a.description as artist_description
-      FROM original_artworks oa
-      LEFT JOIN artists a ON oa.artist_id = a.id
-      WHERE oa.id = ?
-    `, [req.params.id]);
 
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ error: '作品不存在' });
-    }
-
-    const artwork = rows[0];
-    // 处理图片URL
-    artwork.image = artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : '';
-    artwork.artist_avatar = artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : '';
-
-    const collection = {
-      location: artwork.collection_location,
-      number: artwork.collection_number,
-      size: artwork.collection_size,
-      material: artwork.collection_material
-    };
-
-    const artist = {
-      name: artwork.artist_name,
-      avatar: artwork.artist_avatar,
-      description: artwork.artist_description
-    };
-
-    res.json({
-      title: artwork.title,
-      year: artwork.year,
-      image: artwork.image,
-      description: artwork.description,
-      background: artwork.background,
-      features: artwork.features,
-      collection: collection,
-      artist: artist
-    });
-  } catch (error) {
-    console.error('获取作品详情失败:', error);
-    res.status(500).json({ error: '获取作品详情失败' });
-  }
-});
-
-// 获取艺术家详情
-app.get('/api/artists/:id', async (req, res) => {
-  try {
-    const [rows] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
-    
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ error: '艺术家不存在' });
-    }
-
-    const artist = rows[0];
-
-    const [achievementRows] = await db.query(
-      'SELECT * FROM artist_achievements WHERE artist_id = ?',
-      [req.params.id]
-    );
-
-    const [artworkRows] = await db.query(
-      'SELECT id, title, image FROM original_artworks WHERE artist_id = ?',
-      [req.params.id]
-    );
-
-    // 处理图片URL
-    const processedArtworks = artworkRows.map(artwork => ({
-      ...artwork,
-      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : ''
-    }));
-
-    res.json({
-      name: artist.name,
-      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
-      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : '',
-      era: artist.era,
-      description: artist.description,
-      biography: artist.biography,
-      journey: artist.journey,
-      artworks: processedArtworks,
-      achievements: achievementRows
-    });
-  } catch (error) {
-    console.error('获取艺术家详情失败:', error);
-    res.status(500).json({ error: '获取艺术家详情失败' });
-  }
-});
 
 // 获取版权实物列表
 app.get('/api/rights', async (req, res) => {
@@ -606,22 +513,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// 公共数字艺术品列表接口（无需认证）
-app.get('/api/digital-artworks/public', async (req, res) => {
-    try {
-      const [rows] = await db.query('SELECT * FROM digital_artworks');
-      const artworksWithFullUrls = rows.map(artwork => ({
-        ...artwork,
-        image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
-        copyright: artwork.copyright || '',
-        price: artwork.price || 0
-      }));
-      res.json(artworksWithFullUrls);
-    } catch (error) {
-      console.error('Error fetching digital artworks (public):', error);
-      res.status(500).json({ error: '获取数据失败' });
-    }
-  });
+
   
 
 // 认证相关路由
@@ -699,6 +591,9 @@ app.use('/api/original-artworks', artworksRouter);
 
 // 使用数字艺术品路由
 app.use('/api/digital-artworks', digitalArtworksRouter);
+
+// 使用实物分类路由
+app.use('/api/physical-categories', physicalCategoriesRouter);
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
