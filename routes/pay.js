@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../db');
 const jwt = require('jsonwebtoken');
+const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
