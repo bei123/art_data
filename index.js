@@ -12,7 +12,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const xml2js = require('xml2js');
 const wxRouter = require('./routes/wx');
-const paymentRouter = require('./routes/payment');
+const wxpayRouter = require('./routes/wxpay');
 
 const app = express();
 const port = 2000;
@@ -2173,8 +2173,8 @@ app.get('/api/favorites', authenticateToken, async (req, res) => {
 // 使用微信路由
 app.use('/api/wx', wxRouter);
 
-// 使用支付路由
-app.use('/api/wx/pay', paymentRouter);
+// 使用微信支付路由
+app.use('/api/wxpay', wxpayRouter);
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
