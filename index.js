@@ -28,7 +28,7 @@ const port = 2000;
 
 // CORS 配置
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     const allowedOrigins = [
       'http://localhost:5173',
       'https://wx.ht.2000gallery.art',
@@ -36,7 +36,7 @@ app.use(cors({
       'https://www.wx.ht.2000gallery.art',
       'http://www.wx.ht.2000gallery.art'
     ];
-    
+
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, origin);
     } else {
@@ -100,7 +100,7 @@ const fileFilter = (req, file, cb) => {
   // 允许的文件类型
   const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
-  
+
   if (allowedTypes.includes(ext)) {
     cb(null, true);
   } else {
@@ -108,7 +108,7 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
@@ -133,7 +133,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     }
     const fileUrl = `/uploads/${req.file.filename}`;
     const fullUrl = `${BASE_URL}${fileUrl}`;
-    res.json({ 
+    res.json({
       url: fileUrl,
       fullUrl: fullUrl,
       filename: req.file.filename,
@@ -156,7 +156,7 @@ app.get('/api/search', async (req, res) => {
     }
 
     const searchTerm = `%${keyword}%`;
-    
+
     // 搜索艺术家
     const [artistRows] = await db.query(
       `SELECT id, name, avatar, description, 'artist' as type 
@@ -205,11 +205,13 @@ app.get('/api/search', async (req, res) => {
 });
 
 // 认证相关路由
-app.post('/api/auth/register', [
-  body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
-  body('email').isEmail().withMessage('请输入有效的邮箱地址'),
-  body('password').isLength({ min: 6 }).withMessage('密码至少6个字符')
-], auth.register);
+app.post('/api/auth/register',
+
+  [
+    body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
+    body('email').isEmail().withMessage('请输入有效的邮箱地址'),
+    body('password').isLength({ min: 6 }).withMessage('密码至少6个字符')
+  ], auth.register);
 
 app.post('/api/auth/login', [
   body('username').notEmpty().withMessage('请输入用户名'),
@@ -223,7 +225,7 @@ app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
 // 保护需要认证的路由
 // app.use('/api/original-artworks', auth.authenticateToken);
 // app.use('/api/digital-artworks', auth.authenticateToken);
-app.use('/api/rights', auth.authenticateToken);
+// app.use('/api/rights',);
 
 // 保护需要管理员权限的路由
 app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
@@ -286,5 +288,5 @@ app.use('/api/rights', rightsRouter);
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS服务器运行在端口 ${PORT}`);
-}); 
+});
 
