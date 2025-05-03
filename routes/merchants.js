@@ -7,6 +7,30 @@ const fs = require('fs');
 const { authenticateToken } = require('../auth');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
+// 验证图片URL的函数
+const validateImageUrl = (url) => {
+  if (!url) return false;
+  
+  // 检查URL是否以http或https开头
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return false;
+  }
+  
+  // 检查URL是否包含uploads目录
+  if (!url.includes('/uploads/')) {
+    return false;
+  }
+  
+  // 检查文件扩展名
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const ext = path.extname(url).toLowerCase();
+  if (!allowedExtensions.includes(ext)) {
+    return false;
+  }
+  
+  return true;
+};
+
 // 创建上传目录
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
