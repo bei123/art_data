@@ -11,13 +11,8 @@ const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 const validateImageUrl = (url) => {
   if (!url) return false;
   
-  // 检查URL是否以http或https开头
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    return false;
-  }
-  
-  // 检查URL是否包含uploads目录
-  if (!url.includes('/uploads/')) {
+  // 检查URL是否以http或https开头，或者是相对路径
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('/uploads/')) {
     return false;
   }
   
