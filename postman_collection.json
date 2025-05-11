@@ -1,0 +1,227 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-7890",
+		"name": "文创动力 API 测试",
+		"description": "包含获取 token、实名注册（个人/企业）和用户资产列表接口的测试集合",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "获取 Token",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/test-token",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"test-token"
+					]
+				},
+				"description": "获取访问令牌的接口"
+			},
+			"response": []
+		},
+		{
+			"name": "实名注册-个人",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"mobile\": \"13800138000\",\n    \"name\": \"张三\",\n    \"idCardNo\": \"110101199001011234\",\n    \"passCard\": {\n        \"From_IP\": \"127.0.0.1\",\n        \"From_Device\": \"PC\",\n        \"From_MAC\": \"\",\n        \"From_OS\": \"Windows\",\n        \"From_ID\": \"13800138000\",\n        \"Invite_code\": \"\",\n        \"Timestamp\": \"{{$timestamp}}\"\n    },\n    \"type\": \"1\",\n    \"password\": \"your_password\",\n    \"sex\": \"男\",\n    \"ethnic\": \"汉族\",\n    \"birthDate\": \"1990-01-01\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:3000/test-registration",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"test-registration"
+					]
+				},
+				"description": "用户实名注册接口-个人"
+			},
+			"response": []
+		},
+		{
+			"name": "实名注册-企业",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"mobile\": \"13800138001\",\n    \"name\": \"北京某某科技有限公司\",\n    \"idCardNo\": \"91110108MA01XXXXXX\",\n    \"passCard\": {\n        \"From_IP\": \"127.0.0.1\",\n        \"From_Device\": \"PC\",\n        \"From_MAC\": \"\",\n        \"From_OS\": \"Windows\",\n        \"From_ID\": \"13800138001\",\n        \"Invite_code\": \"\",\n        \"Timestamp\": \"{{$timestamp}}\"\n    },\n    \"type\": \"100\",\n    \"password\": \"your_password\",\n    \"legalRepresentative\": \"李四\",\n    \"enterpriseType\": \"有限责任公司\",\n    \"establishmentDate\": \"2015-05-20\",\n    \"registeredCapital\": \"1000万\",\n    \"businessScope\": \"技术开发、技术服务、技术咨询\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:3000/test-registration",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"test-registration"
+					]
+				},
+				"description": "用户实名注册接口-企业"
+			},
+			"response": []
+		},
+		{
+			"name": "用户资产列表",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/assets/list/count?usn={{user_usn}}&rightsType=1&currentPage=1&pageSize=20",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"assets",
+						"list",
+						"count"
+					],
+					"query": [
+						{
+							"key": "usn",
+							"value": "{{user_usn}}"
+						},
+						{
+							"key": "rightsType",
+							"value": "1"
+						},
+						{
+							"key": "currentPage",
+							"value": "1"
+						},
+						{
+							"key": "pageSize",
+							"value": "20"
+						}
+					]
+				},
+				"description": "获取用户资产列表接口"
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// 获取 token 接口的测试脚本",
+					"if (pm.info.requestName === \"获取 Token\") {",
+					"    pm.test(\"状态码是 200\", function () {",
+					"        pm.response.to.have.status(200);",
+					"    });",
+					"",
+					"    pm.test(\"响应包含 access_token\", function () {",
+					"        var jsonData = pm.response.json();",
+					"        pm.expect(jsonData).to.have.property('access_token');",
+					"        pm.environment.set(\"access_token\", jsonData.access_token);",
+					"    });",
+					"}",
+					"",
+					"// 实名注册接口的测试脚本",
+					"if (pm.info.requestName.startsWith(\"实名注册\")) {",
+					"    pm.test(\"状态码是 200\", function () {",
+					"        pm.response.to.have.status(200);",
+					"    });",
+					"",
+					"    pm.test(\"响应格式正确\", function () {",
+					"        var jsonData = pm.response.json();",
+					"        pm.expect(jsonData).to.have.property('code');",
+					"        pm.expect(jsonData).to.have.property('status');",
+					"        pm.expect(jsonData).to.have.property('message');",
+					"    });",
+					"}",
+					"",
+					"// 用户资产列表接口的测试脚本",
+					"if (pm.info.requestName === \"用户资产列表\") {",
+					"    pm.test(\"状态码是 200\", function () {",
+					"        pm.response.to.have.status(200);",
+					"    });",
+					"",
+					"    pm.test(\"响应格式正确\", function () {",
+					"        var jsonData = pm.response.json();",
+					"        pm.expect(jsonData).to.have.property('code');",
+					"        pm.expect(jsonData).to.have.property('status');",
+					"        pm.expect(jsonData).to.have.property('message');",
+					"        pm.expect(jsonData).to.have.property('data');",
+					"        ",
+					"        if (jsonData.data) {",
+					"            pm.expect(jsonData.data).to.have.property('list');",
+					"            pm.expect(jsonData.data).to.have.property('page');",
+					"            ",
+					"            if (jsonData.data.page) {",
+					"                pm.expect(jsonData.data.page).to.have.property('totalRows');",
+					"                pm.expect(jsonData.data.page).to.have.property('currentPage');",
+					"                pm.expect(jsonData.data.page).to.have.property('pageSize');",
+					"            }",
+					"        }",
+					"    });",
+					"}"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_usn",
+			"value": "",
+			"type": "string"
+		}
+	]
+} 

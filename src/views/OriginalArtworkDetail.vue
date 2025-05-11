@@ -154,6 +154,17 @@ const router = useRouter()
 const loading = ref(false)
 const artists = ref([])
 
+// 检查登录状态
+const checkLoginStatus = () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录')
+    router.push('/login')
+    return false
+  }
+  return true
+}
+
 const form = ref({
   title: '',
   year: new Date().getFullYear(),
@@ -179,18 +190,29 @@ const form = ref({
 })
 
 const fetchArtists = async () => {
+  if (!checkLoginStatus()) return
   try {
-    const response = await axios.get('/api/artists')
+    const response = await axios.get('/artists')
     artists.value = response.data
   } catch (error) {
-    ElMessage.error('获取艺术家列表失败')
+    if (error.response) {
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
+      } else {
+        ElMessage.error('获取艺术家列表失败')
+      }
+    } else {
+      ElMessage.error('获取艺术家列表失败')
+    }
   }
 }
 
 const fetchArtworkDetail = async () => {
+  if (!checkLoginStatus()) return
   loading.value = true
   try {
-    const response = await axios.get(`/api/original-artworks/${route.params.id}`)
+    const response = await axios.get(`/original-artworks/${route.params.id}`)
     const data = response.data
     form.value = {
       ...data,
@@ -206,7 +228,19 @@ const fetchArtworkDetail = async () => {
       is_on_sale: data.is_on_sale
     }
   } catch (error) {
-    ElMessage.error('获取作品详情失败')
+    if (error.response) {
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
+      } else if (error.response.status === 404) {
+        ElMessage.error('作品不存在')
+        router.push('/original-artworks')
+      } else {
+        ElMessage.error('获取作品详情失败')
+      }
+    } else {
+      ElMessage.error('获取作品详情失败')
+    }
   } finally {
     loading.value = false
   }
@@ -217,11 +251,22 @@ const handleImageSuccess = (response) => {
 }
 
 const handleEdit = async () => {
+  if (!checkLoginStatus()) return
   try {
-    await axios.put(`/api/original-artworks/${route.params.id}`, form.value)
+    await axios.put(`/original-artworks/${route.params.id}`, form.value)
     ElMessage.success('更新成功')
+    router.push('/original-artworks')
   } catch (error) {
-    ElMessage.error('更新失败')
+    if (error.response) {
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
+      } else {
+        ElMessage.error(error.response.data.message || '更新失败')
+      }
+    } else {
+      ElMessage.error('更新失败')
+    }
   }
 }
 
@@ -230,8 +275,7 @@ const goBack = () => {
 }
 
 onMounted(() => {
-  fetchArtists()
-  fetchArtworkDetail()
+  checkLoginStatus() && Promise.all([fetchArtists(), fetchArtworkDetail()])
 })
 </script>
 

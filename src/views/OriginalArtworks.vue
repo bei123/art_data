@@ -167,8 +167,10 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import axios from 'axios'
+import axios from '../utils/axios'  // 使用封装的axios实例
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const baseUrl = 'https://api.wx.2000gallery.art:2000'
 const artworks = ref([])
 const dialogVisible = ref(false)
@@ -201,41 +203,75 @@ const rules = {
   ]
 }
 
-// 配置 axios 默认值
-axios.defaults.baseURL = baseUrl
-axios.defaults.headers.common['Content-Type'] = 'application/json'
-axios.defaults.withCredentials = true // 允许跨域请求携带凭证
+// 检查登录状态
+const checkLoginStatus = () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录')
+    router.push('/login')
+    return false
+  }
+  return true
+}
 
 // 获取艺术品列表
 const fetchArtworks = async () => {
+  if (!checkLoginStatus()) return
+  
   loading.value = true
   try {
-    console.log('Fetching artworks from:', `${baseUrl}/api/original-artworks`)
-    const response = await axios.get('/api/original-artworks')
-    console.log('API Response:', response.data)
-    
-    if (!Array.isArray(response.data)) {
-      console.error('Invalid response format:', response.data)
-      throw new Error('Invalid response format')
+    console.log('Fetching artworks from:', `${baseUrl}/original-artworks`)
+    const response = await axios.get('/original-artworks')
+    console.log('API Response:', response)
+    console.log('typeof response:', typeof response)
+    console.log('Array.isArray(response):', Array.isArray(response))
+    console.log('response:', response)
+
+    let data = response
+    if (Array.isArray(data)) {
+      // 直接是数组
+    } else if (data && Array.isArray(data.data)) {
+      // 被包裹在 data 字段下
+      data = data.data
+    } else {
+      console.error('Invalid response:', response)
+      throw new Error('无效的响应数据')
     }
 
-    artworks.value = response.data.map(item => {
-      console.log('Processing item:', item)
-      return {
+    // 处理数据
+    artworks.value = data.map(item => {
+      // 确保数值类型正确
+      const artwork = {
         ...item,
         original_price: Number(item.original_price) || 0,
         discount_price: Number(item.discount_price) || 0,
-        price: Number(item.price) || 0,
         stock: Number(item.stock) || 0,
         sales: Number(item.sales) || 0,
-        is_on_sale: Number(item.is_on_sale)
+        is_on_sale: Number(item.is_on_sale) || 0,
+        year: Number(item.year) || new Date().getFullYear()
       }
+
+      // 处理图片URL
+      if (artwork.image && !artwork.image.startsWith('http')) {
+        artwork.image = `${baseUrl}${artwork.image}`
+      }
+
+      // 处理艺术家头像
+      if (artwork.artist && artwork.artist.avatar && !artwork.artist.avatar.startsWith('http')) {
+        artwork.artist.avatar = `${baseUrl}${artwork.artist.avatar}`
+      }
+
+      return artwork
     })
   } catch (error) {
     console.error('Error fetching artworks:', error)
     if (error.response) {
-      console.error('Error response:', error.response.data)
-      ElMessage.error(`获取艺术品列表失败: ${error.response.data.message || '服务器错误'}`)
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
+      } else {
+        ElMessage.error(`获取艺术品列表失败: ${error.response.data.message || '服务器错误'}`)
+      }
     } else if (error.request) {
       console.error('No response received:', error.request)
       ElMessage.error('无法连接到服务器，请检查网络连接')
@@ -250,6 +286,7 @@ const fetchArtworks = async () => {
 
 // 显示添加对话框
 const showAddDialog = () => {
+  if (!checkLoginStatus()) return
   dialogType.value = 'add'
   form.value = {
     title: '',
@@ -267,6 +304,7 @@ const showAddDialog = () => {
 
 // 编辑艺术品
 const editArtwork = (row) => {
+  if (!checkLoginStatus()) return
   console.log('Editing artwork:', row)
   dialogType.value = 'edit'
   form.value = {
@@ -282,12 +320,13 @@ const editArtwork = (row) => {
 
 // 删除艺术品
 const deleteArtwork = async (row) => {
+  if (!checkLoginStatus()) return
   try {
     await ElMessageBox.confirm('确定要删除这个艺术品吗？', '提示', {
       type: 'warning'
     })
     console.log('Deleting artwork:', row.id)
-    const response = await axios.delete(`/api/original-artworks/${row.id}`)
+    const response = await axios.delete(`/original-artworks/${row.id}`)
     console.log('Delete response:', response.data)
     ElMessage.success('删除成功')
     fetchArtworks()
@@ -295,8 +334,12 @@ const deleteArtwork = async (row) => {
     if (error !== 'cancel') {
       console.error('Delete error:', error)
       if (error.response) {
-        console.error('Error response:', error.response.data)
-        ElMessage.error(error.response.data.message || '删除失败')
+        if (error.response.status === 401) {
+          ElMessage.error('登录已过期，请重新登录')
+          router.push('/login')
+        } else {
+          ElMessage.error(error.response.data.message || '删除失败')
+        }
       } else {
         ElMessage.error('删除失败')
       }
@@ -306,6 +349,7 @@ const deleteArtwork = async (row) => {
 
 // 提交表单
 const submitForm = async () => {
+  if (!checkLoginStatus()) return
   if (!formRef.value) return
   
   try {
@@ -323,12 +367,12 @@ const submitForm = async () => {
 
     if (dialogType.value === 'add') {
       console.log('Adding new artwork...')
-      const response = await axios.post('/api/original-artworks', submitData)
+      const response = await axios.post('/original-artworks', submitData)
       console.log('Add response:', response.data)
       ElMessage.success('添加成功')
     } else {
       console.log('Updating artwork:', form.value.id)
-      const response = await axios.put(`/api/original-artworks/${form.value.id}`, submitData)
+      const response = await axios.put(`/original-artworks/${form.value.id}`, submitData)
       console.log('Update response:', response.data)
       ElMessage.success('更新成功')
     }
@@ -337,8 +381,12 @@ const submitForm = async () => {
   } catch (error) {
     console.error('Submit error:', error)
     if (error.response) {
-      console.error('Error response:', error.response.data)
-      ElMessage.error(error.response.data.message || '操作失败')
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
+      } else {
+        ElMessage.error(error.response.data.message || '操作失败')
+      }
     } else {
       ElMessage.error('表单验证失败，请检查输入')
     }
@@ -366,7 +414,7 @@ const beforeUpload = (file) => {
 }
 
 onMounted(() => {
-  fetchArtworks()
+  checkLoginStatus() && fetchArtworks()
 })
 </script>
 
