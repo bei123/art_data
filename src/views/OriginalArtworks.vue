@@ -400,14 +400,14 @@ const handleUploadSuccess = (response) => {
 
 const beforeUpload = (file) => {
   const isImage = file.type.startsWith('image/')
-  const isLt5M = file.size / 1024 / 1024 < 5
+  const isLt5M = file.size / 1024 / 1024 < 500
 
   if (!isImage) {
     ElMessage.error('只能上传图片文件！')
     return false
   }
   if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB！')
+    ElMessage.error('图片大小不能超过 500MB！')
     return false
   }
   return true
