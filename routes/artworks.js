@@ -92,7 +92,13 @@ router.get('/:id', async (req, res) => {
       background: artwork.background,
       features: artwork.features,
       collection: collection,
-      artist: artist
+      artist: artist,
+      price: artwork.price,
+      stock: artwork.stock,
+      discount_price: artwork.discount_price,
+      original_price: artwork.original_price,
+      sales: artwork.sales,
+      is_on_sale: artwork.is_on_sale
     });
   } catch (error) {
     console.error('获取作品详情失败:', error);
