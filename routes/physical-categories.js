@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
+const { processObjectImages } = require('../utils/image');
 
 // 验证图片URL的函数
 function validateImageUrl(url) {
@@ -28,13 +29,12 @@ router.get('/', async (req, res) => {
       return res.json([]);
     }
     
-    // 为每个分类的图片添加完整URL
-    const categoriesWithFullUrls = rows.map(category => ({
-      ...category,
-      image: category.image || '',
-      icon: category.icon || ''
-    }));
-    res.json(categoriesWithFullUrls);
+    // 处理图片URL，添加WebP转换
+    const categoriesWithProcessedImages = rows.map(category => 
+      processObjectImages(category, ['image', 'icon'])
+    );
+    
+    res.json(categoriesWithProcessedImages);
   } catch (error) {
     console.error('Error fetching physical categories:', error);
     res.status(500).json({ error: '获取数据失败' });
@@ -49,7 +49,14 @@ router.post('/', authenticateToken, async (req, res) => {
       'INSERT INTO physical_categories (title, image, icon, count, description) VALUES (?, ?, ?, ?, ?)',
       [title, image, icon, count, description]
     );
-    res.json({ id: result.insertId, ...req.body });
+    
+    // 处理返回的图片URL，添加WebP转换
+    const newCategory = processObjectImages({
+      id: result.insertId,
+      ...req.body
+    }, ['image', 'icon']);
+    
+    res.json(newCategory);
   } catch (error) {
     console.error('Error creating physical category:', error);
     res.status(500).json({ error: '创建失败' });
@@ -64,7 +71,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
       'UPDATE physical_categories SET title = ?, image = ?, icon = ?, count = ?, description = ? WHERE id = ?',
       [title, image, icon, count, description, req.params.id]
     );
-    res.json({ id: req.params.id, ...req.body });
+    
+    // 处理返回的图片URL，添加WebP转换
+    const updatedCategory = processObjectImages({
+      id: req.params.id,
+      ...req.body
+    }, ['image', 'icon']);
+    
+    res.json(updatedCategory);
   } catch (error) {
     console.error('Error updating physical category:', error);
     res.status(500).json({ error: '更新失败' });

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
+const { processObjectImages } = require('../utils/image');
 
 // 验证图片URL的函数
 function validateImageUrl(url) {
@@ -16,6 +17,90 @@ function validateImageUrl(url) {
     return false;
   }
 }
+
+// 获取数字艺术品列表（公开接口）
+router.get('/', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        da.*,
+        a.id as artist_id,
+        a.name as artist_name,
+        a.avatar as artist_avatar
+      FROM digital_artworks da 
+      LEFT JOIN artists a ON da.artist_id = a.id
+      ORDER BY da.created_at DESC
+    `);
+    
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
+    
+    const artworksWithProcessedImages = rows.map(artwork => {
+      const processedArtwork = processObjectImages(artwork, ['image_url', 'avatar']);
+      return {
+        ...processedArtwork,
+        artist: {
+          id: artwork.artist_id,
+          name: artwork.artist_name,
+          avatar: processedArtwork.artist_avatar || ''
+        }
+      };
+    });
+    
+    res.json(artworksWithProcessedImages);
+  } catch (error) {
+    console.error('获取数字艺术品列表失败:', error);
+    res.status(500).json({ error: '获取数字艺术品列表失败' });
+  }
+});
+
+// 获取数字艺术品详情（公开接口）
+router.get('/:id', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        da.*,
+        a.name as artist_name,
+        a.avatar as artist_avatar,
+        a.description as artist_description
+      FROM digital_artworks da
+      LEFT JOIN artists a ON da.artist_id = a.id
+      WHERE da.id = ?
+    `, [req.params.id]);
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: '作品不存在' });
+    }
+
+    const artwork = processObjectImages(rows[0], ['image_url', 'avatar']);
+
+    const artist = {
+      name: artwork.artist_name,
+      avatar: artwork.artist_avatar,
+      description: artwork.artist_description
+    };
+
+    res.json({
+      title: artwork.title,
+      image_url: artwork.image_url,
+      description: artwork.description,
+      price: artwork.price,
+      stock: artwork.stock,
+      discount_price: artwork.discount_price,
+      original_price: artwork.original_price,
+      sales: artwork.sales,
+      is_on_sale: artwork.is_on_sale,
+      contract_address: artwork.contract_address,
+      token_id: artwork.token_id,
+      blockchain: artwork.blockchain,
+      artist: artist
+    });
+  } catch (error) {
+    console.error('获取数字艺术品详情失败:', error);
+    res.status(500).json({ error: '获取数字艺术品详情失败' });
+  }
+});
 
 // 数字艺术品相关接口
 router.get('/', async (req, res) => {

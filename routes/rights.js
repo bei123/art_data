@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
+const { processObjectImages } = require('../utils/image');
 
 // 获取版权实物列表（需要认证）
 router.get('/', async (req, res) => {
@@ -172,64 +173,36 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 // 获取版权实物详情（公开接口）
-router.get('/public/:id', async (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
-        const [right] = await db.query('SELECT * FROM rights WHERE id = ?', [req.params.id]);
+        const [rows] = await db.query(`
+      SELECT 
+        r.*,
+        c.name as category_name
+      FROM rights r
+      LEFT JOIN categories c ON r.category_id = c.id
+      WHERE r.id = ?
+    `, [req.params.id]);
 
-        if (!right || right.length === 0) {
+        if (!rows || rows.length === 0) {
             return res.status(404).json({ error: '版权实物不存在' });
         }
 
+        const right = processObjectImages(rows[0], ['image']);
+        
+        // 获取版权实物的图片
         const [images] = await db.query(
             'SELECT image_url FROM right_images WHERE right_id = ?',
-            [req.params.id]
-        );
-
-        const [details] = await db.query(
-            'SELECT title, content FROM right_details WHERE right_id = ?',
-            [req.params.id]
-        );
-
-        const [rules] = await db.query(
-            'SELECT title, content FROM right_rules WHERE right_id = ?',
-            [req.params.id]
-        );
-
-        // 获取分类信息
-        const [category] = await db.query(
-            'SELECT * FROM physical_categories WHERE id = ?',
-            [right[0].category_id]
+            [right.id]
         );
 
         res.json({
-            id: right[0].id,
-            title: right[0].title,
-            price: right[0].price,
-            originalPrice: right[0].original_price,
-            description: right[0].description,
-            status: right[0].status,
-            period: right[0].period,
-            remainingCount: right[0].remaining_count,
-            totalCount: right[0].total_count,
+            ...right,
+            images: images.map(img => processObjectImages(img, ['image_url']).image_url),
             category: {
-                id: category[0]?.id || null,
-                title: category[0]?.title || '',
-                image: category[0]?.image || '',
-                icon: category[0]?.icon || '',
-                count: category[0]?.count || 0,
-                description: category[0]?.description || ''
-            },
-            images: images.map(img => img.image_url || ''),
-            details: details.map(detail => ({
-                title: detail.title,
-                content: detail.content
-            })),
-            rules: rules.map(rule => ({
-                title: rule.title,
-                content: rule.content
-            })),
-            createdAt: right[0].created_at,
-            updatedAt: right[0].updated_at
+                id: right.category_id,
+                name: right.category_name
+            }
         });
     } catch (error) {
         console.error('获取版权实物详情失败:', error);

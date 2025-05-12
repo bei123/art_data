@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
+const { processObjectImages } = require('../utils/image');
 
 function validateImageUrl(url) {
   if (!url) return false;
@@ -23,13 +24,12 @@ router.get('/', async (req, res) => {
       'SELECT * FROM banners WHERE status = "active" ORDER BY sort_order ASC'
     );
     
-    // 处理图片URL
-    const bannersWithFullUrls = banners.map(banner => ({
-      ...banner,
-      image_url: banner.image_url || ''
-    }));
+    // 处理图片URL，添加WebP转换
+    const bannersWithProcessedImages = banners.map(banner => 
+      processObjectImages(banner, ['image_url'])
+    );
     
-    res.json(bannersWithFullUrls);
+    res.json(bannersWithProcessedImages);
   } catch (error) {
     console.error('获取轮播图列表失败:', error);
     res.status(500).json({ error: '获取轮播图列表失败' });
@@ -42,12 +42,13 @@ router.get('/all', authenticateToken, async (req, res) => {
     const [banners] = await db.query(
       'SELECT * FROM banners ORDER BY sort_order ASC'
     );
-    // 处理图片URL
-    const bannersWithFullUrls = banners.map(banner => ({
-      ...banner,
-      image_url: banner.image_url || ''
-    }));
-    res.json(bannersWithFullUrls);
+    
+    // 处理图片URL，添加WebP转换
+    const bannersWithProcessedImages = banners.map(banner => 
+      processObjectImages(banner, ['image_url'])
+    );
+    
+    res.json(bannersWithProcessedImages);
   } catch (error) {
     console.error('获取所有轮播图失败:', error);
     res.status(500).json({ error: '获取所有轮播图失败' });
@@ -72,7 +73,9 @@ router.post('/', authenticateToken, async (req, res) => {
     );
 
     const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [result.insertId]);
-    res.json(banner[0]);
+    // 处理返回的图片URL，添加WebP转换
+    const processedBanner = processObjectImages(banner[0], ['image_url']);
+    res.json(processedBanner);
   } catch (error) {
     console.error('添加轮播图失败:', error);
     res.status(500).json({ error: '添加轮播图失败' });
@@ -97,7 +100,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     );
 
     const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [req.params.id]);
-    res.json(banner[0]);
+    // 处理返回的图片URL，添加WebP转换
+    const processedBanner = processObjectImages(banner[0], ['image_url']);
+    res.json(processedBanner);
   } catch (error) {
     console.error('更新轮播图失败:', error);
     res.status(500).json({ error: '更新轮播图失败' });

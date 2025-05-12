@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
+const { processObjectImages } = require('../utils/image');
 
 // 获取艺术品列表（公开接口）
 router.get('/', async (req, res) => {
@@ -24,21 +25,23 @@ router.get('/', async (req, res) => {
     }
     
     // 为每个图片URL添加完整URL并构建正确的数据结构
-    const artworksWithFullUrls = rows.map(artwork => ({
-      ...artwork,
-      image: artwork.image || '',
-      artist: {
-        id: artwork.artist_id,
-        name: artwork.artist_name,
-        avatar: artwork.artist_avatar || ''
-      },
-      collection: {
-        location: artwork.collection_location,
-        number: artwork.collection_number,
-        size: artwork.collection_size,
-        material: artwork.collection_material
-      }
-    }));
+    const artworksWithFullUrls = rows.map(artwork => {
+      const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
+      return {
+        ...processedArtwork,
+        artist: {
+          id: artwork.artist_id,
+          name: artwork.artist_name,
+          avatar: processedArtwork.artist_avatar || ''
+        },
+        collection: {
+          location: artwork.collection_location,
+          number: artwork.collection_number,
+          size: artwork.collection_size,
+          material: artwork.collection_material
+        }
+      };
+    });
     
     res.json(artworksWithFullUrls);
   } catch (error) {
@@ -65,10 +68,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: '作品不存在' });
     }
 
-    const artwork = rows[0];
-    // 处理图片URL
-    artwork.image = artwork.image || '';
-    artwork.artist_avatar = artwork.artist_avatar || '';
+    const artwork = processObjectImages(rows[0], ['image', 'avatar']);
 
     const collection = {
       location: artwork.collection_location,

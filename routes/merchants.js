@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { authenticateToken } = require('../auth');
 const { uploadToOSS, deleteFromOSS } = require('../config/oss');
+const { processObjectImages } = require('../utils/image');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 验证图片URL的函数
@@ -97,20 +98,17 @@ router.get('/', async (req, res) => {
         'SELECT image_url FROM merchant_images WHERE merchant_id = ?',
         [merchant.id]
       );
-      merchant.images = images.map(img => 
-        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-      );
+      merchant.images = images.map(img => img.image_url);
     }
 
-    // 处理logo URL
-    const merchantsWithFullUrls = merchants.map(merchant => ({
-      ...merchant,
-      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : ''
-    }));
+    // 处理图片URL，添加WebP转换
+    const merchantsWithProcessedImages = merchants.map(merchant => 
+      processObjectImages(merchant, ['logo', 'images'])
+    );
 
     res.json({
       success: true,
-      data: merchantsWithFullUrls,
+      data: merchantsWithProcessedImages,
       pagination: {
         total,
         page: parseInt(page),
@@ -151,18 +149,15 @@ router.get('/:id', async (req, res) => {
       [req.params.id]
     );
 
-    // 处理图片URL
-    const merchantWithFullUrls = {
+    // 处理图片URL，添加WebP转换
+    const merchantWithProcessedImages = processObjectImages({
       ...merchant,
-      logo: merchant.logo ? (merchant.logo.startsWith('http') ? merchant.logo : `${BASE_URL}${merchant.logo}`) : '',
-      images: images.map(img => 
-        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-      )
-    };
+      images: images.map(img => img.image_url)
+    }, ['logo', 'images']);
 
     res.json({
       success: true,
-      data: merchantWithFullUrls
+      data: merchantWithProcessedImages
     });
   } catch (error) {
     console.error('获取商家详情失败:', error);
@@ -180,7 +175,9 @@ router.post('/upload-logo', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: '没有上传文件' });
     }
     const result = await uploadToOSS(req.file);
-    res.json(result);
+    // 处理返回的图片URL，添加WebP转换
+    const processedResult = processObjectImages(result, ['url']);
+    res.json(processedResult);
   } catch (error) {
     console.error('商家Logo上传失败:', error);
     res.status(500).json({ error: '商家Logo上传失败' });
@@ -194,7 +191,9 @@ router.post('/upload-images', upload.array('images', 10), async (req, res) => {
       return res.status(400).json({ error: '没有上传文件' });
     }
     const results = await Promise.all(req.files.map(file => uploadToOSS(file)));
-    res.json(results);
+    // 处理返回的图片URL，添加WebP转换
+    const processedResults = results.map(result => processObjectImages(result, ['url']));
+    res.json(processedResults);
   } catch (error) {
     console.error('商家图片上传失败:', error);
     res.status(500).json({ error: '商家图片上传失败' });

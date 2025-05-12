@@ -2,26 +2,19 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
+const { processObjectImages } = require('../utils/image');
 
 // 获取艺术家列表（公开接口）
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT * FROM artists');
-    console.log('Artists query result:', rows);
-    
-    if (!rows || !Array.isArray(rows)) {
-      console.log('Invalid artists data:', rows);
-      return res.json([]);
-    }
-    const artistsWithFullUrls = rows.map(artist => ({
-      ...artist,
-      avatar: artist.avatar || '',
-      banner: artist.banner || ''
-    }));
-    res.json(artistsWithFullUrls);
+    const [rows] = await db.query('SELECT * FROM artists ORDER BY created_at DESC');
+    const artistsWithProcessedImages = rows.map(artist => 
+      processObjectImages(artist, ['avatar', 'banner'])
+    );
+    res.json(artistsWithProcessedImages);
   } catch (error) {
-    console.error('Error fetching artists:', error);
-    res.status(500).json({ error: '获取数据失败' });
+    console.error('获取艺术家列表失败:', error);
+    res.status(500).json({ error: '获取艺术家列表失败' });
   }
 });
 
@@ -33,36 +26,9 @@ router.get('/:id', async (req, res) => {
     if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '艺术家不存在' });
     }
-
-    const artist = rows[0];
-
-    const [achievementRows] = await db.query(
-      'SELECT * FROM artist_achievements WHERE artist_id = ?',
-      [req.params.id]
-    );
-
-    const [artworkRows] = await db.query(
-      'SELECT id, title, image FROM original_artworks WHERE artist_id = ?',
-      [req.params.id]
-    );
-
-    // 处理图片URL
-    const processedArtworks = artworkRows.map(artwork => ({
-      ...artwork,
-      image: artwork.image || ''
-    }));
-
-    res.json({
-      name: artist.name,
-      avatar: artist.avatar || '',
-      banner: artist.banner || '',
-      era: artist.era,
-      description: artist.description,
-      biography: artist.biography,
-      journey: artist.journey,
-      artworks: processedArtworks,
-      achievements: achievementRows
-    });
+    
+    const artist = processObjectImages(rows[0], ['avatar', 'banner']);
+    res.json(artist);
   } catch (error) {
     console.error('获取艺术家详情失败:', error);
     res.status(500).json({ error: '获取艺术家详情失败' });
