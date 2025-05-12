@@ -175,7 +175,11 @@ const fetchRightDetail = async () => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image = response.url
+  if (response.url.startsWith('https://wx.oss.2000gallery.art/')) {
+    form.value.images.push(response.url);
+  } else {
+    form.value.images.push(response.url.startsWith('/') ? response.url : `/${response.url}`);
+  }
 }
 
 const handleImageRemove = (file) => {
@@ -222,9 +226,30 @@ const removeRule = (index) => {
   form.value.rules.splice(index, 1)
 }
 
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
+    return url;
+  }
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
 const handleEdit = async () => {
   try {
-    await axios.put(`/api/rights/${route.params.id}`, form.value)
+    const submitData = {
+      ...form.value,
+      images: form.value.images.map(image => {
+        if (image.startsWith('https://wx.oss.2000gallery.art/')) {
+          return image;
+        }
+        if (image.startsWith('http')) {
+          const url = new URL(image);
+          return url.pathname;
+        }
+        return image;
+      })
+    };
+    await axios.put(`/api/rights/${route.params.id}`, submitData)
     ElMessage.success('更新成功')
   } catch (error) {
     ElMessage.error('更新失败')

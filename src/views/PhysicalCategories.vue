@@ -169,6 +169,9 @@ const handleIconSuccess = (response) => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
+  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
+    return url;
+  }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
@@ -198,10 +201,15 @@ const handleSubmit = async () => {
   }
 
   try {
-    // 确保提交的图片URL是相对路径
+    // 处理图片URL，保持OSS URL不变
     const submitData = {
       ...form.value,
-      image: form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image
+      image: form.value.image.startsWith('https://wx.oss.2000gallery.art/') 
+        ? form.value.image 
+        : (form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image),
+      icon: form.value.icon.startsWith('https://wx.oss.2000gallery.art/')
+        ? form.value.icon
+        : (form.value.icon.startsWith('http') ? form.value.icon.replace(API_BASE_URL, '') : form.value.icon)
     };
 
     if (isEdit.value) {

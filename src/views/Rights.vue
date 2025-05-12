@@ -271,12 +271,10 @@ const handleImageRemove = (file) => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
-  // 如果已经是完整的URL，直接返回
-  if (url.startsWith('http')) {
+  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
     return url;
   }
-  // 如果是相对路径，添加API基础URL
-  return `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
 const beforeImageUpload = (file) => {
@@ -313,12 +311,18 @@ const handleSubmit = async () => {
       ...form.value,
       images: form.value.images.map(image => {
         if (typeof image === 'string') {
+          if (image.startsWith('https://wx.oss.2000gallery.art/')) {
+            return image;
+          }
           if (image.startsWith('http')) {
             const url = new URL(image)
             return url.pathname
           }
           return image
         } else if (image.url) {
+          if (image.url.startsWith('https://wx.oss.2000gallery.art/')) {
+            return image.url;
+          }
           if (image.url.startsWith('http')) {
             const url = new URL(image.url)
             return url.pathname
