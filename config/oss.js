@@ -71,9 +71,7 @@ const initOSSClient = async () => {
         timeout: 60000,
         headers: {
             'x-oss-security-token': process.env.OSS_SECURITY_TOKEN,
-        },
-        cname: true,
-        customDomain: 'wx.oss.2000gallery.art'
+        }
     });
 
     // 测试连接
