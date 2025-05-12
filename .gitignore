@@ -23,15 +23,11 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-
 # 系统文件
 .DS_Store
 Thumbs.db
-# 环境变量文件
-.env
-.env.*
-!.env.example
 
 # 环境变量文件
 .env
-.env.* 
+.env.*
+!.env.example 
