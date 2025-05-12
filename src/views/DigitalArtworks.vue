@@ -225,7 +225,7 @@ const handleImageSuccess = (response) => {
 
 const beforeImageUpload = (file) => {
   const isImage = file.type.startsWith('image/');
-  const isLt5M = file.size / 1024 / 1024 < 5;
+  const isLt5M = file.size / 1024 / 1024 < 500;
 
   if (!isImage) {
     ElMessage.error('只能上传图片文件！');
@@ -247,7 +247,7 @@ const getImageUrl = (url) => {
 }
 
 const handleSubmit = async () => {
-  if (!form.value.title.trim()) {
+  if (!form.value.title || !form.value.title.trim()) {
     ElMessage.warning('请输入作品标题');
     return;
   }
@@ -255,31 +255,31 @@ const handleSubmit = async () => {
     ElMessage.warning('请上传作品图片');
     return;
   }
-  if (!form.value.author.trim()) {
+  if (!form.value.author || !form.value.author.trim()) {
     ElMessage.warning('请输入作者名称');
     return;
   }
-  if (!form.value.description.trim()) {
+  if (!form.value.description || !form.value.description.trim()) {
     ElMessage.warning('请输入作品描述');
     return;
   }
-  if (!form.value.project_name.trim()) {
+  if (!form.value.project_name || !form.value.project_name.trim()) {
     ElMessage.warning('请输入项目名称');
     return;
   }
-  if (!form.value.product_name.trim()) {
+  if (!form.value.product_name || !form.value.product_name.trim()) {
     ElMessage.warning('请输入产品名称');
     return;
   }
-  if (!form.value.project_owner.trim()) {
+  if (!form.value.project_owner || !form.value.project_owner.trim()) {
     ElMessage.warning('请输入项目方');
     return;
   }
-  if (!form.value.issuer.trim()) {
+  if (!form.value.issuer || !form.value.issuer.trim()) {
     ElMessage.warning('请输入发行方');
     return;
   }
-  if (!form.value.issue_batch.trim()) {
+  if (!form.value.issue_batch || !form.value.issue_batch.trim()) {
     ElMessage.warning('请输入发行批次');
     return;
   }
@@ -311,6 +311,7 @@ const handleSubmit = async () => {
     dialogVisible.value = false
     fetchArtworks()
   } catch (error) {
+    console.error('保存失败:', error)
     ElMessage.error('保存失败')
   }
 }

@@ -3,6 +3,20 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 
+// 验证图片URL的函数
+function validateImageUrl(url) {
+  if (!url) return false;
+  if (url.startsWith('/uploads/') || url.startsWith('https://wx.oss.2000gallery.art/')) {
+    return true;
+  }
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname === 'wx.oss.2000gallery.art';
+  } catch (e) {
+    return false;
+  }
+}
+
 // 获取实物分类列表（公开接口）
 router.get('/', async (req, res) => {
   try {
