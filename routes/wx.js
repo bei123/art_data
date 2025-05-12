@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../db');
 const multer = require('multer');
 const upload = multer();
+const { uploadToOSS } = require('../config/oss');
 
 // 微信小程序获取手机号接口
 async function getAccessToken(appid, secret) {
