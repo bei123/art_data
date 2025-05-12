@@ -26,4 +26,7 @@ lerna-debug.log*
 
 # 系统文件
 .DS_Store
-Thumbs.db 
+Thumbs.db
+# 环境变量文件
+.env
+.env.* 
