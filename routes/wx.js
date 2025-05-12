@@ -166,4 +166,73 @@ router.get('/userInfo', async (req, res) => {
     }
 });
 
+// 获取外部token接口
+router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), async (req, res) => {
+    const { appInfo } = req.body;
+    if (!appInfo) {
+        return res.status(400).json({ error: '缺少 appInfo 参数' });
+    }
+
+    try {
+        // 调用外部API获取token
+        const response = await axios.post('https://yapi.licenseinfo.cn/mock/600/userApi/user/getToken', 
+            `appInfo=${appInfo}`,
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+
+        // 直接返回外部API的响应
+        res.json(response.data);
+    } catch (err) {
+        console.error('获取token失败:', err);
+        res.status(500).json({ 
+            error: '获取token失败',
+            detail: err.message 
+        });
+    }
+});
+
+// 实名注册接口
+router.post('/userApi/external/user/real_name_registration/simplify/v3', async (req, res) => {
+    // 从请求头获取token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ 
+            code: 401,
+            status: false,
+            message: '缺少token' 
+        });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    
+    try {
+        // 调用外部API进行实名注册，带上token
+        const response = await axios.post(
+            'https://yapi.licenseinfo.cn/mock/600/userApi/external/user/real_name_registration/simplify/v3',
+            req.body,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            }
+        );
+
+        // 直接返回外部API的响应
+        res.json(response.data);
+    } catch (err) {
+        console.error('实名注册失败:', err);
+        res.status(500).json({ 
+            code: 500,
+            status: false,
+            message: '实名注册失败',
+            detail: err.message 
+        });
+    }
+});
+
 module.exports = router; 
