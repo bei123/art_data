@@ -115,10 +115,9 @@ const uploadToOSS = async (file, prefix = '') => {
         // 上传文件，添加服务器端加密配置
         const result = await client.put(ossPath, file.buffer, {
             headers: {
-                'x-oss-server-side-encryption': 'AES256',  // 使用 AES256 加密算法
-                'x-oss-object-acl': 'public-read',  // 设置对象访问权限
-                'Cache-Control': 'max-age=31536000',  // 设置缓存时间
-                'Content-Disposition': 'inline'  // 设置内容处理方式
+                'x-oss-server-side-encryption': 'AES256',
+                'Cache-Control': 'max-age=31536000',
+                'Content-Disposition': 'inline'
             }
         });
 
