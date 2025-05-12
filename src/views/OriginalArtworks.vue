@@ -152,6 +152,34 @@
         <el-form-item label="描述">
           <el-input type="textarea" v-model="form.description" rows="4" />
         </el-form-item>
+
+        <el-divider>收藏信息</el-divider>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="收藏位置">
+              <el-input v-model="form.collection_location" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="收藏编号">
+              <el-input v-model="form.collection_number" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="作品尺寸">
+              <el-input v-model="form.collection_size" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="作品材质">
+              <el-input v-model="form.collection_material" />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -185,7 +213,11 @@ const form = ref({
   discount_price: 0,
   stock: 0,
   is_on_sale: 1,
-  description: ''
+  description: '',
+  collection_location: '',
+  collection_number: '',
+  collection_size: '',
+  collection_material: ''
 })
 
 const formRef = ref(null)
@@ -293,11 +325,18 @@ const showAddDialog = () => {
     image: '',
     artist_name: '',
     year: new Date().getFullYear(),
+    description: '',
+    background: '',
+    features: '',
     original_price: 0,
     discount_price: 0,
     stock: 0,
+    sales: 0,
     is_on_sale: 1,
-    description: ''
+    collection_location: '',
+    collection_number: '',
+    collection_size: '',
+    collection_material: ''
   }
   dialogVisible.value = true
 }
@@ -308,11 +347,23 @@ const editArtwork = (row) => {
   console.log('Editing artwork:', row)
   dialogType.value = 'edit'
   form.value = {
-    ...row,
+    id: row.id,
+    title: row.title || '',
+    image: row.image || '',
+    artist_name: row.artist?.name || '',
+    year: Number(row.year) || new Date().getFullYear(),
+    description: row.description || '',
+    background: row.background || '',
+    features: row.features || '',
     original_price: Number(row.original_price) || 0,
     discount_price: Number(row.discount_price) || 0,
     stock: Number(row.stock) || 0,
-    is_on_sale: Number(row.is_on_sale)
+    sales: Number(row.sales) || 0,
+    is_on_sale: Number(row.is_on_sale) || 1,
+    collection_location: row.collection?.location || '',
+    collection_number: row.collection?.number || '',
+    collection_size: row.collection?.size || '',
+    collection_material: row.collection?.material || ''
   }
   console.log('Form data:', form.value)
   dialogVisible.value = true
@@ -356,11 +407,22 @@ const submitForm = async () => {
     await formRef.value.validate()
     
     const submitData = {
-      ...form.value,
+      title: form.value.title,
+      image: form.value.image,
+      artist_name: form.value.artist_name,
+      year: Number(form.value.year),
+      description: form.value.description,
+      background: form.value.background,
+      features: form.value.features,
       original_price: Number(form.value.original_price),
       discount_price: Number(form.value.discount_price),
       stock: Number(form.value.stock),
-      is_on_sale: Number(form.value.is_on_sale)
+      sales: Number(form.value.sales),
+      is_on_sale: Number(form.value.is_on_sale),
+      collection_location: form.value.collection_location,
+      collection_number: form.value.collection_number,
+      collection_size: form.value.collection_size,
+      collection_material: form.value.collection_material
     }
 
     console.log('Submitting data:', submitData)

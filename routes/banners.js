@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 获取轮播图列表（公开接口）
 router.get('/', async (req, res) => {
@@ -14,7 +13,7 @@ router.get('/', async (req, res) => {
     // 处理图片URL
     const bannersWithFullUrls = banners.map(banner => ({
       ...banner,
-      image_url: banner.image_url ? (banner.image_url.startsWith('http') ? banner.image_url : `${BASE_URL}${banner.image_url}`) : ''
+      image_url: banner.image_url || ''
     }));
     
     res.json(bannersWithFullUrls);
@@ -33,7 +32,7 @@ router.get('/all', authenticateToken, async (req, res) => {
     // 处理图片URL
     const bannersWithFullUrls = banners.map(banner => ({
       ...banner,
-      image_url: banner.image_url ? (banner.image_url.startsWith('http') ? banner.image_url : `${BASE_URL}${banner.image_url}`) : ''
+      image_url: banner.image_url || ''
     }));
     res.json(bannersWithFullUrls);
   } catch (error) {

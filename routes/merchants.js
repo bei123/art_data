@@ -5,25 +5,13 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { authenticateToken } = require('../auth');
+const { uploadToOSS, deleteFromOSS } = require('../config/oss');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 验证图片URL的函数
 const validateImageUrl = (url) => {
   if (!url) return false;
-  
-  // 检查URL是否以http或https开头，或者是相对路径
-  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('/uploads/')) {
-    return false;
-  }
-  
-  // 检查文件扩展名
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-  const ext = path.extname(url).toLowerCase();
-  if (!allowedExtensions.includes(ext)) {
-    return false;
-  }
-  
-  return true;
+  return url.startsWith('http://') || url.startsWith('https://');
 };
 
 // 创建上传目录
@@ -31,22 +19,11 @@ if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
 }
 
-// 配置文件上传
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    // 获取文件扩展名
-    const ext = path.extname(file.originalname).toLowerCase();
-    // 生成文件名
-    cb(null, Date.now() + ext);
-  }
-});
+// 配置文件上传 - 使用内存存储
+const storage = multer.memoryStorage();
 
 // 文件类型验证
 const fileFilter = (req, file, cb) => {
-  // 允许的文件类型
   const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
   
@@ -57,7 +34,7 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
@@ -202,14 +179,8 @@ router.post('/upload-logo', upload.single('file'), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: '没有上传文件' });
     }
-    const fileUrl = `/uploads/${req.file.filename}`;
-    const fullUrl = `${BASE_URL}${fileUrl}`;
-    res.json({ 
-      url: fileUrl,
-      fullUrl: fullUrl,
-      filename: req.file.filename,
-      size: req.file.size
-    });
+    const result = await uploadToOSS(req.file);
+    res.json(result);
   } catch (error) {
     console.error('商家Logo上传失败:', error);
     res.status(500).json({ error: '商家Logo上传失败' });
@@ -222,13 +193,8 @@ router.post('/upload-images', upload.array('images', 10), async (req, res) => {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: '没有上传文件' });
     }
-    const files = req.files.map(file => ({
-      url: `/uploads/${file.filename}`,
-      fullUrl: `${BASE_URL}/uploads/${file.filename}`,
-      filename: file.filename,
-      size: file.size
-    }));
-    res.json(files);
+    const results = await Promise.all(req.files.map(file => uploadToOSS(file)));
+    res.json(results);
   } catch (error) {
     console.error('商家图片上传失败:', error);
     res.status(500).json({ error: '商家图片上传失败' });

@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 获取实物分类列表（公开接口）
 router.get('/', async (req, res) => {
@@ -18,8 +17,8 @@ router.get('/', async (req, res) => {
     // 为每个分类的图片添加完整URL
     const categoriesWithFullUrls = rows.map(category => ({
       ...category,
-      image: category.image ? (category.image.startsWith('http') ? category.image : `${BASE_URL}${category.image}`) : '',
-      icon: category.icon ? (category.icon.startsWith('http') ? category.icon : `${BASE_URL}${category.icon}`) : ''
+      image: category.image || '',
+      icon: category.icon || ''
     }));
     res.json(categoriesWithFullUrls);
   } catch (error) {

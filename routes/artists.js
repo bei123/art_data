@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 获取艺术家列表（公开接口）
 router.get('/', async (req, res) => {
@@ -16,8 +15,8 @@ router.get('/', async (req, res) => {
     }
     const artistsWithFullUrls = rows.map(artist => ({
       ...artist,
-      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
-      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
+      avatar: artist.avatar || '',
+      banner: artist.banner || ''
     }));
     res.json(artistsWithFullUrls);
   } catch (error) {
@@ -50,13 +49,13 @@ router.get('/:id', async (req, res) => {
     // 处理图片URL
     const processedArtworks = artworkRows.map(artwork => ({
       ...artwork,
-      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : ''
+      image: artwork.image || ''
     }));
 
     res.json({
       name: artist.name,
-      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
-      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : '',
+      avatar: artist.avatar || '',
+      banner: artist.banner || '',
       era: artist.era,
       description: artist.description,
       biography: artist.biography,
@@ -114,8 +113,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // 处理图片URL
     const artistWithFullUrls = {
       ...artist,
-      avatar: artist.avatar ? (artist.avatar.startsWith('http') ? artist.avatar : `${BASE_URL}${artist.avatar}`) : '',
-      banner: artist.banner ? (artist.banner.startsWith('http') ? artist.banner : `${BASE_URL}${artist.banner}`) : ''
+      avatar: artist.avatar || '',
+      banner: artist.banner || ''
     };
 
     res.json(artistWithFullUrls);

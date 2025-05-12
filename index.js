@@ -11,6 +11,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const xml2js = require('xml2js');
+const { uploadToOSS } = require('./config/oss');
 const wxRouter = require('./routes/wx');
 const wxpayRouter = require('./routes/pay');
 const favoritesRouter = require('./routes/favorites');
@@ -82,25 +83,15 @@ const sslOptions = {
 // 添加基础URL配置
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
-// 配置文件上传
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    // 获取文件扩展名
-    const ext = path.extname(file.originalname).toLowerCase();
-    // 生成文件名
-    cb(null, Date.now() + ext);
-  }
-});
+// 配置文件上传 - 使用内存存储
+const storage = multer.memoryStorage();
 
 // 文件类型验证
 const fileFilter = (req, file, cb) => {
   // 允许的文件类型
   const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
-
+  
   if (allowedTypes.includes(ext)) {
     cb(null, true);
   } else {
@@ -112,7 +103,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 100 * 1024 * 1024 // 限制文件大小为5MB
+    fileSize: 100 * 1024 * 1024 // 限制文件大小为100MB
   }
 });
 
@@ -126,26 +117,23 @@ if (!fs.existsSync('uploads')) {
 }
 
 // 文件上传接口
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '没有上传文件' });
     }
-    const fileUrl = `/uploads/${req.file.filename}`;
-    const fullUrl = `${BASE_URL}${fileUrl}`;
+    
+    const result = await uploadToOSS(req.file);
     res.json({
-      url: fileUrl,
-      fullUrl: fullUrl,
-      filename: req.file.filename,
-      size: req.file.size
+      url: result.url,
+      name: result.name,
+      size: result.size
     });
   } catch (error) {
     console.error('文件上传失败:', error);
     res.status(500).json({ error: '文件上传失败' });
   }
 });
-
-
 
 // 搜索接口
 app.get('/api/search', async (req, res) => {

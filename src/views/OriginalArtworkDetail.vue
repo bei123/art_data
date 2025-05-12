@@ -215,10 +215,20 @@ const fetchArtworkDetail = async () => {
     const response = await axios.get(`/original-artworks/${route.params.id}`)
     const data = response.data
     form.value = {
-      ...data,
-      collection: data.collection,
+      title: data.title,
+      year: data.year,
+      image: data.image,
+      description: data.description,
+      background: data.background,
+      features: data.features,
+      collection: {
+        location: data.collection?.location || '',
+        number: data.collection?.number || '',
+        size: data.collection?.size || '',
+        material: data.collection?.material || ''
+      },
       artist: {
-        id: data.artist.id
+        id: data.artist?.id || null
       },
       price: data.price,
       stock: data.stock,

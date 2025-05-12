@@ -17,7 +17,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="author" label="作者" />
-      <el-table-column prop="description" label="描述" />
+      <el-table-column prop="description" label="描述" show-overflow-tooltip />
       <el-table-column prop="project_name" label="项目名称" />
       <el-table-column prop="product_name" label="产品名称" />
       <el-table-column prop="project_owner" label="项目方" />

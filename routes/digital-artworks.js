@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 数字艺术品相关接口
 router.get('/', async (req, res) => {
@@ -18,7 +17,7 @@ router.get('/', async (req, res) => {
     // 为每个作品的图片添加完整URL
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
-      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
+      image: artwork.image_url || '',
       price: artwork.price || 0
     }));
     res.json(artworksWithFullUrls);
@@ -34,7 +33,7 @@ router.get('/public', async (req, res) => {
     const [rows] = await db.query('SELECT * FROM digital_artworks');
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
-      image: artwork.image_url ? (artwork.image_url.startsWith('http') ? artwork.image_url : `${BASE_URL}${artwork.image_url}`) : '',
+      image: artwork.image_url || '',
       copyright: artwork.copyright || '',
       price: artwork.price || 0
     }));
@@ -214,19 +213,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // 验证图片URL的函数
 function validateImageUrl(url) {
   if (!url) return false;
-  
-  // 如果是相对路径，直接验证是否以 /uploads/ 开头
-  if (url.startsWith('/uploads/')) {
-    return true;
-  }
-  
-  // 如果是完整URL，解析并验证
-  try {
-    const urlObj = new URL(url);
-    return urlObj.pathname.startsWith('/uploads/');
-  } catch (e) {
-    return false;
-  }
+  return url.startsWith('http://') || url.startsWith('https://');
 }
 
 module.exports = router; 

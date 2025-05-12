@@ -2,7 +2,22 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const jwt = require('jsonwebtoken');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
+
+// Token验证中间件
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) {
+    return res.status(401).json({ error: '未提供token' });
+  }
+  const token = authHeader.replace('Bearer ', '');
+  try {
+    const payload = jwt.verify(token, 'your_jwt_secret');
+    req.user = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'token无效' });
+  }
+};
 
 // 获取购物车列表
 router.get('/', async (req, res) => {
@@ -60,23 +75,21 @@ router.get('/', async (req, res) => {
       );
       return {
         ...item,
-        images: images.map(img =>
-          img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-        )
+        images: images.map(img => img.image_url || '')
       };
     }));
 
     // 处理数字艺术品图片
     const processedCartDigitals = cartDigitals.map(item => ({
       ...item,
-      image: item.image_url ? (item.image_url.startsWith('http') ? item.image_url : `${BASE_URL}${item.image_url}`) : ''
+      image: item.image_url || ''
     }));
 
     // 处理艺术品图片和艺术家头像
     const processedCartArtworks = cartArtworks.map(item => ({
       ...item,
-      image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
-      artist_avatar: item.artist_avatar ? (item.artist_avatar.startsWith('http') ? item.artist_avatar : `${BASE_URL}${item.artist_avatar}`) : '',
+      image: item.image || '',
+      artist_avatar: item.artist_avatar || '',
       price: item.price || 0,
       original_price: item.original_price || 0,
       discount_price: item.discount_price || 0

@@ -902,9 +902,7 @@ router.get('/query', async (req, res) => {
                 );
                 return {
                     ...item,
-                    images: images.map(img =>
-                        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-                    )
+                    images: images.map(img => img.image_url || '')
                 };
             }));
 
@@ -1079,9 +1077,7 @@ router.get('/orders', async (req, res) => {
                 const [images] = await db.query(imagesQuery, imageParams);
                 return {
                     ...item,
-                    images: images.map(img =>
-                        img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-                    )
+                    images: images.map(img => img.image_url || '')
                 };
             }));
 

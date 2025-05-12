@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 获取版权实物列表（需要认证）
 router.get('/', async (req, res) => {
@@ -25,9 +24,7 @@ router.get('/', async (req, res) => {
                 'SELECT image_url FROM right_images WHERE right_id = ?',
                 [right.id]
             );
-            right.images = images.map(img =>
-                img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-            );
+            right.images = images.map(img => img.image_url || '');
         }
 
         res.json(rows);
@@ -104,13 +101,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
             // 删除旧图片
             await connection.query('DELETE FROM right_images WHERE right_id = ?', [req.params.id]);
 
-            // 插入新图片，处理图片URL
+            // 插入新图片
             if (images && images.length > 0) {
-                const imageValues = images.map(image => {
-                    // 如果是完整URL，需要移除BASE_URL前缀
-                    const imageUrl = image.startsWith(BASE_URL) ? image.substring(BASE_URL.length) : image;
-                    return [req.params.id, imageUrl];
-                });
+                const imageValues = images.map(image => [req.params.id, image]);
                 await connection.query(
                     'INSERT INTO right_images (right_id, image_url) VALUES ?',
                     [imageValues]
@@ -132,9 +125,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 'SELECT image_url FROM right_images WHERE right_id = ?',
                 [req.params.id]
             );
-            updatedRight[0].images = rightImages.map(img =>
-                img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-            );
+            updatedRight[0].images = rightImages.map(img => img.image_url || '');
 
             res.json(updatedRight[0]);
         } catch (error) {
@@ -223,14 +214,12 @@ router.get('/public/:id', async (req, res) => {
             category: {
                 id: category[0]?.id || null,
                 title: category[0]?.title || '',
-                image: category[0]?.image ? (category[0].image.startsWith('http') ? category[0].image : `${BASE_URL}${category[0].image}`) : '',
-                icon: category[0]?.icon ? (category[0].icon.startsWith('http') ? category[0].icon : `${BASE_URL}${category[0].icon}`) : '',
+                image: category[0]?.image || '',
+                icon: category[0]?.icon || '',
                 count: category[0]?.count || 0,
                 description: category[0]?.description || ''
             },
-            images: images.map(img =>
-                img.image_url.startsWith('http') ? img.image_url : `${BASE_URL}${img.image_url}`
-            ),
+            images: images.map(img => img.image_url || ''),
             details: details.map(detail => ({
                 title: detail.title,
                 content: detail.content

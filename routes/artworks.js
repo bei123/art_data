@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 获取艺术品列表（公开接口）
 router.get('/', async (req, res) => {
@@ -24,14 +23,14 @@ router.get('/', async (req, res) => {
       return res.json([]);
     }
     
-    // 为每个图片URL添加BASE_URL并构建正确的数据结构
+    // 为每个图片URL添加完整URL并构建正确的数据结构
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
-      image: artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : '',
+      image: artwork.image || '',
       artist: {
         id: artwork.artist_id,
         name: artwork.artist_name,
-        avatar: artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : ''
+        avatar: artwork.artist_avatar || ''
       },
       collection: {
         location: artwork.collection_location,
@@ -68,8 +67,8 @@ router.get('/:id', async (req, res) => {
 
     const artwork = rows[0];
     // 处理图片URL
-    artwork.image = artwork.image ? (artwork.image.startsWith('http') ? artwork.image : `${BASE_URL}${artwork.image}`) : '';
-    artwork.artist_avatar = artwork.artist_avatar ? (artwork.artist_avatar.startsWith('http') ? artwork.artist_avatar : `${BASE_URL}${artwork.artist_avatar}`) : '';
+    artwork.image = artwork.image || '';
+    artwork.artist_avatar = artwork.artist_avatar || '';
 
     const collection = {
       location: artwork.collection_location,
