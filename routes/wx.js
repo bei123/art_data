@@ -3,6 +3,8 @@ const router = express.Router();
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
+const multer = require('multer');
+const upload = multer();
 
 // 微信小程序获取手机号接口
 async function getAccessToken(appid, secret) {
@@ -231,6 +233,67 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
             status: false,
             message: '实名注册失败',
             detail: err.message 
+        });
+    }
+});
+
+// 上传身份证照片接口
+router.post('/userApi/external/user/upload/idcard', upload.fields([
+    { name: 'idCardFront', maxCount: 1 },  // 身份证正面
+    { name: 'idCardBack', maxCount: 1 },   // 身份证背面
+    { name: 'businessLicense', maxCount: 1 }  // 营业执照（可选）
+]), async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+        return res.status(400).json({
+            code: 400,
+            status: false,
+            message: '缺少用户ID'
+        });
+    }
+
+    try {
+        const files = req.files;
+        const result = {
+            idCardFrontUrl: '',
+            idCardBackUrl: '',
+            businessLicenseUrl: ''
+        };
+
+        // 使用用户ID创建文件夹前缀
+        const folderPrefix = `idcards/${userId}/`;
+
+        // 上传身份证正面照片
+        if (files.idCardFront && files.idCardFront[0]) {
+            const frontResult = await uploadToOSS(files.idCardFront[0], folderPrefix);
+            result.idCardFrontUrl = frontResult.url;
+        }
+
+        // 上传身份证背面照片
+        if (files.idCardBack && files.idCardBack[0]) {
+            const backResult = await uploadToOSS(files.idCardBack[0], folderPrefix);
+            result.idCardBackUrl = backResult.url;
+        }
+
+        // 上传营业执照照片（如果有）
+        if (files.businessLicense && files.businessLicense[0]) {
+            const licenseResult = await uploadToOSS(files.businessLicense[0], folderPrefix);
+            result.businessLicenseUrl = licenseResult.url;
+        }
+
+        res.json({
+            code: 200,
+            status: true,
+            message: '上传成功',
+            data: result
+        });
+    } catch (err) {
+        console.error('上传身份证照片失败:', err);
+        res.status(500).json({
+            code: 500,
+            status: false,
+            message: '上传失败',
+            detail: err.message
         });
     }
 });
