@@ -220,7 +220,7 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image = response.url
+  form.value.image_url = response.url
 }
 
 const beforeImageUpload = (file) => {
@@ -240,6 +240,9 @@ const beforeImageUpload = (file) => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
+  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
+    return url;
+  }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
@@ -296,7 +299,7 @@ const handleSubmit = async () => {
   try {
     const submitData = {
       ...form.value,
-      image_url: form.value.image_url.startsWith('http') ? form.value.image_url.replace(API_BASE_URL, '') : form.value.image_url
+      image_url: form.value.image_url
     };
 
     if (isEdit.value) {

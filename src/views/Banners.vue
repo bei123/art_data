@@ -150,7 +150,7 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image = response.url
+  form.value.image_url = response.url
 }
 
 const beforeImageUpload = (file) => {
@@ -190,10 +190,7 @@ const handleSubmit = async () => {
 
   try {
     const submitData = {
-      ...form.value,
-      image_url: form.value.image_url.startsWith('http')
-        ? form.value.image_url.replace(API_BASE_URL, '')
-        : form.value.image_url
+      ...form.value
     }
 
     if (isEdit.value) {
