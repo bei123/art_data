@@ -178,9 +178,9 @@ router.get('/:id', async (req, res) => {
         const [rows] = await db.query(`
       SELECT 
         r.*,
-        c.name as category_name
+        c.title as category_title
       FROM rights r
-      LEFT JOIN categories c ON r.category_id = c.id
+      LEFT JOIN physical_categories c ON r.category_id = c.id
       WHERE r.id = ?
     `, [req.params.id]);
 
@@ -201,7 +201,7 @@ router.get('/:id', async (req, res) => {
             images: images.map(img => processObjectImages(img, ['image_url']).image_url),
             category: {
                 id: right.category_id,
-                name: right.category_name
+                title: right.category_title
             }
         });
     } catch (error) {
