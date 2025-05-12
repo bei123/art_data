@@ -176,7 +176,7 @@ const handleDelete = (row) => {
 }
 
 const handleAvatarSuccess = (response) => {
-  form.value.avatar = response.url;
+  form.value.avatar = response.url
 }
 
 const handleBannerSuccess = (response) => {

@@ -175,14 +175,7 @@ const fetchRightDetail = async () => {
 }
 
 const handleImageSuccess = (response) => {
-  if (!form.value.images) {
-    form.value.images = []
-  }
-  if (response && response.url) {
-    form.value.images.push(response.url)
-  } else {
-    ElMessage.error('图片上传失败')
-  }
+  form.value.image = response.url
 }
 
 const handleImageRemove = (file) => {

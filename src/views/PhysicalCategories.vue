@@ -160,7 +160,7 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image = response.url;
+  form.value.image = response.url
 }
 
 const handleIconSuccess = (response) => {

@@ -457,7 +457,7 @@ const submitForm = async () => {
 
 // 上传图片相关方法
 const handleUploadSuccess = (response) => {
-  form.value.image = response.fullUrl
+  form.value.image = response.url
 }
 
 const beforeUpload = (file) => {

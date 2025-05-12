@@ -150,7 +150,7 @@ const handleDelete = (row) => {
 }
 
 const handleImageSuccess = (response) => {
-  form.value.image_url = response.url
+  form.value.image = response.url
 }
 
 const beforeImageUpload = (file) => {

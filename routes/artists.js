@@ -150,16 +150,16 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // 验证图片URL的函数
 function validateImageUrl(url) {
   if (!url) return false;
-  
-  // 如果是相对路径，直接验证是否以 /uploads/ 开头
-  if (url.startsWith('/uploads/')) {
+
+  // 允许以 /uploads/ 开头，或以 OSS 域名开头
+  if (url.startsWith('/uploads/') || url.startsWith('https://wx.oss.2000gallery.art/')) {
     return true;
   }
-  
-  // 如果是完整URL，解析并验证
+
+  // 允许完整 URL，主机名为 OSS 域名
   try {
     const urlObj = new URL(url);
-    return urlObj.pathname.startsWith('/uploads/');
+    return urlObj.hostname === 'wx.oss.2000gallery.art';
   } catch (e) {
     return false;
   }
