@@ -107,7 +107,7 @@
             :on-success="handleImageSuccess"
             :on-remove="handleImageRemove"
             :before-upload="beforeImageUpload"
-            :file-list="form.images.map(url => ({ url, name: url.split('/').pop() }))"
+            :file-list="fileList"
             name="file"
           >
             <el-icon><Plus /></el-icon>
@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -137,6 +137,7 @@ const rights = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const categories = ref([])
+const fileList = ref([])
 
 const form = ref({
   title: '',
@@ -151,6 +152,13 @@ const form = ref({
   images: [],
   category_id: null
 })
+
+watch(() => form.value.images, (newVal) => {
+  fileList.value = (newVal || []).map(url => ({
+    url: getImageUrl(url),
+    name: url.split('/').pop()
+  }))
+}, { immediate: true })
 
 const fetchRights = async () => {
   try {
@@ -258,15 +266,18 @@ const handleDelete = (row) => {
   })
 }
 
-const handleImageSuccess = (response) => {
-  form.value.image = response.url
+const handleImageSuccess = (response, file, fileListParam) => {
+  if (!form.value.images) form.value.images = []
+  let url = response.url
+  if (!url) return
+  if (!url.startsWith('http') && !url.startsWith('/')) url = '/' + url
+  if (!form.value.images.includes(url)) {
+    form.value.images.push(url)
+  }
 }
 
 const handleImageRemove = (file) => {
-  const index = form.value.images.findIndex(url => url === file.url)
-  if (index !== -1) {
-    form.value.images.splice(index, 1)
-  }
+  form.value.images = form.value.images.filter(url => getImageUrl(url) !== file.url)
 }
 
 const getImageUrl = (url) => {

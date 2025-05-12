@@ -72,7 +72,7 @@
             :on-success="handleImageSuccess"
             :on-remove="handleImageRemove"
             :before-upload="beforeImageUpload"
-            :file-list="form.images.map(url => ({ url, name: url.split('/').pop() }))"
+            :file-list="fileList"
             name="file"
           >
             <el-icon><Plus /></el-icon>
@@ -132,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -157,6 +157,15 @@ const form = ref({
   rules: []
 })
 
+const fileList = ref([])
+
+watch(() => form.value.images, (newVal) => {
+  fileList.value = (newVal || []).map(url => ({
+    url: getImageUrl(url),
+    name: url.split('/').pop()
+  }))
+}, { immediate: true })
+
 const fetchRightDetail = async () => {
   loading.value = true
   try {
@@ -164,6 +173,7 @@ const fetchRightDetail = async () => {
     const data = response.data
     form.value = {
       ...data,
+      images: data.images || [],
       details: data.details || [],
       rules: data.rules || []
     }
@@ -175,18 +185,14 @@ const fetchRightDetail = async () => {
 }
 
 const handleImageSuccess = (response) => {
-  if (response.url.startsWith('https://wx.oss.2000gallery.art/')) {
-    form.value.images.push(response.url);
-  } else {
-    form.value.images.push(response.url.startsWith('/') ? response.url : `/${response.url}`);
-  }
+  if (!form.value.images) form.value.images = []
+  let url = response.url
+  if (!url.startsWith('http') && !url.startsWith('/')) url = '/' + url
+  form.value.images.push(url)
 }
 
 const handleImageRemove = (file) => {
-  const index = form.value.images.findIndex(url => url === file.url)
-  if (index !== -1) {
-    form.value.images.splice(index, 1)
-  }
+  form.value.images = form.value.images.filter(url => getImageUrl(url) !== file.url)
 }
 
 const beforeImageUpload = (file) => {
@@ -235,24 +241,32 @@ const getImageUrl = (url) => {
 }
 
 const handleEdit = async () => {
+  if (!form.value.images || form.value.images.length === 0) {
+    ElMessage.warning('请至少上传一张图片');
+    return;
+  }
+
   try {
     const submitData = {
       ...form.value,
       images: form.value.images.map(image => {
-        if (image.startsWith('https://wx.oss.2000gallery.art/')) {
+        if (typeof image === 'string') {
+          if (image.startsWith('https://wx.oss.2000gallery.art/')) {
+            return image;
+          }
+          if (image.startsWith('http')) {
+            const url = new URL(image);
+            return url.pathname;
+          }
           return image;
         }
-        if (image.startsWith('http')) {
-          const url = new URL(image);
-          return url.pathname;
-        }
-        return image;
+        return image.url || image;
       })
     };
-    await axios.put(`/api/rights/${route.params.id}`, submitData)
-    ElMessage.success('更新成功')
+    await axios.put(`/api/rights/${route.params.id}`, submitData);
+    ElMessage.success('更新成功');
   } catch (error) {
-    ElMessage.error('更新失败')
+    ElMessage.error('更新失败');
   }
 }
 
