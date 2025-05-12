@@ -29,4 +29,9 @@ lerna-debug.log*
 Thumbs.db
 # 环境变量文件
 .env
+.env.*
+!.env.example
+
+# 环境变量文件
+.env
 .env.* 
