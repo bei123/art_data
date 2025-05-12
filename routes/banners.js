@@ -3,6 +3,19 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 
+function validateImageUrl(url) {
+  if (!url) return false;
+  if (url.startsWith('/uploads/') || url.startsWith('https://wx.oss.2000gallery.art/')) {
+    return true;
+  }
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname === 'wx.oss.2000gallery.art';
+  } catch (e) {
+    return false;
+  }
+}
+
 // 获取轮播图列表（公开接口）
 router.get('/', async (req, res) => {
   try {
@@ -49,6 +62,9 @@ router.post('/', authenticateToken, async (req, res) => {
     if (!title || !image_url) {
       return res.status(400).json({ error: '标题和图片URL不能为空' });
     }
+    if (!validateImageUrl(image_url)) {
+      return res.status(400).json({ error: '无效的图片URL' });
+    }
 
     const [result] = await db.query(
       'INSERT INTO banners (title, image_url, link_url, sort_order) VALUES (?, ?, ?, ?)',
@@ -70,6 +86,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     
     if (!title || !image_url) {
       return res.status(400).json({ error: '标题和图片URL不能为空' });
+    }
+    if (!validateImageUrl(image_url)) {
+      return res.status(400).json({ error: '无效的图片URL' });
     }
 
     await db.query(
