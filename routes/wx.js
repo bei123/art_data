@@ -307,7 +307,23 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                 if (parsedData && parsedData.data && parsedData.data.face && Array.isArray(parsedData.data.face.prism_keyValueInfo)) {
                     parsedData.data.face.prism_keyValueInfo.forEach(item => {
                         if (typeof item.value === 'string') {
-                            item.value = Buffer.from(item.value, 'latin1').toString('utf8');
+                            try {
+                                // 尝试多种编码方式
+                                const encodings = ['utf8', 'gbk', 'gb2312', 'latin1'];
+                                for (const encoding of encodings) {
+                                    try {
+                                        const decoded = Buffer.from(item.value, encoding).toString('utf8');
+                                        if (decoded && !decoded.includes('')) {
+                                            item.value = decoded;
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        continue;
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('解码失败:', e);
+                            }
                         }
                     });
                 }
@@ -345,7 +361,8 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                         const client = createDytnsClient();
                         const request = new Dytnsapi20200217.CertNoTwoElementVerificationRequest({
                             certName: certName,
-                            certNo: certNo
+                            certNo: certNo,
+                            authCode: process.env.ALIYUN_IDCARD_AUTHCODE // 添加AuthCode
                         });
                         const runtime = new Util.RuntimeOptions({});
                         
