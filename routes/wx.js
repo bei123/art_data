@@ -288,6 +288,34 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                     }
                 }
                 result.idCardInfo = ocrResult;
+
+                // 自动进行二要素核验
+                let certName = '', certNo = '';
+                if (ocrResult && ocrResult.data && ocrResult.data.face && ocrResult.data.face.data) {
+                    certName = ocrResult.data.face.data.name;
+                    certNo = ocrResult.data.face.data.idNumber;
+                }
+                if (certName && certNo) {
+                    try {
+                        const AuthCode = process.env.ALIYUN_IDCARD_AUTHCODE || '你的AuthCode';
+                        const axios = require('axios');
+                        const params = new URLSearchParams();
+                        params.append('Action', 'CertNoTwoElementVerification');
+                        params.append('Version', '2020-02-17');
+                        params.append('CertName', certName);
+                        params.append('CertNo', certNo);
+                        params.append('AuthCode', AuthCode);
+
+                        const verifyRes = await axios.post(
+                            'dytnsapi.aliyuncs.com',
+                            params
+                        );
+                        result.idCardVerify = verifyRes.data;
+                    } catch (verifyErr) {
+                        console.error('二要素核验失败:', verifyErr);
+                        result.idCardVerify = { code: 500, message: '二要素核验失败', detail: verifyErr.message };
+                    }
+                }
             } catch (ocrError) {
                 console.error('身份证识别失败:', ocrError);
                 // 识别失败不影响上传流程
@@ -351,6 +379,34 @@ router.get('/getIp', (req, res) => {
     res.json({
         ip: Array.isArray(ip) ? ip[0] : ip
     });
+});
+
+// 身份证二要素核验接口
+router.post('/userApi/external/user/idcard-verify', async (req, res) => {
+    const { certName, certNo } = req.body;
+    if (!certName || !certNo) {
+        return res.status(400).json({ code: 400, message: '缺少姓名或身份证号' });
+    }
+
+    const AuthCode = process.env.ALIYUN_IDCARD_AUTHCODE || '你的AuthCode';
+
+    try {
+        const axios = require('axios');
+        const params = new URLSearchParams();
+        params.append('Action', 'CertNoTwoElementVerification');
+        params.append('Version', '2020-02-17');
+        params.append('CertName', certName);
+        params.append('CertNo', certNo);
+        params.append('AuthCode', AuthCode);
+
+        const response = await axios.post(
+            'https://dytnsapi.aliyuncs.com/',
+            params
+        );
+        res.json(response.data);
+    } catch (err) {
+        res.status(500).json({ code: 500, message: '核验失败', detail: err.message });
+    }
 });
 
 module.exports = router; 
