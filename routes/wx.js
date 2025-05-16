@@ -6,6 +6,7 @@ const db = require('../db');
 const multer = require('multer');
 const upload = multer();
 const { uploadToOSS } = require('../config/oss');
+const OcrClient = require('../utils/ocrClient');
 
 // 微信小程序获取手机号接口
 async function getAccessToken(appid, secret) {
@@ -258,16 +259,28 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
         const result = {
             idCardFrontUrl: '',
             idCardBackUrl: '',
-            businessLicenseUrl: ''
+            businessLicenseUrl: '',
+            idCardInfo: null  // 新增：存储身份证识别信息
         };
 
         // 使用用户ID创建文件夹前缀
         const folderPrefix = `idcards/${userId}/`;
 
-        // 上传身份证正面照片
+        // 上传身份证正面照片并进行识别
         if (files.idCardFront && files.idCardFront[0]) {
-            const frontResult = await uploadToOSS(files.idCardFront[0], folderPrefix);
+            const frontFile = files.idCardFront[0];
+            const frontResult = await uploadToOSS(frontFile, folderPrefix);
             result.idCardFrontUrl = frontResult.url;
+            
+            // 进行身份证识别
+            try {
+                const imageBase64 = frontFile.buffer.toString('base64');
+                const ocrResult = await OcrClient.recognizeIdCard(imageBase64);
+                result.idCardInfo = ocrResult;
+            } catch (ocrError) {
+                console.error('身份证识别失败:', ocrError);
+                // 识别失败不影响上传流程
+            }
         }
 
         // 上传身份证背面照片
