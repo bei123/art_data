@@ -255,9 +255,9 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
 
 // 上传身份证照片接口
 router.post('/userApi/external/user/upload/idcard', upload.fields([
-    { name: 'idCardFront', maxCount: 1 },  // 身份证正面
-    { name: 'idCardBack', maxCount: 1 },   // 身份证背面
-    { name: 'businessLicense', maxCount: 1 }  // 营业执照（可选）
+    { name: 'idCardFront', maxCount: 1 },
+    { name: 'idCardBack', maxCount: 1 },
+    { name: 'businessLicense', maxCount: 1 }
 ]), async (req, res) => {
     const { userId } = req.body;
     if (!userId) {
@@ -274,9 +274,9 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             idCardFrontUrl: '',
             idCardBackUrl: '',
             businessLicenseUrl: '',
-            idCardInfo: null,  // 新增：存储身份证识别信息
-            idCardBackInfo: null,  // 新增：存储身份证背面识别信息
-            idCardVerify: null  // 新增：存储二要素核验结果
+            idCardInfo: null,
+            idCardBackInfo: null,
+            idCardVerify: null
         };
 
         // 使用用户ID创建文件夹前缀
@@ -310,7 +310,9 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                     certName = ocrResult.data.face.data.name;
                     certNo = ocrResult.data.face.data.idNumber;
                 }
+
                 if (certName && certNo) {
+                    console.log('开始二要素核验:', { certName, certNo });
                     try {
                         const client = createDytnsClient();
                         const request = new Dytnsapi20200217.CertNoTwoElementVerificationRequest({
@@ -319,10 +321,17 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                         });
                         const runtime = new Util.RuntimeOptions({});
                         
+                        console.log('发送二要素核验请求...');
                         const verifyRes = await client.certNoTwoElementVerificationWithOptions(request, runtime);
+                        console.log('二要素核验响应:', verifyRes);
                         result.idCardVerify = verifyRes.body;
                     } catch (verifyErr) {
-                        console.error('二要素核验失败:', verifyErr);
+                        console.error('二要素核验失败:', {
+                            error: verifyErr,
+                            message: verifyErr.message,
+                            recommend: verifyErr.data?.Recommend,
+                            stack: verifyErr.stack
+                        });
                         result.idCardVerify = { 
                             code: 500, 
                             message: '二要素核验失败', 
@@ -330,10 +339,15 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                             recommend: verifyErr.data?.Recommend 
                         };
                     }
+                } else {
+                    console.log('无法获取姓名或身份证号:', { certName, certNo });
                 }
             } catch (ocrError) {
-                console.error('身份证识别失败:', ocrError);
-                // 识别失败不影响上传流程
+                console.error('身份证识别失败:', {
+                    error: ocrError,
+                    message: ocrError.message,
+                    stack: ocrError.stack
+                });
             }
         }
 
