@@ -16,10 +16,9 @@ class OcrClient {
     static async recognizeIdCard(imageBuffer) {
         const client = this.createClient();
         const request = new ocr_api20210707.RecognizeIdcardRequest({
-            body: imageBuffer  // 直接传入图片buffer
+            body: imageBuffer // 直接传 Buffer
         });
         const runtime = new Util.RuntimeOptions({});
-        
         try {
             const response = await client.recognizeIdcardWithOptions(request, runtime);
             return response.body;
