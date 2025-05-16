@@ -277,6 +277,14 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                 const ocrResult = await OcrClient.recognizeIdCard(frontFile.buffer);
                 if (ocrResult && typeof ocrResult.data === 'string') {
                     ocrResult.data = JSON.parse(ocrResult.data);
+                    // 修正所有 value 字段乱码
+                    if (ocrResult.data && ocrResult.data.face && Array.isArray(ocrResult.data.face.prism_keyValueInfo)) {
+                        ocrResult.data.face.prism_keyValueInfo.forEach(item => {
+                            if (typeof item.value === 'string') {
+                                item.value = Buffer.from(item.value, 'latin1').toString('utf8');
+                            }
+                        });
+                    }
                 }
                 result.idCardInfo = ocrResult;
             } catch (ocrError) {
