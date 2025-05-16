@@ -2,6 +2,7 @@ const ocr_api20210707 = require('@alicloud/ocr-api20210707');
 const OpenApi = require('@alicloud/openapi-client');
 const Util = require('@alicloud/tea-util');
 const Credential = require('@alicloud/credentials');
+const { Readable } = require('stream');
 
 class OcrClient {
     static createClient() {
@@ -15,8 +16,12 @@ class OcrClient {
 
     static async recognizeIdCard(imageBuffer) {
         const client = this.createClient();
+        // 将Buffer转为Node.js的Readable Stream
+        const stream = new Readable();
+        stream.push(imageBuffer);
+        stream.push(null);
         const request = new ocr_api20210707.RecognizeIdcardRequest({
-            body: imageBuffer // 直接传 Buffer
+            body: stream
         });
         const runtime = new Util.RuntimeOptions({});
         try {
