@@ -344,4 +344,13 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
     }
 });
 
+// 获取用户IP接口
+router.get('/getIp', (req, res) => {
+    // 兼容代理、CDN等多种场景
+    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.socket.remoteAddress || (req.connection.socket ? req.connection.socket.remoteAddress : null);
+    res.json({
+        ip: Array.isArray(ip) ? ip[0] : ip
+    });
+});
+
 module.exports = router; 
