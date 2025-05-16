@@ -1,0 +1,60 @@
+{
+  "info": {
+    "_postman_id": "b1e1e1e1-1111-2222-3333-444455556666",
+    "name": "身份证上传接口测试",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "上传身份证",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "userId",
+              "value": "1",
+              "type": "text"
+            },
+            {
+              "key": "idCardFront",
+              "type": "file",
+              "src": ""
+            },
+            {
+              "key": "idCardBack",
+              "type": "file",
+              "src": ""
+            },
+            {
+              "key": "businessLicense",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "https://api.wx.2000gallery.art:2000/userApi/external/user/upload/idcard",
+          "protocol": "https",
+          "host": [
+            "api",
+            "wx",
+            "2000gallery",
+            "art"
+          ],
+          "port": "2000",
+          "path": [
+            "userApi",
+            "external",
+            "user",
+            "upload",
+            "idcard"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+} 

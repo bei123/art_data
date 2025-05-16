@@ -260,7 +260,8 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             idCardFrontUrl: '',
             idCardBackUrl: '',
             businessLicenseUrl: '',
-            idCardInfo: null  // 新增：存储身份证识别信息
+            idCardInfo: null,  // 新增：存储身份证识别信息
+            idCardBackInfo: null  // 新增：存储身份证背面识别信息
         };
 
         // 使用用户ID创建文件夹前缀
@@ -293,10 +294,31 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             }
         }
 
-        // 上传身份证背面照片
+        // 上传身份证背面照片并进行识别
         if (files.idCardBack && files.idCardBack[0]) {
-            const backResult = await uploadToOSS(files.idCardBack[0], folderPrefix);
+            const backFile = files.idCardBack[0];
+            const backResult = await uploadToOSS(backFile, folderPrefix);
             result.idCardBackUrl = backResult.url;
+
+            // 进行身份证背面识别
+            try {
+                const ocrBackResult = await OcrClient.recognizeIdCard(backFile.buffer);
+                if (ocrBackResult && typeof ocrBackResult.data === 'string') {
+                    ocrBackResult.data = JSON.parse(ocrBackResult.data);
+                    // 修正所有 value 字段乱码
+                    if (ocrBackResult.data && ocrBackResult.data.face && Array.isArray(ocrBackResult.data.face.prism_keyValueInfo)) {
+                        ocrBackResult.data.face.prism_keyValueInfo.forEach(item => {
+                            if (typeof item.value === 'string') {
+                                item.value = Buffer.from(item.value, 'latin1').toString('utf8');
+                            }
+                        });
+                    }
+                }
+                result.idCardBackInfo = ocrBackResult;
+            } catch (ocrError) {
+                console.error('身份证背面识别失败:', ocrError);
+                // 识别失败不影响上传流程
+            }
         }
 
         // 上传营业执照照片（如果有）
