@@ -293,27 +293,36 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                 const ocrResult = await OcrClient.recognizeIdCard(frontFile.buffer);
                 console.log('OCR原始结果:', JSON.stringify(ocrResult, null, 2));
                 
-                if (ocrResult && typeof ocrResult.data === 'string') {
-                    ocrResult.data = JSON.parse(ocrResult.data);
+                // 解析嵌套的JSON字符串
+                let parsedData;
+                if (ocrResult && ocrResult.data) {
+                    if (typeof ocrResult.data === 'string') {
+                        parsedData = JSON.parse(ocrResult.data);
+                    } else {
+                        parsedData = ocrResult.data;
+                    }
                 }
                 
                 // 修正所有 value 字段乱码
-                if (ocrResult && ocrResult.data && ocrResult.data.face && Array.isArray(ocrResult.data.face.prism_keyValueInfo)) {
-                    ocrResult.data.face.prism_keyValueInfo.forEach(item => {
+                if (parsedData && parsedData.data && parsedData.data.face && Array.isArray(parsedData.data.face.prism_keyValueInfo)) {
+                    parsedData.data.face.prism_keyValueInfo.forEach(item => {
                         if (typeof item.value === 'string') {
                             item.value = Buffer.from(item.value, 'latin1').toString('utf8');
                         }
                     });
                 }
                 
-                result.idCardInfo = ocrResult;
+                result.idCardInfo = {
+                    ...ocrResult,
+                    data: parsedData
+                };
 
                 // 自动进行二要素核验
                 let certName = '', certNo = '';
                 
                 // 从prism_keyValueInfo中提取姓名和身份证号
-                if (ocrResult && ocrResult.data && ocrResult.data.face && Array.isArray(ocrResult.data.face.prism_keyValueInfo)) {
-                    const keyValueInfo = ocrResult.data.face.prism_keyValueInfo;
+                if (parsedData && parsedData.data && parsedData.data.face && Array.isArray(parsedData.data.face.prism_keyValueInfo)) {
+                    const keyValueInfo = parsedData.data.face.prism_keyValueInfo;
                     console.log('解析后的keyValueInfo:', JSON.stringify(keyValueInfo, null, 2));
                     
                     const nameItem = keyValueInfo.find(item => item.key === 'name');
@@ -362,7 +371,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                     console.log('无法获取姓名或身份证号:', { 
                         certName, 
                         certNo,
-                        ocrResult: JSON.stringify(ocrResult, null, 2)
+                        parsedData: JSON.stringify(parsedData, null, 2)
                     });
                 }
             } catch (ocrError) {
