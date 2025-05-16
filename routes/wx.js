@@ -275,6 +275,9 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             // 进行身份证识别
             try {
                 const ocrResult = await OcrClient.recognizeIdCard(frontFile.buffer);
+                if (ocrResult && typeof ocrResult.data === 'string') {
+                    ocrResult.data = JSON.parse(ocrResult.data);
+                }
                 result.idCardInfo = ocrResult;
             } catch (ocrError) {
                 console.error('身份证识别失败:', ocrError);
