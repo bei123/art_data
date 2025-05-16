@@ -13,10 +13,10 @@ class OcrClient {
         return new ocr_api20210707.default(config);
     }
 
-    static async recognizeIdCard(imageBase64) {
+    static async recognizeIdCard(imageBuffer) {
         const client = this.createClient();
         const request = new ocr_api20210707.RecognizeIdcardRequest({
-            imageURL: imageBase64
+            body: imageBuffer  // 直接传入图片buffer
         });
         const runtime = new Util.RuntimeOptions({});
         
