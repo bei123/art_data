@@ -7,6 +7,20 @@ const multer = require('multer');
 const upload = multer();
 const { uploadToOSS } = require('../config/oss');
 const OcrClient = require('../utils/ocrClient');
+const Dytnsapi20200217 = require('@alicloud/dytnsapi20200217');
+const OpenApi = require('@alicloud/openapi-client');
+const Util = require('@alicloud/tea-util');
+const Credential = require('@alicloud/credentials');
+
+// 创建阿里云二要素核验客户端
+function createDytnsClient() {
+    let credential = new Credential.default();
+    let config = new OpenApi.Config({
+        credential: credential,
+    });
+    config.endpoint = 'dytnsapi.aliyuncs.com';
+    return new Dytnsapi20200217.default(config);
+}
 
 // 微信小程序获取手机号接口
 async function getAccessToken(appid, secret) {
@@ -261,7 +275,8 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             idCardBackUrl: '',
             businessLicenseUrl: '',
             idCardInfo: null,  // 新增：存储身份证识别信息
-            idCardBackInfo: null  // 新增：存储身份证背面识别信息
+            idCardBackInfo: null,  // 新增：存储身份证背面识别信息
+            idCardVerify: null  // 新增：存储二要素核验结果
         };
 
         // 使用用户ID创建文件夹前缀
@@ -297,23 +312,23 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                 }
                 if (certName && certNo) {
                     try {
-                        const AuthCode = process.env.ALIYUN_IDCARD_AUTHCODE || '你的AuthCode';
-                        const axios = require('axios');
-                        const params = new URLSearchParams();
-                        params.append('Action', 'CertNoTwoElementVerification');
-                        params.append('Version', '2020-02-17');
-                        params.append('CertName', certName);
-                        params.append('CertNo', certNo);
-                        params.append('AuthCode', AuthCode);
-
-                        const verifyRes = await axios.post(
-                            'https://dytnsapi.aliyuncs.com',
-                            params
-                        );
-                        result.idCardVerify = verifyRes.data;
+                        const client = createDytnsClient();
+                        const request = new Dytnsapi20200217.CertNoTwoElementVerificationRequest({
+                            certName: certName,
+                            certNo: certNo
+                        });
+                        const runtime = new Util.RuntimeOptions({});
+                        
+                        const verifyRes = await client.certNoTwoElementVerificationWithOptions(request, runtime);
+                        result.idCardVerify = verifyRes.body;
                     } catch (verifyErr) {
                         console.error('二要素核验失败:', verifyErr);
-                        result.idCardVerify = { code: 500, message: '二要素核验失败', detail: verifyErr.message };
+                        result.idCardVerify = { 
+                            code: 500, 
+                            message: '二要素核验失败', 
+                            detail: verifyErr.message,
+                            recommend: verifyErr.data?.Recommend 
+                        };
                     }
                 }
             } catch (ocrError) {
@@ -388,24 +403,24 @@ router.post('/userApi/external/user/idcard-verify', async (req, res) => {
         return res.status(400).json({ code: 400, message: '缺少姓名或身份证号' });
     }
 
-    const AuthCode = process.env.ALIYUN_IDCARD_AUTHCODE || '你的AuthCode';
-
     try {
-        const axios = require('axios');
-        const params = new URLSearchParams();
-        params.append('Action', 'CertNoTwoElementVerification');
-        params.append('Version', '2020-02-17');
-        params.append('CertName', certName);
-        params.append('CertNo', certNo);
-        params.append('AuthCode', AuthCode);
-
-        const response = await axios.post(
-            'https://dytnsapi.aliyuncs.com/',
-            params
-        );
-        res.json(response.data);
+        const client = createDytnsClient();
+        const request = new Dytnsapi20200217.CertNoTwoElementVerificationRequest({
+            certName: certName,
+            certNo: certNo
+        });
+        const runtime = new Util.RuntimeOptions({});
+        
+        const response = await client.certNoTwoElementVerificationWithOptions(request, runtime);
+        res.json(response.body);
     } catch (err) {
-        res.status(500).json({ code: 500, message: '核验失败', detail: err.message });
+        console.error('二要素核验失败:', err);
+        res.status(500).json({ 
+            code: 500, 
+            message: '核验失败', 
+            detail: err.message,
+            recommend: err.data?.Recommend 
+        });
     }
 });
 
