@@ -307,7 +307,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                         params.append('AuthCode', AuthCode);
 
                         const verifyRes = await axios.post(
-                            'dytnsapi.aliyuncs.com',
+                            'https://dytnsapi.aliyuncs.com',
                             params
                         );
                         result.idCardVerify = verifyRes.data;
