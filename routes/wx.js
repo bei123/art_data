@@ -97,13 +97,11 @@ router.post('/login', async (req, res) => {
         // 3. 生成你自己系统的 token（如 JWT）
         const token = jwt.sign({ userId: user.id, openid }, 'your_jwt_secret', { expiresIn: '7d' });
 
-        // 4. 返回用户信息和 token
+        // 4. 返回用户信息和 token, 包含用户所有信息，并过滤掉敏感字段
+        const { session_key: sk, ...userProfile } = user;
         res.json({
             token,
-            user: {
-                id: user.id,
-                openid
-            }
+            user: userProfile
         });
     } catch (err) {
         res.status(500).json({ error: '服务器错误', detail: err.message });
@@ -131,25 +129,39 @@ router.post('/bindUserInfo', async (req, res) => {
     }
 
     try {
+        // 先查询用户，判断是否已存在自定义信息
+        const [existingUsers] = await db.query('SELECT nickname, avatar FROM wx_users WHERE id = ?', [payload.userId]);
+        if (existingUsers.length === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+        const existingUser = existingUsers[0];
+
         // 只更新有传的字段
         const fields = [];
         const values = [];
+
+        // 手机号可以更新
         if (phone) {
             fields.push('phone = ?');
             values.push(phone);
         }
-        if (nickname) {
+        // 只有当数据库中没有昵称时，才使用微信的昵称进行填充
+        if (nickname && !existingUser.nickname) {
             fields.push('nickname = ?');
             values.push(nickname);
         }
-        if (avatar) {
+        // 只有当数据库中没有头像时，才使用微信的头像进行填充
+        if (avatar && !existingUser.avatar) {
             fields.push('avatar = ?');
             values.push(avatar);
         }
-        values.push(payload.userId);
 
-        const sql = `UPDATE wx_users SET ${fields.join(', ')} WHERE id = ?`;
-        await db.query(sql, values);
+        // 如果有需要更新的字段，才执行更新操作
+        if (fields.length > 0) {
+            values.push(payload.userId);
+            const sql = `UPDATE wx_users SET ${fields.join(', ')} WHERE id = ?`;
+            await db.query(sql, values);
+        }
 
         res.json({ success: true });
     } catch (err) {
