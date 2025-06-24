@@ -184,6 +184,62 @@ router.get('/userInfo', async (req, res) => {
     }
 });
 
+// 新增：更新用户昵称和头像（支持上传头像到OSS）
+router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
+    // 1. 验证用户身份
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const { nickname } = req.body;
+    const avatarFile = req.file;
+
+    // 2. 校验参数
+    if (!nickname && !avatarFile) {
+        return res.status(400).json({ error: '昵称和头像至少需要提供一个' });
+    }
+
+    try {
+        const fieldsToUpdate = {};
+        if (nickname) {
+            fieldsToUpdate.nickname = nickname;
+        }
+
+        // 如果有上传头像，则上传到OSS
+        if (avatarFile) {
+            const folderPrefix = `avatars/${payload.userId}/`;
+            const ossResult = await uploadToOSS(avatarFile, folderPrefix);
+            fieldsToUpdate.avatar = ossResult.url;
+        }
+
+        // 3. 更新数据库
+        await db.query('UPDATE wx_users SET ? WHERE id = ?', [fieldsToUpdate, payload.userId]);
+
+        // 4. 查询并返回更新后的用户信息
+        const [users] = await db.query('SELECT id, openid, nickname, avatar, phone FROM wx_users WHERE id = ?', [payload.userId]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+
+        res.json({
+            success: true,
+            message: '用户信息更新成功',
+            user: users[0]
+        });
+    } catch (err) {
+        console.error('更新用户信息失败:', err);
+        res.status(500).json({ error: '服务器错误', detail: err.message });
+    }
+});
+
 // 获取外部token接口
 router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), async (req, res) => {
     const { appInfo } = req.body;
@@ -453,7 +509,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
 // 获取用户IP接口
 router.get('/getIp', (req, res) => {
     // 兼容代理、CDN等多种场景
-    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.socket.remoteAddress || (req.connection.socket ? req.connection.socket.remoteAddress : null);
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     res.json({
         ip: Array.isArray(ip) ? ip[0] : ip
     });
