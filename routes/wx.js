@@ -521,10 +521,19 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
 // 获取用户IP接口
 router.get('/getIp', (req, res) => {
     // 兼容代理、CDN等多种场景
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    res.json({
-        ip: Array.isArray(ip) ? ip[0] : ip
-    });
+    let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    // 如果是数组，取第一个
+    if (Array.isArray(ip)) {
+        ip = ip[0];
+    }
+
+    // 如果是IPv4映射的IPv6地址（如 ::ffff:127.0.0.1），则清理前缀
+    if (ip && typeof ip === 'string' && ip.startsWith('::ffff:')) {
+        ip = ip.substring(7);
+    }
+
+    res.json({ ip });
 });
 
 // 身份证二要素核验接口
