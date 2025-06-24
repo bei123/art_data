@@ -61,6 +61,7 @@ router.get('/:id', async (req, res) => {
     const [rows] = await db.query(`
       SELECT 
         da.*,
+        a.id as artist_id,
         a.name as artist_name,
         a.avatar as artist_avatar,
         a.description as artist_description
@@ -73,27 +74,20 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: '作品不存在' });
     }
 
-    const artwork = processObjectImages(rows[0], ['image_url', 'avatar']);
+    const artwork = processObjectImages(rows[0], ['image_url', 'artist_avatar']);
 
     const artist = {
+      id: artwork.artist_id,
       name: artwork.artist_name,
       avatar: artwork.artist_avatar,
       description: artwork.artist_description
     };
+    
+    // 移除 artist 相关字段，避免在顶层重复
+    const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
 
     res.json({
-      title: artwork.title,
-      image_url: artwork.image_url,
-      description: artwork.description,
-      price: artwork.price,
-      stock: artwork.stock,
-      discount_price: artwork.discount_price,
-      original_price: artwork.original_price,
-      sales: artwork.sales,
-      is_on_sale: artwork.is_on_sale,
-      contract_address: artwork.contract_address,
-      token_id: artwork.token_id,
-      blockchain: artwork.blockchain,
+      ...artworkData,
       artist: artist
     });
   } catch (error) {
