@@ -90,6 +90,7 @@ router.get('/:id', async (req, res) => {
     };
 
     const artist = {
+      id: artwork.artist_id,
       name: artwork.artist_name,
       avatar: artwork.artist_avatar,
       description: artwork.artist_description
