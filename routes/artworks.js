@@ -7,7 +7,9 @@ const { processObjectImages } = require('../utils/image');
 // 获取艺术品列表（公开接口）
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const { artist_id } = req.query;
+
+    let sql = `
       SELECT 
         oa.*,
         a.id as artist_id,
@@ -15,8 +17,17 @@ router.get('/', async (req, res) => {
         a.avatar as artist_avatar
       FROM original_artworks oa 
       LEFT JOIN artists a ON oa.artist_id = a.id
-      ORDER BY oa.created_at DESC
-    `);
+    `;
+    const params = [];
+
+    if (artist_id) {
+      sql += ' WHERE oa.artist_id = ?';
+      params.push(artist_id);
+    }
+
+    sql += ' ORDER BY oa.created_at DESC';
+
+    const [rows] = await db.query(sql, params);
     console.log('Original artworks query result:', rows);
     
     if (!rows || !Array.isArray(rows)) {
