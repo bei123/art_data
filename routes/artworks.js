@@ -67,6 +67,7 @@ router.get('/:id', async (req, res) => {
     const [rows] = await db.query(`
       SELECT 
         oa.*,
+        a.id as artist_id,
         a.name as artist_name,
         a.avatar as artist_avatar,
         a.description as artist_description
