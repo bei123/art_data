@@ -80,6 +80,21 @@
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
+        <el-form-item label="多图">
+          <el-upload
+            v-model:file-list="form.images"
+            list-type="picture-card"
+            :action="`${baseUrl}/api/upload`"
+            :on-success="handleMultiImageSuccess"
+            :before-upload="beforeUpload"
+            multiple
+          >
+            <el-icon><Plus /></el-icon>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="详情富文本">
+          <quill-editor v-model="form.long_description" style="height: 300px" />
+        </el-form-item>
         <el-form-item label="艺术家" required>
           <el-select v-model="form.artist_id" filterable placeholder="请选择艺术家">
             <el-option
@@ -215,6 +230,8 @@ const loading = ref(false)
 const form = ref({
   title: '',
   image: '',
+  images: [],
+  long_description: '',
   artist_id: '',
   year: new Date().getFullYear(),
   original_price: 0,
@@ -317,6 +334,9 @@ const fetchArtworks = async () => {
         artwork.artist.avatar = `${baseUrl}${artwork.artist.avatar}`
       }
 
+      artwork.images = item.images || []
+      artwork.long_description = item.long_description || ''
+
       return artwork
     })
   } catch (error) {
@@ -347,6 +367,8 @@ const showAddDialog = () => {
   form.value = {
     title: '',
     image: '',
+    images: [],
+    long_description: '',
     artist_id: '',
     year: new Date().getFullYear(),
     description: '',
@@ -374,6 +396,8 @@ const editArtwork = (row) => {
     id: row.id,
     title: row.title || '',
     image: row.image || '',
+    images: row.images || [],
+    long_description: row.long_description || '',
     artist_id: row.artist?.id || '',
     year: Number(row.year) || new Date().getFullYear(),
     description: row.description || '',
@@ -433,6 +457,8 @@ const submitForm = async () => {
     const submitData = {
       title: form.value.title,
       image: form.value.image,
+      images: form.value.images,
+      long_description: form.value.long_description,
       artist_id: form.value.artist_id,
       year: Number(form.value.year),
       description: form.value.description,
@@ -482,6 +508,10 @@ const submitForm = async () => {
 // 上传图片相关方法
 const handleUploadSuccess = (response) => {
   form.value.image = response.url
+}
+
+const handleMultiImageSuccess = (response, file, fileList) => {
+  form.value.images = fileList.map(f => f.response?.url || f.url)
 }
 
 const beforeUpload = async (file) => {

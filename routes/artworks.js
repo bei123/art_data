@@ -82,6 +82,10 @@ router.get('/:id', async (req, res) => {
 
     const artwork = processObjectImages(rows[0], ['image', 'avatar']);
 
+    // 查询多图
+    const [imageRows] = await db.query('SELECT image_url FROM artwork_images WHERE artwork_id = ? ORDER BY sort_order, id', [artwork.id]);
+    const images = imageRows.map(row => row.image_url);
+
     const collection = {
       location: artwork.collection_location,
       number: artwork.collection_number,
@@ -100,7 +104,9 @@ router.get('/:id', async (req, res) => {
       title: artwork.title,
       year: artwork.year,
       image: artwork.image,
+      images: images,
       description: artwork.description,
+      long_description: artwork.long_description,
       background: artwork.background,
       features: artwork.features,
       collection: collection,
@@ -124,10 +130,12 @@ router.post('/', authenticateToken, async (req, res) => {
     const {
       title,
       image,
+      images,
       artist_id,
       artist_name,
       year,
       description,
+      long_description,
       background,
       features,
       collection_location,
@@ -160,16 +168,22 @@ router.post('/', authenticateToken, async (req, res) => {
     // 创建艺术品
     const [result] = await db.query(
       `INSERT INTO original_artworks (
-        title, image, artist_id, year, description, 
+        title, image, artist_id, year, description, long_description,
         background, features, collection_location, 
         collection_number, collection_size, collection_material
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        title, image, finalArtistId, year, description,
+        title, image, finalArtistId, year, description, long_description,
         background, features, collection_location,
         collection_number, collection_size, collection_material
       ]
     );
+    // 批量插入多图
+    if (Array.isArray(images) && images.length > 0) {
+      for (let i = 0; i < images.length; i++) {
+        await db.query('INSERT INTO artwork_images (artwork_id, image_url, sort_order) VALUES (?, ?, ?)', [result.insertId, images[i], i]);
+      }
+    }
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
@@ -177,8 +191,10 @@ router.post('/', authenticateToken, async (req, res) => {
       id: result.insertId,
       title,
       image,
+      images: images || [],
       year,
       description,
+      long_description,
       background,
       features,
       collection: {
@@ -204,10 +220,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const {
       title,
       image,
+      images,
       artist_id,
       artist_name,
       year,
       description,
+      long_description,
       background,
       features,
       collection_location,
@@ -245,6 +263,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         artist_id = ?,
         year = ?,
         description = ?,
+        long_description = ?,
         background = ?,
         features = ?,
         collection_location = ?,
@@ -258,13 +277,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
         is_on_sale = ?
       WHERE id = ?`,
       [
-        title, image, finalArtistId, year, description,
+        title, image, finalArtistId, year, description, long_description,
         background, features, collection_location,
         collection_number, collection_size, collection_material,
         original_price, discount_price, stock, sales, is_on_sale,
         req.params.id
       ]
     );
+    // 先删除原有多图，再插入新多图
+    await db.query('DELETE FROM artwork_images WHERE artwork_id = ?', [req.params.id]);
+    if (Array.isArray(images) && images.length > 0) {
+      for (let i = 0; i < images.length; i++) {
+        await db.query('INSERT INTO artwork_images (artwork_id, image_url, sort_order) VALUES (?, ?, ?)', [req.params.id, images[i], i]);
+      }
+    }
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
@@ -272,8 +298,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
       id: parseInt(req.params.id),
       title,
       image,
+      images: images || [],
       year,
       description,
+      long_description,
       background,
       features,
       collection: {

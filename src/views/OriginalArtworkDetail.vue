@@ -137,6 +137,19 @@
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-form-item label="多图">
+          <el-image
+            v-for="(img, idx) in form.images"
+            :key="idx"
+            :src="img"
+            style="width: 100px; margin-right: 10px"
+          />
+        </el-form-item>
+
+        <el-form-item label="详情富文本">
+          <div v-html="form.long_description"></div>
+        </el-form-item>
       </el-form>
     </el-card>
   </div>
@@ -188,7 +201,9 @@ const form = ref({
   discount_price: 0,
   original_price: 0,
   sales: 0,
-  is_on_sale: 1
+  is_on_sale: 1,
+  images: [],
+  long_description: ''
 })
 
 const fetchArtists = async () => {
@@ -237,7 +252,9 @@ const fetchArtworkDetail = async () => {
       discount_price: data.discount_price,
       original_price: data.original_price,
       sales: data.sales,
-      is_on_sale: data.is_on_sale
+      is_on_sale: data.is_on_sale,
+      images: data.images || [],
+      long_description: data.long_description || ''
     }
   } catch (error) {
     if (error.response) {
