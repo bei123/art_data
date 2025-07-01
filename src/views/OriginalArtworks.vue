@@ -81,7 +81,14 @@
           </el-upload>
         </el-form-item>
         <el-form-item label="艺术家" required>
-          <el-input v-model="form.artist_name" />
+          <el-select v-model="form.artist_id" filterable placeholder="请选择艺术家">
+            <el-option
+              v-for="artist in artistOptions"
+              :key="artist.id"
+              :label="artist.name"
+              :value="artist.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="年份">
           <el-input v-model="form.year" />
@@ -207,7 +214,7 @@ const loading = ref(false)
 const form = ref({
   title: '',
   image: '',
-  artist_name: '',
+  artist_id: '',
   year: new Date().getFullYear(),
   original_price: 0,
   discount_price: 0,
@@ -233,6 +240,22 @@ const rules = {
     { required: true, message: '请输入库存', trigger: 'blur' },
     { type: 'number', min: 0, message: '库存必须大于等于0', trigger: 'blur' }
   ]
+}
+
+const artistOptions = ref([])
+
+const fetchArtists = async () => {
+  try {
+    const data = await axios.get('/artists')
+    if (Array.isArray(data)) {
+      artistOptions.value = data
+    } else {
+      artistOptions.value = []
+    }
+  } catch (error) {
+    artistOptions.value = []
+    ElMessage.error('获取艺术家列表失败')
+  }
 }
 
 // 检查登录状态
@@ -323,7 +346,7 @@ const showAddDialog = () => {
   form.value = {
     title: '',
     image: '',
-    artist_name: '',
+    artist_id: '',
     year: new Date().getFullYear(),
     description: '',
     background: '',
@@ -350,7 +373,7 @@ const editArtwork = (row) => {
     id: row.id,
     title: row.title || '',
     image: row.image || '',
-    artist_name: row.artist?.name || '',
+    artist_id: row.artist?.id || '',
     year: Number(row.year) || new Date().getFullYear(),
     description: row.description || '',
     background: row.background || '',
@@ -409,7 +432,7 @@ const submitForm = async () => {
     const submitData = {
       title: form.value.title,
       image: form.value.image,
-      artist_name: form.value.artist_name,
+      artist_id: form.value.artist_id,
       year: Number(form.value.year),
       description: form.value.description,
       background: form.value.background,
@@ -476,6 +499,7 @@ const beforeUpload = (file) => {
 }
 
 onMounted(() => {
+  fetchArtists()
   checkLoginStatus() && fetchArtworks()
 })
 </script>

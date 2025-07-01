@@ -121,9 +121,10 @@ router.get('/:id', async (req, res) => {
 // 创建艺术品（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { 
-      title, 
-      image, 
+    const {
+      title,
+      image,
+      artist_id,
       artist_name,
       year,
       description,
@@ -134,26 +135,28 @@ router.post('/', authenticateToken, async (req, res) => {
       collection_size,
       collection_material
     } = req.body;
-    
+
+    let finalArtistId = artist_id;
+    // 如果没有artist_id，兼容老前端用artist_name查找或新建
+    if (!finalArtistId && artist_name) {
+      const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
+      if (existingArtists.length > 0) {
+        finalArtistId = existingArtists[0].id;
+      } else {
+        const [artistResult] = await db.query(
+          'INSERT INTO artists (name) VALUES (?)',
+          [artist_name]
+        );
+        finalArtistId = artistResult.insertId;
+      }
+    }
+    if (!finalArtistId) {
+      return res.status(400).json({ error: '缺少有效的艺术家ID' });
+    }
     // 验证图片URL
     if (!validateImageUrl(image)) {
       return res.status(400).json({ error: '无效的图片URL' });
     }
-    
-    // 先创建或查找艺术家
-    const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
-    let artist_id;
-    
-    if (existingArtists.length > 0) {
-      artist_id = existingArtists[0].id;
-    } else {
-      const [artistResult] = await db.query(
-        'INSERT INTO artists (name) VALUES (?)',
-        [artist_name]
-      );
-      artist_id = artistResult.insertId;
-    }
-    
     // 创建艺术品
     const [result] = await db.query(
       `INSERT INTO original_artworks (
@@ -162,13 +165,15 @@ router.post('/', authenticateToken, async (req, res) => {
         collection_number, collection_size, collection_material
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        title, image, artist_id, year, description,
+        title, image, finalArtistId, year, description,
         background, features, collection_location,
         collection_number, collection_size, collection_material
       ]
     );
-    
-    res.json({ 
+    // 查询艺术家信息
+    const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
+    const artist = artistRows[0] || {};
+    res.json({
       id: result.insertId,
       title,
       image,
@@ -183,8 +188,8 @@ router.post('/', authenticateToken, async (req, res) => {
         material: collection_material
       },
       artist: {
-        id: artist_id,
-        name: artist_name
+        id: artist.id,
+        name: artist.name
       }
     });
   } catch (error) {
@@ -196,9 +201,10 @@ router.post('/', authenticateToken, async (req, res) => {
 // 更新艺术品（需要认证）
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { 
-      title, 
-      image, 
+    const {
+      title,
+      image,
+      artist_id,
       artist_name,
       year,
       description,
@@ -214,21 +220,23 @@ router.put('/:id', authenticateToken, async (req, res) => {
       sales,
       is_on_sale
     } = req.body;
-    
-    // 先创建或查找艺术家
-    const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
-    let artist_id;
-    
-    if (existingArtists.length > 0) {
-      artist_id = existingArtists[0].id;
-    } else {
-      const [artistResult] = await db.query(
-        'INSERT INTO artists (name) VALUES (?)',
-        [artist_name]
-      );
-      artist_id = artistResult.insertId;
+    let finalArtistId = artist_id;
+    // 如果没有artist_id，兼容老前端用artist_name查找或新建
+    if (!finalArtistId && artist_name) {
+      const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
+      if (existingArtists.length > 0) {
+        finalArtistId = existingArtists[0].id;
+      } else {
+        const [artistResult] = await db.query(
+          'INSERT INTO artists (name) VALUES (?)',
+          [artist_name]
+        );
+        finalArtistId = artistResult.insertId;
+      }
     }
-    
+    if (!finalArtistId) {
+      return res.status(400).json({ error: '缺少有效的艺术家ID' });
+    }
     // 更新艺术品
     await db.query(
       `UPDATE original_artworks SET 
@@ -250,15 +258,17 @@ router.put('/:id', authenticateToken, async (req, res) => {
         is_on_sale = ?
       WHERE id = ?`,
       [
-        title, image, artist_id, year, description,
+        title, image, finalArtistId, year, description,
         background, features, collection_location,
         collection_number, collection_size, collection_material,
         original_price, discount_price, stock, sales, is_on_sale,
         req.params.id
       ]
     );
-    
-    res.json({ 
+    // 查询艺术家信息
+    const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
+    const artist = artistRows[0] || {};
+    res.json({
       id: parseInt(req.params.id),
       title,
       image,
@@ -273,8 +283,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         material: collection_material
       },
       artist: {
-        id: artist_id,
-        name: artist_name
+        id: artist.id,
+        name: artist.name
       },
       original_price,
       discount_price,

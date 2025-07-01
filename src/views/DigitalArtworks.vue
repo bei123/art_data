@@ -58,7 +58,14 @@
           </el-upload>
         </el-form-item>
         <el-form-item label="作者">
-          <el-input v-model="form.author" />
+          <el-select v-model="form.artist_id" filterable placeholder="请选择艺术家">
+            <el-option
+              v-for="artist in artistOptions"
+              :key="artist.id"
+              :label="artist.name"
+              :value="artist.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="4" />
@@ -123,10 +130,11 @@ import { API_BASE_URL } from '../config'
 const artworks = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const artistOptions = ref([])
 const form = ref({
   title: '',
   image_url: '',
-  author: '',
+  artist_id: '',
   description: '',
   registration_certificate: '',
   license_rights: '',
@@ -165,12 +173,26 @@ const fetchArtworks = async () => {
   }
 }
 
+const fetchArtists = async () => {
+  try {
+    const data = await axios.get('/artists')
+    if (Array.isArray(data)) {
+      artistOptions.value = data
+    } else {
+      artistOptions.value = []
+    }
+  } catch (error) {
+    artistOptions.value = []
+    ElMessage.error('获取艺术家列表失败')
+  }
+}
+
 const handleAdd = () => {
   isEdit.value = false
   form.value = {
     title: '',
     image_url: '',
-    author: '',
+    artist_id: '',
     description: '',
     registration_certificate: '',
     license_rights: '',
@@ -255,8 +277,8 @@ const handleSubmit = async () => {
     ElMessage.warning('请上传作品图片');
     return;
   }
-  if (!form.value.author || !form.value.author.trim()) {
-    ElMessage.warning('请输入作者名称');
+  if (!form.value.artist_id) {
+    ElMessage.warning('请选择艺术家');
     return;
   }
   if (!form.value.description || !form.value.description.trim()) {
@@ -317,6 +339,7 @@ const handleSubmit = async () => {
 }
 
 onMounted(() => {
+  fetchArtists()
   fetchArtworks()
 })
 </script>

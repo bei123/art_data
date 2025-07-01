@@ -77,18 +77,13 @@ instance.interceptors.response.use(
 
     if (error.response) {
       const { status, data } = error.response;
-      switch (status) {
-        case 401:
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          router.push('/login');
-          ElMessage.error('登录已过期，请重新登录');
-          break;
-        case 403:
-          ElMessage.error('没有权限执行此操作');
-          break;
-        default:
-          ElMessage.error(data?.error || '操作失败');
+      if (status === 401 || status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        router.push('/login');
+        ElMessage.error('登录已过期或无权限，请重新登录');
+      } else {
+        ElMessage.error(data?.error || '操作失败');
       }
     } else if (error.request) {
       console.error('请求未收到响应:', error.request);
