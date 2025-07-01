@@ -140,11 +140,12 @@ router.get('/public', async (req, res) => {
 // 创建数字艺术品（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { 
-      title, 
-      image_url, 
-      author, 
-      description, 
+    const {
+      title,
+      image_url,
+      artist_id,
+      author,
+      description,
       registration_certificate,
       license_rights,
       license_period,
@@ -157,34 +158,55 @@ router.post('/', authenticateToken, async (req, res) => {
       issue_batch,
       issue_year,
       batch_quantity,
-      price 
+      price
     } = req.body;
-    
+
+    let finalArtistId = artist_id;
+    // 如果没有artist_id，兼容老前端用author查找或新建
+    if (!finalArtistId && author) {
+      const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [author]);
+      if (existingArtists.length > 0) {
+        finalArtistId = existingArtists[0].id;
+      } else {
+        const [artistResult] = await db.query(
+          'INSERT INTO artists (name) VALUES (?)',
+          [author]
+        );
+        finalArtistId = artistResult.insertId;
+      }
+    }
+    if (!finalArtistId) {
+      return res.status(400).json({ error: '缺少有效的艺术家ID' });
+    }
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
       return res.status(400).json({ error: '无效的图片URL' });
     }
-    
     const [result] = await db.query(
       `INSERT INTO digital_artworks (
-        title, image_url, author, description, registration_certificate,
+        title, image_url, artist_id, description, registration_certificate,
         license_rights, license_period, owner_rights, license_items,
         project_name, product_name, project_owner, issuer, issue_batch,
         issue_year, batch_quantity, price
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        title, image_url, author, description, registration_certificate,
+        title, image_url, finalArtistId, description, registration_certificate,
         license_rights, license_period, owner_rights, license_items,
         project_name, product_name, project_owner, issuer, issue_batch,
         issue_year, batch_quantity, price
       ]
     );
-    
-    res.json({ 
+    // 查询艺术家信息
+    const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
+    const artist = artistRows[0] || {};
+    res.json({
       id: result.insertId,
       title,
       image_url,
-      author,
+      artist: {
+        id: artist.id,
+        name: artist.name
+      },
       description,
       registration_certificate,
       license_rights,
@@ -210,11 +232,12 @@ router.post('/', authenticateToken, async (req, res) => {
 // 更新数字艺术品（需要认证）
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { 
-      title, 
-      image_url, 
-      author, 
-      description, 
+    const {
+      title,
+      image_url,
+      artist_id,
+      author,
+      description,
       registration_certificate,
       license_rights,
       license_period,
@@ -227,35 +250,55 @@ router.put('/:id', authenticateToken, async (req, res) => {
       issue_batch,
       issue_year,
       batch_quantity,
-      price 
+      price
     } = req.body;
-    
+    let finalArtistId = artist_id;
+    // 如果没有artist_id，兼容老前端用author查找或新建
+    if (!finalArtistId && author) {
+      const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [author]);
+      if (existingArtists.length > 0) {
+        finalArtistId = existingArtists[0].id;
+      } else {
+        const [artistResult] = await db.query(
+          'INSERT INTO artists (name) VALUES (?)',
+          [author]
+        );
+        finalArtistId = artistResult.insertId;
+      }
+    }
+    if (!finalArtistId) {
+      return res.status(400).json({ error: '缺少有效的艺术家ID' });
+    }
     // 验证图片URL
     if (!validateImageUrl(image_url)) {
       return res.status(400).json({ error: '无效的图片URL' });
     }
-    
     await db.query(
       `UPDATE digital_artworks SET 
-        title = ?, image_url = ?, author = ?, description = ?, 
+        title = ?, image_url = ?, artist_id = ?, description = ?, 
         registration_certificate = ?, license_rights = ?, license_period = ?,
         owner_rights = ?, license_items = ?, project_name = ?, product_name = ?,
         project_owner = ?, issuer = ?, issue_batch = ?, issue_year = ?,
         batch_quantity = ?, price = ?
       WHERE id = ?`,
       [
-        title, image_url, author, description, registration_certificate,
+        title, image_url, finalArtistId, description, registration_certificate,
         license_rights, license_period, owner_rights, license_items,
         project_name, product_name, project_owner, issuer, issue_batch,
         issue_year, batch_quantity, price, req.params.id
       ]
     );
-    
-    res.json({ 
+    // 查询艺术家信息
+    const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
+    const artist = artistRows[0] || {};
+    res.json({
       id: parseInt(req.params.id),
       title,
       image_url,
-      author,
+      artist: {
+        id: artist.id,
+        name: artist.name
+      },
       description,
       registration_certificate,
       license_rights,
