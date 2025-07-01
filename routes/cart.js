@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
     const [cartDigitals] = await db.query(`
       SELECT 
         ci.*, 'digital' as type,
-        d.title, d.price, d.image_url, d.author, d.description
+        d.title, d.price, d.image_url, d.description
       FROM cart_items ci
       JOIN digital_artworks d ON ci.digital_artwork_id = d.id
       WHERE ci.user_id = ? AND ci.type = 'digital'
