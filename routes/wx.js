@@ -11,6 +11,7 @@ const Dytnsapi20200217 = require('@alicloud/dytnsapi20200217');
 const OpenApi = require('@alicloud/openapi-client');
 const Util = require('@alicloud/tea-util');
 const Credential = require('@alicloud/credentials');
+const sharp = require('sharp');
 
 // 创建阿里云二要素核验客户端
 function createDytnsClient() {
@@ -228,7 +229,20 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
         // 如果有上传头像，则上传到OSS
         if (avatarFile) {
             const folderPrefix = `avatars/${payload.userId}/`;
-            const ossResult = await uploadToOSS(avatarFile, folderPrefix);
+
+            // 1. 转换为 webp 格式
+            const webpBuffer = await sharp(avatarFile.buffer).webp().toBuffer();
+
+            // 2. 构造 webp 文件对象
+            const webpFile = {
+                ...avatarFile,
+                buffer: webpBuffer,
+                originalname: avatarFile.originalname.replace(/\.[\w]+$/, '.webp'),
+                mimetype: 'image/webp'
+            };
+
+            // 3. 上传到OSS
+            const ossResult = await uploadToOSS(webpFile, folderPrefix);
             fieldsToUpdate.avatar = ossResult.url;
         }
 
