@@ -82,10 +82,11 @@
         </el-form-item>
         <el-form-item label="多图">
           <el-upload
-            v-model:file-list="form.images"
+            :file-list="form.images"
             list-type="picture-card"
             :action="`${baseUrl}/api/upload`"
             :on-success="handleMultiImageSuccess"
+            :on-remove="handleMultiImageRemove"
             :before-upload="beforeUpload"
             multiple
           >
@@ -396,7 +397,7 @@ const editArtwork = (row) => {
     id: row.id,
     title: row.title || '',
     image: row.image || '',
-    images: row.images || [],
+    images: (row.images || []).map((img, idx) => ({ url: img, name: `图片${idx + 1}`, uid: `${Date.now()}-${idx}` })),
     long_description: row.long_description || '',
     artist_id: row.artist?.id || '',
     year: Number(row.year) || new Date().getFullYear(),
@@ -457,7 +458,7 @@ const submitForm = async () => {
     const submitData = {
       title: form.value.title,
       image: form.value.image,
-      images: form.value.images,
+      images: form.value.images.map(img => img.url),
       long_description: form.value.long_description,
       artist_id: form.value.artist_id,
       year: Number(form.value.year),
@@ -510,8 +511,20 @@ const handleUploadSuccess = (response) => {
   form.value.image = response.url
 }
 
-const handleMultiImageSuccess = (response, file, fileList) => {
-  form.value.images = fileList.map(f => f.response?.url || f.url)
+const handleMultiImageSuccess = (response, file) => {
+  form.value.images.push({
+    url: response.url,
+    name: file.name,
+    uid: file.uid
+  })
+}
+
+const handleMultiImageRemove = (file, fileList) => {
+  form.value.images = fileList.map(f => ({
+    url: f.url,
+    name: f.name,
+    uid: f.uid
+  }))
 }
 
 const beforeUpload = async (file) => {

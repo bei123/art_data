@@ -36,10 +36,14 @@ router.get('/', async (req, res) => {
     }
     
     // 为每个图片URL添加完整URL并构建正确的数据结构
-    const artworksWithFullUrls = rows.map(artwork => {
+    const artworksWithFullUrls = await Promise.all(rows.map(async artwork => {
       const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
+      // 查询多图
+      const [imageRows] = await db.query('SELECT image_url FROM artwork_images WHERE artwork_id = ? ORDER BY sort_order, id', [artwork.id]);
+      const images = imageRows.map(row => row.image_url);
       return {
         ...processedArtwork,
+        images: images,
         artist: {
           id: artwork.artist_id,
           name: artwork.artist_name,
@@ -52,7 +56,7 @@ router.get('/', async (req, res) => {
           material: artwork.collection_material
         }
       };
-    });
+    }));
     
     res.json(artworksWithFullUrls);
   } catch (error) {
