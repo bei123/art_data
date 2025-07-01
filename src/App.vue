@@ -2,6 +2,19 @@
   <router-view></router-view>
 </template>
 
+<script setup>
+import { onMounted } from 'vue'
+import { useUserStore } from '@/stores/user'
+
+onMounted(() => {
+  const userStore = useUserStore()
+  const user = localStorage.getItem('user')
+  if (user) {
+    userStore.setUserInfo(JSON.parse(user))
+  }
+})
+</script>
+
 <style>
 html, body {
   margin: 0;

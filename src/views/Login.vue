@@ -49,11 +49,13 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const formRef = ref(null)
 const isLogin = ref(true)
 const loading = ref(false)
+const userStore = useUserStore()
 
 const form = reactive({
   username: '',
@@ -107,6 +109,9 @@ const handleSubmit = async () => {
       const expiryTime = Date.now() + (24 * 60 * 60 * 1000)
       localStorage.setItem('tokenExpiry', expiryTime.toString())
       localStorage.setItem('user', JSON.stringify(response.data.user))
+      
+      // 新增：存入pinia
+      userStore.setUserInfo(response.data.user)
       
       ElMessage.success('登录成功')
       router.push('/')

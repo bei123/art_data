@@ -82,7 +82,7 @@ const routes = [
       {
         path: '/refund-approval',
         name: 'RefundApproval',
-        component: () => import('@/pages/RefundApproval.vue'),
+        component: () => import('@/views/RefundApproval.vue'),
         meta: {
           title: '退款审批',
           requiresAuth: true,
