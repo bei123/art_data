@@ -16,7 +16,6 @@
           />
         </template>
       </el-table-column>
-      <el-table-column prop="author" label="作者" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
       <el-table-column prop="project_name" label="项目名称" />
       <el-table-column prop="product_name" label="产品名称" />
@@ -56,16 +55,6 @@
             <img v-if="form.image_url" :src="getImageUrl(form.image_url)" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
-        </el-form-item>
-        <el-form-item label="作者">
-          <el-select v-model="form.artist_id" filterable placeholder="请选择艺术家">
-            <el-option
-              v-for="artist in artistOptions"
-              :key="artist.id"
-              :label="artist.name"
-              :value="artist.id"
-            />
-          </el-select>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="4" />
@@ -320,23 +309,8 @@ const handleSubmit = async () => {
 
   try {
     const submitData = {
-      artist_id: form.value.artist_id,
-      title: form.value.title,
-      image_url: form.value.image_url,
-      description: form.value.description,
-      registration_certificate: form.value.registration_certificate,
-      license_rights: form.value.license_rights,
-      license_period: form.value.license_period,
-      owner_rights: form.value.owner_rights,
-      license_items: form.value.license_items,
-      project_name: form.value.project_name,
-      product_name: form.value.product_name,
-      project_owner: form.value.project_owner,
-      issuer: form.value.issuer,
-      issue_batch: form.value.issue_batch,
-      issue_year: form.value.issue_year,
-      batch_quantity: form.value.batch_quantity,
-      price: form.value.price
+      ...form.value,
+      image_url: form.value.image_url
     };
 
     if (isEdit.value) {

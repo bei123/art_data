@@ -74,7 +74,6 @@
           </template>
           <el-table :data="recentDigitalArtworks" style="width: 100%">
             <el-table-column prop="title" label="标题" />
-            <el-table-column prop="author" label="作者" />
             <el-table-column prop="created_at" label="添加时间" />
           </el-table>
         </el-card>
