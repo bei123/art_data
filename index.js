@@ -90,7 +90,10 @@ const storage = multer.memoryStorage();
 // 文件类型验证
 const fileFilter = (req, file, cb) => {
   // 允许的文件类型
-  const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const allowedTypes = [
+    '.jpg', '.jpeg', '.png', '.gif', '.webp',
+    '.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'
+  ];
   const ext = path.extname(file.originalname).toLowerCase();
   
   if (allowedTypes.includes(ext)) {

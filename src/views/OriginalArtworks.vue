@@ -282,22 +282,108 @@ const editorConfig = {
         // 1. 先用你的方法处理
         const processedFile = await uploadImageToWebpLimit5MB(file);
         if (!processedFile) {
+          ElMessage.error('图片处理失败');
           return;
         }
+
         // 2. 构造 formData 上传到后端
         const formData = new FormData();
         formData.append('file', processedFile);
-        // 3. 上传到后端
-        const resp = await fetch(`${baseUrl}/api/upload`, {
-          method: 'POST',
-          body: formData
-        });
-        const result = await resp.json();
-        if (result.errno === 0 && result.data && result.data.url) {
-          insertFn(result.data.url);
-        } else {
-          ElMessage.error(result.message || '图片上传失败');
+
+        // 3. 获取 token（如有需要）
+        const token = localStorage.getItem('token');
+
+        // 4. 上传到后端
+        try {
+          const resp = await fetch(`${baseUrl}/api/upload`, {
+            method: 'POST',
+            body: formData,
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          const result = await resp.json();
+          console.log('图片上传返回：', result);
+
+          // 5. 兼容多种返回格式
+          let url = '';
+          if (result.url) {
+            url = result.url;
+          } else if (result.data && result.data.url) {
+            url = result.data.url;
+          }
+
+          if (typeof url === 'string' && url) {
+            setTimeout(() => {
+              insertFn(url);
+              ElMessage.success('图片上传成功');
+            }, 0);
+          } else {
+            ElMessage.error(result.message || '图片上传失败');
+          }
+        } catch (err) {
+          console.error('图片上传异常:', err);
+          ElMessage.error('图片上传异常');
         }
+      }
+    },
+    uploadVideo: {
+      // 自定义上传
+      async customUpload(file, insertFn) {
+        // 1. 构造 formData
+        const formData = new FormData();
+        formData.append('file', file);
+
+        // 2. 获取 token（如有需要）
+        const token = localStorage.getItem('token');
+
+        // 3. 上传到后端
+        try {
+          const resp = await fetch(`${baseUrl}/api/upload`, {
+            method: 'POST',
+            body: formData,
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          const result = await resp.json();
+          console.log('视频上传返回：', result);
+
+          // 4. 兼容多种返回格式
+          let url = '';
+          let poster = '';
+          if (result.url) {
+            url = result.url;
+          } else if (result.data && result.data.url) {
+            url = result.data.url;
+            poster = result.data.poster || '';
+          }
+
+          if (typeof url === 'string' && url) {
+            setTimeout(() => {
+              insertFn(url, poster); // poster 可选
+              ElMessage.success('视频上传成功');
+            }, 0);
+          } else {
+            ElMessage.error(result.message || '视频上传失败');
+          }
+        } catch (err) {
+          console.error('视频上传异常:', err);
+          ElMessage.error('视频上传异常');
+        }
+      },
+      // 限制最大体积、类型、数量
+      maxFileSize: 50 * 1024 * 1024, // 50M
+      allowedFileTypes: ['video/mp4', 'video/webm', 'video/ogg'],
+      maxNumberOfFiles: 1,
+      // 上传进度、成功、失败、错误回调
+      onProgress(progress) {
+        console.log('视频上传进度', progress);
+      },
+      onSuccess(file, res) {
+        console.log('视频上传成功', file, res);
+      },
+      onFailed(file, res) {
+        console.log('视频上传失败', file, res);
+      },
+      onError(file, err, res) {
+        console.log('视频上传出错', file, err, res);
       }
     }
   }
