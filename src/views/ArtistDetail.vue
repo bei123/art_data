@@ -32,6 +32,7 @@
                 :action="`${API_BASE_URL}/api/upload`"
                 :show-file-list="false"
                 :on-success="handleAvatarSuccess"
+                :before-upload="beforeAvatarUpload"
                 name="file"
               >
                 <img v-if="form.avatar" :src="form.avatar" class="avatar" />
@@ -46,6 +47,7 @@
                 :action="`${API_BASE_URL}/api/upload`"
                 :show-file-list="false"
                 :on-success="handleBannerSuccess"
+                :before-upload="beforeBannerUpload"
                 name="file"
               >
                 <img v-if="form.banner" :src="form.banner" class="banner" />
@@ -102,6 +104,7 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const route = useRoute()
 const router = useRouter()
@@ -140,6 +143,18 @@ const handleAvatarSuccess = (response) => {
 
 const handleBannerSuccess = (response) => {
   form.value.banner = response.url
+}
+
+const beforeAvatarUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file);
+  if (!result) return false;
+  return result;
+}
+
+const beforeBannerUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file);
+  if (!result) return false;
+  return result;
 }
 
 const addAchievement = () => {

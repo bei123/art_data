@@ -121,8 +121,8 @@ const uploadToOSS = async (file, prefix = '') => {
             }
         });
 
-        // 生成带有下载参数的 URL（使用自定义域名）
-        const downloadUrl = `https://wx.oss.2000gallery.art/${ossPath}?response-content-disposition=attachment%3B%20filename%3D${encodeURIComponent(ossPath)}`;
+        // 生成公开访问的 URL（使用自定义域名）
+        const downloadUrl = `https://wx.oss.2000gallery.art/${ossPath}`;
 
         return {
             url: downloadUrl,

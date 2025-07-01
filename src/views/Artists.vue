@@ -44,6 +44,7 @@
             :action="`${API_BASE_URL}/api/upload`"
             :show-file-list="false"
             :on-success="handleAvatarSuccess"
+            :before-upload="beforeAvatarUpload"
             name="file"
           >
             <el-image
@@ -59,6 +60,7 @@
             :action="`${API_BASE_URL}/api/upload`"
             :show-file-list="false"
             :on-success="handleBannerSuccess"
+            :before-upload="beforeBannerUpload"
             name="file"
           >
             <el-image
@@ -95,6 +97,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const router = useRouter()
 const artists = ref([])
@@ -213,6 +216,18 @@ const handleSubmit = async () => {
   } catch (error) {
     ElMessage.error('保存失败')
   }
+}
+
+const beforeAvatarUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file);
+  if (!result) return false;
+  return result;
+}
+
+const beforeBannerUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file);
+  if (!result) return false;
+  return result;
 }
 
 // 页面加载时获取数据
