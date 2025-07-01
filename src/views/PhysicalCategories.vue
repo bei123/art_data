@@ -93,6 +93,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const categories = ref([])
 const dialogVisible = ref(false)
@@ -175,19 +176,10 @@ const getImageUrl = (url) => {
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 }
 
-const beforeImageUpload = (file) => {
-  const isImage = file.type.startsWith('image/');
-  const isLt5M = file.size / 1024 / 1024 < 5;
-
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件！');
-    return false;
-  }
-  if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB！');
-    return false;
-  }
-  return true;
+const beforeImageUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file)
+  if (!result) return false
+  return Promise.resolve(result)
 }
 
 const handleSubmit = async () => {

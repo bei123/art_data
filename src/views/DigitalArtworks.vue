@@ -98,6 +98,16 @@
         <el-form-item label="价格">
           <el-input-number v-model="form.price" :precision="2" :step="0.01" :min="0" />
         </el-form-item>
+        <el-form-item label="艺术家" required>
+          <el-select v-model="form.artist_id" filterable placeholder="请选择艺术家">
+            <el-option
+              v-for="artist in artistOptions"
+              :key="artist.id"
+              :label="artist.name"
+              :value="artist.id"
+            />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -115,6 +125,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const artworks = ref([])
 const dialogVisible = ref(false)
@@ -234,19 +245,11 @@ const handleImageSuccess = (response) => {
   form.value.image_url = response.url
 }
 
-const beforeImageUpload = (file) => {
-  const isImage = file.type.startsWith('image/');
-  const isLt5M = file.size / 1024 / 1024 < 500;
-
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件！');
-    return false;
-  }
-  if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB！');
-    return false;
-  }
-  return true;
+const beforeImageUpload = async (file) => {
+  // 直接调用通用工具
+  const result = await uploadImageToWebpLimit5MB(file)
+  if (!result) return false
+  return Promise.resolve(result)
 }
 
 const getImageUrl = (url) => {
@@ -255,6 +258,21 @@ const getImageUrl = (url) => {
     return url;
   }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+}
+
+const getSubmitData = () => {
+  const {
+    artist_id, title, image_url, description, registration_certificate,
+    license_rights, license_period, owner_rights, license_items,
+    project_name, product_name, project_owner, issuer, issue_batch,
+    issue_year, batch_quantity, price
+  } = form.value;
+  return {
+    artist_id, title, image_url, description, registration_certificate,
+    license_rights, license_period, owner_rights, license_items,
+    project_name, product_name, project_owner, issuer, issue_batch,
+    issue_year, batch_quantity, price
+  };
 }
 
 const handleSubmit = async () => {
@@ -308,22 +326,16 @@ const handleSubmit = async () => {
   }
 
   try {
-    const submitData = {
-      ...form.value,
-      image_url: form.value.image_url
-    };
-
     if (isEdit.value) {
-      await axios.put(`/digital-artworks/${form.value.id}`, submitData)
+      await axios.put(`/digital-artworks/${form.value.id}`, getSubmitData())
     } else {
-      await axios.post('/digital-artworks', submitData)
+      await axios.post('/digital-artworks', getSubmitData())
     }
-    ElMessage.success('保存成功')
+    ElMessage.success(isEdit.value ? '更新成功' : '添加成功')
     dialogVisible.value = false
     fetchArtworks()
   } catch (error) {
-    console.error('保存失败:', error)
-    ElMessage.error('保存失败')
+    ElMessage.error(isEdit.value ? '更新失败' : '添加失败')
   }
 }
 

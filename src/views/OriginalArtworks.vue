@@ -204,6 +204,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const router = useRouter()
 const baseUrl = 'https://api.wx.2000gallery.art:2000'
@@ -483,19 +484,10 @@ const handleUploadSuccess = (response) => {
   form.value.image = response.url
 }
 
-const beforeUpload = (file) => {
-  const isImage = file.type.startsWith('image/')
-  const isLt5M = file.size / 1024 / 1024 < 500
-
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件！')
-    return false
-  }
-  if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 500MB！')
-    return false
-  }
-  return true
+const beforeUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file)
+  if (!result) return false
+  return Promise.resolve(result)
 }
 
 onMounted(() => {

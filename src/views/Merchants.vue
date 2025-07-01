@@ -147,6 +147,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import axios from 'axios'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.wx.2000gallery.art:2000'
 
@@ -322,19 +323,10 @@ const handleImagesProgress = (event, file) => {
 }
 
 // Logo上传前的验证
-const beforeImageUpload = (file) => {
-  const isImage = file.type.startsWith('image/')
-  const isLt5M = file.size / 1024 / 1024 < 5
-
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件!')
-    return false
-  }
-  if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB!')
-    return false
-  }
-  return true
+const beforeImageUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file)
+  if (!result) return false
+  return Promise.resolve(result)
 }
 
 // 商家图片上传成功的回调

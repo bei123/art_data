@@ -3,7 +3,7 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
   : 'http://localhost:2000';
 
 /**
- * 处理图片URL，添加WebP转换参数
+ * 处理图片URL，不再添加WebP转换参数
  * @param {string} url - 原始图片URL
  * @returns {string} - 处理后的URL
  */
@@ -11,11 +11,6 @@ function processImageUrl(url) {
   // 检查url是否为字符串类型
   if (typeof url !== 'string' || !url) {
     return url;
-  }
-
-  // 如果是OSS的图片，添加WebP转换参数
-  if (url.includes('wx.oss.2000gallery.art')) {
-    return `${url}?x-oss-process=image/format,webp`;
   }
 
   // 如果是相对路径，添加完整URL
