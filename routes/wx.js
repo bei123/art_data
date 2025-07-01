@@ -233,6 +233,10 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
             // 1. 转换为 webp 格式
             const webpBuffer = await sharp(avatarFile.buffer).webp().toBuffer();
 
+            // 检查webpBuffer的元数据
+            const meta = await sharp(webpBuffer).metadata();
+            console.log('webp meta:', meta); // 应该有 format: 'webp'
+
             // 2. 构造 webp 文件对象
             const webpFile = {
                 ...avatarFile,
@@ -240,6 +244,7 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
                 originalname: avatarFile.originalname.replace(/\.[\w]+$/, '.webp'),
                 mimetype: 'image/webp'
             };
+            console.log('webpFile.originalname:', webpFile.originalname);
 
             // 3. 上传到OSS
             const ossResult = await uploadToOSS(webpFile, folderPrefix);
