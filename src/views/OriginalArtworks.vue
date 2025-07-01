@@ -93,8 +93,15 @@
             <el-icon><Plus /></el-icon>
           </el-upload>
         </el-form-item>
-        <el-form-item label="详情富文本">
-          <quill-editor v-model="form.long_description" style="height: 300px" />
+        <el-form-item label="详情富文本" style="width: 100%">
+          <Toolbar :editor="editorRef" style="width: 100%" />
+          <Editor
+            v-model="longDescriptionHtml"
+            :defaultConfig="{ placeholder: '请输入内容...', ...editorConfig }"
+            mode="default"
+            style="width: 100%; min-width: 400px; height: 300px; border: 1px solid #ccc"
+            @onCreated="handleEditorCreated"
+          />
         </el-form-item>
         <el-form-item label="艺术家" required>
           <el-select v-model="form.artist_id" filterable placeholder="请选择艺术家">
@@ -215,12 +222,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import '@wangeditor/editor/dist/css/style.css'
+import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 
 const router = useRouter()
 const baseUrl = 'https://api.wx.2000gallery.art:2000'
@@ -262,6 +271,37 @@ const rules = {
 }
 
 const artistOptions = ref([])
+
+const editorRef = ref(null)
+const longDescriptionHtml = ref('')
+
+const editorConfig = {
+  MENU_CONF: {
+    uploadImage: {
+      async customUpload(file, insertFn) {
+        // 1. 先用你的方法处理
+        const processedFile = await uploadImageToWebpLimit5MB(file);
+        if (!processedFile) {
+          return;
+        }
+        // 2. 构造 formData 上传到后端
+        const formData = new FormData();
+        formData.append('file', processedFile);
+        // 3. 上传到后端
+        const resp = await fetch(`${baseUrl}/api/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        const result = await resp.json();
+        if (result.errno === 0 && result.data && result.data.url) {
+          insertFn(result.data.url);
+        } else {
+          ElMessage.error(result.message || '图片上传失败');
+        }
+      }
+    }
+  }
+};
 
 const fetchArtists = async () => {
   try {
@@ -416,6 +456,9 @@ const editArtwork = (row) => {
   }
   console.log('Form data:', form.value)
   dialogVisible.value = true
+  nextTick(() => {
+    longDescriptionHtml.value = form.value.long_description
+  })
 }
 
 // 删除艺术品
@@ -459,7 +502,7 @@ const submitForm = async () => {
       title: form.value.title,
       image: form.value.image,
       images: form.value.images.map(img => img.url),
-      long_description: form.value.long_description,
+      long_description: longDescriptionHtml.value,
       artist_id: form.value.artist_id,
       year: Number(form.value.year),
       description: form.value.description,
@@ -533,9 +576,19 @@ const beforeUpload = async (file) => {
   return Promise.resolve(result)
 }
 
+const handleEditorCreated = (editor) => {
+  if (editorRef) {
+    editorRef.value = editor
+  }
+}
+
 onMounted(() => {
   fetchArtists()
   checkLoginStatus() && fetchArtworks()
+})
+
+onBeforeUnmount(() => {
+  if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
 })
 </script>
 

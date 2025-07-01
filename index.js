@@ -23,6 +23,7 @@ const artworksRouter = require('./routes/artworks');
 const digitalArtworksRouter = require('./routes/digital-artworks');
 const physicalCategoriesRouter = require('./routes/physical-categories');
 const rightsRouter = require('./routes/rights');
+const uploadRouter = require('./routes/upload');
 
 const app = express();
 const port = 2000;
@@ -271,6 +272,9 @@ app.use('/api/physical-categories', physicalCategoriesRouter);
 
 // 使用版权实物路由
 app.use('/api/rights', rightsRouter);
+
+// 使用上传路由
+app.use('/api/upload', uploadRouter);
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;

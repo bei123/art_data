@@ -17,6 +17,8 @@
     "@alicloud/tea-console": "^1.0.0",
     "@alicloud/tea-typescript": "^1.8.0",
     "@alicloud/tea-util": "^1.4.10",
+    "@wangeditor/editor": "^5.1.23",
+    "@wangeditor/editor-for-vue": "^5.1.12",
     "ali-oss": "^6.23.0",
     "axios": "^1.4.0",
     "bcryptjs": "^2.4.3",
