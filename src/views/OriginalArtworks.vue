@@ -497,7 +497,7 @@ const submitForm = async () => {
   
   try {
     await formRef.value.validate()
-    
+    console.log('提交时 images:', form.value.images)
     const submitData = {
       title: form.value.title,
       image: form.value.image,
@@ -555,11 +555,13 @@ const handleUploadSuccess = (response) => {
 }
 
 const handleMultiImageSuccess = (response, file) => {
+  const url = response.url || (response.data && response.data.url)
   form.value.images.push({
-    url: response.url,
-    name: file.name,
+    url,
+    name: response.name || file.name,
     uid: file.uid
   })
+  console.log('多图上传成功，当前 images:', form.value.images)
 }
 
 const handleMultiImageRemove = (file, fileList) => {

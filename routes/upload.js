@@ -22,7 +22,8 @@ router.post('/', upload.single('file'), async (req, res) => {
       data: {
         url: result.url
       },
-      url: result.url // 兼容 el-upload
+      url: result.url,
+      name: result.name // 关键：加上 name 字段，兼容 el-upload
     });
   } catch (e) {
     console.error('OSS 上传异常:', e);
