@@ -320,8 +320,23 @@ const handleSubmit = async () => {
 
   try {
     const submitData = {
-      ...form.value,
-      image_url: form.value.image_url
+      artist_id: form.value.artist_id,
+      title: form.value.title,
+      image_url: form.value.image_url,
+      description: form.value.description,
+      registration_certificate: form.value.registration_certificate,
+      license_rights: form.value.license_rights,
+      license_period: form.value.license_period,
+      owner_rights: form.value.owner_rights,
+      license_items: form.value.license_items,
+      project_name: form.value.project_name,
+      product_name: form.value.product_name,
+      project_owner: form.value.project_owner,
+      issuer: form.value.issuer,
+      issue_batch: form.value.issue_batch,
+      issue_year: form.value.issue_year,
+      batch_quantity: form.value.batch_quantity,
+      price: form.value.price
     };
 
     if (isEdit.value) {
