@@ -583,4 +583,12 @@ router.post('/userApi/external/user/idcard-verify', async (req, res) => {
     }
 });
 
+// 获取微信小程序字体文件链接
+router.get('/font-url', (req, res) => {
+    // 这里可以根据需要返回不同字体，这里写死一个示例
+    res.json({
+        url: 'https://wx.oss.2000gallery.art/font/SF-Pro.ttf'
+    });
+});
+
 module.exports = router; 
