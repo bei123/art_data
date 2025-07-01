@@ -30,6 +30,7 @@
             :action="`${API_BASE_URL}/api/upload`"
             :show-file-list="false"
             :on-success="handleImageSuccess"
+            :before-upload="beforeImageUpload"
             name="file"
           >
             <img v-if="form.image" :src="form.image" class="avatar" />
@@ -148,6 +149,7 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const route = useRoute()
 const router = useRouter()
@@ -258,6 +260,13 @@ const fetchArtworkDetail = async () => {
 
 const handleImageSuccess = (response) => {
   form.value.image = response.url
+}
+
+const beforeImageUpload = async (file) => {
+  const result = await uploadImageToWebpLimit5MB(file);
+  if (!result) return false;
+  // el-upload 需要返回 File 对象，直接 return result 即可
+  return result;
 }
 
 const handleEdit = async () => {

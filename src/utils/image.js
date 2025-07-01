@@ -20,11 +20,34 @@ export async function uploadImageToWebpLimit5MB(file) {
   };
   try {
     const compressedFile = await imageCompression(file, options);
-    if (compressedFile.size / 1024 / 1024 > 5) {
+    let finalFile = compressedFile;
+    // 如果压缩后不是webp格式，再用canvas转一次
+    if (compressedFile.type !== 'image/webp') {
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = reject;
+          image.src = URL.createObjectURL(compressedFile);
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp'));
+        if (!blob) throw new Error('canvas toBlob 失败');
+        finalFile = new File([blob], file.name.replace(/\.[^.]+$/, '.webp'), { type: 'image/webp' });
+      } catch (e) {
+        ElMessage.error('图片转换为webp失败！');
+        return false;
+      }
+    }
+    if (finalFile.size / 1024 / 1024 > 5) {
       ElMessage.error('图片压缩后仍超过5MB！');
       return false;
     }
-    return compressedFile;
+    return finalFile;
   } catch (e) {
     ElMessage.error('图片压缩/转换失败！');
     return false;
