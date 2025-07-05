@@ -210,6 +210,7 @@ router.get('/userInfo', async (req, res) => {
             return res.status(404).json({ error: '用户不存在' });
         }
         const user = users[0];
+        if ('salt' in user) delete user.salt;
         res.json(user);
     } catch (err) {
         res.status(500).json({ error: '服务器错误' });
