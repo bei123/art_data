@@ -5,12 +5,18 @@ require('dotenv').config();
 const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'data',
-    password: process.env.DB_PASSWORD || '5z24cJEiMd34jAtt',
+    password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME || 'data',
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
 };
+
+// 检查必要的环境变量
+if (!process.env.DB_PASSWORD) {
+    console.error('错误: 缺少必要的环境变量 DB_PASSWORD');
+    process.exit(1);
+}
 
 console.log('Database configuration:', {
     ...dbConfig,

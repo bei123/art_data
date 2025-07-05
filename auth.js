@@ -4,7 +4,13 @@ const { validationResult } = require('express-validator');
 const { pool, query } = require('./db');
 
 // JWT密钥
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// 检查必要的环境变量
+if (!JWT_SECRET) {
+    console.error('错误: 缺少必要的环境变量 JWT_SECRET');
+    process.exit(1);
+}
 
 // 生成JWT token
 const generateToken = (userId) => {

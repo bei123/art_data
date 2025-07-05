@@ -62,9 +62,15 @@ router.post('/getPhoneNumber', async (req, res) => {
         return res.status(400).json({ error: '缺少 code' });
     }
 
-    // 你的微信小程序 appid 和 appsecret
-    const appid = 'wx96a502c78c9156d0'; // TODO: 替换为你自己的
-    const secret = 'bf47d45e6b0a96b1d1b73b186860c4cb'; // TODO: 替换为你自己的
+    // 从环境变量获取微信小程序配置
+    const appid = process.env.WX_APPID;
+    const secret = process.env.WX_SECRET;
+    
+    // 检查必要的环境变量
+    if (!appid || !secret) {
+        console.error('错误: 缺少必要的微信小程序环境变量 WX_APPID 或 WX_SECRET');
+        return res.status(500).json({ error: '服务器配置错误' });
+    }
 
     try {
         // 1. 获取 access_token
@@ -88,8 +94,14 @@ router.post('/login', async (req, res) => {
         return res.status(400).json({ error: '缺少 code' });
     }
 
-    const appid = 'wx96a502c78c9156d0';
-    const secret = 'bf47d45e6b0a96b1d1b73b186860c4cb';
+    const appid = process.env.WX_APPID;
+    const secret = process.env.WX_SECRET;
+    
+    // 检查必要的环境变量
+    if (!appid || !secret) {
+        console.error('错误: 缺少必要的微信小程序环境变量 WX_APPID 或 WX_SECRET');
+        return res.status(500).json({ error: '服务器配置错误' });
+    }
 
     try {
         // 1. 用 code 换 openid 和 session_key
@@ -115,7 +127,7 @@ router.post('/login', async (req, res) => {
         }
 
         // 3. 生成你自己系统的 token（如 JWT）
-        const token = jwt.sign({ userId: user.id, openid }, 'your_jwt_secret', { expiresIn: '7d' });
+        const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
         // 4. 返回用户信息和 token, 包含用户所有信息，并过滤掉敏感字段
         const { session_key: sk, ...userProfile } = user;
@@ -138,7 +150,7 @@ router.post('/bindUserInfo', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-        payload = jwt.verify(token, 'your_jwt_secret');
+        payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
         return res.status(401).json({ error: 'token无效' });
     }
@@ -199,7 +211,7 @@ router.get('/userInfo', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-        payload = jwt.verify(token, 'your_jwt_secret');
+        payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
         return res.status(401).json({ error: 'token无效' });
     }
@@ -227,7 +239,7 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-        payload = jwt.verify(token, 'your_jwt_secret');
+        payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
         return res.status(401).json({ error: 'token无效' });
     }
@@ -621,7 +633,7 @@ router.post('/setPassword', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-        payload = jwt.verify(token, 'your_jwt_secret');
+        payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
         return res.status(401).json({ error: 'token无效' });
     }
@@ -677,7 +689,7 @@ router.post('/changePassword', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-        payload = jwt.verify(token, 'your_jwt_secret');
+        payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
         return res.status(401).json({ error: 'token无效' });
     }
@@ -740,7 +752,7 @@ router.post('/verifyPassword', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-        payload = jwt.verify(token, 'your_jwt_secret');
+        payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
         return res.status(401).json({ error: 'token无效' });
     }
