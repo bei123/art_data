@@ -21,7 +21,13 @@ router.get('/', async (req, res) => {
 // 获取艺术家详情（公开接口）
 router.get('/:id', async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
+    // 验证ID参数
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: '无效的艺术家ID' });
+    }
+    
+    const [rows] = await db.query('SELECT * FROM artists WHERE id = ?', [id]);
     
     if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '艺术家不存在' });
@@ -31,7 +37,7 @@ router.get('/:id', async (req, res) => {
     res.json(artist);
   } catch (error) {
     console.error('获取艺术家详情失败:', error);
-    res.status(500).json({ error: '获取艺术家详情失败' });
+    res.status(500).json({ error: '获取艺术家详情服务暂时不可用' });
   }
 });
 
@@ -39,14 +45,32 @@ router.get('/:id', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { avatar, name, description } = req.body;
+    
+    // 输入验证
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ error: '艺术家名称不能为空' });
+    }
+    
+    if (name.length > 100) {
+      return res.status(400).json({ error: '艺术家名称长度不能超过100个字符' });
+    }
+    
+    if (description && description.length > 2000) {
+      return res.status(400).json({ error: '描述长度不能超过2000个字符' });
+    }
+    
+    // 清理输入
+    const cleanName = name.trim();
+    const cleanDescription = description ? description.trim() : '';
+    
     const [result] = await db.query(
       'INSERT INTO artists (avatar, name, description) VALUES (?, ?, ?)',
-      [avatar, name, description]
+      [avatar, cleanName, cleanDescription]
     );
-    res.json({ id: result.insertId, ...req.body });
+    res.json({ id: result.insertId, name: cleanName, description: cleanDescription, avatar });
   } catch (error) {
     console.error('Error creating artist:', error);
-    res.status(500).json({ error: '创建失败' });
+    res.status(500).json({ error: '创建艺术家服务暂时不可用' });
   }
 });
 

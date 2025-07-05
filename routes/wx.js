@@ -83,7 +83,7 @@ router.post('/getPhoneNumber', async (req, res) => {
             res.status(400).json({ error: result.errmsg });
         }
     } catch (err) {
-        res.status(500).json({ error: '服务器错误' });
+        res.status(500).json({ error: '获取手机号服务暂时不可用' });
     }
 });
 
@@ -136,7 +136,7 @@ router.post('/login', async (req, res) => {
             user: userProfile
         });
     } catch (err) {
-        res.status(500).json({ error: '服务器错误', detail: err.message });
+        res.status(500).json({ error: '获取用户信息服务暂时不可用', detail: err.message });
     }
 });
 
@@ -197,7 +197,7 @@ router.post('/bindUserInfo', async (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: '服务器错误' });
+        res.status(500).json({ error: '更新用户信息服务暂时不可用' });
     }
 });
 
@@ -225,7 +225,7 @@ router.get('/userInfo', async (req, res) => {
         if ('salt' in user) delete user.salt;
         res.json(user);
     } catch (err) {
-        res.status(500).json({ error: '服务器错误' });
+        res.status(500).json({ error: '获取用户信息服务暂时不可用' });
     }
 });
 
@@ -251,11 +251,20 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
     if (!nickname && !avatarFile) {
         return res.status(400).json({ error: '昵称和头像至少需要提供一个' });
     }
+    
+    // 输入验证
+    if (nickname && (typeof nickname !== 'string' || nickname.trim().length === 0)) {
+        return res.status(400).json({ error: '昵称不能为空' });
+    }
+    
+    if (nickname && nickname.length > 50) {
+        return res.status(400).json({ error: '昵称长度不能超过50个字符' });
+    }
 
     try {
         const fieldsToUpdate = {};
         if (nickname) {
-            fieldsToUpdate.nickname = nickname;
+            fieldsToUpdate.nickname = nickname.trim();
         }
 
         // 如果有上传头像，则上传到OSS
@@ -299,15 +308,21 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
         });
     } catch (err) {
         console.error('更新用户信息失败:', err);
-        res.status(500).json({ error: '服务器错误', detail: err.message });
+        res.status(500).json({ error: '更新用户信息服务暂时不可用', detail: err.message });
     }
 });
 
 // 获取外部token接口
 router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), async (req, res) => {
     const { appInfo } = req.body;
-    if (!appInfo) {
-        return res.status(400).json({ error: '缺少 appInfo 参数' });
+    
+    // 输入验证
+    if (!appInfo || typeof appInfo !== 'string') {
+        return res.status(400).json({ error: '缺少有效的 appInfo 参数' });
+    }
+    
+    if (appInfo.length > 1000) {
+        return res.status(400).json({ error: 'appInfo 参数长度不能超过1000个字符' });
     }
 
     try {
@@ -326,7 +341,7 @@ router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), a
     } catch (err) {
         console.error('获取token失败:', err);
         res.status(500).json({ 
-            error: '获取token失败',
+            error: '获取外部token服务暂时不可用',
             detail: err.message 
         });
     }
@@ -345,6 +360,25 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
     }
 
     const token = authHeader.replace('Bearer ', '');
+    
+    // 输入验证
+    if (!req.body || typeof req.body !== 'object') {
+        return res.status(400).json({
+            code: 400,
+            status: false,
+            message: '请求体格式错误'
+        });
+    }
+    
+    // 验证请求体大小
+    const bodySize = JSON.stringify(req.body).length;
+    if (bodySize > 10000) {
+        return res.status(400).json({
+            code: 400,
+            status: false,
+            message: '请求体过大'
+        });
+    }
     
     try {
         // 调用外部API进行实名注册，带上token
@@ -366,7 +400,7 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
         res.status(500).json({ 
             code: 500,
             status: false,
-            message: '实名注册失败',
+            message: '实名注册服务暂时不可用',
             detail: err.message 
         });
     }
@@ -379,11 +413,22 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
     { name: 'businessLicense', maxCount: 1 }
 ]), async (req, res) => {
     const { userId } = req.body;
+    
+    // 输入验证
     if (!userId) {
         return res.status(400).json({
             code: 400,
             status: false,
             message: '缺少用户ID'
+        });
+    }
+    
+    const cleanUserId = parseInt(userId);
+    if (isNaN(cleanUserId) || cleanUserId <= 0) {
+        return res.status(400).json({
+            code: 400,
+            status: false,
+            message: '无效的用户ID'
         });
     }
 
@@ -399,7 +444,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
         };
 
         // 使用用户ID创建文件夹前缀
-        const folderPrefix = `idcards/${userId}/`;
+        const folderPrefix = `idcards/${cleanUserId}/`;
 
         // 上传身份证正面照片并进行识别
         if (files.idCardFront && files.idCardFront[0]) {
@@ -563,7 +608,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
         res.status(500).json({
             code: 500,
             status: false,
-            message: '上传失败',
+            message: '上传身份证照片服务暂时不可用',
             detail: err.message
         });
     }
@@ -590,15 +635,36 @@ router.get('/getIp', (req, res) => {
 // 身份证二要素核验接口
 router.post('/userApi/external/user/idcard-verify', async (req, res) => {
     const { certName, certNo } = req.body;
-    if (!certName || !certNo) {
-        return res.status(400).json({ code: 400, message: '缺少姓名或身份证号' });
+    
+    // 输入验证
+    if (!certName || typeof certName !== 'string' || certName.trim().length === 0) {
+        return res.status(400).json({ code: 400, message: '缺少有效的姓名' });
     }
+    
+    if (!certNo || typeof certNo !== 'string' || certNo.trim().length === 0) {
+        return res.status(400).json({ code: 400, message: '缺少有效的身份证号' });
+    }
+    
+    // 验证姓名长度
+    if (certName.length > 50) {
+        return res.status(400).json({ code: 400, message: '姓名长度不能超过50个字符' });
+    }
+    
+    // 验证身份证号格式
+    const idCardRegex = /^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(1[0-2]))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$/;
+    if (!idCardRegex.test(certNo)) {
+        return res.status(400).json({ code: 400, message: '身份证号格式不正确' });
+    }
+    
+    // 清理输入
+    const cleanCertName = certName.trim();
+    const cleanCertNo = certNo.trim();
 
     try {
         const client = createDytnsClient();
         const request = new Dytnsapi20200217.CertNoTwoElementVerificationRequest({
-            certName: certName,
-            certNo: certNo
+            certName: cleanCertName,
+            certNo: cleanCertNo
         });
         const runtime = new Util.RuntimeOptions({});
         
@@ -608,7 +674,7 @@ router.post('/userApi/external/user/idcard-verify', async (req, res) => {
         console.error('二要素核验失败:', err);
         res.status(500).json({ 
             code: 500, 
-            message: '核验失败', 
+            message: '身份证核验服务暂时不可用', 
             detail: err.message,
             recommend: err.data?.Recommend 
         });
@@ -639,13 +705,24 @@ router.post('/setPassword', async (req, res) => {
     }
 
     const { password } = req.body;
-    if (!password) {
+    
+    // 输入验证
+    if (!password || typeof password !== 'string') {
         return res.status(400).json({ error: '缺少密码参数' });
     }
-
-    // 验证密码强度
+    
     if (password.length < 6) {
         return res.status(400).json({ error: '密码长度至少6位' });
+    }
+    
+    if (password.length > 50) {
+        return res.status(400).json({ error: '密码长度不能超过50位' });
+    }
+    
+    // 验证密码复杂度
+    const passwordRegex = /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d@#$%^&+=]{6,}$/;
+    if (!passwordRegex.test(password)) {
+        return res.status(400).json({ error: '密码必须包含字母和数字' });
     }
 
     try {
@@ -675,7 +752,7 @@ router.post('/setPassword', async (req, res) => {
         });
     } catch (err) {
         console.error('设置密码失败:', err);
-        res.status(500).json({ error: '服务器错误', detail: err.message });
+        res.status(500).json({ error: '设置密码服务暂时不可用', detail: err.message });
     }
 });
 
@@ -695,13 +772,33 @@ router.post('/changePassword', async (req, res) => {
     }
 
     const { oldPassword, newPassword } = req.body;
-    if (!oldPassword || !newPassword) {
-        return res.status(400).json({ error: '缺少旧密码或新密码参数' });
+    
+    // 输入验证
+    if (!oldPassword || typeof oldPassword !== 'string') {
+        return res.status(400).json({ error: '缺少旧密码参数' });
     }
-
-    // 验证新密码强度
+    
+    if (!newPassword || typeof newPassword !== 'string') {
+        return res.status(400).json({ error: '缺少新密码参数' });
+    }
+    
     if (newPassword.length < 6) {
         return res.status(400).json({ error: '新密码长度至少6位' });
+    }
+    
+    if (newPassword.length > 50) {
+        return res.status(400).json({ error: '新密码长度不能超过50位' });
+    }
+    
+    // 验证新密码复杂度
+    const passwordRegex = /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d@#$%^&+=]{6,}$/;
+    if (!passwordRegex.test(newPassword)) {
+        return res.status(400).json({ error: '新密码必须包含字母和数字' });
+    }
+    
+    // 验证新旧密码不能相同
+    if (oldPassword === newPassword) {
+        return res.status(400).json({ error: '新密码不能与旧密码相同' });
     }
 
     try {
@@ -738,7 +835,7 @@ router.post('/changePassword', async (req, res) => {
         });
     } catch (err) {
         console.error('修改密码失败:', err);
-        res.status(500).json({ error: '服务器错误', detail: err.message });
+        res.status(500).json({ error: '修改密码服务暂时不可用', detail: err.message });
     }
 });
 
@@ -786,7 +883,7 @@ router.post('/verifyPassword', async (req, res) => {
         });
     } catch (err) {
         console.error('验证密码失败:', err);
-        res.status(500).json({ error: '服务器错误', detail: err.message });
+        res.status(500).json({ error: '验证密码服务暂时不可用', detail: err.message });
     }
 });
 

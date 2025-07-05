@@ -10,14 +10,20 @@ const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
-    appId: 'wx96a502c78c9156d0', // 小程序appid
-    mchId: '1360639602', // 商户号
-    key: 'e0v3TF5sgZS82fk1ylb4oNqczZbKqeYk', // API密钥
-    serialNo: '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
+    appId: process.env.WX_APPID || 'wx96a502c78c9156d0', // 小程序appid
+    mchId: process.env.WX_PAY_MCH_ID || '1360639602', // 商户号
+    key: process.env.WX_PAY_KEY, // API密钥
+    serialNo: process.env.WX_PAY_SERIAL_NO || '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
     privateKey: fs.readFileSync(path.join(__dirname, '../apiclient_key.pem')), // 商户私钥
     notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
     spbillCreateIp: '127.0.0.1' // 终端IP
 };
+
+// 检查必要的环境变量
+if (!WX_PAY_CONFIG.key) {
+    console.error('错误: 缺少必要的环境变量 WX_PAY_KEY');
+    process.exit(1);
+}
 
 // 生成随机字符串
 function generateNonceStr() {
@@ -60,9 +66,44 @@ router.post('/unifiedorder', async (req, res) => {
     try {
         const { openid, total_fee, body, out_trade_no, cart_items } = req.body;
 
-        if (!openid || !total_fee || !body || !out_trade_no || !cart_items) {
-            return res.status(400).json({ error: '参数不完整' });
+        // 输入验证
+        if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的openid' });
         }
+        
+        if (!total_fee || isNaN(parseFloat(total_fee)) || parseFloat(total_fee) <= 0) {
+            return res.status(400).json({ error: '缺少有效的支付金额' });
+        }
+        
+        if (!body || typeof body !== 'string' || body.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的商品描述' });
+        }
+        
+        if (body.length > 128) {
+            return res.status(400).json({ error: '商品描述长度不能超过128个字符' });
+        }
+        
+        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的订单号' });
+        }
+        
+        if (out_trade_no.length > 64) {
+            return res.status(400).json({ error: '订单号长度不能超过64个字符' });
+        }
+        
+        if (!cart_items || !Array.isArray(cart_items) || cart_items.length === 0) {
+            return res.status(400).json({ error: '缺少有效的购物车商品' });
+        }
+        
+        if (cart_items.length > 20) {
+            return res.status(400).json({ error: '购物车商品数量不能超过20个' });
+        }
+        
+        // 清理输入
+        const cleanOpenid = openid.trim();
+        const cleanTotalFee = parseFloat(total_fee);
+        const cleanBody = body.trim();
+        const cleanOutTradeNo = out_trade_no.trim();
 
         // 开始事务
         const connection = await db.getConnection();
@@ -72,7 +113,7 @@ router.post('/unifiedorder', async (req, res) => {
             // 根据openid获取用户id
             const [users] = await connection.query(
                 'SELECT id FROM wx_users WHERE openid = ?',
-                [openid]
+                [cleanOpenid]
             );
 
             if (!users || users.length === 0) {
@@ -181,7 +222,7 @@ router.post('/unifiedorder', async (req, res) => {
             // 创建订单
             const [orderResult] = await connection.query(
                 'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
-                [userId, out_trade_no, total_fee, actualTotalFee, availableDiscount, body]
+                [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, cleanBody]
             );
 
             const orderId = orderResult.insertId;
@@ -214,8 +255,8 @@ router.post('/unifiedorder', async (req, res) => {
             const params = {
                 appid: WX_PAY_CONFIG.appId,
                 mchid: WX_PAY_CONFIG.mchId,
-                description: body,
-                out_trade_no: out_trade_no,
+                description: cleanBody,
+                out_trade_no: cleanOutTradeNo,
                 notify_url: WX_PAY_CONFIG.notifyUrl,
                 amount: {
                     total: actualTotalFee,
@@ -225,7 +266,7 @@ router.post('/unifiedorder', async (req, res) => {
                     payer_client_ip: WX_PAY_CONFIG.spbillCreateIp
                 },
                 payer: {
-                    openid: openid
+                    openid: cleanOpenid
                 }
             };
 
@@ -272,8 +313,7 @@ router.post('/unifiedorder', async (req, res) => {
     } catch (error) {
         console.error('统一下单失败:', error);
         res.status(500).json({
-            error: '统一下单失败',
-            detail: error.message
+            error: '统一下单失败'
         });
     }
 });
@@ -281,6 +321,14 @@ router.post('/unifiedorder', async (req, res) => {
 // 支付回调接口
 router.post('/notify', async (req, res) => {
     try {
+        // 输入验证
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '无效的请求数据'
+            });
+        }
+        
         // 获取回调数据
         const {
             id, // 通知ID
@@ -291,11 +339,26 @@ router.post('/notify', async (req, res) => {
             summary // 回调摘要
         } = req.body;
 
+        // 验证必要字段
+        if (!resource || !resource.associated_data || !resource.nonce || !resource.ciphertext) {
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '回调数据格式错误'
+            });
+        }
+
         // 验证签名
         const timestamp = req.headers['wechatpay-timestamp'];
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
+
+        if (!timestamp || !nonce || !signature || !serial) {
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '缺少签名验证信息'
+            });
+        }
 
         if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
             return res.status(401).json({
@@ -387,9 +450,16 @@ router.post('/close', async (req, res) => {
     try {
         const { out_trade_no } = req.body;
 
-        if (!out_trade_no) {
-            return res.status(400).json({ error: '缺少商户订单号' });
+        // 输入验证
+        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的商户订单号' });
         }
+        
+        if (out_trade_no.length > 64) {
+            return res.status(400).json({ error: '商户订单号长度不能超过64个字符' });
+        }
+        
+        const cleanOutTradeNo = out_trade_no.trim();
 
         // 构建请求参数
         const params = {
@@ -400,7 +470,7 @@ router.post('/close', async (req, res) => {
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
         const method = 'POST';
-        const url = `/v3/pay/transactions/out-trade-no/${out_trade_no}/close`;
+        const url = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}/close`;
         const bodyStr = JSON.stringify(params);
 
         // 生成签名
@@ -408,7 +478,7 @@ router.post('/close', async (req, res) => {
 
         // 发送请求到微信支付
         const response = await axios.post(
-            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${out_trade_no}/close`,
+            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}/close`,
             params,
             {
                 headers: {
@@ -433,17 +503,10 @@ router.post('/close', async (req, res) => {
         }
     } catch (error) {
         console.error('关闭订单失败:', error);
-        if (error.response) {
-            res.status(error.response.status).json({
-                success: false,
-                error: error.response.data.message || '关闭订单失败'
-            });
-        } else {
-            res.status(500).json({
-                success: false,
-                error: '关闭订单失败'
-            });
-        }
+        res.status(500).json({
+            success: false,
+            error: '关闭订单失败'
+        });
     }
 });
 
@@ -460,10 +523,47 @@ router.post('/refund', async (req, res) => {
             amount         // 金额信息
         } = req.body;
 
-        // 参数验证
-        if (!out_refund_no || !amount || !amount.refund || !amount.total || !amount.currency) {
-            return res.status(400).json({ error: '参数不完整' });
+        // 输入验证
+        if (!out_refund_no || typeof out_refund_no !== 'string' || out_refund_no.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的退款单号' });
         }
+        
+        if (out_refund_no.length > 64) {
+            return res.status(400).json({ error: '退款单号长度不能超过64个字符' });
+        }
+        
+        if (!amount || typeof amount !== 'object') {
+            return res.status(400).json({ error: '缺少有效的金额信息' });
+        }
+        
+        if (!amount.refund || isNaN(parseFloat(amount.refund)) || parseFloat(amount.refund) <= 0) {
+            return res.status(400).json({ error: '缺少有效的退款金额' });
+        }
+        
+        if (!amount.total || isNaN(parseFloat(amount.total)) || parseFloat(amount.total) <= 0) {
+            return res.status(400).json({ error: '缺少有效的订单总金额' });
+        }
+        
+        if (!amount.currency || typeof amount.currency !== 'string' || amount.currency !== 'CNY') {
+            return res.status(400).json({ error: '缺少有效的货币类型' });
+        }
+        
+        if (parseFloat(amount.refund) > parseFloat(amount.total)) {
+            return res.status(400).json({ error: '退款金额不能超过订单总金额' });
+        }
+        
+        if (reason && (typeof reason !== 'string' || reason.length > 80)) {
+            return res.status(400).json({ error: '退款原因长度不能超过80个字符' });
+        }
+        
+        // 清理输入
+        const cleanOutRefundNo = out_refund_no.trim();
+        const cleanReason = reason ? reason.trim() : '';
+        const cleanAmount = {
+            refund: parseFloat(amount.refund),
+            total: parseFloat(amount.total),
+            currency: amount.currency
+        };
 
         // 开始事务
         const connection = await db.getConnection();
@@ -483,10 +583,10 @@ router.post('/refund', async (req, res) => {
           ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
                 [
                     out_trade_no,
-                    out_refund_no,
+                    cleanOutRefundNo,
                     transaction_id,
-                    reason,
-                    JSON.stringify(amount)
+                    cleanReason,
+                    JSON.stringify(cleanAmount)
                 ]
             );
 
@@ -510,8 +610,7 @@ router.post('/refund', async (req, res) => {
         console.error('申请退款失败:', error);
         res.status(500).json({
             success: false,
-            error: '申请退款失败',
-            detail: error.message
+            error: '申请退款失败'
         });
     }
 });
@@ -521,9 +620,26 @@ router.post('/refund/approve', async (req, res) => {
     try {
         const { refund_id, approve, reject_reason } = req.body;
 
-        if (!refund_id) {
-            return res.status(400).json({ error: '缺少退款ID' });
+        // 输入验证
+        if (!refund_id || isNaN(parseInt(refund_id)) || parseInt(refund_id) <= 0) {
+            return res.status(400).json({ error: '缺少有效的退款ID' });
         }
+        
+        if (typeof approve !== 'boolean') {
+            return res.status(400).json({ error: '缺少有效的审批结果' });
+        }
+        
+        if (!approve && (!reject_reason || typeof reject_reason !== 'string' || reject_reason.trim().length === 0)) {
+            return res.status(400).json({ error: '拒绝退款必须提供原因' });
+        }
+        
+        if (reject_reason && reject_reason.length > 200) {
+            return res.status(400).json({ error: '拒绝原因长度不能超过200个字符' });
+        }
+        
+        // 清理输入
+        const cleanRefundId = parseInt(refund_id);
+        const cleanRejectReason = reject_reason ? reject_reason.trim() : '';
 
         // 开始事务
         const connection = await db.getConnection();
@@ -533,7 +649,7 @@ router.post('/refund/approve', async (req, res) => {
             // 获取退款申请信息
             const [refunds] = await connection.query(
                 'SELECT * FROM refund_requests WHERE id = ? AND status = "PENDING"',
-                [refund_id]
+                [cleanRefundId]
             );
 
             if (!refunds || refunds.length === 0) {
@@ -547,7 +663,7 @@ router.post('/refund/approve', async (req, res) => {
                 // 更新退款申请状态为已批准
                 await connection.query(
                     'UPDATE refund_requests SET status = "APPROVED", approved_at = NOW() WHERE id = ?',
-                    [refund_id]
+                    [cleanRefundId]
                 );
 
                 // 确保amount是有效的JSON字符串
@@ -609,7 +725,7 @@ router.post('/refund/approve', async (req, res) => {
                     // 更新退款申请状态为处理中
                     await connection.query(
                         'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ? WHERE id = ?',
-                        [response.data.refund_id, refund_id]
+                        [response.data.refund_id, cleanRefundId]
                     );
 
                     await connection.commit();
@@ -629,14 +745,9 @@ router.post('/refund/approve', async (req, res) => {
                 }
             } else {
                 // 拒绝退款申请
-                if (!reject_reason) {
-                    await connection.rollback();
-                    return res.status(400).json({ error: '拒绝退款必须提供原因' });
-                }
-
                 await connection.query(
                     'UPDATE refund_requests SET status = "REJECTED", reject_reason = ?, rejected_at = NOW() WHERE id = ?',
-                    [reject_reason, refund_id]
+                    [cleanRejectReason, cleanRefundId]
                 );
 
                 await connection.commit();
@@ -658,8 +769,7 @@ router.post('/refund/approve', async (req, res) => {
         console.error('处理退款申请失败:', error);
         res.status(500).json({
             success: false,
-            error: '处理退款申请失败',
-            detail: error.message
+            error: '处理退款申请失败'
         });
     }
 });
@@ -669,26 +779,44 @@ router.get('/refund/requests', async (req, res) => {
     try {
         const { status, page = 1, limit = 10 } = req.query;
 
-        const offset = (page - 1) * limit;
+        // 输入验证
+        if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
+            return res.status(400).json({ error: '页码必须是正整数' });
+        }
+        
+        if (limit && (isNaN(parseInt(limit)) || parseInt(limit) <= 0 || parseInt(limit) > 100)) {
+            return res.status(400).json({ error: '每页数量必须在1-100之间' });
+        }
+        
+        if (status && !['PENDING', 'APPROVED', 'REJECTED', 'PROCESSING', 'SUCCESS', 'FAILED'].includes(status)) {
+            return res.status(400).json({ error: '无效的状态值' });
+        }
+        
+        // 清理输入
+        const cleanPage = parseInt(page);
+        const cleanLimit = parseInt(limit);
+        const cleanStatus = status ? status.trim() : null;
+
+        const offset = (cleanPage - 1) * cleanLimit;
 
         // 构建查询条件
         let query = 'SELECT * FROM refund_requests';
         let countQuery = 'SELECT COUNT(*) as total FROM refund_requests';
         let params = [];
 
-        if (status) {
+        if (cleanStatus) {
             query += ' WHERE status = ?';
             countQuery += ' WHERE status = ?';
-            params.push(status);
+            params.push(cleanStatus);
         }
 
         // 添加排序和分页
         query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-        params.push(parseInt(limit), offset);
+        params.push(cleanLimit, offset);
 
         // 执行查询
         const [refunds] = await db.query(query, params);
-        const [[{ total }]] = await db.query(countQuery, status ? [status] : []);
+        const [[{ total }]] = await db.query(countQuery, cleanStatus ? [cleanStatus] : []);
 
         // 确保amount字段是有效的JSON字符串
         const formattedRefunds = refunds.map(refund => ({
@@ -700,8 +828,8 @@ router.get('/refund/requests', async (req, res) => {
             success: true,
             data: formattedRefunds,
             total: parseInt(total),
-            page: parseInt(page),
-            limit: parseInt(limit)
+            page: cleanPage,
+            limit: cleanLimit
         });
     } catch (error) {
         console.error('获取退款申请列表失败:', error);
@@ -715,9 +843,17 @@ router.get('/refund/requests', async (req, res) => {
 // 获取退款申请详情
 router.get('/refund/requests/:id', async (req, res) => {
     try {
+        // 输入验证
+        const refundId = req.params.id;
+        if (!refundId || isNaN(parseInt(refundId)) || parseInt(refundId) <= 0) {
+            return res.status(400).json({ error: '无效的退款申请ID' });
+        }
+        
+        const cleanRefundId = parseInt(refundId);
+        
         const [refunds] = await db.query(
             'SELECT * FROM refund_requests WHERE id = ?',
-            [req.params.id]
+            [cleanRefundId]
         );
 
         if (!refunds || refunds.length === 0) {
@@ -740,6 +876,14 @@ router.get('/refund/requests/:id', async (req, res) => {
 // 退款回调接口
 router.post('/refund/notify', async (req, res) => {
     try {
+        // 输入验证
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '无效的请求数据'
+            });
+        }
+        
         // 获取回调数据
         const {
             id, // 通知ID
@@ -750,11 +894,26 @@ router.post('/refund/notify', async (req, res) => {
             summary // 回调摘要
         } = req.body;
 
+        // 验证必要字段
+        if (!resource || !resource.associated_data || !resource.nonce || !resource.ciphertext) {
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '回调数据格式错误'
+            });
+        }
+
         // 验证签名
         const timestamp = req.headers['wechatpay-timestamp'];
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
+
+        if (!timestamp || !nonce || !signature || !serial) {
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '缺少签名验证信息'
+            });
+        }
 
         if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
             return res.status(401).json({
@@ -811,14 +970,21 @@ router.post('/sign', async (req, res) => {
     try {
         const { prepay_id } = req.body;
 
-        if (!prepay_id) {
-            return res.status(400).json({ error: '缺少prepay_id' });
+        // 输入验证
+        if (!prepay_id || typeof prepay_id !== 'string' || prepay_id.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的prepay_id' });
         }
+        
+        if (prepay_id.length > 64) {
+            return res.status(400).json({ error: 'prepay_id长度不能超过64个字符' });
+        }
+        
+        const cleanPrepayId = prepay_id.trim();
 
         // 构建签名参数
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
-        const package = `prepay_id=${prepay_id}`;
+        const package = `prepay_id=${cleanPrepayId}`;
 
         // 构建签名串
         const signStr = `${WX_PAY_CONFIG.appId}\n${timestamp}\n${nonceStr}\n${package}\n`;
@@ -847,22 +1013,29 @@ router.get('/query', async (req, res) => {
     try {
         const { out_trade_no } = req.query;
 
-        if (!out_trade_no) {
-            return res.status(400).json({ error: '缺少商户订单号' });
+        // 输入验证
+        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的商户订单号' });
         }
+        
+        if (out_trade_no.length > 64) {
+            return res.status(400).json({ error: '商户订单号长度不能超过64个字符' });
+        }
+        
+        const cleanOutTradeNo = out_trade_no.trim();
 
         // 生成签名所需的参数
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
         const method = 'GET';
-        const url = `/v3/pay/transactions/out-trade-no/${out_trade_no}`;
+        const url = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}`;
 
         // 生成签名
         const signature = generateSignV3(method, url, timestamp, nonceStr, '');
 
         // 发送请求到微信支付
         const response = await axios.get(
-            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${out_trade_no}`,
+            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}`,
             {
                 headers: {
                     'Accept': 'application/json',
@@ -876,7 +1049,7 @@ router.get('/query', async (req, res) => {
             // 同时查询数据库中的订单信息
             const [orders] = await db.query(
                 'SELECT * FROM orders WHERE out_trade_no = ?',
-                [out_trade_no]
+                [cleanOutTradeNo]
             );
 
             if (orders.length === 0) {
@@ -919,25 +1092,15 @@ router.get('/query', async (req, res) => {
         } else {
             res.status(400).json({
                 success: false,
-                error: '查询订单失败',
-                detail: response.data
+                error: '查询订单失败'
             });
         }
     } catch (error) {
         console.error('查询订单失败:', error);
-        if (error.response) {
-            res.status(error.response.status).json({
-                success: false,
-                error: '查询订单失败',
-                detail: error.response.data
-            });
-        } else {
-            res.status(500).json({
-                success: false,
-                error: '查询订单失败',
-                detail: error.message
-            });
-        }
+        res.status(500).json({
+            success: false,
+            error: '查询订单失败'
+        });
     }
 });
 
@@ -952,14 +1115,33 @@ router.get('/orders', async (req, res) => {
             limit = 10
         } = req.query;
 
-        if (!user_id) {
-            return res.status(400).json({ error: '缺少用户ID' });
+        // 输入验证
+        if (!user_id || isNaN(parseInt(user_id)) || parseInt(user_id) <= 0) {
+            return res.status(400).json({ error: '缺少有效的用户ID' });
         }
+        
+        if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
+            return res.status(400).json({ error: '页码必须是正整数' });
+        }
+        
+        if (limit && (isNaN(parseInt(limit)) || parseInt(limit) <= 0 || parseInt(limit) > 100)) {
+            return res.status(400).json({ error: '每页数量必须在1-100之间' });
+        }
+        
+        if (status && !['SUCCESS', 'REFUND', 'CLOSED', 'REVOKED', 'PAYERROR', 'NOTPAY'].includes(status)) {
+            return res.status(400).json({ error: '无效的订单状态' });
+        }
+        
+        // 清理输入
+        const cleanUserId = parseInt(user_id);
+        const cleanPage = parseInt(page);
+        const cleanLimit = parseInt(limit);
+        const cleanStatus = status ? status.trim() : null;
 
         // 查询用户是否存在
         const [users] = await db.query(
             'SELECT * FROM wx_users WHERE id = ?',
-            [user_id]
+            [cleanUserId]
         );
 
         if (users.length === 0) {
@@ -969,20 +1151,20 @@ router.get('/orders', async (req, res) => {
         // 构建查询条件
         let query = 'SELECT * FROM orders WHERE user_id = ?';
         let countQuery = 'SELECT COUNT(*) as total FROM orders WHERE user_id = ?';
-        let params = [user_id];
-        let countParams = [user_id];
+        let params = [cleanUserId];
+        let countParams = [cleanUserId];
 
-        if (status) {
+        if (cleanStatus) {
             query += ' AND trade_state = ?';
             countQuery += ' AND trade_state = ?';
-            params.push(status);
-            countParams.push(status);
+            params.push(cleanStatus);
+            countParams.push(cleanStatus);
         }
 
         // 添加排序和分页
         query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-        const offset = (page - 1) * limit;
-        params.push(parseInt(limit), offset);
+        const offset = (cleanPage - 1) * cleanLimit;
+        params.push(cleanLimit, offset);
 
         // 执行查询
         const [orders] = await db.query(query, params);
@@ -1142,26 +1324,17 @@ router.get('/orders', async (req, res) => {
                 orders: ordersWithItems,
                 pagination: {
                     total: parseInt(total),
-                    page: parseInt(page),
-                    limit: parseInt(limit)
+                    page: cleanPage,
+                    limit: cleanLimit
                 }
             }
         });
     } catch (error) {
         console.error('查询订单列表失败:', error);
-        if (error.response) {
-            res.status(error.response.status).json({
-                success: false,
-                error: '查询订单列表失败',
-                detail: error.response.data
-            });
-        } else {
-            res.status(500).json({
-                success: false,
-                error: '查询订单列表失败',
-                detail: error.message
-            });
-        }
+        res.status(500).json({
+            success: false,
+            error: '查询订单列表失败'
+        });
     }
 });
 
@@ -1170,9 +1343,23 @@ router.post('/digital-identity/purchase', async (req, res) => {
     try {
         const { user_id, digital_artwork_id, discount_amount } = req.body;
 
-        if (!user_id || !digital_artwork_id || !discount_amount) {
-            return res.status(400).json({ error: '参数不完整' });
+        // 输入验证
+        if (!user_id || isNaN(parseInt(user_id)) || parseInt(user_id) <= 0) {
+            return res.status(400).json({ error: '缺少有效的用户ID' });
         }
+        
+        if (!digital_artwork_id || isNaN(parseInt(digital_artwork_id)) || parseInt(digital_artwork_id) <= 0) {
+            return res.status(400).json({ error: '缺少有效的数字艺术品ID' });
+        }
+        
+        if (!discount_amount || isNaN(parseFloat(discount_amount)) || parseFloat(discount_amount) < 0) {
+            return res.status(400).json({ error: '缺少有效的抵扣金额' });
+        }
+        
+        // 清理输入
+        const cleanUserId = parseInt(user_id);
+        const cleanDigitalArtworkId = parseInt(digital_artwork_id);
+        const cleanDiscountAmount = parseFloat(discount_amount);
 
         // 开始事务
         const connection = await db.getConnection();
@@ -1182,7 +1369,7 @@ router.post('/digital-identity/purchase', async (req, res) => {
             // 检查用户是否存在
             const [users] = await connection.query(
                 'SELECT id FROM wx_users WHERE id = ?',
-                [user_id]
+                [cleanUserId]
             );
 
             if (!users || users.length === 0) {
@@ -1193,7 +1380,7 @@ router.post('/digital-identity/purchase', async (req, res) => {
             // 检查数字艺术品是否存在
             const [artworks] = await connection.query(
                 'SELECT id FROM digital_artworks WHERE id = ?',
-                [digital_artwork_id]
+                [cleanDigitalArtworkId]
             );
 
             if (!artworks || artworks.length === 0) {
@@ -1204,7 +1391,7 @@ router.post('/digital-identity/purchase', async (req, res) => {
             // 记录购买
             await connection.query(
                 'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount) VALUES (?, ?, ?)',
-                [user_id, digital_artwork_id, discount_amount]
+                [cleanUserId, cleanDigitalArtworkId, cleanDiscountAmount]
             );
 
             await connection.commit();
@@ -1224,6 +1411,14 @@ router.post('/digital-identity/purchase', async (req, res) => {
 // 获取用户的数字身份购买记录
 router.get('/digital-identity/purchases/:user_id', async (req, res) => {
     try {
+        // 输入验证
+        const userId = req.params.user_id;
+        if (!userId || isNaN(parseInt(userId)) || parseInt(userId) <= 0) {
+            return res.status(400).json({ error: '无效的用户ID' });
+        }
+        
+        const cleanUserId = parseInt(userId);
+        
         const [purchases] = await db.query(`
         SELECT 
           dip.*,
@@ -1233,7 +1428,7 @@ router.get('/digital-identity/purchases/:user_id', async (req, res) => {
         JOIN digital_artworks da ON dip.digital_artwork_id = da.id
         WHERE dip.user_id = ?
         ORDER BY dip.purchase_date DESC
-      `, [req.params.user_id]);
+      `, [cleanUserId]);
 
         res.json(purchases);
     } catch (error) {

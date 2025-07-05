@@ -55,7 +55,30 @@ router.get('/', async (req, res) => {
       sort_order = 'DESC'
     } = req.query;
 
-    const offset = (page - 1) * limit;
+    // 输入验证
+    const cleanPage = parseInt(page);
+    const cleanLimit = parseInt(limit);
+    
+    if (isNaN(cleanPage) || cleanPage < 1) {
+      return res.status(400).json({ error: '页码必须是大于0的整数' });
+    }
+    
+    if (isNaN(cleanLimit) || cleanLimit < 1 || cleanLimit > 100) {
+      return res.status(400).json({ error: '每页数量必须在1-100之间' });
+    }
+    
+    // 验证状态参数
+    const validStatuses = ['active', 'inactive', 'pending'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ error: '无效的状态参数' });
+    }
+    
+    // 验证搜索关键词
+    if (search && typeof search === 'string' && search.length > 100) {
+      return res.status(400).json({ error: '搜索关键词长度不能超过100个字符' });
+    }
+
+    const offset = (cleanPage - 1) * cleanLimit;
     
     // 构建查询条件
     let whereClause = 'WHERE 1=1';
@@ -89,7 +112,7 @@ router.get('/', async (req, res) => {
        ${whereClause}
        ORDER BY ${sortField} ${orderDirection}
        LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
+      [...params, cleanLimit, offset]
     );
 
     // 查询每个商家的图片
@@ -111,16 +134,16 @@ router.get('/', async (req, res) => {
       data: merchantsWithProcessedImages,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total_pages: Math.ceil(total / limit)
+        page: cleanPage,
+        limit: cleanLimit,
+        total_pages: Math.ceil(total / cleanLimit)
       }
     });
   } catch (error) {
     console.error('获取商家列表失败:', error);
     res.status(500).json({ 
       success: false,
-      error: '获取商家列表失败' 
+      error: '获取商家列表服务暂时不可用' 
     });
   }
 });
@@ -128,10 +151,16 @@ router.get('/', async (req, res) => {
 // 获取商家详情接口
 router.get('/:id', async (req, res) => {
   try {
+    // 验证ID参数
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: '无效的商家ID' });
+    }
+    
     // 获取商家基本信息
     const [merchants] = await db.query(
       'SELECT * FROM merchants WHERE id = ? AND status = "active"',
-      [req.params.id]
+      [id]
     );
 
     if (!merchants || merchants.length === 0) {
@@ -146,7 +175,7 @@ router.get('/:id', async (req, res) => {
     // 获取商家图片
     const [images] = await db.query(
       'SELECT image_url FROM merchant_images WHERE merchant_id = ?',
-      [req.params.id]
+      [id]
     );
 
     // 处理图片URL，添加WebP转换
@@ -163,7 +192,7 @@ router.get('/:id', async (req, res) => {
     console.error('获取商家详情失败:', error);
     res.status(500).json({ 
       success: false,
-      error: '获取商家详情失败' 
+      error: '获取商家详情服务暂时不可用' 
     });
   }
 });

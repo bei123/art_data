@@ -9,6 +9,14 @@ router.get('/', async (req, res) => {
   try {
     const { artist_id } = req.query;
 
+    // 验证artist_id参数
+    if (artist_id) {
+      const artistId = parseInt(artist_id);
+      if (isNaN(artistId) || artistId <= 0) {
+        return res.status(400).json({ error: '无效的艺术家ID' });
+      }
+    }
+
     let sql = `
       SELECT 
         oa.*,
@@ -22,7 +30,7 @@ router.get('/', async (req, res) => {
 
     if (artist_id) {
       sql += ' WHERE oa.artist_id = ?';
-      params.push(artist_id);
+      params.push(parseInt(artist_id));
     }
 
     sql += ' ORDER BY oa.created_at DESC';
@@ -61,13 +69,19 @@ router.get('/', async (req, res) => {
     res.json(artworksWithFullUrls);
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
-    res.status(500).json({ error: '获取艺术品列表失败' });
+    res.status(500).json({ error: '获取艺术品列表服务暂时不可用' });
   }
 });
 
 // 获取艺术品详情（公开接口）
 router.get('/:id', async (req, res) => {
   try {
+    // 验证ID参数
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: '无效的作品ID' });
+    }
+    
     const [rows] = await db.query(`
       SELECT 
         oa.*,
@@ -78,7 +92,7 @@ router.get('/:id', async (req, res) => {
       FROM original_artworks oa
       LEFT JOIN artists a ON oa.artist_id = a.id
       WHERE oa.id = ?
-    `, [req.params.id]);
+    `, [id]);
 
     if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '作品不存在' });
@@ -124,7 +138,7 @@ router.get('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('获取作品详情失败:', error);
-    res.status(500).json({ error: '获取作品详情失败' });
+    res.status(500).json({ error: '获取作品详情服务暂时不可用' });
   }
 });
 

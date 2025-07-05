@@ -12,6 +12,8 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const xml2js = require('xml2js');
 const { uploadToOSS } = require('./config/oss');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const wxRouter = require('./routes/wx');
 const wxpayRouter = require('./routes/pay');
 const favoritesRouter = require('./routes/favorites');
@@ -27,6 +29,55 @@ const uploadRouter = require('./routes/upload');
 
 const app = express();
 const port = 2000;
+
+// 安全中间件配置
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:", "http:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
+// 速率限制配置
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15分钟
+  max: 100, // 限制每个IP 15分钟内最多100个请求
+  message: {
+    error: '请求过于频繁，请稍后再试'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 对API路由应用速率限制
+app.use('/api/', limiter);
+
+// 对登录接口应用更严格的速率限制
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15分钟
+  max: 5, // 限制每个IP 15分钟内最多5次登录尝试
+  message: {
+    error: '登录尝试过于频繁，请稍后再试'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/auth/login', loginLimiter);
 
 // CORS 配置
 app.use(cors({
@@ -51,15 +102,9 @@ app.use(cors({
   exposedHeaders: ['Authorization']
 }));
 
-// 安全相关的响应头
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  next();
-});
+// 请求体大小限制
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // 解析JSON请求体
 app.use(express.json());
@@ -111,8 +156,7 @@ const upload = multer({
   }
 });
 
-// 配置中间件
-app.use(express.json());
+// 静态文件服务
 app.use('/uploads', express.static('uploads'));
 
 // 创建上传目录
@@ -135,7 +179,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     });
   } catch (error) {
     console.error('文件上传失败:', error);
-    res.status(500).json({ error: '文件上传失败' });
+    res.status(500).json({ error: '文件上传服务暂时不可用，请稍后再试' });
   }
 });
 
@@ -143,11 +187,25 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 app.get('/api/search', async (req, res) => {
   try {
     const { keyword } = req.query;
-    if (!keyword) {
-      return res.status(400).json({ error: '请输入搜索关键词' });
+    
+    // 输入验证
+    if (!keyword || typeof keyword !== 'string') {
+      return res.status(400).json({ error: '请输入有效的搜索关键词' });
+    }
+    
+    // 清理和验证关键词
+    const cleanKeyword = keyword.trim();
+    if (cleanKeyword.length < 1 || cleanKeyword.length > 100) {
+      return res.status(400).json({ error: '搜索关键词长度必须在1-100个字符之间' });
+    }
+    
+    // 检查是否包含危险字符
+    const dangerousChars = /[<>'"&]/;
+    if (dangerousChars.test(cleanKeyword)) {
+      return res.status(400).json({ error: '搜索关键词包含无效字符' });
     }
 
-    const searchTerm = `%${keyword}%`;
+    const searchTerm = `%${cleanKeyword}%`;
 
     // 搜索艺术家
     const [artistRows] = await db.query(
@@ -192,7 +250,7 @@ app.get('/api/search', async (req, res) => {
     res.json(results);
   } catch (error) {
     console.error('搜索失败:', error);
-    res.status(500).json({ error: '搜索失败' });
+    res.status(500).json({ error: '搜索服务暂时不可用，请稍后再试' });
   }
 });
 
@@ -278,6 +336,32 @@ app.use('/api/rights', rightsRouter);
 
 // 使用上传路由
 app.use('/api/upload', uploadRouter);
+
+// 全局错误处理中间件
+app.use((err, req, res, next) => {
+  console.error('未处理的错误:', err);
+  
+  // 根据错误类型返回不同的响应
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: '文件大小超过限制' });
+  }
+  
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({ error: '不支持的文件类型' });
+  }
+  
+  if (err.message && err.message.includes('文件')) {
+    return res.status(400).json({ error: err.message });
+  }
+  
+  // 默认错误响应
+  res.status(500).json({ error: '服务器内部错误' });
+});
+
+// 404处理
+app.use('*', (req, res) => {
+  res.status(404).json({ error: '接口不存在' });
+});
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;

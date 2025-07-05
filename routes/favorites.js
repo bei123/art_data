@@ -11,7 +11,7 @@ const authenticateToken = (req, res, next) => {
   }
   const token = authHeader.replace('Bearer ', '');
   try {
-    const payload = jwt.verify(token, 'your_jwt_secret');
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = payload;
     next();
   } catch (err) {
@@ -22,8 +22,16 @@ const authenticateToken = (req, res, next) => {
 // 添加收藏
 router.post('/', authenticateToken, async (req, res) => {
   const { itemId, itemType } = req.body;
+  
+  // 输入验证
   if (!itemId || !itemType) {
     return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  // 验证itemId
+  const cleanItemId = parseInt(itemId);
+  if (isNaN(cleanItemId) || cleanItemId <= 0) {
+    return res.status(400).json({ error: '无效的物品ID' });
   }
 
   // 验证收藏类型
@@ -43,11 +51,11 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const sql = 'INSERT INTO favorites (user_id, item_id, item_type) VALUES (?, ?, ?)';
-    await db.query(sql, [userId, itemId, itemType]);
+    await db.query(sql, [userId, cleanItemId, itemType]);
     res.json({ success: true });
   } catch (err) {
     console.error('添加收藏失败:', err);
-    res.status(500).json({ error: '服务器错误' });
+    res.status(500).json({ error: '添加收藏服务暂时不可用' });
   }
 });
 
@@ -56,9 +64,21 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
   const { itemId, itemType } = req.params;
   const userId = req.user.userId;
 
+  // 输入验证
+  const cleanItemId = parseInt(itemId);
+  if (isNaN(cleanItemId) || cleanItemId <= 0) {
+    return res.status(400).json({ error: '无效的物品ID' });
+  }
+
+  // 验证收藏类型
+  const validTypes = ['artwork', 'digital_art', 'copyright_item'];
+  if (!validTypes.includes(itemType)) {
+    return res.status(400).json({ error: '无效的收藏类型' });
+  }
+
   try {
     const sql = 'DELETE FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
-    const result = await db.query(sql, [userId, itemId, itemType]);
+    const result = await db.query(sql, [userId, cleanItemId, itemType]);
     
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: '未找到该收藏记录' });
@@ -67,7 +87,7 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('取消收藏失败:', err);
-    res.status(500).json({ error: '服务器错误' });
+    res.status(500).json({ error: '取消收藏服务暂时不可用' });
   }
 });
 

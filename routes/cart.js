@@ -11,7 +11,7 @@ const authenticateToken = (req, res, next) => {
   }
   const token = authHeader.replace('Bearer ', '');
   try {
-    const payload = jwt.verify(token, 'your_jwt_secret');
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = payload;
     next();
   } catch (err) {
@@ -30,7 +30,7 @@ router.get('/', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-      payload = jwt.verify(token, 'your_jwt_secret');
+      payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'token无效' });
     }
@@ -98,7 +98,7 @@ router.get('/', async (req, res) => {
     res.json([...processedCartRights, ...processedCartDigitals, ...processedCartArtworks]);
   } catch (error) {
     console.error('获取购物车失败:', error);
-    res.status(500).json({ error: '获取购物车失败' });
+    res.status(500).json({ error: '获取购物车服务暂时不可用' });
   }
 });
 
@@ -113,13 +113,23 @@ router.post('/', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-      payload = jwt.verify(token, 'your_jwt_secret');
+      payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'token无效' });
     }
 
     const userId = payload.userId;
     const { type = 'right', right_id, digital_artwork_id, artwork_id, quantity = 1 } = req.body;
+    
+    // 输入验证
+    if (!['right', 'digital', 'artwork'].includes(type)) {
+      return res.status(400).json({ error: '无效的商品类型' });
+    }
+    
+    const cleanQuantity = parseInt(quantity);
+    if (isNaN(cleanQuantity) || cleanQuantity <= 0 || cleanQuantity > 99) {
+      return res.status(400).json({ error: '商品数量必须在1-99之间' });
+    }
 
     if (type === 'right') {
       if (!right_id) {
@@ -237,7 +247,7 @@ router.put('/:id', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-      payload = jwt.verify(token, 'your_jwt_secret');
+      payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'token无效' });
     }
@@ -320,7 +330,7 @@ router.delete('/:id', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-      payload = jwt.verify(token, 'your_jwt_secret');
+      payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'token无效' });
     }
@@ -354,7 +364,7 @@ router.delete('/', async (req, res) => {
     const token = authHeader.replace('Bearer ', '');
     let payload;
     try {
-      payload = jwt.verify(token, 'your_jwt_secret');
+      payload = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'token无效' });
     }
