@@ -129,8 +129,8 @@ router.post('/login', async (req, res) => {
         // 3. 生成你自己系统的 token（如 JWT）
         const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-        // 4. 返回用户信息和 token, 包含用户所有信息，并过滤掉敏感字段
-        const { session_key: sk, ...userProfile } = user;
+        // 4. 返回用户信息和 token, 过滤掉敏感字段
+        const { session_key: sk, salt, password_hash, ...userProfile } = user;
         res.json({
             token,
             user: userProfile
