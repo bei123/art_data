@@ -1,0 +1,1 @@
+ALTER TABLE wx_users ADD COLUMN salt VARCHAR(32) NULL COMMENT '密码盐值'; 

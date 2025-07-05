@@ -19,6 +19,18 @@ const crypto = require('crypto');
 function md5(str) {
     return crypto.createHash('md5').update(str).digest('hex');
 }
+// 新增：生成随机盐
+function generateSalt(length = 16) {
+    return crypto.randomBytes(length).toString('hex').slice(0, length);
+}
+// 新增：多次MD5加盐加密
+function md5WithSalt(password, salt, times = 3) {
+    let hash = password + salt;
+    for (let i = 0; i < times; i++) {
+        hash = crypto.createHash('md5').update(hash).digest('hex');
+    }
+    return hash;
+}
 
 // 创建阿里云二要素核验客户端
 function createDytnsClient() {
@@ -636,11 +648,13 @@ router.post('/setPassword', async (req, res) => {
             return res.status(400).json({ error: '密码已经设置过，如需修改请使用修改密码接口' });
         }
 
-        // MD5加密密码
-        const passwordHash = md5(password);
+        // 生成盐
+        const salt = generateSalt(16);
+        // 多次MD5加密
+        const passwordHash = md5WithSalt(password, salt, 3);
 
-        // 更新用户密码
-        await db.query('UPDATE wx_users SET password_hash = ? WHERE id = ?', [passwordHash, payload.userId]);
+        // 更新用户密码和盐
+        await db.query('UPDATE wx_users SET password_hash = ?, salt = ? WHERE id = ?', [passwordHash, salt, payload.userId]);
 
         res.json({
             success: true,
@@ -678,8 +692,8 @@ router.post('/changePassword', async (req, res) => {
     }
 
     try {
-        // 检查用户是否存在并获取当前密码
-        const [users] = await db.query('SELECT password_hash FROM wx_users WHERE id = ?', [payload.userId]);
+        // 检查用户是否存在并获取当前密码和盐
+        const [users] = await db.query('SELECT password_hash, salt FROM wx_users WHERE id = ?', [payload.userId]);
         if (users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
@@ -691,17 +705,19 @@ router.post('/changePassword', async (req, res) => {
             return res.status(400).json({ error: '用户尚未设置密码，请先设置密码' });
         }
 
-        // 验证旧密码（MD5）
-        const isValidOldPassword = (md5(oldPassword) === user.password_hash);
+        // 验证旧密码（多次MD5+盐）
+        const isValidOldPassword = (md5WithSalt(oldPassword, user.salt, 3) === user.password_hash);
         if (!isValidOldPassword) {
             return res.status(400).json({ error: '旧密码错误' });
         }
 
-        // MD5加密新密码
-        const newPasswordHash = md5(newPassword);
+        // 生成新盐
+        const newSalt = generateSalt(16);
+        // 多次MD5加密新密码
+        const newPasswordHash = md5WithSalt(newPassword, newSalt, 3);
 
-        // 更新用户密码
-        await db.query('UPDATE wx_users SET password_hash = ? WHERE id = ?', [newPasswordHash, payload.userId]);
+        // 更新用户密码和盐
+        await db.query('UPDATE wx_users SET password_hash = ?, salt = ? WHERE id = ?', [newPasswordHash, newSalt, payload.userId]);
 
         res.json({
             success: true,
@@ -734,8 +750,8 @@ router.post('/verifyPassword', async (req, res) => {
     }
 
     try {
-        // 检查用户是否存在并获取密码
-        const [users] = await db.query('SELECT password_hash FROM wx_users WHERE id = ?', [payload.userId]);
+        // 检查用户是否存在并获取密码和盐
+        const [users] = await db.query('SELECT password_hash, salt FROM wx_users WHERE id = ?', [payload.userId]);
         if (users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
@@ -747,8 +763,8 @@ router.post('/verifyPassword', async (req, res) => {
             return res.status(400).json({ error: '用户尚未设置密码' });
         }
 
-        // 验证密码（MD5）
-        const isValidPassword = (md5(password) === user.password_hash);
+        // 验证密码（多次MD5+盐）
+        const isValidPassword = (md5WithSalt(password, user.salt, 3) === user.password_hash);
         
         res.json({
             success: true,
