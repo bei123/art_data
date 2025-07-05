@@ -21,7 +21,9 @@ function validateImageUrl(url) {
 // 获取数字艺术品列表（公开接口）
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const { artist_id } = req.query;
+    
+    let query = `
       SELECT 
         da.*,
         a.id as artist_id,
@@ -29,8 +31,19 @@ router.get('/', async (req, res) => {
         a.avatar as artist_avatar
       FROM digital_artworks da 
       LEFT JOIN artists a ON da.artist_id = a.id
-      ORDER BY da.created_at DESC
-    `);
+    `;
+    
+    const queryParams = [];
+    
+    // 如果提供了 artist_id 参数，添加筛选条件
+    if (artist_id) {
+      query += ` WHERE da.artist_id = ?`;
+      queryParams.push(artist_id);
+    }
+    
+    query += ` ORDER BY da.created_at DESC`;
+    
+    const [rows] = await db.query(query, queryParams);
     
     if (!rows || !Array.isArray(rows)) {
       return res.json([]);
@@ -96,34 +109,23 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// 数字艺术品相关接口
-router.get('/', async (req, res) => {
-  try {
-    const [rows] = await db.query('SELECT * FROM digital_artworks');
-    console.log('Digital artworks query result:', rows);
-    
-    if (!rows || !Array.isArray(rows)) {
-      console.log('Invalid digital artworks data:', rows);
-      return res.json([]);
-    }
-    
-    // 为每个作品的图片添加完整URL
-    const artworksWithFullUrls = rows.map(artwork => ({
-      ...artwork,
-      image: artwork.image_url || '',
-      price: artwork.price || 0
-    }));
-    res.json(artworksWithFullUrls);
-  } catch (error) {
-    console.error('Error fetching digital artworks:', error);
-    res.status(500).json({ error: '获取数据失败' });
-  }
-});
+
 
 // 公共数字艺术品列表接口（无需认证）
 router.get('/public', async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT * FROM digital_artworks');
+    const { artist_id } = req.query;
+    
+    let query = 'SELECT * FROM digital_artworks';
+    const queryParams = [];
+    
+    // 如果提供了 artist_id 参数，添加筛选条件
+    if (artist_id) {
+      query += ' WHERE artist_id = ?';
+      queryParams.push(artist_id);
+    }
+    
+    const [rows] = await db.query(query, queryParams);
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
       image: artwork.image_url || '',
