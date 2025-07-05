@@ -14,6 +14,12 @@ const Util = require('@alicloud/tea-util');
 const Credential = require('@alicloud/credentials');
 const sharp = require('sharp');
 
+// 新增：MD5加密函数
+const crypto = require('crypto');
+function md5(str) {
+    return crypto.createHash('md5').update(str).digest('hex');
+}
+
 // 创建阿里云二要素核验客户端
 function createDytnsClient() {
     let credential = new Credential.default();
@@ -630,9 +636,8 @@ router.post('/setPassword', async (req, res) => {
             return res.status(400).json({ error: '密码已经设置过，如需修改请使用修改密码接口' });
         }
 
-        // 加密密码
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(password, salt);
+        // MD5加密密码
+        const passwordHash = md5(password);
 
         // 更新用户密码
         await db.query('UPDATE wx_users SET password_hash = ? WHERE id = ?', [passwordHash, payload.userId]);
@@ -686,15 +691,14 @@ router.post('/changePassword', async (req, res) => {
             return res.status(400).json({ error: '用户尚未设置密码，请先设置密码' });
         }
 
-        // 验证旧密码
-        const isValidOldPassword = await bcrypt.compare(oldPassword, user.password_hash);
+        // 验证旧密码（MD5）
+        const isValidOldPassword = (md5(oldPassword) === user.password_hash);
         if (!isValidOldPassword) {
             return res.status(400).json({ error: '旧密码错误' });
         }
 
-        // 加密新密码
-        const salt = await bcrypt.genSalt(10);
-        const newPasswordHash = await bcrypt.hash(newPassword, salt);
+        // MD5加密新密码
+        const newPasswordHash = md5(newPassword);
 
         // 更新用户密码
         await db.query('UPDATE wx_users SET password_hash = ? WHERE id = ?', [newPasswordHash, payload.userId]);
@@ -743,8 +747,8 @@ router.post('/verifyPassword', async (req, res) => {
             return res.status(400).json({ error: '用户尚未设置密码' });
         }
 
-        // 验证密码
-        const isValidPassword = await bcrypt.compare(password, user.password_hash);
+        // 验证密码（MD5）
+        const isValidPassword = (md5(password) === user.password_hash);
         
         res.json({
             success: true,
