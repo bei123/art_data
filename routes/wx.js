@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const db = require('../db');
 const multer = require('multer');
 const upload = multer();
@@ -589,6 +590,171 @@ router.get('/font-url', (req, res) => {
     res.json({
         url: 'https://wx.oss.2000gallery.art/font/SF-Pro.ttf'
     });
+});
+
+// 设置用户密码接口
+router.post('/setPassword', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const { password } = req.body;
+    if (!password) {
+        return res.status(400).json({ error: '缺少密码参数' });
+    }
+
+    // 验证密码强度
+    if (password.length < 6) {
+        return res.status(400).json({ error: '密码长度至少6位' });
+    }
+
+    try {
+        // 检查用户是否存在
+        const [users] = await db.query('SELECT id FROM wx_users WHERE id = ?', [payload.userId]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+
+        // 检查是否已经设置过密码
+        const [existingUser] = await db.query('SELECT password_hash FROM wx_users WHERE id = ?', [payload.userId]);
+        if (existingUser[0].password_hash) {
+            return res.status(400).json({ error: '密码已经设置过，如需修改请使用修改密码接口' });
+        }
+
+        // 加密密码
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(password, salt);
+
+        // 更新用户密码
+        await db.query('UPDATE wx_users SET password_hash = ? WHERE id = ?', [passwordHash, payload.userId]);
+
+        res.json({
+            success: true,
+            message: '密码设置成功'
+        });
+    } catch (err) {
+        console.error('设置密码失败:', err);
+        res.status(500).json({ error: '服务器错误', detail: err.message });
+    }
+});
+
+// 修改用户密码接口
+router.post('/changePassword', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const { oldPassword, newPassword } = req.body;
+    if (!oldPassword || !newPassword) {
+        return res.status(400).json({ error: '缺少旧密码或新密码参数' });
+    }
+
+    // 验证新密码强度
+    if (newPassword.length < 6) {
+        return res.status(400).json({ error: '新密码长度至少6位' });
+    }
+
+    try {
+        // 检查用户是否存在并获取当前密码
+        const [users] = await db.query('SELECT password_hash FROM wx_users WHERE id = ?', [payload.userId]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+
+        const user = users[0];
+        
+        // 检查是否已经设置过密码
+        if (!user.password_hash) {
+            return res.status(400).json({ error: '用户尚未设置密码，请先设置密码' });
+        }
+
+        // 验证旧密码
+        const isValidOldPassword = await bcrypt.compare(oldPassword, user.password_hash);
+        if (!isValidOldPassword) {
+            return res.status(400).json({ error: '旧密码错误' });
+        }
+
+        // 加密新密码
+        const salt = await bcrypt.genSalt(10);
+        const newPasswordHash = await bcrypt.hash(newPassword, salt);
+
+        // 更新用户密码
+        await db.query('UPDATE wx_users SET password_hash = ? WHERE id = ?', [newPasswordHash, payload.userId]);
+
+        res.json({
+            success: true,
+            message: '密码修改成功'
+        });
+    } catch (err) {
+        console.error('修改密码失败:', err);
+        res.status(500).json({ error: '服务器错误', detail: err.message });
+    }
+});
+
+// 验证用户密码接口
+router.post('/verifyPassword', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, 'your_jwt_secret');
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const { password } = req.body;
+    if (!password) {
+        return res.status(400).json({ error: '缺少密码参数' });
+    }
+
+    try {
+        // 检查用户是否存在并获取密码
+        const [users] = await db.query('SELECT password_hash FROM wx_users WHERE id = ?', [payload.userId]);
+        if (users.length === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+
+        const user = users[0];
+        
+        // 检查是否已经设置过密码
+        if (!user.password_hash) {
+            return res.status(400).json({ error: '用户尚未设置密码' });
+        }
+
+        // 验证密码
+        const isValidPassword = await bcrypt.compare(password, user.password_hash);
+        
+        res.json({
+            success: true,
+            isValid: isValidPassword,
+            message: isValidPassword ? '密码验证成功' : '密码错误'
+        });
+    } catch (err) {
+        console.error('验证密码失败:', err);
+        res.status(500).json({ error: '服务器错误', detail: err.message });
+    }
 });
 
 module.exports = router; 
