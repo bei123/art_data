@@ -654,10 +654,18 @@ router.post('/notify', async (req, res) => {
 
                 // 更新商品库存
                 for (const item of orderItems) {
-                    await connection.query(
-                        'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
-                        [item.quantity, item.right_id]
-                    );
+                    if (item.type === 'right') {
+                        await connection.query(
+                            'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
+                            [item.quantity, item.right_id]
+                        );
+                    } else if (item.type === 'artwork') {
+                        await connection.query(
+                            'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
+                            [item.quantity, item.artwork_id]
+                        );
+                    }
+                    // digital 类型暂不处理库存
                 }
 
                 await connection.commit();
@@ -1183,6 +1191,44 @@ router.post('/refund/notify', async (req, res) => {
                 amount // 金额信息
             } = callbackData;
 
+            // 更新订单项库存回补
+            const connection = await db.getConnection();
+            await connection.beginTransaction();
+            try {
+                // 查询订单id
+                const [orders] = await connection.query(
+                    'SELECT id FROM orders WHERE out_trade_no = ?',
+                    [out_trade_no]
+                );
+                if (orders.length > 0) {
+                    const orderId = orders[0].id;
+                    // 查询订单项
+                    const [orderItems] = await connection.query(
+                        'SELECT * FROM order_items WHERE order_id = ?',
+                        [orderId]
+                    );
+                    for (const item of orderItems) {
+                        if (item.type === 'right') {
+                            await connection.query(
+                                'UPDATE rights SET remaining_count = remaining_count + ? WHERE id = ?',
+                                [item.quantity, item.right_id]
+                            );
+                        } else if (item.type === 'artwork') {
+                            await connection.query(
+                                'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
+                                [item.quantity, item.artwork_id]
+                            );
+                        }
+                        // digital 类型暂不处理库存
+                    }
+                }
+                await connection.commit();
+            } catch (err) {
+                await connection.rollback();
+                throw err;
+            } finally {
+                connection.release();
+            }
             // TODO: 更新订单状态
             // 这里需要根据你的业务逻辑来处理退款状态更新
             // 例如：更新数据库中的订单状态为已退款
