@@ -11,7 +11,10 @@ const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:';
 // 获取艺术品列表（公开接口）
 router.get('/', async (req, res) => {
   try {
-    const { artist_id } = req.query;
+    const { artist_id, page = 1, pageSize = 20 } = req.query;
+    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
+    const offset = (pageNum - 1) * sizeNum;
 
     // 验证artist_id参数
     if (artist_id) {
@@ -23,10 +26,8 @@ router.get('/', async (req, res) => {
 
     let sql = `
       SELECT 
-        oa.*,
-        a.id as artist_id,
-        a.name as artist_name,
-        a.avatar as artist_avatar
+        oa.id, oa.title, oa.year, oa.image, oa.price, oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM original_artworks oa 
       LEFT JOIN artists a ON oa.artist_id = a.id
     `;
@@ -37,11 +38,12 @@ router.get('/', async (req, res) => {
       params.push(parseInt(artist_id));
     }
 
-    sql += ' ORDER BY oa.created_at DESC';
+    sql += ' ORDER BY oa.created_at DESC LIMIT ? OFFSET ?';
+    params.push(sizeNum, offset);
 
-    let cacheKey = REDIS_ARTWORKS_LIST_KEY;
+    let cacheKey = REDIS_ARTWORKS_LIST_KEY + `:page:${pageNum}:size:${sizeNum}`;
     if (artist_id) {
-      cacheKey = REDIS_ARTWORKS_LIST_KEY_PREFIX + artist_id;
+      cacheKey = REDIS_ARTWORKS_LIST_KEY_PREFIX + artist_id + `:page:${pageNum}:size:${sizeNum}`;
     }
     // 先查redis缓存
     const cache = await redisClient.get(cacheKey);
@@ -50,27 +52,36 @@ router.get('/', async (req, res) => {
     }
 
     const [rows] = await db.query(sql, params);
-    console.log('Original artworks query result:', rows);
-    
     if (!rows || !Array.isArray(rows)) {
-      console.log('Invalid original artworks data:', rows);
       return res.json([]);
     }
-    
+
+    // 一次查出所有图片，避免N+1
+    const artworkIds = rows.map(r => r.id);
+    let imagesMap = {};
+    if (artworkIds.length > 0) {
+      const [allImages] = await db.query(
+        'SELECT artwork_id, image_url FROM artwork_images WHERE artwork_id IN (?) ORDER BY sort_order, id',
+        [artworkIds]
+      );
+      allImages.forEach(img => {
+        if (!imagesMap[img.artwork_id]) imagesMap[img.artwork_id] = [];
+        imagesMap[img.artwork_id].push(img.image_url);
+      });
+    }
+
     // 为每个图片URL添加完整URL并构建正确的数据结构
-    const artworksWithFullUrls = await Promise.all(rows.map(async artwork => {
+    const artworksWithFullUrls = rows.map(artwork => {
       const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
-      // 查询多图
-      const [imageRows] = await db.query('SELECT image_url FROM artwork_images WHERE artwork_id = ? ORDER BY sort_order, id', [artwork.id]);
-      const images = imageRows.map(row => row.image_url);
       return {
         ...processedArtwork,
-        images: images,
+        images: imagesMap[artwork.id] || [],
         artist: {
           id: artwork.artist_id,
           name: artwork.artist_name,
           avatar: processedArtwork.artist_avatar || ''
         },
+        // collection 字段保留兼容
         collection: {
           location: artwork.collection_location,
           number: artwork.collection_number,
@@ -78,8 +89,8 @@ router.get('/', async (req, res) => {
           material: artwork.collection_material
         }
       };
-    }));
-    
+    });
+
     res.json(artworksWithFullUrls);
     // 写入redis缓存，7天过期
     await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithFullUrls));
