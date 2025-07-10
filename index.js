@@ -55,7 +55,7 @@ app.use(helmet({
 // 速率限制配置
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15分钟
-  max: 100, // 限制每个IP 15分钟内最多100个请求
+  max: 1000, // 限制每个IP 15分钟内最多1000个请求
   message: {
     error: '请求过于频繁，请稍后再试'
   },
@@ -69,7 +69,7 @@ app.use('/api/', limiter);
 // 对登录接口应用更严格的速率限制
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15分钟
-  max: 5, // 限制每个IP 15分钟内最多5次登录尝试
+  max: 10, // 限制每个IP 15分钟内最多5次登录尝试
   message: {
     error: '登录尝试过于频繁，请稍后再试'
   },
