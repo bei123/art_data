@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
       return res.json(JSON.parse(cache));
     }
     const [banners] = await db.query(
-      'SELECT * FROM banners WHERE status = "active" ORDER BY sort_order ASC'
+      'SELECT id, title, image_url, link_url, sort_order FROM banners WHERE status = "active" ORDER BY sort_order ASC'
     );
     
     // 处理图片URL，添加WebP转换
@@ -55,7 +55,7 @@ router.get('/all', authenticateToken, async (req, res) => {
       return res.json(JSON.parse(cache));
     }
     const [banners] = await db.query(
-      'SELECT * FROM banners ORDER BY sort_order ASC'
+      'SELECT id, title, image_url, link_url, sort_order, status FROM banners ORDER BY sort_order ASC'
     );
     
     // 处理图片URL，添加WebP转换
