@@ -61,7 +61,9 @@ router.post('/', authenticateToken, async (req, res) => {
         const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
-          await redisClient.del(reply.keys);
+          // 确保所有key都是字符串类型
+          const stringKeys = reply.keys.map(key => String(key));
+          await redisClient.del(stringKeys);
         }
       } while (cursor !== 0);
     };
@@ -105,7 +107,9 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
         const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
-          await redisClient.del(reply.keys);
+          // 确保所有key都是字符串类型
+          const stringKeys = reply.keys.map(key => String(key));
+          await redisClient.del(stringKeys);
         }
       } while (cursor !== 0);
     };
