@@ -3,6 +3,9 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+const REDIS_BANNERS_LIST_KEY = 'banners:list';
+const REDIS_BANNERS_ALL_KEY = 'banners:all';
 
 function validateImageUrl(url) {
   if (!url) return false;
@@ -20,6 +23,11 @@ function validateImageUrl(url) {
 // 获取轮播图列表（公开接口）
 router.get('/', async (req, res) => {
   try {
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_BANNERS_LIST_KEY);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
     const [banners] = await db.query(
       'SELECT * FROM banners WHERE status = "active" ORDER BY sort_order ASC'
     );
@@ -30,6 +38,8 @@ router.get('/', async (req, res) => {
     );
     
     res.json(bannersWithProcessedImages);
+    // 写入redis缓存，永久有效
+    await redisClient.set(REDIS_BANNERS_LIST_KEY, JSON.stringify(bannersWithProcessedImages));
   } catch (error) {
     console.error('获取轮播图列表失败:', error);
     res.status(500).json({ error: '获取轮播图列表服务暂时不可用' });
@@ -39,6 +49,11 @@ router.get('/', async (req, res) => {
 // 获取所有轮播图（管理后台用）
 router.get('/all', authenticateToken, async (req, res) => {
   try {
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_BANNERS_ALL_KEY);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
     const [banners] = await db.query(
       'SELECT * FROM banners ORDER BY sort_order ASC'
     );
@@ -49,6 +64,8 @@ router.get('/all', authenticateToken, async (req, res) => {
     );
     
     res.json(bannersWithProcessedImages);
+    // 写入redis缓存，永久有效
+    await redisClient.set(REDIS_BANNERS_ALL_KEY, JSON.stringify(bannersWithProcessedImages));
   } catch (error) {
     console.error('获取所有轮播图失败:', error);
     res.status(500).json({ error: '获取所有轮播图服务暂时不可用' });
@@ -91,6 +108,9 @@ router.post('/', authenticateToken, async (req, res) => {
     const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [result.insertId]);
     // 处理返回的图片URL，添加WebP转换
     const processedBanner = processObjectImages(banner[0], ['image_url']);
+    // 清理缓存
+    await redisClient.del(REDIS_BANNERS_LIST_KEY);
+    await redisClient.del(REDIS_BANNERS_ALL_KEY);
     res.json(processedBanner);
   } catch (error) {
     console.error('添加轮播图失败:', error);
@@ -144,6 +164,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [id]);
     // 处理返回的图片URL，添加WebP转换
     const processedBanner = processObjectImages(banner[0], ['image_url']);
+    // 清理缓存
+    await redisClient.del(REDIS_BANNERS_LIST_KEY);
+    await redisClient.del(REDIS_BANNERS_ALL_KEY);
     res.json(processedBanner);
   } catch (error) {
     console.error('更新轮播图失败:', error);
@@ -161,6 +184,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
     
     await db.query('DELETE FROM banners WHERE id = ?', [id]);
+    // 清理缓存
+    await redisClient.del(REDIS_BANNERS_LIST_KEY);
+    await redisClient.del(REDIS_BANNERS_ALL_KEY);
     res.json({ message: '删除成功' });
   } catch (error) {
     console.error('删除轮播图失败:', error);

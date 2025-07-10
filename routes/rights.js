@@ -3,10 +3,18 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+const REDIS_RIGHTS_LIST_KEY = 'rights:list';
+const REDIS_RIGHT_DETAIL_KEY_PREFIX = 'rights:detail:';
 
 // 获取版权实物列表（需要认证）
 router.get('/', async (req, res) => {
     try {
+        // 先查redis缓存
+        const cache = await redisClient.get(REDIS_RIGHTS_LIST_KEY);
+        if (cache) {
+            return res.json(JSON.parse(cache));
+        }
         // 获取版权实物基本信息和分类信息
         const [rows] = await db.query(`
       SELECT r.*, c.title as category_title
@@ -29,6 +37,8 @@ router.get('/', async (req, res) => {
         }
 
         res.json(rows);
+        // 写入redis缓存，7天过期
+        await redisClient.setEx(REDIS_RIGHTS_LIST_KEY, 604800, JSON.stringify(rows));
     } catch (error) {
         console.error('获取版权实物列表失败:', error);
         res.status(500).json({ error: '获取版权实物列表服务暂时不可用' });
@@ -72,6 +82,8 @@ router.post('/', authenticateToken, async (req, res) => {
       `, [rightId]);
 
             res.json(newRight[0]);
+            // 清理缓存
+            await redisClient.del(REDIS_RIGHTS_LIST_KEY);
         } catch (error) {
             await connection.rollback();
             throw error;
@@ -129,6 +141,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
             updatedRight[0].images = rightImages.map(img => img.image_url || '');
 
             res.json(updatedRight[0]);
+            // 清理缓存
+            await redisClient.del(REDIS_RIGHTS_LIST_KEY);
+            await redisClient.del(REDIS_RIGHT_DETAIL_KEY_PREFIX + req.params.id);
         } catch (error) {
             await connection.rollback();
             throw error;
@@ -160,6 +175,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
             await connection.commit();
             res.json({ message: '删除成功' });
+            // 清理缓存
+            await redisClient.del(REDIS_RIGHTS_LIST_KEY);
+            await redisClient.del(REDIS_RIGHT_DETAIL_KEY_PREFIX + req.params.id);
         } catch (error) {
             await connection.rollback();
             throw error;
@@ -179,6 +197,11 @@ router.get('/:id', async (req, res) => {
         const id = parseInt(req.params.id);
         if (isNaN(id) || id <= 0) {
             return res.status(400).json({ error: '无效的版权实物ID' });
+        }
+        // 先查redis缓存
+        const cache = await redisClient.get(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
+        if (cache) {
+            return res.json(JSON.parse(cache));
         }
         
         const [rows] = await db.query(`
@@ -202,7 +225,7 @@ router.get('/:id', async (req, res) => {
             [right.id]
         );
 
-        res.json({
+        const result = {
             ...right,
             rich_text: right.rich_text,
             images: images.map(img => processObjectImages(img, ['image_url']).image_url),
@@ -210,7 +233,10 @@ router.get('/:id', async (req, res) => {
                 id: right.category_id,
                 title: right.category_title
             }
-        });
+        };
+        res.json(result);
+        // 写入redis缓存，7天过期
+        await redisClient.setEx(REDIS_RIGHT_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
     } catch (error) {
         console.error('获取版权实物详情失败:', error);
         res.status(500).json({ error: '获取版权实物详情失败' });

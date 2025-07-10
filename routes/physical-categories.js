@@ -3,6 +3,8 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 
 // 验证图片URL的函数
 function validateImageUrl(url) {
@@ -21,6 +23,11 @@ function validateImageUrl(url) {
 // 获取实物分类列表（公开接口）
 router.get('/', async (req, res) => {
   try {
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_PHYSICAL_CATEGORIES_LIST_KEY);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
     const [rows] = await db.query('SELECT * FROM physical_categories');
     console.log('Physical categories query result:', rows);
     
@@ -35,6 +42,8 @@ router.get('/', async (req, res) => {
     );
     
     res.json(categoriesWithProcessedImages);
+    // 写入redis缓存，7天过期
+    await redisClient.setEx(REDIS_PHYSICAL_CATEGORIES_LIST_KEY, 604800, JSON.stringify(categoriesWithProcessedImages));
   } catch (error) {
     console.error('Error fetching physical categories:', error);
     res.status(500).json({ error: '获取实物分类数据服务暂时不可用' });
@@ -76,6 +85,8 @@ router.post('/', authenticateToken, async (req, res) => {
       ...req.body
     }, ['image', 'icon']);
     
+    // 清理缓存
+    await redisClient.del(REDIS_PHYSICAL_CATEGORIES_LIST_KEY);
     res.json(newCategory);
   } catch (error) {
     console.error('Error creating physical category:', error);
@@ -124,6 +135,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
       ...req.body
     }, ['image', 'icon']);
     
+    // 清理缓存
+    await redisClient.del(REDIS_PHYSICAL_CATEGORIES_LIST_KEY);
     res.json(updatedCategory);
   } catch (error) {
     console.error('Error updating physical category:', error);
@@ -141,6 +154,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
     
     await db.query('DELETE FROM physical_categories WHERE id = ?', [id]);
+    // 清理缓存
+    await redisClient.del(REDIS_PHYSICAL_CATEGORIES_LIST_KEY);
     res.json({ message: '删除成功' });
   } catch (error) {
     console.error('Error deleting physical category:', error);

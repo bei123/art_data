@@ -7,6 +7,9 @@ const path = require('path');
 const db = require('../db');
 const jwt = require('jsonwebtoken');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
+const redisClient = require('../utils/redisClient');
+const LOCK_EXPIRE = 30; // 30秒
+const CALLBACK_EXPIRE = 600; // 10分钟
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
@@ -99,6 +102,13 @@ router.post('/unifiedorder', async (req, res) => {
             return res.status(400).json({ error: '购物车商品数量不能超过20个' });
         }
         
+        // 幂等性锁
+        const lockKey = `pay:order:lock:${out_trade_no}`;
+        const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+        if (!lock) {
+            return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
+        }
+
         // 清理输入
         const cleanOpenid = openid.trim();
         const cleanTotalFee = parseFloat(total_fee);
@@ -356,6 +366,13 @@ router.post('/singleorder', async (req, res) => {
             (type === 'artwork' && (!artwork_id || isNaN(parseInt(artwork_id))))
         ) {
             return res.status(400).json({ error: '缺少有效的商品ID' });
+        }
+
+        // 幂等性锁
+        const lockKey = `pay:order:lock:${out_trade_no}`;
+        const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+        if (!lock) {
+            return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
         }
 
         // 清理输入
@@ -636,6 +653,12 @@ router.post('/notify', async (req, res) => {
         }
         // 处理支付结果
         if (callbackData.trade_state === 'SUCCESS') {
+            // 回调去重
+            const callbackKey = `pay:callback:${callbackData.out_trade_no}`;
+            const processed = await redisClient.set(callbackKey, '1', { NX: true, EX: CALLBACK_EXPIRE });
+            if (!processed) {
+                return res.json({ code: 'SUCCESS', message: '重复回调，已忽略' });
+            }
             // 日志：支付成功回调
             console.log('支付成功回调数据:', callbackData);
             const {

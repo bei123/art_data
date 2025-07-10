@@ -8,6 +8,9 @@ const { authenticateToken } = require('../auth');
 const { uploadToOSS, deleteFromOSS } = require('../config/oss');
 const { processObjectImages } = require('../utils/image');
 const BASE_URL = 'https://api.wx.2000gallery.art:2000';
+const redisClient = require('../utils/redisClient');
+const REDIS_MERCHANTS_LIST_KEY_PREFIX = 'merchants:list:';
+const REDIS_MERCHANT_DETAIL_KEY_PREFIX = 'merchants:detail:';
 
 // 验证图片URL的函数
 const validateImageUrl = (url) => {
@@ -139,6 +142,18 @@ router.get('/', async (req, res) => {
         total_pages: Math.ceil(total / cleanLimit)
       }
     });
+    // 写入redis缓存，永久有效
+    const cacheKey = `${REDIS_MERCHANTS_LIST_KEY_PREFIX}${page}:${limit}:${search}:${status}:${sort_by}:${sort_order}`;
+    await redisClient.set(cacheKey, JSON.stringify({
+      success: true,
+      data: merchantsWithProcessedImages,
+      pagination: {
+        total,
+        page: cleanPage,
+        limit: cleanLimit,
+        total_pages: Math.ceil(total / cleanLimit)
+      }
+    }));
   } catch (error) {
     console.error('获取商家列表失败:', error);
     res.status(500).json({ 
@@ -155,6 +170,12 @@ router.get('/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的商家ID' });
+    }
+    // 先查redis缓存
+    const cacheKey = REDIS_MERCHANT_DETAIL_KEY_PREFIX + id;
+    const cache = await redisClient.get(cacheKey);
+    if (cache) {
+      return res.json(JSON.parse(cache));
     }
     
     // 获取商家基本信息
@@ -184,10 +205,13 @@ router.get('/:id', async (req, res) => {
       images: images.map(img => img.image_url)
     }, ['logo', 'images']);
 
-    res.json({
+    const result = {
       success: true,
       data: merchantWithProcessedImages
-    });
+    };
+    res.json(result);
+    // 写入redis缓存，永久有效
+    await redisClient.set(cacheKey, JSON.stringify(result));
   } catch (error) {
     console.error('获取商家详情失败:', error);
     res.status(500).json({ 
@@ -273,6 +297,18 @@ router.post('/', authenticateToken, async (req, res) => {
         success: true,
         data: newMerchant[0]
       });
+      // 清理所有商家列表缓存
+      const scanDel = async (pattern) => {
+        let cursor = 0;
+        do {
+          const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+          cursor = reply.cursor;
+          if (reply.keys.length > 0) {
+            await redisClient.del(reply.keys);
+          }
+        } while (cursor !== 0);
+      };
+      await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -333,6 +369,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
         success: true,
         data: updatedMerchant[0]
       });
+      // 清理所有商家列表缓存和该商家详情缓存
+      const scanDel = async (pattern) => {
+        let cursor = 0;
+        do {
+          const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+          cursor = reply.cursor;
+          if (reply.keys.length > 0) {
+            await redisClient.del(reply.keys);
+          }
+        } while (cursor !== 0);
+      };
+      await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+      await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -367,6 +416,19 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         success: true,
         message: '删除成功'
       });
+      // 清理所有商家列表缓存和该商家详情缓存
+      const scanDel = async (pattern) => {
+        let cursor = 0;
+        do {
+          const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+          cursor = reply.cursor;
+          if (reply.keys.length > 0) {
+            await redisClient.del(reply.keys);
+          }
+        } while (cursor !== 0);
+      };
+      await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+      await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -403,6 +465,19 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       success: true,
       message: '状态更新成功'
     });
+    // 清理所有商家列表缓存和该商家详情缓存
+    const scanDel = async (pattern) => {
+      let cursor = 0;
+      do {
+        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        cursor = reply.cursor;
+        if (reply.keys.length > 0) {
+          await redisClient.del(reply.keys);
+        }
+      } while (cursor !== 0);
+    };
+    await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
   } catch (error) {
     console.error('更新商家状态失败:', error);
     res.status(500).json({ 
@@ -433,6 +508,19 @@ router.patch('/:id/sort', authenticateToken, async (req, res) => {
       success: true,
       message: '排序更新成功'
     });
+    // 清理所有商家列表缓存和该商家详情缓存
+    const scanDel = async (pattern) => {
+      let cursor = 0;
+      do {
+        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        cursor = reply.cursor;
+        if (reply.keys.length > 0) {
+          await redisClient.del(reply.keys);
+        }
+      } while (cursor !== 0);
+    };
+    await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
   } catch (error) {
     console.error('更新商家排序失败:', error);
     res.status(500).json({ 

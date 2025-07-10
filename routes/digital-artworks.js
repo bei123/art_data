@@ -3,6 +3,10 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+const REDIS_DIGITAL_ARTWORKS_LIST_KEY = 'digital_artworks:list';
+const REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX = 'digital_artworks:list:artist:';
+const REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX = 'digital_artworks:detail:';
 
 // 验证图片URL的函数
 function validateImageUrl(url) {
@@ -62,6 +66,12 @@ router.get('/', async (req, res) => {
     });
     
     res.json(artworksWithProcessedImages);
+    // 写入redis缓存，7天过期
+    let cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY;
+    if (artist_id) {
+      cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artist_id;
+    }
+    await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithProcessedImages));
   } catch (error) {
     console.error('获取数字艺术品列表失败:', error);
     res.status(500).json({ error: '获取数字艺术品列表失败' });
@@ -75,6 +85,11 @@ router.get('/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的作品ID' });
+    }
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
+    if (cache) {
+      return res.json(JSON.parse(cache));
     }
     
     const [rows] = await db.query(`
@@ -105,10 +120,13 @@ router.get('/:id', async (req, res) => {
     // 移除 artist 相关字段，避免在顶层重复
     const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
 
-    res.json({
+    const result = {
       ...artworkData,
       artist: artist
-    });
+    };
+    res.json(result);
+    // 写入redis缓存，7天过期
+    await redisClient.setEx(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
   } catch (error) {
     console.error('获取数字艺术品详情失败:', error);
     res.status(500).json({ error: '获取数字艺术品详情服务暂时不可用' });
@@ -198,6 +216,11 @@ router.post('/', authenticateToken, async (req, res) => {
     );
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [artist_id]);
     const artist = artistRows[0] || {};
+    // 清理缓存
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+    if (artist_id) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artist_id);
+    }
     res.json({
       id: result.insertId,
       title,
@@ -273,6 +296,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
     );
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [artist_id]);
     const artist = artistRows[0] || {};
+    // 清理缓存
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+    if (artist_id) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artist_id);
+    }
+    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + req.params.id);
     res.json({
       id: parseInt(req.params.id),
       title,
@@ -318,6 +347,14 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     await connection.query('DELETE FROM digital_artworks WHERE id = ?', [req.params.id]);
 
     await connection.commit();
+    // 清理缓存
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+    // 查出artist_id用于精准清理缓存
+    const [rows] = await connection.query('SELECT artist_id FROM digital_artworks WHERE id = ?', [req.params.id]);
+    if (rows && rows.length > 0 && rows[0].artist_id) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + rows[0].artist_id);
+    }
+    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + req.params.id);
     res.json({ message: '删除成功' });
   } catch (error) {
     await connection.rollback();

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const jwt = require('jsonwebtoken');
+const redisClient = require('../utils/redisClient');
+const REDIS_FAVORITES_LIST_KEY_PREFIX = 'favorites:list:';
 
 // Token验证中间件
 const authenticateToken = (req, res, next) => {
@@ -52,6 +54,18 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const sql = 'INSERT INTO favorites (user_id, item_id, item_type) VALUES (?, ?, ?)';
     await db.query(sql, [userId, cleanItemId, itemType]);
+    // 清理该用户所有收藏列表缓存
+    const scanDel = async (pattern) => {
+      let cursor = 0;
+      do {
+        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        cursor = reply.cursor;
+        if (reply.keys.length > 0) {
+          await redisClient.del(reply.keys);
+        }
+      } while (cursor !== 0);
+    };
+    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:*`);
     res.json({ success: true });
   } catch (err) {
     console.error('添加收藏失败:', err);
@@ -84,6 +98,18 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: '未找到该收藏记录' });
     }
     
+    // 清理该用户所有收藏列表缓存
+    const scanDel = async (pattern) => {
+      let cursor = 0;
+      do {
+        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        cursor = reply.cursor;
+        if (reply.keys.length > 0) {
+          await redisClient.del(reply.keys);
+        }
+      } while (cursor !== 0);
+    };
+    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:*`);
     res.json({ success: true });
   } catch (err) {
     console.error('取消收藏失败:', err);
@@ -95,6 +121,13 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
 router.get('/', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   const { page = 1, pageSize = 10, itemType } = req.query;
+  // 生成缓存key
+  const cacheKey = `${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:${itemType || 'all'}:${page}:${pageSize}`;
+  // 先查redis缓存
+  const cache = await redisClient.get(cacheKey);
+  if (cache) {
+    return res.json(JSON.parse(cache));
+  }
 
   try {
     const offset = (page - 1) * pageSize;
@@ -173,6 +206,16 @@ router.get('/', authenticateToken, async (req, res) => {
         pageSize: parseInt(pageSize)
       }
     });
+    // 写入redis缓存，1分钟
+    await redisClient.setEx(cacheKey, 60, JSON.stringify({
+      success: true,
+      data: favorites,
+      pagination: {
+        total: countResult[0].total,
+        page: parseInt(page),
+        pageSize: parseInt(pageSize)
+      }
+    }));
   } catch (err) {
     console.error('获取收藏列表失败:', err);
     res.status(500).json({ error: '服务器错误' });

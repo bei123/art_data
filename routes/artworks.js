@@ -3,6 +3,10 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
+const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
+const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:';
 
 // 获取艺术品列表（公开接口）
 router.get('/', async (req, res) => {
@@ -34,6 +38,16 @@ router.get('/', async (req, res) => {
     }
 
     sql += ' ORDER BY oa.created_at DESC';
+
+    let cacheKey = REDIS_ARTWORKS_LIST_KEY;
+    if (artist_id) {
+      cacheKey = REDIS_ARTWORKS_LIST_KEY_PREFIX + artist_id;
+    }
+    // 先查redis缓存
+    const cache = await redisClient.get(cacheKey);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
 
     const [rows] = await db.query(sql, params);
     console.log('Original artworks query result:', rows);
@@ -67,6 +81,8 @@ router.get('/', async (req, res) => {
     }));
     
     res.json(artworksWithFullUrls);
+    // 写入redis缓存，7天过期
+    await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithFullUrls));
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
     res.status(500).json({ error: '获取艺术品列表服务暂时不可用' });
@@ -82,6 +98,12 @@ router.get('/:id', async (req, res) => {
       return res.status(400).json({ error: '无效的作品ID' });
     }
     
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
+
     const [rows] = await db.query(`
       SELECT 
         oa.*,
@@ -118,7 +140,7 @@ router.get('/:id', async (req, res) => {
       description: artwork.artist_description
     };
 
-    res.json({
+    const result = {
       title: artwork.title,
       year: artwork.year,
       image: artwork.image,
@@ -135,7 +157,10 @@ router.get('/:id', async (req, res) => {
       original_price: artwork.original_price,
       sales: artwork.sales,
       is_on_sale: artwork.is_on_sale
-    });
+    };
+    res.json(result);
+    // 写入redis缓存，7天过期
+    await redisClient.setEx(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
   } catch (error) {
     console.error('获取作品详情失败:', error);
     res.status(500).json({ error: '获取作品详情服务暂时不可用' });
@@ -205,6 +230,11 @@ router.post('/', authenticateToken, async (req, res) => {
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
+    // 清理缓存
+    await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
+    if (finalArtistId) {
+      await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + finalArtistId);
+    }
     res.json({
       id: result.insertId,
       title,
@@ -312,6 +342,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
+    // 清理缓存
+    await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
+    if (finalArtistId) {
+      await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + finalArtistId);
+    }
+    await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + req.params.id);
     res.json({
       id: parseInt(req.params.id),
       title,
@@ -348,6 +384,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     await db.query('DELETE FROM original_artworks WHERE id = ?', [req.params.id]);
+    // 清理缓存
+    await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
+    // 精准清理对应artist_id的缓存
+    // 先查出该作品的artist_id
+    const [rows] = await db.query('SELECT artist_id FROM original_artworks WHERE id = ?', [req.params.id]);
+    if (rows && rows.length > 0 && rows[0].artist_id) {
+      await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + rows[0].artist_id);
+    }
+    await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + req.params.id);
     res.json({ message: '删除成功' });
   } catch (error) {
     console.error('Error deleting original artwork:', error);
