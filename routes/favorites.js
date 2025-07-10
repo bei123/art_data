@@ -12,17 +12,24 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: '未提供token' });
   }
   const token = authHeader.replace('Bearer ', '');
+  if (!token) {
+    return res.status(401).json({ error: 'token格式错误' });
+  }
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
+    if (!payload || !payload.userId) {
+      return res.status(401).json({ error: 'token内容无效' });
+    }
     req.user = payload;
     next();
   } catch (err) {
+    console.error('Token验证失败:', err.message);
     return res.status(401).json({ error: 'token无效' });
   }
 };
 
 // 验证物品是否存在
-const validateItemExists = async (itemId, itemType) => {
+const validateItemExists = async (itemId, itemType, connection = null) => {
   try {
     let sql = '';
     switch (itemType) {
@@ -38,7 +45,7 @@ const validateItemExists = async (itemId, itemType) => {
       default:
         return false;
     }
-    const [result] = await db.query(sql, [itemId]);
+    const [result] = connection ? await connection.query(sql, [itemId]) : await db.query(sql, [itemId]);
     return result && result.length > 0;
   } catch (err) {
     console.error('验证物品存在性失败:', err);
@@ -51,20 +58,29 @@ const clearUserFavoritesCache = async (userId) => {
   try {
     const scanDel = async (pattern) => {
       let cursor = 0;
+      let totalDeleted = 0;
       do {
         const reply = await redisClient.scan(String(cursor), { MATCH: String(pattern), COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
           const stringKeys = reply.keys.map(key => String(key));
-          await redisClient.del(...stringKeys.map(k => String(k)));
+          const deleted = await redisClient.del(...stringKeys.map(k => String(k)));
+          totalDeleted += deleted;
         }
       } while (cursor !== 0);
+      return totalDeleted;
     };
-    await scanDel(String(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`));
+    const deletedCount = await scanDel(String(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`));
+    console.log(`清理用户 ${userId} 的收藏缓存，删除了 ${deletedCount} 个key`);
   } catch (err) {
     console.error('清理缓存失败:', err);
-    // 缓存清理失败不应该影响主流程
+    // 缓存清理失败不应该影响主流程，但记录详细错误信息
+    console.error('缓存清理错误详情:', {
+      userId,
+      error: err.message,
+      stack: err.stack
+    });
   }
 };
 
@@ -92,27 +108,49 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    // 验证物品是否存在
-    const itemExists = await validateItemExists(cleanItemId, itemType);
-    if (!itemExists) {
-      return res.status(404).json({ error: '要收藏的物品不存在' });
+    // 验证用户ID
+    if (!userId || isNaN(parseInt(userId)) || parseInt(userId) <= 0) {
+      return res.status(400).json({ error: '无效的用户ID' });
     }
     
-    // 检查是否已经收藏 - 使用cleanItemId保持一致性
-    const checkSql = 'SELECT id FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
-    const [existing] = await db.query(checkSql, [userId, cleanItemId, itemType]);
+    // 使用事务确保数据一致性
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
     
-    if (existing && existing.length > 0) {
-      return res.status(400).json({ error: '已经收藏过该物品' });
-    }
+    try {
+      // 验证物品是否存在
+      const itemExists = await validateItemExists(cleanItemId, itemType, connection);
+      if (!itemExists) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ error: '要收藏的物品不存在' });
+      }
+      
+      // 检查是否已经收藏 - 使用cleanItemId保持一致性
+      const checkSql = 'SELECT id FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
+      const [existing] = await connection.query(checkSql, [userId, cleanItemId, itemType]);
+      
+      if (existing && existing.length > 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({ error: '已经收藏过该物品' });
+      }
 
-    const sql = 'INSERT INTO favorites (user_id, item_id, item_type) VALUES (?, ?, ?)';
-    await db.query(sql, [userId, cleanItemId, itemType]);
-    
-    // 清理该用户所有收藏列表缓存
-    await clearUserFavoritesCache(userId);
-    
-    res.json({ success: true });
+      const sql = 'INSERT INTO favorites (user_id, item_id, item_type) VALUES (?, ?, ?)';
+      await connection.query(sql, [userId, cleanItemId, itemType]);
+      
+      await connection.commit();
+      connection.release();
+      
+      // 清理该用户所有收藏列表缓存
+      await clearUserFavoritesCache(userId);
+      
+      res.json({ success: true });
+    } catch (err) {
+      await connection.rollback();
+      connection.release();
+      throw err;
+    }
   } catch (err) {
     console.error('添加收藏失败:', err);
     res.status(500).json({ error: '添加收藏服务暂时不可用' });
@@ -121,8 +159,13 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // 取消收藏
 router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
-  const { itemId, itemType } = req.params;
+  const { itemType, itemId } = req.params; // 修复参数顺序
   const userId = req.user.userId;
+
+  // 验证用户ID
+  if (!userId || isNaN(parseInt(userId)) || parseInt(userId) <= 0) {
+    return res.status(400).json({ error: '无效的用户ID' });
+  }
 
   // 输入验证
   const cleanItemId = parseInt(itemId);
@@ -137,17 +180,32 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
   }
 
   try {
-    const sql = 'DELETE FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
-    const [result] = await db.query(sql, [userId, cleanItemId, itemType]);
+    // 使用事务确保数据一致性
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
     
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: '未找到该收藏记录' });
+    try {
+      const sql = 'DELETE FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
+      const [result] = await connection.query(sql, [userId, cleanItemId, itemType]);
+      
+      if (result.affectedRows === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ error: '未找到该收藏记录' });
+      }
+      
+      await connection.commit();
+      connection.release();
+      
+      // 清理该用户所有收藏列表缓存
+      await clearUserFavoritesCache(userId);
+      
+      res.json({ success: true });
+    } catch (err) {
+      await connection.rollback();
+      connection.release();
+      throw err;
     }
-    
-    // 清理该用户所有收藏列表缓存
-    await clearUserFavoritesCache(userId);
-    
-    res.json({ success: true });
   } catch (err) {
     console.error('取消收藏失败:', err);
     res.status(500).json({ error: '取消收藏服务暂时不可用' });
