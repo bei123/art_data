@@ -135,94 +135,104 @@ router.post('/unifiedorder', async (req, res) => {
 
             // 获取用户可用的抵扣金额
             const [discounts] = await connection.query(`
-          SELECT SUM(dip.discount_amount) as total_discount
-          FROM digital_identity_purchases dip
-          WHERE dip.user_id = ? AND dip.discount_amount > 0
-        `, [userId]);
+                SELECT COALESCE(SUM(dip.discount_amount), 0) as total_discount
+                FROM digital_identity_purchases dip
+                WHERE dip.user_id = ? AND dip.discount_amount > 0
+            `, [userId]);
 
             const availableDiscount = discounts[0].total_discount || 0;
 
+            // 分类商品ID，批量查询
+            const rightIds = [];
+            const artworkIds = [];
+            const digitalIds = [];
+
+            cart_items.forEach(item => {
+                if (item.type === 'right') {
+                    rightIds.push(item.right_id);
+                } else if (item.type === 'artwork') {
+                    artworkIds.push(item.artwork_id);
+                } else if (item.type === 'digital') {
+                    digitalIds.push(item.digital_artwork_id);
+                }
+            });
+
+            // 批量查询商品信息
+            const goodsMap = new Map();
+
+            // 批量查询rights
+            if (rightIds.length > 0) {
+                const [rights] = await connection.query(
+                    'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id IN (?) AND status = "onsale"',
+                    [rightIds]
+                );
+                rights.forEach(right => {
+                    goodsMap.set(`right_${right.id}`, right);
+                });
+            }
+
+            // 批量查询artworks
+            if (artworkIds.length > 0) {
+                const [artworks] = await connection.query(
+                    'SELECT id, original_price, discount_price, stock FROM original_artworks WHERE id IN (?) AND is_on_sale = 1',
+                    [artworkIds]
+                );
+                artworks.forEach(artwork => {
+                    goodsMap.set(`artwork_${artwork.id}`, artwork);
+                });
+            }
+
+            // 批量查询digitals
+            if (digitalIds.length > 0) {
+                const [digitals] = await connection.query(
+                    'SELECT id, price FROM digital_artworks WHERE id IN (?)',
+                    [digitalIds]
+                );
+                digitals.forEach(digital => {
+                    goodsMap.set(`digital_${digital.id}`, digital);
+                });
+            }
+
             // 校验所有商品
             for (const item of cart_items) {
-                if (item.type === 'right') {
-                    const [rights] = await connection.query(
-                        'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id = ? AND status = "onsale"',
-                        [item.right_id]
-                    );
-                    if (!rights || rights.length === 0) {
-                        await connection.rollback();
-                        return res.status(404).json({ error: `商品ID ${item.right_id} 不存在或已下架` });
-                    }
-                    if (rights[0].remaining_count < item.quantity) {
-                        await connection.rollback();
-                        return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
-                    }
-                    // 验证价格
-                    const itemPrice = parseFloat(item.price);
-                    const dbPrice = parseFloat(rights[0].price);
-                    if (Math.abs(itemPrice - dbPrice) > 0.01) {
-                        await connection.rollback();
-                        return res.status(400).json({
-                            error: `商品ID ${item.right_id} 价格不匹配`,
-                            detail: {
-                                expected: dbPrice,
-                                received: itemPrice
-                            }
-                        });
-                    }
-                } else if (item.type === 'artwork') {
-                    const [artworks] = await connection.query(
-                        'SELECT id, original_price, discount_price, stock FROM original_artworks WHERE id = ? AND is_on_sale = 1',
-                        [item.artwork_id]
-                    );
-                    if (!artworks || artworks.length === 0) {
-                        await connection.rollback();
-                        return res.status(404).json({ error: `艺术品ID ${item.artwork_id} 不存在或已下架` });
-                    }
-                    if (artworks[0].stock < item.quantity) {
-                        await connection.rollback();
-                        return res.status(400).json({ error: `艺术品ID ${item.artwork_id} 库存不足` });
-                    }
-                    // 验证价格
-                    const itemPrice = parseFloat(item.price);
-                    const actualPrice = (artworks[0].discount_price && artworks[0].discount_price > 0 && artworks[0].discount_price < artworks[0].original_price)
-                        ? artworks[0].discount_price
-                        : artworks[0].original_price;
-                    if (Math.abs(itemPrice - actualPrice) > 0.01) {
-                        await connection.rollback();
-                        return res.status(400).json({
-                            error: `艺术品ID ${item.artwork_id} 价格不匹配`,
-                            detail: {
-                                expected: actualPrice,
-                                received: itemPrice
-                            }
-                        });
-                    }
-                } else if (item.type === 'digital') {
-                    const [digitals] = await connection.query(
-                        'SELECT id, price FROM digital_artworks WHERE id = ?',
-                        [item.digital_artwork_id]
-                    );
-                    if (!digitals || digitals.length === 0) {
-                        await connection.rollback();
-                        return res.status(404).json({ error: `数字艺术品ID ${item.digital_artwork_id} 不存在` });
-                    }
-                    // 验证价格
-                    const itemPrice = parseFloat(item.price);
-                    const dbPrice = parseFloat(digitals[0].price);
-                    if (Math.abs(itemPrice - dbPrice) > 0.01) {
-                        await connection.rollback();
-                        return res.status(400).json({
-                            error: `数字艺术品ID ${item.digital_artwork_id} 价格不匹配`,
-                            detail: {
-                                expected: dbPrice,
-                                received: itemPrice
-                            }
-                        });
-                    }
-                } else {
+                const key = `${item.type}_${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id}`;
+                const goods = goodsMap.get(key);
+
+                if (!goods) {
                     await connection.rollback();
-                    return res.status(400).json({ error: `不支持的商品类型: ${item.type}` });
+                    return res.status(404).json({ error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 不存在或已下架` });
+                }
+
+                // 验证库存
+                if (item.type === 'right' && goods.remaining_count < item.quantity) {
+                    await connection.rollback();
+                    return res.status(400).json({ error: `商品ID ${item.right_id} 库存不足` });
+                }
+                if (item.type === 'artwork' && goods.stock < item.quantity) {
+                    await connection.rollback();
+                    return res.status(400).json({ error: `艺术品ID ${item.artwork_id} 库存不足` });
+                }
+
+                // 验证价格
+                const itemPrice = parseFloat(item.price);
+                let dbPrice;
+                if (item.type === 'right' || item.type === 'digital') {
+                    dbPrice = parseFloat(goods.price);
+                } else if (item.type === 'artwork') {
+                    dbPrice = (goods.discount_price && goods.discount_price > 0 && goods.discount_price < goods.original_price)
+                        ? goods.discount_price
+                        : goods.original_price;
+                }
+
+                if (Math.abs(itemPrice - dbPrice) > 0.01) {
+                    await connection.rollback();
+                    return res.status(400).json({
+                        error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 价格不匹配`,
+                        detail: {
+                            expected: dbPrice,
+                            received: itemPrice
+                        }
+                    });
                 }
             }
 
@@ -255,10 +265,10 @@ router.post('/unifiedorder', async (req, res) => {
             // 如果使用了抵扣，更新抵扣记录
             if (availableDiscount > 0) {
                 await connection.query(`
-            UPDATE digital_identity_purchases 
-            SET discount_amount = 0 
-            WHERE user_id = ? AND discount_amount > 0
-          `, [userId]);
+                    UPDATE digital_identity_purchases 
+                    SET discount_amount = 0 
+                    WHERE user_id = ? AND discount_amount > 0
+                `, [userId]);
             }
 
             // 构建统一下单参数
@@ -686,27 +696,44 @@ router.post('/notify', async (req, res) => {
                     [transaction_id, trade_type, trade_state, trade_state_desc, success_time, out_trade_no]
                 );
                 // 获取订单项
-                const [orderItems] = await connection.query(
-                    'SELECT * FROM order_items WHERE order_id = (SELECT id FROM orders WHERE out_trade_no = ?)',
-                    [out_trade_no]
-                );
+                const [orderItems] = await connection.query(`
+                    SELECT oi.*, o.id as order_id
+                    FROM order_items oi
+                    JOIN orders o ON oi.order_id = o.id
+                    WHERE o.out_trade_no = ?
+                `, [out_trade_no]);
                 console.log('订单项:', orderItems);
-                // 更新商品库存
+                
+                // 批量更新商品库存
+                const rightUpdates = [];
+                const artworkUpdates = [];
+                
                 for (const item of orderItems) {
                     if (item.type === 'right') {
-                        await connection.query(
-                            'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
-                            [item.quantity, item.right_id]
-                        );
-                        console.log(`扣减right库存: right_id=${item.right_id}, quantity=${item.quantity}`);
+                        rightUpdates.push([item.quantity, item.right_id]);
                     } else if (item.type === 'artwork') {
-                        await connection.query(
-                            'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
-                            [item.quantity, item.artwork_id]
-                        );
-                        console.log(`扣减artwork库存: artwork_id=${item.artwork_id}, quantity=${item.quantity}`);
+                        artworkUpdates.push([item.quantity, item.artwork_id]);
                     }
-                    // digital 类型暂不处理库存
+                }
+                
+                // 批量更新rights库存
+                if (rightUpdates.length > 0) {
+                    await connection.query(`
+                        UPDATE rights 
+                        SET remaining_count = remaining_count - ? 
+                        WHERE id = ?
+                    `, rightUpdates);
+                    console.log(`批量扣减right库存: ${rightUpdates.length}条记录`);
+                }
+                
+                // 批量更新artworks库存
+                if (artworkUpdates.length > 0) {
+                    await connection.query(`
+                        UPDATE original_artworks 
+                        SET stock = stock - ? 
+                        WHERE id = ?
+                    `, artworkUpdates);
+                    console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
                 }
                 await connection.commit();
                 console.log('支付回调处理完成，库存已更新');
@@ -1238,33 +1265,44 @@ router.post('/refund/notify', async (req, res) => {
             const connection = await db.getConnection();
             await connection.beginTransaction();
             try {
-                // 查询订单id
-                const [orders] = await connection.query(
-                    'SELECT id FROM orders WHERE out_trade_no = ?',
-                    [out_trade_no]
-                );
-                if (orders.length > 0) {
-                    const orderId = orders[0].id;
-                    // 查询订单项
-                    const [orderItems] = await connection.query(
-                        'SELECT * FROM order_items WHERE order_id = ?',
-                        [orderId]
-                    );
-                    for (const item of orderItems) {
-                        if (item.type === 'right') {
-                            await connection.query(
-                                'UPDATE rights SET remaining_count = remaining_count + ? WHERE id = ?',
-                                [item.quantity, item.right_id]
-                            );
-                        } else if (item.type === 'artwork') {
-                            await connection.query(
-                                'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
-                                [item.quantity, item.artwork_id]
-                            );
-                        }
-                        // digital 类型暂不处理库存
+                // 查询订单项 - 使用JOIN优化
+                const [orderItems] = await connection.query(`
+                    SELECT oi.*, o.id as order_id
+                    FROM order_items oi
+                    JOIN orders o ON oi.order_id = o.id
+                    WHERE o.out_trade_no = ?
+                `, [out_trade_no]);
+                
+                // 批量更新库存
+                const rightUpdates = [];
+                const artworkUpdates = [];
+                
+                for (const item of orderItems) {
+                    if (item.type === 'right') {
+                        rightUpdates.push([item.quantity, item.right_id]);
+                    } else if (item.type === 'artwork') {
+                        artworkUpdates.push([item.quantity, item.artwork_id]);
                     }
                 }
+                
+                // 批量更新rights库存
+                if (rightUpdates.length > 0) {
+                    await connection.query(`
+                        UPDATE rights 
+                        SET remaining_count = remaining_count + ? 
+                        WHERE id = ?
+                    `, rightUpdates);
+                }
+                
+                // 批量更新artworks库存
+                if (artworkUpdates.length > 0) {
+                    await connection.query(`
+                        UPDATE original_artworks 
+                        SET stock = stock + ? 
+                        WHERE id = ?
+                    `, artworkUpdates);
+                }
+                
                 await connection.commit();
             } catch (err) {
                 await connection.rollback();
@@ -1502,96 +1540,78 @@ router.get('/orders', async (req, res) => {
 
         // 查询每个订单的订单项
         const ordersWithItems = await Promise.all(orders.map(async (order) => {
-            // 查询订单项
-            let orderItemsQuery = `
-          SELECT oi.*, 
-            CASE 
-              WHEN oi.type = 'right' THEN r.title
-              WHEN oi.type = 'digital' THEN da.title
-              WHEN oi.type = 'artwork' THEN oa.title
-              ELSE NULL
-            END as title,
-            CASE 
-              WHEN oi.type = 'right' THEN r.price
-              WHEN oi.type = 'digital' THEN da.price
-              WHEN oi.type = 'artwork' THEN oa.original_price
-              ELSE NULL
-            END as price,
-            CASE 
-              WHEN oi.type = 'right' THEN r.original_price
-              WHEN oi.type = 'artwork' THEN oa.original_price
-              ELSE NULL
-            END as original_price,
-            CASE 
-              WHEN oi.type = 'right' THEN r.description
-              WHEN oi.type = 'digital' THEN da.description
-              WHEN oi.type = 'artwork' THEN oa.description
-              ELSE NULL
-            END as description,
-            CASE 
-              WHEN oi.type = 'right' THEN r.status
-              ELSE NULL
-            END as status,
-            CASE 
-              WHEN oi.type = 'right' THEN r.remaining_count
-              ELSE NULL
-            END as remaining_count,
-            CASE
-              WHEN oi.type = 'artwork' THEN oa.discount_price
-              ELSE NULL
-            END as discount_price,
-            CASE 
-              WHEN oi.type = 'digital' THEN da.image_url
-              ELSE NULL
-            END as digital_artwork_image_url,
-            CASE 
-              WHEN oi.type = 'artwork' THEN oa.image
-              ELSE NULL
-            END as original_artwork_image
-          FROM order_items oi
-          LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-          LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
-          LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
-          WHERE oi.order_id = ?
-        `;
+            // 查询订单项 - 优化查询，避免复杂CASE WHEN
+            const [orderItems] = await db.query(`
+                SELECT 
+                    oi.id,
+                    oi.type,
+                    oi.right_id,
+                    oi.digital_artwork_id,
+                    oi.artwork_id,
+                    oi.quantity,
+                    oi.price,
+                    r.title as right_title,
+                    r.price as right_price,
+                    r.original_price as right_original_price,
+                    r.description as right_description,
+                    r.status as right_status,
+                    r.remaining_count as right_remaining_count,
+                    da.title as digital_title,
+                    da.price as digital_price,
+                    da.description as digital_description,
+                    da.image_url as digital_image_url,
+                    oa.title as artwork_title,
+                    oa.original_price as artwork_original_price,
+                    oa.discount_price as artwork_discount_price,
+                    oa.description as artwork_description,
+                    oa.image as artwork_image
+                FROM order_items oi
+                LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+                LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+                LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+                WHERE oi.order_id = ?
+            `, [order.id]);
 
-            const [orderItems] = await db.query(orderItemsQuery, [order.id]);
+            // 处理订单项数据
+            const orderItemsWithImages = orderItems.map(item => {
+                let processedItem = {
+                    id: item.id,
+                    type: item.type,
+                    quantity: item.quantity,
+                    price: item.price
+                };
 
-            // 查询订单项图片
-            const orderItemsWithImages = await Promise.all(orderItems.map(async (item) => {
-                let imagesQuery = '';
-                let imageParams = [];
-
-                switch (item.type) {
-                    case 'right':
-                        imagesQuery = 'SELECT image_url FROM right_images WHERE right_id = ?';
-                        imageParams = [item.right_id];
-                        break;
-                    case 'digital':
-                        // 数字艺术品直接使用digital_artwork_image_url
-                        return {
-                            ...item,
-                            images: item.digital_artwork_image_url ? [item.digital_artwork_image_url] : []
-                        };
-                    case 'artwork':
-                        // 原作商品直接使用original_artwork_image
-                        return {
-                            ...item,
-                            images: item.original_artwork_image ? [item.original_artwork_image] : []
-                        };
-                    default:
-                        return {
-                            ...item,
-                            images: []
-                        };
+                // 根据类型设置相应的字段
+                if (item.type === 'right') {
+                    processedItem = {
+                        ...processedItem,
+                        title: item.right_title,
+                        original_price: item.right_original_price,
+                        description: item.right_description,
+                        status: item.right_status,
+                        remaining_count: item.right_remaining_count,
+                        images: []
+                    };
+                } else if (item.type === 'digital') {
+                    processedItem = {
+                        ...processedItem,
+                        title: item.digital_title,
+                        description: item.digital_description,
+                        images: item.digital_image_url ? [item.digital_image_url] : []
+                    };
+                } else if (item.type === 'artwork') {
+                    processedItem = {
+                        ...processedItem,
+                        title: item.artwork_title,
+                        original_price: item.artwork_original_price,
+                        discount_price: item.artwork_discount_price,
+                        description: item.artwork_description,
+                        images: item.artwork_image ? [item.artwork_image] : []
+                    };
                 }
 
-                const [images] = await db.query(imagesQuery, imageParams);
-                return {
-                    ...item,
-                    images: images.map(img => img.image_url || '')
-                };
-            }));
+                return processedItem;
+            });
 
             // 查询微信支付订单状态
             try {
@@ -1750,15 +1770,19 @@ router.get('/digital-identity/purchases/:user_id', async (req, res) => {
         const cleanUserId = parseInt(userId);
         
         const [purchases] = await db.query(`
-        SELECT 
-          dip.*,
-          da.title as artwork_title,
-          da.image_url as artwork_image
-        FROM digital_identity_purchases dip
-        JOIN digital_artworks da ON dip.digital_artwork_id = da.id
-        WHERE dip.user_id = ?
-        ORDER BY dip.purchase_date DESC
-      `, [cleanUserId]);
+            SELECT 
+                dip.id,
+                dip.user_id,
+                dip.digital_artwork_id,
+                dip.discount_amount,
+                dip.purchase_date,
+                da.title as artwork_title,
+                da.image_url as artwork_image
+            FROM digital_identity_purchases dip
+            JOIN digital_artworks da ON dip.digital_artwork_id = da.id
+            WHERE dip.user_id = ?
+            ORDER BY dip.purchase_date DESC
+        `, [cleanUserId]);
 
         res.json(purchases);
     } catch (error) {
