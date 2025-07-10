@@ -245,7 +245,7 @@ router.get('/', authenticateToken, async (req, res) => {
     let rightsMap = {};
     if (rightIds.length > 0) {
       const [rights] = await db.query(
-        'SELECT id, title FROM rights WHERE id IN (?)',
+        'SELECT r.id, r.title, ri.image_url FROM rights r LEFT JOIN right_images ri ON r.id = ri.right_id WHERE r.id IN (?)',
         [rightIds]
       );
       rights.forEach(right => { rightsMap[right.id] = right; });
@@ -264,7 +264,7 @@ router.get('/', authenticateToken, async (req, res) => {
         image_url = digitalsMap[fav.item_id].image_url || '';
       } else if (fav.item_type === 'copyright_item' && rightsMap[fav.item_id]) {
         title = rightsMap[fav.item_id].title;
-        image_url = '';
+        image_url = rightsMap[fav.item_id].image_url || '';
       }
       
       return {
