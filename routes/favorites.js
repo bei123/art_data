@@ -58,7 +58,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const scanDel = async (pattern) => {
       let cursor = 0;
       do {
-        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: '100' });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
@@ -104,7 +104,7 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
     const scanDel = async (pattern) => {
       let cursor = 0;
       do {
-        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: '100' });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
