@@ -289,6 +289,7 @@ router.get('/userInfo', async (req, res) => {
                 nickname,
                 avatar,
                 phone,
+                password_hash,
                 created_at,
                 updated_at
             FROM wx_users 
