@@ -19,8 +19,8 @@ router.get('/', async (req, res) => {
     const artistsWithProcessedImages = rows.map(artist => 
       processObjectImages(artist, ['avatar', 'banner'])
     );
-    // 写入redis缓存，设置60秒过期
-    await redisClient.setEx(REDIS_ARTISTS_LIST_KEY, 60, JSON.stringify(artistsWithProcessedImages));
+    // 写入redis缓存，永久有效
+    await redisClient.set(REDIS_ARTISTS_LIST_KEY, JSON.stringify(artistsWithProcessedImages));
     res.json(artistsWithProcessedImages);
   } catch (error) {
     console.error('获取艺术家列表失败:', error);
@@ -48,8 +48,8 @@ router.get('/:id', async (req, res) => {
     }
     
     const artist = processObjectImages(rows[0], ['avatar', 'banner']);
-    // 写入redis缓存，设置60秒过期
-    await redisClient.setEx(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, 60, JSON.stringify(artist));
+    // 写入redis缓存，永久有效
+    await redisClient.set(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, JSON.stringify(artist));
     res.json(artist);
   } catch (error) {
     console.error('获取艺术家详情失败:', error);
