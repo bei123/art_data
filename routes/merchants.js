@@ -111,24 +111,35 @@ router.get('/', async (req, res) => {
 
     // 查询商家列表
     const [merchants] = await db.query(
-      `SELECT * FROM merchants 
+      `SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants 
        ${whereClause}
        ORDER BY ${sortField} ${orderDirection}
        LIMIT ? OFFSET ?`,
       [...params, cleanLimit, offset]
     );
 
-    // 查询每个商家的图片
-    for (const merchant of merchants) {
-      const [images] = await db.query(
-        'SELECT image_url FROM merchant_images WHERE merchant_id = ?',
-        [merchant.id]
+    // 批量查询所有商家图片
+    const merchantIds = merchants.map(m => m.id);
+    let imagesMap = {};
+    if (merchantIds.length > 0) {
+      const [allImages] = await db.query(
+        'SELECT merchant_id, image_url FROM merchant_images WHERE merchant_id IN (?)',
+        [merchantIds]
       );
-      merchant.images = images.map(img => img.image_url);
+      allImages.forEach(img => {
+        if (!imagesMap[img.merchant_id]) imagesMap[img.merchant_id] = [];
+        imagesMap[img.merchant_id].push(img.image_url);
+      });
     }
 
+    // 组装商家数据
+    const merchantsWithImages = merchants.map(merchant => ({
+      ...merchant,
+      images: imagesMap[merchant.id] || []
+    }));
+
     // 处理图片URL，添加WebP转换
-    const merchantsWithProcessedImages = merchants.map(merchant => 
+    const merchantsWithProcessedImages = merchantsWithImages.map(merchant => 
       processObjectImages(merchant, ['logo', 'images'])
     );
 
@@ -180,7 +191,7 @@ router.get('/:id', async (req, res) => {
     
     // 获取商家基本信息
     const [merchants] = await db.query(
-      'SELECT * FROM merchants WHERE id = ? AND status = "active"',
+      'SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants WHERE id = ? AND status = "active"',
       [id]
     );
 
@@ -289,7 +300,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
       // 返回完整的商家信息
       const [newMerchant] = await db.query(
-        'SELECT * FROM merchants WHERE id = ?',
+        'SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants WHERE id = ?',
         [merchantId]
       );
 
@@ -361,7 +372,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
       // 返回更新后的商家信息
       const [updatedMerchant] = await db.query(
-        'SELECT * FROM merchants WHERE id = ?',
+        'SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants WHERE id = ?',
         [req.params.id]
       );
 
