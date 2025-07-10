@@ -65,7 +65,7 @@ router.post('/', authenticateToken, async (req, res) => {
         }
       } while (cursor !== 0);
     };
-    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:*`);
+    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`);
     res.json({ success: true });
   } catch (err) {
     console.error('添加收藏失败:', err);
@@ -109,7 +109,7 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
         }
       } while (cursor !== 0);
     };
-    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:*`);
+    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`);
     res.json({ success: true });
   } catch (err) {
     console.error('取消收藏失败:', err);
@@ -126,7 +126,7 @@ router.get('/', authenticateToken, async (req, res) => {
   const offset = (pageNum - 1) * sizeNum;
   
   // 生成缓存key
-  const cacheKey = `${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:${itemType || 'all'}:${pageNum}:${sizeNum}`;
+  const cacheKey = `${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:${itemType || 'all'}:${pageNum}:${sizeNum}`;
   // 先查redis缓存
   const cache = await redisClient.get(cacheKey);
   if (cache) {
