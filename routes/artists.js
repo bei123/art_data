@@ -3,14 +3,24 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+const REDIS_ARTISTS_LIST_KEY = 'artists:list';
+const REDIS_ARTIST_DETAIL_KEY_PREFIX = 'artists:detail:';
 
 // 获取艺术家列表（公开接口）
 router.get('/', async (req, res) => {
   try {
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
     const [rows] = await db.query('SELECT * FROM artists ORDER BY created_at DESC');
     const artistsWithProcessedImages = rows.map(artist => 
       processObjectImages(artist, ['avatar', 'banner'])
     );
+    // 写入redis缓存，设置60秒过期
+    await redisClient.setEx(REDIS_ARTISTS_LIST_KEY, 60, JSON.stringify(artistsWithProcessedImages));
     res.json(artistsWithProcessedImages);
   } catch (error) {
     console.error('获取艺术家列表失败:', error);
@@ -26,7 +36,11 @@ router.get('/:id', async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的艺术家ID' });
     }
-    
+    // 先查redis缓存
+    const cache = await redisClient.get(REDIS_ARTIST_DETAIL_KEY_PREFIX + id);
+    if (cache) {
+      return res.json(JSON.parse(cache));
+    }
     const [rows] = await db.query('SELECT * FROM artists WHERE id = ?', [id]);
     
     if (!rows || rows.length === 0) {
@@ -34,6 +48,8 @@ router.get('/:id', async (req, res) => {
     }
     
     const artist = processObjectImages(rows[0], ['avatar', 'banner']);
+    // 写入redis缓存，设置60秒过期
+    await redisClient.setEx(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, 60, JSON.stringify(artist));
     res.json(artist);
   } catch (error) {
     console.error('获取艺术家详情失败:', error);
@@ -67,6 +83,8 @@ router.post('/', authenticateToken, async (req, res) => {
       'INSERT INTO artists (avatar, name, description) VALUES (?, ?, ?)',
       [avatar, cleanName, cleanDescription]
     );
+    // 清理缓存
+    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
     res.json({ id: result.insertId, name: cleanName, description: cleanDescription, avatar });
   } catch (error) {
     console.error('Error creating artist:', error);
@@ -92,6 +110,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
       'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ?, journey = ? WHERE id = ?',
       [name, era, avatar, banner, description, biography, journey, req.params.id]
     );
+    // 清理缓存
+    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
+    await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + req.params.id);
 
     // 获取更新后的艺术家信息
     const [artists] = await db.query('SELECT * FROM artists WHERE id = ?', [req.params.id]);
@@ -127,6 +148,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     await connection.query('DELETE FROM artists WHERE id = ?', [req.params.id]);
 
     await connection.commit();
+    // 清理缓存
+    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
+    await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + req.params.id);
     res.json({ message: '删除成功' });
   } catch (error) {
     await connection.rollback();
