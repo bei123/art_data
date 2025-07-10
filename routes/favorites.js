@@ -45,7 +45,7 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     // 检查是否已经收藏
-    const checkSql = 'SELECT * FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
+    const checkSql = 'SELECT id FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
     const [existing] = await db.query(checkSql, [userId, itemId, itemType]);
     
     if (existing && existing.length > 0) {
@@ -92,7 +92,7 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
 
   try {
     const sql = 'DELETE FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ?';
-    const result = await db.query(sql, [userId, cleanItemId, itemType]);
+    const [result] = await db.query(sql, [userId, cleanItemId, itemType]);
     
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: '未找到该收藏记录' });
@@ -121,8 +121,12 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
 router.get('/', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   const { page = 1, pageSize = 10, itemType } = req.query;
+  const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+  const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 10;
+  const offset = (pageNum - 1) * sizeNum;
+  
   // 生成缓存key
-  const cacheKey = `${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:${itemType || 'all'}:${page}:${pageSize}`;
+  const cacheKey = `${REDIS_FAVORITES_LIST_KEY_PREFIX}${userId}:${itemType || 'all'}:${pageNum}:${sizeNum}`;
   // 先查redis缓存
   const cache = await redisClient.get(cacheKey);
   if (cache) {
@@ -130,65 +134,101 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 
   try {
-    const offset = (page - 1) * pageSize;
-    let sql = '';
-    let params = [];
+    // 1. 先查询收藏记录
+    let favoritesSql = 'SELECT id, item_id, item_type, created_at FROM favorites WHERE user_id = ?';
+    let favoritesParams = [userId];
     
     if (itemType) {
-      // 获取特定类型的收藏
-      sql = `
-        SELECT f.*, 
-          CASE f.item_type
-            WHEN 'artwork' THEN oa.title
-            WHEN 'digital_art' THEN da.title
-            WHEN 'copyright_item' THEN r.title
-          END as title,
-          CASE f.item_type
-            WHEN 'artwork' THEN oa.image
-            WHEN 'digital_art' THEN da.image_url
-            WHEN 'copyright_item' THEN ri.image_url
-          END as image_url,
-          f.created_at as favorite_time
-        FROM favorites f
-        LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
-        LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
-        LEFT JOIN rights r ON f.item_type = 'copyright_item' AND f.item_id = r.id
-        LEFT JOIN right_images ri ON f.item_type = 'copyright_item' AND f.item_id = r.id AND ri.right_id = r.id
-        WHERE f.user_id = ? AND f.item_type = ?
-        ORDER BY f.created_at DESC
-        LIMIT ? OFFSET ?
-      `;
-      params = [userId, itemType, parseInt(pageSize), offset];
-    } else {
-      // 获取所有类型的收藏
-      sql = `
-        SELECT f.*, 
-          CASE f.item_type
-            WHEN 'artwork' THEN oa.title
-            WHEN 'digital_art' THEN da.title
-            WHEN 'copyright_item' THEN r.title
-          END as title,
-          CASE f.item_type
-            WHEN 'artwork' THEN oa.image
-            WHEN 'digital_art' THEN da.image_url
-            WHEN 'copyright_item' THEN ri.image_url
-          END as image_url,
-          f.created_at as favorite_time
-        FROM favorites f
-        LEFT JOIN original_artworks oa ON f.item_type = 'artwork' AND f.item_id = oa.id
-        LEFT JOIN digital_artworks da ON f.item_type = 'digital_art' AND f.item_id = da.id
-        LEFT JOIN rights r ON f.item_type = 'copyright_item' AND f.item_id = r.id
-        LEFT JOIN right_images ri ON f.item_type = 'copyright_item' AND f.item_id = r.id AND ri.right_id = r.id
-        WHERE f.user_id = ?
-        ORDER BY f.created_at DESC
-        LIMIT ? OFFSET ?
-      `;
-      params = [userId, parseInt(pageSize), offset];
+      favoritesSql += ' AND item_type = ?';
+      favoritesParams.push(itemType);
     }
     
-    const [favorites] = await db.query(sql, params);
+    favoritesSql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    favoritesParams.push(sizeNum, offset);
     
-    // 获取总数
+    const [favorites] = await db.query(favoritesSql, favoritesParams);
+    
+    if (!favorites || favorites.length === 0) {
+      const result = {
+        success: true,
+        data: [],
+        pagination: {
+          total: 0,
+          page: pageNum,
+          pageSize: sizeNum
+        }
+      };
+      res.json(result);
+      await redisClient.setEx(cacheKey, 60, JSON.stringify(result));
+      return;
+    }
+    
+    // 2. 分类收集ID
+    const artworkIds = [];
+    const digitalIds = [];
+    const rightIds = [];
+    
+    favorites.forEach(fav => {
+      if (fav.item_type === 'artwork') artworkIds.push(fav.item_id);
+      if (fav.item_type === 'digital_art') digitalIds.push(fav.item_id);
+      if (fav.item_type === 'copyright_item') rightIds.push(fav.item_id);
+    });
+    
+    // 3. 批量查询商品信息
+    let artworksMap = {};
+    if (artworkIds.length > 0) {
+      const [artworks] = await db.query(
+        'SELECT id, title, image FROM original_artworks WHERE id IN (?)',
+        [artworkIds]
+      );
+      artworks.forEach(art => { artworksMap[art.id] = art; });
+    }
+    
+    let digitalsMap = {};
+    if (digitalIds.length > 0) {
+      const [digitals] = await db.query(
+        'SELECT id, title, image_url FROM digital_artworks WHERE id IN (?)',
+        [digitalIds]
+      );
+      digitals.forEach(dig => { digitalsMap[dig.id] = dig; });
+    }
+    
+    let rightsMap = {};
+    if (rightIds.length > 0) {
+      const [rights] = await db.query(
+        'SELECT id, title FROM rights WHERE id IN (?)',
+        [rightIds]
+      );
+      rights.forEach(right => { rightsMap[right.id] = right; });
+    }
+    
+    // 4. 组装返回数据
+    const resultData = favorites.map(fav => {
+      let title = '';
+      let image_url = '';
+      
+      if (fav.item_type === 'artwork' && artworksMap[fav.item_id]) {
+        title = artworksMap[fav.item_id].title;
+        image_url = artworksMap[fav.item_id].image || '';
+      } else if (fav.item_type === 'digital_art' && digitalsMap[fav.item_id]) {
+        title = digitalsMap[fav.item_id].title;
+        image_url = digitalsMap[fav.item_id].image_url || '';
+      } else if (fav.item_type === 'copyright_item' && rightsMap[fav.item_id]) {
+        title = rightsMap[fav.item_id].title;
+        image_url = ''; // 实物商品图片需要单独查询
+      }
+      
+      return {
+        id: fav.id,
+        item_id: fav.item_id,
+        item_type: fav.item_type,
+        title: title,
+        image_url: image_url,
+        favorite_time: fav.created_at
+      };
+    });
+    
+    // 5. 获取总数
     let countSql = 'SELECT COUNT(*) as total FROM favorites WHERE user_id = ?';
     let countParams = [userId];
     if (itemType) {
@@ -197,25 +237,19 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     const [countResult] = await db.query(countSql, countParams);
     
-    res.json({
+    const result = {
       success: true,
-      data: favorites,
+      data: resultData,
       pagination: {
         total: countResult[0].total,
-        page: parseInt(page),
-        pageSize: parseInt(pageSize)
+        page: pageNum,
+        pageSize: sizeNum
       }
-    });
+    };
+    
+    res.json(result);
     // 写入redis缓存，1分钟
-    await redisClient.setEx(cacheKey, 60, JSON.stringify({
-      success: true,
-      data: favorites,
-      pagination: {
-        total: countResult[0].total,
-        page: parseInt(page),
-        pageSize: parseInt(pageSize)
-      }
-    }));
+    await redisClient.setEx(cacheKey, 60, JSON.stringify(result));
   } catch (err) {
     console.error('获取收藏列表失败:', err);
     res.status(500).json({ error: '服务器错误' });
