@@ -25,14 +25,15 @@ function validateImageUrl(url) {
 // 获取数字艺术品列表（公开接口）
 router.get('/', async (req, res) => {
   try {
-    const { artist_id } = req.query;
+    const { artist_id, page = 1, pageSize = 20 } = req.query;
+    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
+    const offset = (pageNum - 1) * sizeNum;
     
     let query = `
       SELECT 
-        da.*,
-        a.id as artist_id,
-        a.name as artist_name,
-        a.avatar as artist_avatar
+        da.id, da.title, da.image_url, da.description, da.price, da.created_at,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM digital_artworks da 
       LEFT JOIN artists a ON da.artist_id = a.id
     `;
@@ -45,7 +46,8 @@ router.get('/', async (req, res) => {
       queryParams.push(artist_id);
     }
     
-    query += ` ORDER BY da.created_at DESC`;
+    query += ` ORDER BY da.created_at DESC LIMIT ? OFFSET ?`;
+    queryParams.push(sizeNum, offset);
     
     const [rows] = await db.query(query, queryParams);
     
@@ -67,9 +69,9 @@ router.get('/', async (req, res) => {
     
     res.json(artworksWithProcessedImages);
     // 写入redis缓存，7天过期
-    let cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY;
+    let cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY + `:page:${pageNum}:size:${sizeNum}`;
     if (artist_id) {
-      cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artist_id;
+      cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artist_id + `:page:${pageNum}:size:${sizeNum}`;
     }
     await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithProcessedImages));
   } catch (error) {
@@ -94,10 +96,11 @@ router.get('/:id', async (req, res) => {
     
     const [rows] = await db.query(`
       SELECT 
-        da.*,
-        a.id as artist_id,
-        a.name as artist_name,
-        a.avatar as artist_avatar,
+        da.id, da.title, da.image_url, da.description, da.registration_certificate,
+        da.license_rights, da.license_period, da.owner_rights, da.license_items,
+        da.project_name, da.product_name, da.project_owner, da.issuer, da.issue_batch,
+        da.issue_year, da.batch_quantity, da.price, da.created_at, da.updated_at,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar,
         a.description as artist_description
       FROM digital_artworks da
       LEFT JOIN artists a ON da.artist_id = a.id
@@ -138,7 +141,10 @@ router.get('/:id', async (req, res) => {
 // 公共数字艺术品列表接口（无需认证）
 router.get('/public', async (req, res) => {
   try {
-    const { artist_id } = req.query;
+    const { artist_id, page = 1, pageSize = 20 } = req.query;
+    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
+    const offset = (pageNum - 1) * sizeNum;
     
     // 验证artist_id参数
     if (artist_id) {
@@ -148,7 +154,7 @@ router.get('/public', async (req, res) => {
       }
     }
     
-    let query = 'SELECT * FROM digital_artworks';
+    let query = 'SELECT id, title, image_url, description, price, created_at FROM digital_artworks';
     const queryParams = [];
     
     // 如果提供了 artist_id 参数，添加筛选条件
@@ -157,11 +163,13 @@ router.get('/public', async (req, res) => {
       queryParams.push(parseInt(artist_id));
     }
     
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    queryParams.push(sizeNum, offset);
+    
     const [rows] = await db.query(query, queryParams);
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
       image: artwork.image_url || '',
-      copyright: artwork.copyright || '',
       price: artwork.price || 0
     }));
     res.json(artworksWithFullUrls);
@@ -337,6 +345,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    // 先查询artist_id用于清理缓存
+    const [artworkRows] = await connection.query('SELECT artist_id FROM digital_artworks WHERE id = ?', [req.params.id]);
+    const artistId = artworkRows.length > 0 ? artworkRows[0].artist_id : null;
+
     // 先删除相关的数字身份购买记录
     await connection.query('DELETE FROM digital_identity_purchases WHERE digital_artwork_id = ?', [req.params.id]);
     
@@ -349,10 +361,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     await connection.commit();
     // 清理缓存
     await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
-    // 查出artist_id用于精准清理缓存
-    const [rows] = await connection.query('SELECT artist_id FROM digital_artworks WHERE id = ?', [req.params.id]);
-    if (rows && rows.length > 0 && rows[0].artist_id) {
-      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + rows[0].artist_id);
+    if (artistId) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artistId);
     }
     await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + req.params.id);
     res.json({ message: '删除成功' });
