@@ -58,16 +58,16 @@ router.post('/', authenticateToken, async (req, res) => {
     const scanDel = async (pattern) => {
       let cursor = 0;
       do {
-        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        const reply = await redisClient.scan(String(cursor), { MATCH: String(pattern), COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
           const stringKeys = reply.keys.map(key => String(key));
-          await redisClient.del(...stringKeys);
+          await redisClient.del(...stringKeys.map(k => String(k)));
         }
       } while (cursor !== 0);
     };
-    await scanDel(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`);
+    await scanDel(String(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`));
     res.json({ success: true });
   } catch (err) {
     console.error('添加收藏失败:', err);
@@ -104,7 +104,7 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
     const scanDel = async (pattern) => {
       let cursor = 0;
       do {
-        const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        const reply = await redisClient.scan(String(cursor), { MATCH: String(pattern), COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
@@ -130,9 +130,9 @@ router.get('/', authenticateToken, async (req, res) => {
   const offset = (pageNum - 1) * sizeNum;
   
   // 生成缓存key
-  const cacheKey = `${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:${itemType || 'all'}:${pageNum}:${sizeNum}`;
+  const cacheKey = String(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:${itemType || 'all'}:${pageNum}:${sizeNum}`);
   // 先查redis缓存
-  const cache = await redisClient.get(cacheKey);
+  const cache = await redisClient.get(String(cacheKey));
   if (cache) {
     return res.json(JSON.parse(cache));
   }
@@ -163,7 +163,7 @@ router.get('/', authenticateToken, async (req, res) => {
         }
       };
       res.json(result);
-      await redisClient.setEx(cacheKey, 60, JSON.stringify(result));
+      await redisClient.setEx(String(cacheKey), 60, JSON.stringify(result));
       return;
     }
     
@@ -253,7 +253,7 @@ router.get('/', authenticateToken, async (req, res) => {
     
     res.json(result);
     // 写入redis缓存，1分钟
-    await redisClient.setEx(cacheKey, 60, JSON.stringify(result));
+    await redisClient.setEx(String(cacheKey), 60, JSON.stringify(result));
   } catch (err) {
     console.error('获取收藏列表失败:', err);
     res.status(500).json({ error: '服务器错误' });
