@@ -2,8 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const jwt = require('jsonwebtoken');
-const redisClient = require('../utils/redisClient');
-const REDIS_FAVORITES_LIST_KEY_PREFIX = 'favorites:list:';
 
 // Token验证中间件
 const authenticateToken = (req, res, next) => {
@@ -53,36 +51,7 @@ const validateItemExists = async (itemId, itemType, connection = null) => {
   }
 };
 
-// 清理用户收藏缓存
-const clearUserFavoritesCache = async (userId) => {
-  try {
-    const scanDel = async (pattern) => {
-      let cursor = 0;
-      let totalDeleted = 0;
-      do {
-        const reply = await redisClient.scan(String(cursor), { MATCH: String(pattern), COUNT: 100 });
-        cursor = reply.cursor;
-        if (reply.keys.length > 0) {
-          // 确保所有key都是字符串类型
-          const stringKeys = reply.keys.map(key => String(key));
-          const deleted = await redisClient.del(...stringKeys.map(k => String(k)));
-          totalDeleted += deleted;
-        }
-      } while (cursor !== 0);
-      return totalDeleted;
-    };
-    const deletedCount = await scanDel(String(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:*`));
-    console.log(`清理用户 ${userId} 的收藏缓存，删除了 ${deletedCount} 个key`);
-  } catch (err) {
-    console.error('清理缓存失败:', err);
-    // 缓存清理失败不应该影响主流程，但记录详细错误信息
-    console.error('缓存清理错误详情:', {
-      userId,
-      error: err.message,
-      stack: err.stack
-    });
-  }
-};
+
 
 // 添加收藏
 router.post('/', authenticateToken, async (req, res) => {
@@ -142,9 +111,6 @@ router.post('/', authenticateToken, async (req, res) => {
       await connection.commit();
       connection.release();
       
-      // 清理该用户所有收藏列表缓存
-      await clearUserFavoritesCache(userId);
-      
       res.json({ success: true });
     } catch (err) {
       await connection.rollback();
@@ -197,9 +163,6 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
       await connection.commit();
       connection.release();
       
-      // 清理该用户所有收藏列表缓存
-      await clearUserFavoritesCache(userId);
-      
       res.json({ success: true });
     } catch (err) {
       await connection.rollback();
@@ -220,21 +183,6 @@ router.get('/', authenticateToken, async (req, res) => {
   const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 10;
   const offset = (pageNum - 1) * sizeNum;
   
-  // 生成缓存key - 修复itemType为undefined的情况
-  const typeFilter = itemType || 'all';
-  const cacheKey = String(`${REDIS_FAVORITES_LIST_KEY_PREFIX}${String(userId)}:${typeFilter}:${pageNum}:${sizeNum}`);
-  
-  // 先查redis缓存
-  try {
-    const cache = await redisClient.get(String(cacheKey));
-    if (cache) {
-      return res.json(JSON.parse(cache));
-    }
-  } catch (err) {
-    console.error('读取缓存失败:', err);
-    // 缓存读取失败继续执行数据库查询
-  }
-
   try {
     // 1. 先查询收藏记录
     let favoritesSql = 'SELECT id, item_id, item_type, created_at FROM favorites WHERE user_id = ?';
@@ -261,11 +209,6 @@ router.get('/', authenticateToken, async (req, res) => {
         }
       };
       res.json(result);
-      try {
-        await redisClient.setEx(String(cacheKey), 60, JSON.stringify(result));
-      } catch (err) {
-        console.error('写入缓存失败:', err);
-      }
       return;
     }
     
@@ -321,7 +264,7 @@ router.get('/', authenticateToken, async (req, res) => {
         image_url = digitalsMap[fav.item_id].image_url || '';
       } else if (fav.item_type === 'copyright_item' && rightsMap[fav.item_id]) {
         title = rightsMap[fav.item_id].title;
-        image_url = ''; // 实物商品图片需要单独查询
+        image_url = '';
       }
       
       return {
@@ -354,12 +297,6 @@ router.get('/', authenticateToken, async (req, res) => {
     };
     
     res.json(result);
-    // 写入redis缓存，1分钟
-    try {
-      await redisClient.setEx(String(cacheKey), 60, JSON.stringify(result));
-    } catch (err) {
-      console.error('写入缓存失败:', err);
-    }
   } catch (err) {
     console.error('获取收藏列表失败:', err);
     res.status(500).json({ error: '服务器错误' });
