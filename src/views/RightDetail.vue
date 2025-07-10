@@ -58,8 +58,20 @@
           <el-input-number v-model="form.totalCount" :min="0" />
         </el-form-item>
 
-        <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" :rows="4" />
+        <el-form-item label="富文本内容">
+          <div v-if="!isEditing">
+            <div v-html="form.rich_text"></div>
+          </div>
+          <div v-else>
+            <Toolbar :editor="editorRef" style="width: 100%" />
+            <Editor
+              v-model="richTextHtml"
+              :defaultConfig="{ placeholder: '请输入富文本内容...', ...editorConfig }"
+              mode="default"
+              style="width: 100%; min-width: 400px; height: 300px; border: 1px solid #ccc"
+              @onCreated="handleEditorCreated"
+            />
+          </div>
         </el-form-item>
 
         <el-divider>图片列表</el-divider>
@@ -139,6 +151,9 @@ import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import '@wangeditor/editor/dist/css/style.css'
+import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import { onBeforeUnmount } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -155,7 +170,8 @@ const form = ref({
   totalCount: 0,
   images: [],
   details: [],
-  rules: []
+  rules: [],
+  rich_text: ''
 })
 
 const fileList = ref([])
@@ -167,6 +183,55 @@ watch(() => form.value.images, (newVal) => {
   }))
 }, { immediate: true })
 
+const editorRef = ref(null)
+const richTextHtml = ref('')
+const isEditing = ref(false)
+
+const editorConfig = {
+  MENU_CONF: {
+    uploadImage: {
+      async customUpload(file, insertFn) {
+        const processedFile = await uploadImageToWebpLimit5MB(file);
+        if (!processedFile) {
+          ElMessage.error('图片处理失败');
+          return;
+        }
+        const formData = new FormData();
+        formData.append('file', processedFile);
+        const token = localStorage.getItem('token');
+        try {
+          const resp = await fetch(`${API_BASE_URL}/api/upload`, {
+            method: 'POST',
+            body: formData,
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          const result = await resp.json();
+          let url = '';
+          if (result.url) {
+            url = result.url;
+          } else if (result.data && result.data.url) {
+            url = result.data.url;
+          }
+          if (typeof url === 'string' && url) {
+            setTimeout(() => {
+              insertFn(url);
+              ElMessage.success('图片上传成功');
+            }, 0);
+          } else {
+            ElMessage.error(result.message || '图片上传失败');
+          }
+        } catch (err) {
+          ElMessage.error('图片上传异常');
+        }
+      }
+    }
+  }
+}
+
+const handleEditorCreated = (editor) => {
+  editorRef.value = editor
+}
+
 const fetchRightDetail = async () => {
   loading.value = true
   try {
@@ -176,7 +241,8 @@ const fetchRightDetail = async () => {
       ...data,
       images: data.images || [],
       details: data.details || [],
-      rules: data.rules || []
+      rules: data.rules || [],
+      rich_text: data.rich_text || ''
     }
   } catch (error) {
     ElMessage.error('获取版权实物详情失败')
@@ -237,10 +303,15 @@ const handleEdit = async () => {
     ElMessage.warning('请至少上传一张图片');
     return;
   }
+  isEditing.value = true
+  richTextHtml.value = form.value.rich_text || ''
+}
 
+const saveEdit = async () => {
   try {
     const submitData = {
       ...form.value,
+      rich_text: richTextHtml.value,
       images: form.value.images.map(image => {
         if (typeof image === 'string') {
           if (image.startsWith('https://wx.oss.2000gallery.art/')) {
@@ -257,6 +328,8 @@ const handleEdit = async () => {
     };
     await axios.put(`/api/rights/${route.params.id}`, submitData);
     ElMessage.success('更新成功');
+    isEditing.value = false
+    form.value.rich_text = richTextHtml.value
   } catch (error) {
     ElMessage.error('更新失败');
   }
@@ -268,6 +341,10 @@ const goBack = () => {
 
 onMounted(() => {
   fetchRightDetail()
+})
+
+onBeforeUnmount(() => {
+  if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
 })
 </script>
 

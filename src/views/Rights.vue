@@ -113,6 +113,16 @@
             <el-icon><Plus /></el-icon>
           </el-upload>
         </el-form-item>
+        <el-form-item label="富文本内容">
+          <Toolbar :editor="editorRef" style="width: 100%" />
+          <Editor
+            v-model="richTextHtml"
+            :defaultConfig="{ placeholder: '请输入富文本内容...', ...editorConfig }"
+            mode="default"
+            style="width: 100%; min-width: 400px; height: 300px; border: 1px solid #ccc"
+            @onCreated="handleEditorCreated"
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -125,13 +135,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import '@wangeditor/editor/dist/css/style.css'
+import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 
 const router = useRouter()
 const rights = ref([])
@@ -154,11 +166,61 @@ const form = ref({
   category_id: null
 })
 
+const editorRef = ref(null)
+const richTextHtml = ref('')
+
+const editorConfig = {
+  MENU_CONF: {
+    uploadImage: {
+      async customUpload(file, insertFn) {
+        const processedFile = await uploadImageToWebpLimit5MB(file);
+        if (!processedFile) {
+          ElMessage.error('图片处理失败');
+          return;
+        }
+        const formData = new FormData();
+        formData.append('file', processedFile);
+        const token = localStorage.getItem('token');
+        try {
+          const resp = await fetch(`${API_BASE_URL}/api/upload`, {
+            method: 'POST',
+            body: formData,
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          const result = await resp.json();
+          let url = '';
+          if (result.url) {
+            url = result.url;
+          } else if (result.data && result.data.url) {
+            url = result.data.url;
+          }
+          if (typeof url === 'string' && url) {
+            setTimeout(() => {
+              insertFn(url);
+              ElMessage.success('图片上传成功');
+            }, 0);
+          } else {
+            ElMessage.error(result.message || '图片上传失败');
+          }
+        } catch (err) {
+          ElMessage.error('图片上传异常');
+        }
+      }
+    }
+  }
+}
+
 watch(() => form.value.images, (newVal) => {
   fileList.value = (newVal || []).map(url => ({
     url: getImageUrl(url),
     name: url.split('/').pop()
   }))
+}, { immediate: true })
+
+watch(dialogVisible, (val) => {
+  if (val) {
+    richTextHtml.value = form.value.rich_text || ''
+  }
 }, { immediate: true })
 
 const fetchRights = async () => {
@@ -295,6 +357,10 @@ const beforeImageUpload = async (file) => {
   return Promise.resolve(result)
 }
 
+const handleEditorCreated = (editor) => {
+  editorRef.value = editor
+}
+
 const handleSubmit = async () => {
   if (!form.value.title.trim()) {
     ElMessage.warning('请输入标题')
@@ -335,7 +401,8 @@ const handleSubmit = async () => {
         return image
       }),
       category_id: form.value.category_id,
-      discount_amount: form.value.discountAmount
+      discount_amount: form.value.discountAmount,
+      rich_text: richTextHtml.value
     }
 
     if (isEdit.value) {
@@ -355,6 +422,9 @@ const handleSubmit = async () => {
 onMounted(() => {
   fetchRights()
   fetchCategories()
+})
+onBeforeUnmount(() => {
+  if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
 })
 </script>
 

@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
 // 新增版权实物（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id } = req.body;
+        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, rich_text } = req.body;
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -46,8 +46,8 @@ router.post('/', authenticateToken, async (req, res) => {
         try {
             // 插入版权实物基本信息
             const [result] = await connection.query(
-                'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [title, status, price, originalPrice, period, totalCount, remainingCount, description, category_id]
+                'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description, category_id, rich_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [title, status, price, originalPrice, period, totalCount, remainingCount, description, category_id, rich_text]
             );
 
             const rightId = result.insertId;
@@ -87,7 +87,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // 编辑版权实物（需要认证）
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id } = req.body;
+        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, rich_text } = req.body;
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -95,8 +95,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         try {
             // 更新版权实物基本信息
             await connection.query(
-                'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ? WHERE id = ?',
-                [title, status, price, originalPrice, period, totalCount, remainingCount, description, category_id, req.params.id]
+                'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, rich_text = ? WHERE id = ?',
+                [title, status, price, originalPrice, period, totalCount, remainingCount, description, category_id, rich_text, req.params.id]
             );
 
             // 删除旧图片
@@ -204,6 +204,7 @@ router.get('/:id', async (req, res) => {
 
         res.json({
             ...right,
+            rich_text: right.rich_text,
             images: images.map(img => processObjectImages(img, ['image_url']).image_url),
             category: {
                 id: right.category_id,
