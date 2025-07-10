@@ -318,6 +318,247 @@ router.post('/unifiedorder', async (req, res) => {
     }
 });
 
+// 单商品下单接口
+router.post('/singleorder', async (req, res) => {
+    try {
+        const { openid, type, quantity, price, body, out_trade_no, right_id, digital_artwork_id, artwork_id } = req.body;
+
+        // 输入验证
+        if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的openid' });
+        }
+        if (!type || !['right', 'digital', 'artwork'].includes(type)) {
+            return res.status(400).json({ error: 'type 必须是 right、digital 或 artwork' });
+        }
+        if (!quantity || isNaN(parseInt(quantity)) || parseInt(quantity) <= 0) {
+            return res.status(400).json({ error: '缺少有效的商品数量' });
+        }
+        if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+            return res.status(400).json({ error: '缺少有效的商品价格' });
+        }
+        if (!body || typeof body !== 'string' || body.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的商品描述' });
+        }
+        if (body.length > 128) {
+            return res.status(400).json({ error: '商品描述长度不能超过128个字符' });
+        }
+        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的订单号' });
+        }
+        if (out_trade_no.length > 64) {
+            return res.status(400).json({ error: '订单号长度不能超过64个字符' });
+        }
+
+        // 只允许一个商品id
+        if (
+            (type === 'right' && (!right_id || isNaN(parseInt(right_id)))) ||
+            (type === 'digital' && (!digital_artwork_id || isNaN(parseInt(digital_artwork_id)))) ||
+            (type === 'artwork' && (!artwork_id || isNaN(parseInt(artwork_id))))
+        ) {
+            return res.status(400).json({ error: '缺少有效的商品ID' });
+        }
+
+        // 清理输入
+        const cleanOpenid = openid.trim();
+        const cleanType = type;
+        const cleanQuantity = parseInt(quantity);
+        const cleanPrice = parseFloat(price);
+        const cleanBody = body.trim();
+        const cleanOutTradeNo = out_trade_no.trim();
+
+        // 开始事务
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
+
+        try {
+            // 根据openid获取用户id
+            const [users] = await connection.query(
+                'SELECT id FROM wx_users WHERE openid = ?',
+                [cleanOpenid]
+            );
+            if (!users || users.length === 0) {
+                await connection.rollback();
+                return res.status(404).json({ error: '用户不存在' });
+            }
+            const userId = users[0].id;
+
+            // 获取用户可用的抵扣金额
+            const [discounts] = await connection.query(`
+                SELECT SUM(dip.discount_amount) as total_discount
+                FROM digital_identity_purchases dip
+                WHERE dip.user_id = ? AND dip.discount_amount > 0
+            `, [userId]);
+            const availableDiscount = discounts[0].total_discount || 0;
+
+            // 校验商品
+            let itemId, dbPrice, stock, actualPrice;
+            if (cleanType === 'right') {
+                itemId = parseInt(right_id);
+                const [rights] = await connection.query(
+                    'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id = ? AND status = "onsale"',
+                    [itemId]
+                );
+                if (!rights || rights.length === 0) {
+                    await connection.rollback();
+                    return res.status(404).json({ error: `商品ID ${itemId} 不存在或已下架` });
+                }
+                if (rights[0].remaining_count < cleanQuantity) {
+                    await connection.rollback();
+                    return res.status(400).json({ error: `商品ID ${itemId} 库存不足` });
+                }
+                dbPrice = parseFloat(rights[0].price);
+                if (Math.abs(cleanPrice - dbPrice) > 0.01) {
+                    await connection.rollback();
+                    return res.status(400).json({
+                        error: `商品ID ${itemId} 价格不匹配`,
+                        detail: { expected: dbPrice, received: cleanPrice }
+                    });
+                }
+            } else if (cleanType === 'artwork') {
+                itemId = parseInt(artwork_id);
+                const [artworks] = await connection.query(
+                    'SELECT id, original_price, discount_price, stock FROM original_artworks WHERE id = ? AND is_on_sale = 1',
+                    [itemId]
+                );
+                if (!artworks || artworks.length === 0) {
+                    await connection.rollback();
+                    return res.status(404).json({ error: `艺术品ID ${itemId} 不存在或已下架` });
+                }
+                if (artworks[0].stock < cleanQuantity) {
+                    await connection.rollback();
+                    return res.status(400).json({ error: `艺术品ID ${itemId} 库存不足` });
+                }
+                actualPrice = (artworks[0].discount_price && artworks[0].discount_price > 0 && artworks[0].discount_price < artworks[0].original_price)
+                    ? artworks[0].discount_price
+                    : artworks[0].original_price;
+                if (Math.abs(cleanPrice - actualPrice) > 0.01) {
+                    await connection.rollback();
+                    return res.status(400).json({
+                        error: `艺术品ID ${itemId} 价格不匹配`,
+                        detail: { expected: actualPrice, received: cleanPrice }
+                    });
+                }
+            } else if (cleanType === 'digital') {
+                itemId = parseInt(digital_artwork_id);
+                const [digitals] = await connection.query(
+                    'SELECT id, price FROM digital_artworks WHERE id = ?',
+                    [itemId]
+                );
+                if (!digitals || digitals.length === 0) {
+                    await connection.rollback();
+                    return res.status(404).json({ error: `数字艺术品ID ${itemId} 不存在` });
+                }
+                dbPrice = parseFloat(digitals[0].price);
+                if (Math.abs(cleanPrice - dbPrice) > 0.01) {
+                    await connection.rollback();
+                    return res.status(400).json({
+                        error: `数字艺术品ID ${itemId} 价格不匹配`,
+                        detail: { expected: dbPrice, received: cleanPrice }
+                    });
+                }
+            }
+
+            // 计算实际支付金额（考虑抵扣）
+            const total_fee = cleanPrice * cleanQuantity;
+            const actualTotalFee = Math.max(0, total_fee - availableDiscount);
+
+            // 创建订单
+            const [orderResult] = await connection.query(
+                'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
+                [userId, cleanOutTradeNo, total_fee, actualTotalFee, availableDiscount, cleanBody]
+            );
+            const orderId = orderResult.insertId;
+
+            // 创建订单项
+            let orderItem;
+            if (cleanType === 'right') {
+                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, cleanPrice];
+            } else if (cleanType === 'digital') {
+                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, cleanPrice];
+            } else if (cleanType === 'artwork') {
+                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, cleanPrice];
+            }
+            await connection.query(
+                'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                orderItem
+            );
+
+            // 如果使用了抵扣，更新抵扣记录
+            if (availableDiscount > 0) {
+                await connection.query(`
+                    UPDATE digital_identity_purchases 
+                    SET discount_amount = 0 
+                    WHERE user_id = ? AND discount_amount > 0
+                `, [userId]);
+            }
+
+            // 构建统一下单参数
+            const params = {
+                appid: WX_PAY_CONFIG.appId,
+                mchid: WX_PAY_CONFIG.mchId,
+                description: cleanBody,
+                out_trade_no: cleanOutTradeNo,
+                notify_url: WX_PAY_CONFIG.notifyUrl,
+                amount: {
+                    total: actualTotalFee,
+                    currency: 'CNY'
+                },
+                scene_info: {
+                    payer_client_ip: WX_PAY_CONFIG.spbillCreateIp
+                },
+                payer: {
+                    openid: cleanOpenid
+                }
+            };
+
+            // 生成签名所需的参数
+            const timestamp = Math.floor(Date.now() / 1000).toString();
+            const nonceStr = generateNonceStr();
+            const method = 'POST';
+            const url = '/v3/pay/transactions/jsapi';
+            const bodyStr = JSON.stringify(params);
+
+            // 生成签名
+            const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
+
+            // 发送请求到微信支付
+            const response = await axios.post('https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi', params, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'User-Agent': 'axios/1.9.0'
+                }
+            });
+
+            if (response.status === 200) {
+                await connection.commit();
+                res.json({
+                    success: true,
+                    data: response.data
+                });
+            } else {
+                await connection.rollback();
+                res.status(400).json({
+                    success: false,
+                    error: '统一下单失败',
+                    detail: response.data
+                });
+            }
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    } catch (error) {
+        console.error('单商品下单失败:', error);
+        res.status(500).json({
+            error: '单商品下单失败'
+        });
+    }
+});
+
 // 支付回调接口
 router.post('/notify', async (req, res) => {
     try {
