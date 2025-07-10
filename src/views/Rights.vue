@@ -289,9 +289,11 @@ const handleAdd = () => {
     remainingCount: 0,
     description: '',
     images: [],
-    category_id: null
+    category_id: null,
+    rich_text: ''
   }
   dialogVisible.value = true
+  richTextHtml.value = ''
 }
 
 const handleEdit = (row) => {
@@ -308,9 +310,11 @@ const handleEdit = (row) => {
     remainingCount: parseInt(row.remaining_count),
     description: row.description,
     images: row.images || [],
-    category_id: row.category_id
+    category_id: row.category_id,
+    rich_text: row.rich_text || ''
   }
   dialogVisible.value = true
+  richTextHtml.value = row.rich_text || ''
 }
 
 const handleDelete = (row) => {
