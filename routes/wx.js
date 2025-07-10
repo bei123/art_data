@@ -102,10 +102,17 @@ router.post('/getPhoneNumber', async (req, res) => {
 // 小程序登录注册接口
 router.post('/login', async (req, res) => {
     const { code } = req.body;
-    if (!code) {
-        return res.status(400).json({ error: '缺少 code' });
+    
+    // 输入验证
+    if (!code || typeof code !== 'string' || code.trim().length === 0) {
+        return res.status(400).json({ error: '缺少有效的 code' });
     }
-
+    
+    if (code.length > 100) {
+        return res.status(400).json({ error: 'code 长度不能超过100个字符' });
+    }
+    
+    const cleanCode = code.trim();
     const appid = process.env.WX_APPID;
     const secret = process.env.WX_SECRET;
     
@@ -117,7 +124,7 @@ router.post('/login', async (req, res) => {
 
     try {
         // 1. 用 code 换 openid 和 session_key
-        const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${appid}&secret=${secret}&js_code=${code}&grant_type=authorization_code`;
+        const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${appid}&secret=${secret}&js_code=${cleanCode}&grant_type=authorization_code`;
         const wxRes = await axios.get(url);
         const { openid, session_key } = wxRes.data;
 
@@ -126,15 +133,24 @@ router.post('/login', async (req, res) => {
         }
 
         // 2. 在你自己的数据库查找或注册用户（表名改为 wx_users）
-        let [users] = await db.query('SELECT * FROM wx_users WHERE openid = ?', [openid]);
+        let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?', [openid]);
         let user;
+        
         if (users.length === 0) {
-            // 没有则注册
+            // 没有则注册，只插入必要字段
             const [result] = await db.query('INSERT INTO wx_users (openid, session_key) VALUES (?, ?)', [openid, session_key]);
-            user = { id: result.insertId, openid, session_key };
+            user = { 
+                id: result.insertId, 
+                openid, 
+                nickname: null,
+                avatar: null,
+                phone: null,
+                created_at: new Date(),
+                updated_at: new Date()
+            };
         } else {
-            // 有则更新 session_key
-            await db.query('UPDATE wx_users SET session_key = ? WHERE openid = ?', [session_key, openid]);
+            // 有则更新 session_key，只查询必要字段
+            await db.query('UPDATE wx_users SET session_key = ?, updated_at = NOW() WHERE openid = ?', [session_key, openid]);
             user = users[0];
         }
 
@@ -142,12 +158,20 @@ router.post('/login', async (req, res) => {
         const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
         // 4. 返回用户信息和 token, 过滤掉敏感字段
-        const { session_key: sk, salt, password_hash, ...userProfile } = user;
         res.json({
             token,
-            user: userProfile
+            user: {
+                id: user.id,
+                openid: user.openid,
+                nickname: user.nickname,
+                avatar: user.avatar,
+                phone: user.phone,
+                created_at: user.created_at,
+                updated_at: user.updated_at
+            }
         });
     } catch (err) {
+        console.error('登录失败:', err);
         res.status(500).json({ error: '获取用户信息服务暂时不可用', detail: err.message });
     }
 });
@@ -168,13 +192,39 @@ router.post('/bindUserInfo', async (req, res) => {
     }
 
     const { phone, nickname, avatar } = req.body;
+    
+    // 输入验证
     if (!phone && !nickname && !avatar) {
         return res.status(400).json({ error: '缺少参数' });
     }
+    
+    if (phone && (typeof phone !== 'string' || phone.trim().length === 0)) {
+        return res.status(400).json({ error: '手机号格式不正确' });
+    }
+    
+    if (phone && phone.length > 20) {
+        return res.status(400).json({ error: '手机号长度不能超过20个字符' });
+    }
+    
+    if (nickname && (typeof nickname !== 'string' || nickname.trim().length === 0)) {
+        return res.status(400).json({ error: '昵称不能为空' });
+    }
+    
+    if (nickname && nickname.length > 50) {
+        return res.status(400).json({ error: '昵称长度不能超过50个字符' });
+    }
+    
+    if (avatar && (typeof avatar !== 'string' || avatar.trim().length === 0)) {
+        return res.status(400).json({ error: '头像URL不能为空' });
+    }
+    
+    if (avatar && avatar.length > 500) {
+        return res.status(400).json({ error: '头像URL长度不能超过500个字符' });
+    }
 
     try {
-        // 先查询用户，判断是否已存在自定义信息
-        const [existingUsers] = await db.query('SELECT nickname, avatar FROM wx_users WHERE id = ?', [payload.userId]);
+        // 先查询用户，判断是否已存在自定义信息，只查询必要字段
+        const [existingUsers] = await db.query('SELECT id, nickname, avatar FROM wx_users WHERE id = ?', [payload.userId]);
         if (existingUsers.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
@@ -187,21 +237,22 @@ router.post('/bindUserInfo', async (req, res) => {
         // 手机号可以更新
         if (phone) {
             fields.push('phone = ?');
-            values.push(phone);
+            values.push(phone.trim());
         }
         // 只有当数据库中没有昵称时，才使用微信的昵称进行填充
         if (nickname && !existingUser.nickname) {
             fields.push('nickname = ?');
-            values.push(nickname);
+            values.push(nickname.trim());
         }
         // 只有当数据库中没有头像时，才使用微信的头像进行填充
         if (avatar && !existingUser.avatar) {
             fields.push('avatar = ?');
-            values.push(avatar);
+            values.push(avatar.trim());
         }
 
         // 如果有需要更新的字段，才执行更新操作
         if (fields.length > 0) {
+            fields.push('updated_at = NOW()');
             values.push(payload.userId);
             const sql = `UPDATE wx_users SET ${fields.join(', ')} WHERE id = ?`;
             await db.query(sql, values);
@@ -209,6 +260,7 @@ router.post('/bindUserInfo', async (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
+        console.error('绑定用户信息失败:', err);
         res.status(500).json({ error: '更新用户信息服务暂时不可用' });
     }
 });
@@ -229,14 +281,27 @@ router.get('/userInfo', async (req, res) => {
     }
 
     try {
-        const [users] = await db.query('SELECT * FROM wx_users WHERE id = ?', [payload.userId]);
+        // 只查询必要字段，不包含敏感信息
+        const [users] = await db.query(`
+            SELECT 
+                id,
+                openid,
+                nickname,
+                avatar,
+                phone,
+                created_at,
+                updated_at
+            FROM wx_users 
+            WHERE id = ?
+        `, [payload.userId]);
+        
         if (!users || users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
-        const user = users[0];
-        if ('salt' in user) delete user.salt;
-        res.json(user);
+        
+        res.json(users[0]);
     } catch (err) {
+        console.error('获取用户信息失败:', err);
         res.status(500).json({ error: '获取用户信息服务暂时不可用' });
     }
 });
@@ -272,6 +337,10 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
     if (nickname && nickname.length > 50) {
         return res.status(400).json({ error: '昵称长度不能超过50个字符' });
     }
+    
+    if (avatarFile && avatarFile.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ error: '头像文件大小不能超过5MB' });
+    }
 
     try {
         const fieldsToUpdate = {};
@@ -305,10 +374,23 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
         }
 
         // 3. 更新数据库
+        fieldsToUpdate.updated_at = new Date();
         await db.query('UPDATE wx_users SET ? WHERE id = ?', [fieldsToUpdate, payload.userId]);
 
-        // 4. 查询并返回更新后的用户信息
-        const [users] = await db.query('SELECT id, openid, nickname, avatar, phone FROM wx_users WHERE id = ?', [payload.userId]);
+        // 4. 查询并返回更新后的用户信息，只查询必要字段
+        const [users] = await db.query(`
+            SELECT 
+                id,
+                openid,
+                nickname,
+                avatar,
+                phone,
+                created_at,
+                updated_at
+            FROM wx_users 
+            WHERE id = ?
+        `, [payload.userId]);
+        
         if (users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
@@ -744,7 +826,7 @@ router.post('/setPassword', async (req, res) => {
             return res.status(404).json({ error: '用户不存在' });
         }
 
-        // 检查是否已经设置过密码
+        // 检查是否已经设置过密码，只查询必要字段
         const [existingUser] = await db.query('SELECT password_hash FROM wx_users WHERE id = ?', [payload.userId]);
         if (existingUser[0].password_hash) {
             return res.status(400).json({ error: '密码已经设置过，如需修改请使用修改密码接口' });
@@ -756,7 +838,7 @@ router.post('/setPassword', async (req, res) => {
         const passwordHash = md5WithSalt(password, salt, 3);
 
         // 更新用户密码和盐
-        await db.query('UPDATE wx_users SET password_hash = ?, salt = ? WHERE id = ?', [passwordHash, salt, payload.userId]);
+        await db.query('UPDATE wx_users SET password_hash = ?, salt = ?, updated_at = NOW() WHERE id = ?', [passwordHash, salt, payload.userId]);
 
         res.json({
             success: true,
@@ -814,7 +896,7 @@ router.post('/changePassword', async (req, res) => {
     }
 
     try {
-        // 检查用户是否存在并获取当前密码和盐
+        // 检查用户是否存在并获取当前密码和盐，只查询必要字段
         const [users] = await db.query('SELECT password_hash, salt FROM wx_users WHERE id = ?', [payload.userId]);
         if (users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
@@ -839,7 +921,7 @@ router.post('/changePassword', async (req, res) => {
         const newPasswordHash = md5WithSalt(newPassword, newSalt, 3);
 
         // 更新用户密码和盐
-        await db.query('UPDATE wx_users SET password_hash = ?, salt = ? WHERE id = ?', [newPasswordHash, newSalt, payload.userId]);
+        await db.query('UPDATE wx_users SET password_hash = ?, salt = ?, updated_at = NOW() WHERE id = ?', [newPasswordHash, newSalt, payload.userId]);
 
         res.json({
             success: true,
@@ -867,12 +949,22 @@ router.post('/verifyPassword', async (req, res) => {
     }
 
     const { password } = req.body;
-    if (!password) {
+    
+    // 输入验证
+    if (!password || typeof password !== 'string') {
         return res.status(400).json({ error: '缺少密码参数' });
+    }
+    
+    if (password.length < 6) {
+        return res.status(400).json({ error: '密码长度至少6位' });
+    }
+    
+    if (password.length > 50) {
+        return res.status(400).json({ error: '密码长度不能超过50位' });
     }
 
     try {
-        // 检查用户是否存在并获取密码和盐
+        // 检查用户是否存在并获取密码和盐，只查询必要字段
         const [users] = await db.query('SELECT password_hash, salt FROM wx_users WHERE id = ?', [payload.userId]);
         if (users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
