@@ -562,14 +562,16 @@ router.post('/singleorder', async (req, res) => {
 // 支付回调接口
 router.post('/notify', async (req, res) => {
     try {
+        // 日志：收到回调
+        console.log('收到微信支付回调，原始body:', JSON.stringify(req.body));
         // 输入验证
         if (!req.body || typeof req.body !== 'object') {
+            console.error('回调body无效:', req.body);
             return res.status(400).json({
                 code: 'FAIL',
                 message: '无效的请求数据'
             });
         }
-        
         // 获取回调数据
         const {
             id, // 通知ID
@@ -579,46 +581,63 @@ router.post('/notify', async (req, res) => {
             resource, // 通知数据
             summary // 回调摘要
         } = req.body;
-
         // 验证必要字段
         if (!resource || !resource.associated_data || !resource.nonce || !resource.ciphertext) {
+            console.error('回调数据格式错误:', resource);
             return res.status(400).json({
                 code: 'FAIL',
                 message: '回调数据格式错误'
             });
         }
-
         // 验证签名
         const timestamp = req.headers['wechatpay-timestamp'];
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
-
         if (!timestamp || !nonce || !signature || !serial) {
+            console.error('缺少签名验证信息:', req.headers);
             return res.status(400).json({
                 code: 'FAIL',
                 message: '缺少签名验证信息'
             });
         }
-
         if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
+            console.error('签名验证失败:', { timestamp, nonce, signature });
             return res.status(401).json({
                 code: 'FAIL',
                 message: '签名验证失败'
             });
         }
-
         // 解密回调数据
-        const decryptedData = decryptCallbackData(
-            resource.associated_data,
-            resource.nonce,
-            resource.ciphertext
-        );
-
-        const callbackData = JSON.parse(decryptedData);
-
+        let decryptedData;
+        try {
+            decryptedData = decryptCallbackData(
+                resource.associated_data,
+                resource.nonce,
+                resource.ciphertext
+            );
+            console.log('解密后回调数据:', decryptedData);
+        } catch (e) {
+            console.error('解密回调数据失败:', e);
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '解密失败'
+            });
+        }
+        let callbackData;
+        try {
+            callbackData = JSON.parse(decryptedData);
+        } catch (e) {
+            console.error('解析解密数据失败:', decryptedData);
+            return res.status(400).json({
+                code: 'FAIL',
+                message: '回调数据解析失败'
+            });
+        }
         // 处理支付结果
         if (callbackData.trade_state === 'SUCCESS') {
+            // 日志：支付成功回调
+            console.log('支付成功回调数据:', callbackData);
             const {
                 out_trade_no, // 商户订单号
                 transaction_id, // 微信支付订单号
@@ -628,11 +647,9 @@ router.post('/notify', async (req, res) => {
                 success_time, // 支付完成时间
                 amount // 订单金额
             } = callbackData;
-
             // 开始事务
             const connection = await db.getConnection();
             await connection.beginTransaction();
-
             try {
                 // 更新订单状态
                 await connection.query(
@@ -645,13 +662,12 @@ router.post('/notify', async (req, res) => {
             WHERE out_trade_no = ?`,
                     [transaction_id, trade_type, trade_state, trade_state_desc, success_time, out_trade_no]
                 );
-
                 // 获取订单项
                 const [orderItems] = await connection.query(
                     'SELECT * FROM order_items WHERE order_id = (SELECT id FROM orders WHERE out_trade_no = ?)',
                     [out_trade_no]
                 );
-
+                console.log('订单项:', orderItems);
                 // 更新商品库存
                 for (const item of orderItems) {
                     if (item.type === 'right') {
@@ -659,27 +675,31 @@ router.post('/notify', async (req, res) => {
                             'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
                             [item.quantity, item.right_id]
                         );
+                        console.log(`扣减right库存: right_id=${item.right_id}, quantity=${item.quantity}`);
                     } else if (item.type === 'artwork') {
                         await connection.query(
                             'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
                             [item.quantity, item.artwork_id]
                         );
+                        console.log(`扣减artwork库存: artwork_id=${item.artwork_id}, quantity=${item.quantity}`);
                     }
                     // digital 类型暂不处理库存
                 }
-
                 await connection.commit();
+                console.log('支付回调处理完成，库存已更新');
                 res.json({
                     code: 'SUCCESS',
                     message: 'OK'
                 });
             } catch (error) {
                 await connection.rollback();
+                console.error('支付回调处理事务失败:', error);
                 throw error;
             } finally {
                 connection.release();
             }
         } else {
+            console.warn('支付未成功，trade_state:', callbackData.trade_state);
             res.json({
                 code: 'FAIL',
                 message: callbackData.trade_state_desc || '支付失败'
