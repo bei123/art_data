@@ -1,1 +1,0 @@
-ALTER TABLE artists ADD COLUMN journey TEXT AFTER biography; 

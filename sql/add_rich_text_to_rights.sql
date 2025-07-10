@@ -1,1 +1,0 @@
-ALTER TABLE rights ADD COLUMN rich_text TEXT COMMENT '富文本内容'; 
