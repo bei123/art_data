@@ -63,7 +63,7 @@ router.post('/', authenticateToken, async (req, res) => {
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
           const stringKeys = reply.keys.map(key => String(key));
-          await redisClient.del(stringKeys);
+          await redisClient.del(...stringKeys);
         }
       } while (cursor !== 0);
     };
@@ -109,7 +109,7 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
         if (reply.keys.length > 0) {
           // 确保所有key都是字符串类型
           const stringKeys = reply.keys.map(key => String(key));
-          await redisClient.del(stringKeys);
+          await redisClient.del(...stringKeys);
         }
       } while (cursor !== 0);
     };

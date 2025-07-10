@@ -11,7 +11,7 @@ async function clearPhysicalCategoriesCache() {
   try {
     const keys = await redisClient.keys(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`);
     if (keys.length > 0) {
-      await redisClient.del(keys);
+      await redisClient.del(...keys);
       console.log(`Cleared ${keys.length} physical categories cache keys`);
     }
   } catch (error) {

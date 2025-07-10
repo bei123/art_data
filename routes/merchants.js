@@ -315,7 +315,7 @@ router.post('/', authenticateToken, async (req, res) => {
           const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
           cursor = reply.cursor;
           if (reply.keys.length > 0) {
-            await redisClient.del(reply.keys);
+            await redisClient.del(...reply.keys);
           }
         } while (cursor !== 0);
       };
@@ -387,7 +387,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
           const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
           cursor = reply.cursor;
           if (reply.keys.length > 0) {
-            await redisClient.del(reply.keys);
+            await redisClient.del(...reply.keys);
           }
         } while (cursor !== 0);
       };
@@ -434,7 +434,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
           const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
           cursor = reply.cursor;
           if (reply.keys.length > 0) {
-            await redisClient.del(reply.keys);
+            await redisClient.del(...reply.keys);
           }
         } while (cursor !== 0);
       };
@@ -483,7 +483,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
         const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
-          await redisClient.del(reply.keys);
+          await redisClient.del(...reply.keys);
         }
       } while (cursor !== 0);
     };
@@ -526,7 +526,7 @@ router.patch('/:id/sort', authenticateToken, async (req, res) => {
         const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
-          await redisClient.del(reply.keys);
+          await redisClient.del(...reply.keys);
         }
       } while (cursor !== 0);
     };
