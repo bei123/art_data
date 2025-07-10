@@ -43,12 +43,15 @@ function generateSignV3(method, url, timestamp, nonceStr, body) {
     return signature;
 }
 
-// 验证签名
+// 读取微信支付平台证书公钥（请确保 wx_platform_cert.pem 已放在项目根目录）
+const wxPlatformPublicKey = fs.readFileSync(path.join(__dirname, '../wx_platform_cert.pem'));
+
+// 验证签名（使用微信平台公钥）
 function verifySignV3(timestamp, nonceStr, body, signature) {
     const message = `${timestamp}\n${nonceStr}\n${body}\n`;
     const verify = crypto.createVerify('RSA-SHA256');
     verify.update(message);
-    return verify.verify(WX_PAY_CONFIG.privateKey, signature, 'base64');
+    return verify.verify(wxPlatformPublicKey, signature, 'base64');
 }
 
 // 解密回调数据
