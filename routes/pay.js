@@ -1556,6 +1556,7 @@ router.get('/orders', async (req, res) => {
                     r.description as right_description,
                     r.status as right_status,
                     r.remaining_count as right_remaining_count,
+                    ri.image_url as right_image_url,
                     da.title as digital_title,
                     da.price as digital_price,
                     da.description as digital_description,
@@ -1567,6 +1568,7 @@ router.get('/orders', async (req, res) => {
                     oa.image as artwork_image
                 FROM order_items oi
                 LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+                LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
                 LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
                 LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
                 WHERE oi.order_id = ?
@@ -1590,7 +1592,7 @@ router.get('/orders', async (req, res) => {
                         description: item.right_description,
                         status: item.right_status,
                         remaining_count: item.right_remaining_count,
-                        images: []
+                        images: item.right_image_url ? [item.right_image_url] : []
                     };
                 } else if (item.type === 'digital') {
                     processedItem = {
