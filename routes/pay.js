@@ -79,6 +79,14 @@ function decryptCallbackData(associatedData, nonce, ciphertext) {
     return decrypted.toString('utf8');
 }
 
+// 新增：微信时间格式转换为 MySQL DATETIME
+function formatWechatTime(isoString) {
+    if (!isoString) return null;
+    const date = new Date(isoString);
+    const pad = n => n < 10 ? '0' + n : n;
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 // 统一下单接口
 router.post('/unifiedorder', async (req, res) => {
     try {
@@ -684,7 +692,7 @@ router.post('/notify', async (req, res) => {
               trade_state_desc = ?,
               success_time = ?
             WHERE out_trade_no = ?`,
-                    [transaction_id, trade_type, trade_state, trade_state_desc, success_time, out_trade_no]
+                    [transaction_id, trade_type, trade_state, trade_state_desc, success_time ? formatWechatTime(success_time) : null, out_trade_no]
                 );
                 // 获取订单项
                 const [orderItems] = await connection.query(`
