@@ -110,6 +110,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const result = cartItems.map(item => {
       if (item.type === 'right' && rightsMap[item.right_id]) {
         return {
+          cart_item_id: item.id, // 购物车主键
           ...item,
           type: 'right',
           ...rightsMap[item.right_id]
@@ -117,6 +118,7 @@ router.get('/', authenticateToken, async (req, res) => {
       }
       if (item.type === 'digital' && digitalsMap[item.digital_artwork_id]) {
         return {
+          cart_item_id: item.id,
           ...item,
           type: 'digital',
           ...digitalsMap[item.digital_artwork_id],
@@ -127,6 +129,7 @@ router.get('/', authenticateToken, async (req, res) => {
         const artwork = artworksMap[item.artwork_id];
         const artist = artistsMap[artwork.artist_id] || {};
         return {
+          cart_item_id: item.id,
           ...item,
           type: 'artwork',
           ...artwork,
@@ -138,7 +141,10 @@ router.get('/', authenticateToken, async (req, res) => {
           discount_price: artwork.discount_price || 0
         };
       }
-      return item;
+      return {
+        cart_item_id: item.id,
+        ...item
+      };
     });
 
     res.json(result);
