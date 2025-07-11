@@ -602,45 +602,33 @@ router.post('/singleorder', async (req, res) => {
 // 支付回调接口
 router.post('/notify', async (req, res) => {
     try {
+        // 获取原始body字符串
+        const body = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
         // 日志：收到回调
-        console.log('收到微信支付回调，原始body:', JSON.stringify(req.body));
-        // 输入验证
-        if (!req.body || typeof req.body !== 'object') {
-            console.error('回调body无效:', req.body);
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '无效的请求数据'
-            });
+        console.log('收到微信支付回调，原始body:', body);
+        // 解析JSON
+        let parsed;
+        try {
+            parsed = JSON.parse(body);
+        } catch (e) {
+            console.error('回调body解析失败:', body);
+            return res.status(400).json({ code: 'FAIL', message: '回调数据解析失败' });
         }
         // 获取回调数据
-        const {
-            id, // 通知ID
-            create_time, // 通知创建时间
-            event_type, // 通知类型
-            resource_type, // 通知数据类型
-            resource, // 通知数据
-            summary // 回调摘要
-        } = req.body;
+        const { resource } = parsed;
         // 验证必要字段
         if (!resource || !resource.associated_data || !resource.nonce || !resource.ciphertext) {
             console.error('回调数据格式错误:', resource);
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '回调数据格式错误'
-            });
+            return res.status(400).json({ code: 'FAIL', message: '回调数据格式错误' });
         }
-        // 验证签名
-        const timestamp = req.headers['wechatpay-timestamp'];       
+        // 验签
+        const timestamp = req.headers['wechatpay-timestamp'];
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
-        const body = JSON.stringify(req.body);
         if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })) {
             console.error('签名验证失败:', { serial, signature });
-            return res.status(401).json({
-                code: 'FAIL',
-                message: '签名验证失败'
-            });
+            return res.status(401).json({ code: 'FAIL', message: '签名验证失败' });
         }
         // 解密回调数据
         let decryptedData;
@@ -653,20 +641,14 @@ router.post('/notify', async (req, res) => {
             console.log('解密后回调数据:', decryptedData);
         } catch (e) {
             console.error('解密回调数据失败:', e);
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '解密失败'
-            });
+            return res.status(400).json({ code: 'FAIL', message: '解密失败' });
         }
         let callbackData;
         try {
             callbackData = JSON.parse(decryptedData);
         } catch (e) {
             console.error('解析解密数据失败:', decryptedData);
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '回调数据解析失败'
-            });
+            return res.status(400).json({ code: 'FAIL', message: '回调数据解析失败' });
         }
         // 处理支付结果
         if (callbackData.trade_state === 'SUCCESS') {
@@ -1202,61 +1184,34 @@ router.get('/refund/requests/:id', async (req, res) => {
 // 退款回调接口
 router.post('/refund/notify', async (req, res) => {
     try {
-        // 输入验证
-        if (!req.body || typeof req.body !== 'object') {
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '无效的请求数据'
-            });
+        // 获取原始body字符串
+        const body = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
+        // 解析JSON
+        let parsed;
+        try {
+            parsed = JSON.parse(body);
+        } catch (e) {
+            return res.status(400).json({ code: 'FAIL', message: '回调数据解析失败' });
         }
-        
-        // 获取回调数据
-        const {
-            id, // 通知ID
-            create_time, // 通知创建时间
-            event_type, // 通知类型
-            resource_type, // 通知数据类型
-            resource, // 通知数据
-            summary // 回调摘要
-        } = req.body;
-
-        // 验证必要字段
+        const { resource } = parsed;
         if (!resource || !resource.associated_data || !resource.nonce || !resource.ciphertext) {
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '回调数据格式错误'
-            });
+            return res.status(400).json({ code: 'FAIL', message: '回调数据格式错误' });
         }
-
-        // 验证签名
+        // 验签
         const timestamp = req.headers['wechatpay-timestamp'];
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
-
-        if (!timestamp || !nonce || !signature || !serial) {
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '缺少签名验证信息'
-            });
+        if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })) {
+            return res.status(401).json({ code: 'FAIL', message: '签名验证失败' });
         }
-
-        if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body: JSON.stringify(req.body) })) {
-            return res.status(401).json({
-                code: 'FAIL',
-                message: '签名验证失败'
-            });
-        }
-
         // 解密回调数据
         const decryptedData = decryptCallbackData(
             resource.associated_data,
             resource.nonce,
             resource.ciphertext
         );
-
         const callbackData = JSON.parse(decryptedData);
-
         // 处理退款结果
         if (callbackData.refund_status === 'SUCCESS') {
             const {

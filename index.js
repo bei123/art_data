@@ -30,6 +30,10 @@ const uploadRouter = require('./routes/upload');
 const app = express();
 const port = 2000;
 
+// 微信支付回调接口必须用原始body字符串
+app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
+app.use('/api/wx/pay/refund/notify', express.raw({ type: 'application/json' }));
+
 // 安全中间件配置
 app.use(helmet({
   contentSecurityPolicy: {
