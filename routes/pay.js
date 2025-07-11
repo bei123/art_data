@@ -880,8 +880,8 @@ router.post('/refund', async (req, res) => {
         const cleanOutRefundNo = out_refund_no.trim();
         const cleanReason = reason ? reason.trim() : '';
         const cleanAmount = {
-            refund: parseFloat(amount.refund),
-            total: parseFloat(amount.total),
+            refund: Math.round(parseFloat(amount.refund) * 100), // 元转分
+            total: Math.round(parseFloat(amount.total) * 100),   // 元转分
             currency: amount.currency
         };
 
