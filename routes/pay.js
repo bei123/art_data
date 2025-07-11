@@ -10,6 +10,7 @@ const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 const redisClient = require('../utils/redisClient');
 const LOCK_EXPIRE = 30; // 30秒
 const CALLBACK_EXPIRE = 600; // 10分钟
+const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
@@ -46,12 +47,15 @@ function generateSignV3(method, url, timestamp, nonceStr, body) {
     return signature;
 }
 
-// 验证签名
-function verifySignV3(timestamp, nonceStr, body, signature) {
-    const message = `${timestamp}\n${nonceStr}\n${body}\n`;
-    const verify = crypto.createVerify('RSA-SHA256');
-    verify.update(message);
-    return verify.verify(WX_PAY_CONFIG.privateKey, signature, 'base64');
+// 替换验签函数
+function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body }) {
+  const publicKey = getWechatpayPublicKey(serial);
+  if (!publicKey) return false;
+  const message = `${timestamp}\n${nonce}\n${body}\n`;
+  const verify = crypto.createVerify('RSA-SHA256');
+  verify.update(message);
+  verify.end();
+  return verify.verify(publicKey, signature, 'base64');
 }
 
 // 解密回调数据
@@ -621,15 +625,9 @@ router.post('/notify', async (req, res) => {
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
-        if (!timestamp || !nonce || !signature || !serial) {
-            console.error('缺少签名验证信息:', req.headers);
-            return res.status(400).json({
-                code: 'FAIL',
-                message: '缺少签名验证信息'
-            });
-        }
-        if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
-            console.error('签名验证失败:', { timestamp, nonce, signature });
+        const body = JSON.stringify(req.body);
+        if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })) {
+            console.error('签名验证失败:', { serial, signature });
             return res.status(401).json({
                 code: 'FAIL',
                 message: '签名验证失败'
@@ -1234,7 +1232,7 @@ router.post('/refund/notify', async (req, res) => {
             });
         }
 
-        if (!verifySignV3(timestamp, nonce, JSON.stringify(req.body), signature)) {
+        if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body: JSON.stringify(req.body) })) {
             return res.status(401).json({
                 code: 'FAIL',
                 message: '签名验证失败'
