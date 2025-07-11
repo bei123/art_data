@@ -57,7 +57,7 @@ function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })
   verify.end();
   return verify.verify(publicKey, signature, 'base64');
 }
-
+console.log('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key.length);
 // 解密回调数据
 function decryptCallbackData(associatedData, nonce, ciphertext) {
     const key = Buffer.from(WX_PAY_CONFIG.key, 'utf8'); // 32字节明文
