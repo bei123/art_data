@@ -196,7 +196,8 @@ router.post('/', authenticateToken, async (req, res) => {
       collection_location,
       collection_number,
       collection_size,
-      collection_material
+      collection_material,
+      price,
     } = req.body;
 
     let finalArtistId = artist_id;
@@ -225,12 +226,12 @@ router.post('/', authenticateToken, async (req, res) => {
       `INSERT INTO original_artworks (
         title, image, artist_id, year, description, long_description,
         background, features, collection_location, 
-        collection_number, collection_size, collection_material
+        collection_number, collection_size, collection_material,price
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title, image, finalArtistId, year, description, long_description,
         background, features, collection_location,
-        collection_number, collection_size, collection_material
+        collection_number, collection_size, collection_material,price
       ]
     );
     // 批量插入多图
@@ -250,6 +251,7 @@ router.post('/', authenticateToken, async (req, res) => {
     res.json({
       id: result.insertId,
       title,
+      price,
       image,
       images: images || [],
       year,
@@ -296,7 +298,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
       discount_price,
       stock,
       sales,
-      is_on_sale
+      is_on_sale,
+      price
     } = req.body;
     let finalArtistId = artist_id;
     // 如果没有artist_id，兼容老前端用artist_name查找或新建
@@ -334,7 +337,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         discount_price = ?,
         stock = ?,
         sales = ?,
-        is_on_sale = ?
+        is_on_sale = ?,
+        price = ?
       WHERE id = ?`,
       [
         title, image, finalArtistId, year, description, long_description,
@@ -363,6 +367,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.json({
       id: parseInt(req.params.id),
       title,
+      price,
       image,
       images: images || [],
       year,
