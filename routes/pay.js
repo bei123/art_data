@@ -709,21 +709,23 @@ router.post('/notify', async (req, res) => {
                 
                 // 批量更新rights库存
                 if (rightUpdates.length > 0) {
-                    await connection.query(`
-                        UPDATE rights 
-                        SET remaining_count = remaining_count - ? 
-                        WHERE id = ?
-                    `, rightUpdates);
+                    for (const [quantity, rightId] of rightUpdates) {
+                        await connection.query(
+                            'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
+                            [quantity, rightId]
+                        );
+                    }
                     console.log(`批量扣减right库存: ${rightUpdates.length}条记录`);
                 }
                 
                 // 批量更新artworks库存
                 if (artworkUpdates.length > 0) {
-                    await connection.query(`
-                        UPDATE original_artworks 
-                        SET stock = stock - ? 
-                        WHERE id = ?
-                    `, artworkUpdates);
+                    for (const [quantity, artworkId] of artworkUpdates) {
+                        await connection.query(
+                            'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
+                            [quantity, artworkId]
+                        );
+                    }
                     console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
                 }
                 await connection.commit();
@@ -1251,20 +1253,22 @@ router.post('/refund/notify', async (req, res) => {
                 
                 // 批量更新rights库存
                 if (rightUpdates.length > 0) {
-                    await connection.query(`
-                        UPDATE rights 
-                        SET remaining_count = remaining_count + ? 
-                        WHERE id = ?
-                    `, rightUpdates);
+                    for (const [quantity, rightId] of rightUpdates) {
+                        await connection.query(
+                            'UPDATE rights SET remaining_count = remaining_count + ? WHERE id = ?',
+                            [quantity, rightId]
+                        );
+                    }
                 }
                 
                 // 批量更新artworks库存
                 if (artworkUpdates.length > 0) {
-                    await connection.query(`
-                        UPDATE original_artworks 
-                        SET stock = stock + ? 
-                        WHERE id = ?
-                    `, artworkUpdates);
+                    for (const [quantity, artworkId] of artworkUpdates) {
+                        await connection.query(
+                            'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
+                            [quantity, artworkId]
+                        );
+                    }
                 }
                 
                 await connection.commit();
