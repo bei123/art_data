@@ -11,6 +11,7 @@ const redisClient = require('../utils/redisClient');
 const LOCK_EXPIRE = 30; // 30秒
 const CALLBACK_EXPIRE = 600; // 10分钟
 const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
+console.log('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key.length);
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
