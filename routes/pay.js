@@ -60,10 +60,19 @@ function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })
 
 // 解密回调数据
 function decryptCallbackData(associatedData, nonce, ciphertext) {
-    const key = Buffer.from(WX_PAY_CONFIG.key, 'base64');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(nonce, 'base64'));
-    decipher.setAuthTag(Buffer.from(associatedData, 'base64'));
-    let decrypted = decipher.update(Buffer.from(ciphertext, 'base64'));
+    const key = Buffer.from(WX_PAY_CONFIG.key, 'utf8'); // 32字节明文
+    const nonceBuf = Buffer.from(nonce, 'base64');
+    const data = Buffer.from(ciphertext, 'base64');
+    const authTag = data.slice(data.length - 16);
+    const encrypted = data.slice(0, data.length - 16);
+
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonceBuf);
+    if (associatedData) {
+        decipher.setAAD(Buffer.from(associatedData, 'base64'));
+    }
+    decipher.setAuthTag(authTag);
+
+    let decrypted = decipher.update(encrypted);
     decrypted = Buffer.concat([decrypted, decipher.final()]);
     return decrypted.toString('utf8');
 }
