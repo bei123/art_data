@@ -242,10 +242,10 @@ router.post('/', authenticateToken, async (req, res) => {
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
-    // 清理缓存
-    await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
-    if (finalArtistId) {
-      await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + finalArtistId);
+    // 清理所有artworks:list相关缓存（包括分页）
+    const listKeys = await redisClient.keys('artworks:list*');
+    if (listKeys.length > 0) {
+      await redisClient.del(listKeys);
     }
     res.json({
       id: result.insertId,
@@ -354,10 +354,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
-    // 清理缓存
-    await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
-    if (finalArtistId) {
-      await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + finalArtistId);
+    // 清理所有artworks:list相关缓存（包括分页）
+    const listKeys = await redisClient.keys('artworks:list*');
+    if (listKeys.length > 0) {
+      await redisClient.del(listKeys);
     }
     await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + req.params.id);
     res.json({
@@ -398,8 +398,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     // 先查artist_id
     const [rows] = await db.query('SELECT artist_id FROM original_artworks WHERE id = ?', [req.params.id]);
     await db.query('DELETE FROM original_artworks WHERE id = ?', [req.params.id]);
-    // 清理缓存
-    await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
+    // 清理所有artworks:list相关缓存（包括分页）
+    const listKeys = await redisClient.keys('artworks:list*');
+    if (listKeys.length > 0) {
+      await redisClient.del(listKeys);
+    }
     // 精准清理对应artist_id的缓存
     if (rows && rows.length > 0 && rows[0].artist_id) {
       await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + rows[0].artist_id);
