@@ -68,7 +68,7 @@ function decryptCallbackData(associatedData, nonce, ciphertext) {
 
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonceBuf);
     if (associatedData) {
-        decipher.setAAD(Buffer.from(associatedData, 'base64'));
+        decipher.setAAD(Buffer.from(associatedData, 'utf8')); // 修正为utf8
     }
     decipher.setAuthTag(authTag);
 
