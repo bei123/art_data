@@ -1196,17 +1196,22 @@ router.get('/refund/requests/:id', async (req, res) => {
 // 退款回调接口
 router.post('/refund/notify', async (req, res) => {
     try {
+        console.log('【退款回调】收到微信退款回调请求');
         // 获取原始body字符串
         const body = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
+        console.log('【退款回调】原始body:', body);
         // 解析JSON
         let parsed;
         try {
             parsed = JSON.parse(body);
+            console.log('【退款回调】解析后的JSON:', parsed);
         } catch (e) {
+            console.error('【退款回调】回调body解析失败:', body);
             return res.status(400).json({ code: 'FAIL', message: '回调数据解析失败' });
         }
         const { resource } = parsed;
         if (!resource || !resource.associated_data || !resource.nonce || !resource.ciphertext) {
+            console.error('【退款回调】回调数据格式错误:', resource);
             return res.status(400).json({ code: 'FAIL', message: '回调数据格式错误' });
         }
         // 验签
@@ -1214,16 +1219,33 @@ router.post('/refund/notify', async (req, res) => {
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
-        if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })) {
+        const verifyResult = verifyWechatpaySignature({ serial, signature, timestamp, nonce, body });
+        console.log('【退款回调】验签结果:', verifyResult);
+        if (!verifyResult) {
+            console.error('【退款回调】签名验证失败:', { serial, signature });
             return res.status(401).json({ code: 'FAIL', message: '签名验证失败' });
         }
         // 解密回调数据
-        const decryptedData = decryptCallbackData(
-            resource.associated_data,
-            resource.nonce,
-            resource.ciphertext
-        );
-        const callbackData = JSON.parse(decryptedData);
+        let decryptedData;
+        try {
+            decryptedData = decryptCallbackData(
+                resource.associated_data,
+                resource.nonce,
+                resource.ciphertext
+            );
+            console.log('【退款回调】解密后回调数据:', decryptedData);
+        } catch (e) {
+            console.error('【退款回调】解密回调数据失败:', e);
+            return res.status(400).json({ code: 'FAIL', message: '解密失败' });
+        }
+        let callbackData;
+        try {
+            callbackData = JSON.parse(decryptedData);
+            console.log('【退款回调】最终业务数据:', callbackData);
+        } catch (e) {
+            console.error('【退款回调】解析解密数据失败:', decryptedData);
+            return res.status(400).json({ code: 'FAIL', message: '回调数据解析失败' });
+        }
         // 处理退款结果
         if (callbackData.refund_status === 'SUCCESS') {
             const {
