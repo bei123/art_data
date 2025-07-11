@@ -515,36 +515,44 @@ const showAddDialog = () => {
 }
 
 // 编辑艺术品
-const editArtwork = (row) => {
+const editArtwork = async (row) => {
   if (!checkLoginStatus()) return
-  console.log('Editing artwork:', row)
-  dialogType.value = 'edit'
-  form.value = {
-    id: row.id,
-    title: row.title || '',
-    image: row.image || '',
-    images: (row.images || []).map((img, idx) => ({ url: img, name: `图片${idx + 1}`, uid: `${Date.now()}-${idx}` })),
-    long_description: row.long_description || '',
-    artist_id: row.artist?.id || '',
-    year: Number(row.year) || new Date().getFullYear(),
-    description: row.description || '',
-    background: row.background || '',
-    features: row.features || '',
-    original_price: Number(row.original_price) || 0,
-    discount_price: Number(row.discount_price) || 0,
-    stock: Number(row.stock) || 0,
-    sales: Number(row.sales) || 0,
-    is_on_sale: Number(row.is_on_sale) || 1,
-    collection_location: row.collection?.location || '',
-    collection_number: row.collection?.number || '',
-    collection_size: row.collection?.size || '',
-    collection_material: row.collection?.material || ''
+  try {
+    // 1. 直接用 axios.get 返回的 resp 作为 detail
+    const detail = await axios.get(`/original-artworks/${row.id}`)
+
+    // 2. 用详情数据填充form
+    dialogType.value = 'edit'
+    form.value = {
+      id: detail.id,
+      title: detail.title || '',
+      image: detail.image || '',
+      images: (detail.images || []).map((img, idx) => ({ url: img, name: `图片${idx + 1}`, uid: `${Date.now()}-${idx}` })),
+      long_description: detail.long_description || '',
+      artist_id: detail.artist?.id || '',
+      year: Number(detail.year) || new Date().getFullYear(),
+      description: detail.description || '',
+      background: detail.background || '',
+      features: detail.features || '',
+      original_price: Number(detail.original_price) || 0,
+      discount_price: Number(detail.discount_price) || 0,
+      stock: Number(detail.stock) || 0,
+      sales: Number(detail.sales) || 0,
+      is_on_sale: Number(detail.is_on_sale) || 1,
+      collection_location: detail.collection?.location || '',
+      collection_number: detail.collection?.number || '',
+      collection_size: detail.collection?.size || '',
+      collection_material: detail.collection?.material || ''
+    }
+    console.log('editArtwork detail.id:', detail.id)
+    dialogVisible.value = true
+    nextTick(() => {
+      longDescriptionHtml.value = form.value.long_description
+    })
+  } catch (error) {
+    console.error('获取详细信息失败:', error)
+    ElMessage.error('获取详细信息失败，无法编辑')
   }
-  console.log('Form data:', form.value)
-  dialogVisible.value = true
-  nextTick(() => {
-    longDescriptionHtml.value = form.value.long_description
-  })
 }
 
 // 删除艺术品
@@ -584,6 +592,7 @@ const submitForm = async () => {
   try {
     await formRef.value.validate()
     console.log('提交时 images:', form.value.images)
+    console.log('submitForm form.value.id:', form.value.id)
     const submitData = {
       title: form.value.title,
       image: form.value.image,
@@ -613,6 +622,10 @@ const submitForm = async () => {
       console.log('Add response:', response.data)
       ElMessage.success('添加成功')
     } else {
+      if (!form.value.id) {
+        ElMessage.error('未获取到作品ID，无法保存')
+        return
+      }
       console.log('Updating artwork:', form.value.id)
       const response = await axios.put(`/original-artworks/${form.value.id}`, submitData)
       console.log('Update response:', response.data)

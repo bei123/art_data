@@ -152,6 +152,7 @@ router.get('/:id', async (req, res) => {
     };
 
     const result = {
+      id: artwork.id,
       title: artwork.title,
       year: artwork.year,
       image: artwork.image,
@@ -394,12 +395,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // 删除艺术品（需要认证）
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
+    // 先查artist_id
+    const [rows] = await db.query('SELECT artist_id FROM original_artworks WHERE id = ?', [req.params.id]);
     await db.query('DELETE FROM original_artworks WHERE id = ?', [req.params.id]);
     // 清理缓存
     await redisClient.del(REDIS_ARTWORKS_LIST_KEY);
     // 精准清理对应artist_id的缓存
-    // 先查出该作品的artist_id
-    const [rows] = await db.query('SELECT artist_id FROM original_artworks WHERE id = ?', [req.params.id]);
     if (rows && rows.length > 0 && rows[0].artist_id) {
       await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + rows[0].artist_id);
     }
