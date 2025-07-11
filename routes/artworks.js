@@ -226,12 +226,12 @@ router.post('/', authenticateToken, async (req, res) => {
       `INSERT INTO original_artworks (
         title, image, artist_id, year, description, long_description,
         background, features, collection_location, 
-        collection_number, collection_size, collection_material,price
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        collection_number, collection_size, collection_material, price, original_price, discount_price
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title, image, finalArtistId, year, description, long_description,
         background, features, collection_location,
-        collection_number, collection_size, collection_material,price
+        collection_number, collection_size, collection_material, price, req.body.original_price, req.body.discount_price
       ]
     );
     // 批量插入多图
