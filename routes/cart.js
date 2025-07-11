@@ -179,15 +179,16 @@ router.post('/', authenticateToken, async (req, res) => {
       if (!right || right.length === 0) {
         return res.status(404).json({ error: '商品不存在或已下架' });
       }
-      // 检查库存
-      if (right[0].remaining_count < cleanQuantity) {
-        return res.status(400).json({ error: '库存不足' });
-      }
       // 检查购物车中是否已存在该商品
       const [existingItem] = await db.query(
-        'SELECT id FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
+        'SELECT id, quantity FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
         [userId, right_id]
       );
+      const existingQuantity = (existingItem && existingItem.length > 0) ? existingItem[0].quantity : 0;
+      // 校验总数量是否超过库存
+      if (right[0].remaining_count < existingQuantity + cleanQuantity) {
+        return res.status(400).json({ error: '库存不足' });
+      }
       if (existingItem && existingItem.length > 0) {
         // 更新数量
         await db.query(
@@ -235,7 +236,7 @@ router.post('/', authenticateToken, async (req, res) => {
         return res.status(400).json({ error: '缺少艺术品ID' });
       }
       // 检查艺术品是否存在
-      const [artwork] = await db.query('SELECT original_price, discount_price FROM original_artworks WHERE id = ?', [artwork_id]);
+      const [artwork] = await db.query('SELECT original_price, discount_price, stock, is_on_sale FROM original_artworks WHERE id = ?', [artwork_id]);
       if (!artwork || artwork.length === 0) {
         return res.status(404).json({ error: '艺术品不存在' });
       }
@@ -243,15 +244,24 @@ router.post('/', authenticateToken, async (req, res) => {
       if (!artwork[0].original_price || artwork[0].original_price <= 0) {
         return res.status(400).json({ error: '艺术品价格无效' });
       }
+      // 检查是否在售
+      if (artwork[0].is_on_sale !== 1) {
+        return res.status(400).json({ error: '艺术品未上架' });
+      }
       // 确定实际价格（如果有优惠价且优惠价小于原价，则使用优惠价）
       const actualPrice = (artwork[0].discount_price && artwork[0].discount_price > 0 && artwork[0].discount_price < artwork[0].original_price) 
         ? artwork[0].discount_price 
         : artwork[0].original_price;
       // 检查购物车中是否已存在该艺术品
       const [existingItem] = await db.query(
-        'SELECT id FROM cart_items WHERE user_id = ? AND artwork_id = ? AND type = "artwork"',
+        'SELECT id, quantity FROM cart_items WHERE user_id = ? AND artwork_id = ? AND type = "artwork"',
         [userId, artwork_id]
       );
+      const existingQuantity = (existingItem && existingItem.length > 0) ? existingItem[0].quantity : 0;
+      // 校验总数量是否超过库存
+      if (artwork[0].stock < existingQuantity + cleanQuantity) {
+        return res.status(400).json({ error: '库存不足' });
+      }
       if (existingItem && existingItem.length > 0) {
         // 更新数量
         await db.query(
