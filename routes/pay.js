@@ -621,7 +621,7 @@ router.post('/notify', async (req, res) => {
             });
         }
         // 验证签名
-        const timestamp = req.headers['wechatpay-timestamp'];
+        const timestamp = req.headers['wechatpay-timestamp'];       
         const nonce = req.headers['wechatpay-nonce'];
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
