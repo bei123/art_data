@@ -310,14 +310,14 @@ router.post('/', authenticateToken, async (req, res) => {
       });
       // 清理所有商家列表缓存
       const scanDel = async (pattern) => {
-        let cursor = 0;
+        let cursor = '0';
         do {
           const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
           cursor = reply.cursor;
           if (reply.keys.length > 0) {
             await redisClient.del(...reply.keys);
           }
-        } while (cursor !== 0);
+        } while (cursor !== '0');
       };
       await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
     } catch (error) {
@@ -382,14 +382,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
       });
       // 清理所有商家列表缓存和该商家详情缓存
       const scanDel = async (pattern) => {
-        let cursor = 0;
+        let cursor = '0';
         do {
           const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
           cursor = reply.cursor;
           if (reply.keys.length > 0) {
             await redisClient.del(...reply.keys);
           }
-        } while (cursor !== 0);
+        } while (cursor !== '0');
       };
       await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
       await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
@@ -429,14 +429,14 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       });
       // 清理所有商家列表缓存和该商家详情缓存
       const scanDel = async (pattern) => {
-        let cursor = 0;
+        let cursor = '0';
         do {
           const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
           cursor = reply.cursor;
           if (reply.keys.length > 0) {
             await redisClient.del(...reply.keys);
           }
-        } while (cursor !== 0);
+        } while (cursor !== '0');
       };
       await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
       await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
@@ -478,14 +478,14 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
     });
     // 清理所有商家列表缓存和该商家详情缓存
     const scanDel = async (pattern) => {
-      let cursor = 0;
+      let cursor = '0';
       do {
         const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           await redisClient.del(...reply.keys);
         }
-      } while (cursor !== 0);
+      } while (cursor !== '0');
     };
     await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
@@ -521,14 +521,14 @@ router.patch('/:id/sort', authenticateToken, async (req, res) => {
     });
     // 清理所有商家列表缓存和该商家详情缓存
     const scanDel = async (pattern) => {
-      let cursor = 0;
+      let cursor = '0';
       do {
         const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT: 100 });
         cursor = reply.cursor;
         if (reply.keys.length > 0) {
           await redisClient.del(...reply.keys);
         }
-      } while (cursor !== 0);
+      } while (cursor !== '0');
     };
     await scanDel(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);

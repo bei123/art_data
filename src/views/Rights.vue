@@ -225,16 +225,22 @@ watch(dialogVisible, (val) => {
 
 const fetchRights = async () => {
   try {
-    const data = await axios.get('/rights')
-    console.log('API返回的原始数据：', data)
-    if (Array.isArray(data)) {
-      rights.value = data.map(right => ({
+    const response = await axios.get('/rights')
+    console.log('API返回的原始数据：', response.data)
+    let arr = []
+    if (Array.isArray(response.data)) {
+      arr = response.data
+    } else if (response.data && Array.isArray(response.data.data)) {
+      arr = response.data.data
+    }
+    if (arr.length) {
+      rights.value = arr.map(right => ({
         ...right,
         images: right.images ? right.images.map(image => getImageUrl(image)) : []
       }))
       console.log('设置后的版权实物数据：', rights.value)
     } else {
-      console.error('返回的数据不是数组：', data)
+      console.error('返回的数据不是数组：', response.data)
       rights.value = []
       ElMessage.error('获取数据格式不正确')
     }
@@ -248,8 +254,8 @@ const fetchRights = async () => {
 const fetchCategories = async () => {
   try {
     const response = await axios.get('/physical-categories')
-    if (Array.isArray(response)) {
-      categories.value = response
+    if (Array.isArray(response.data)) {
+      categories.value = response.data
     } else {
       categories.value = []
     }
