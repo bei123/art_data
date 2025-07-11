@@ -302,7 +302,7 @@ router.post('/unifiedorder', async (req, res) => {
                 out_trade_no: cleanOutTradeNo,
                 notify_url: WX_PAY_CONFIG.notifyUrl,
                 amount: {
-                    total: actualTotalFee,
+                    total: Math.round(actualTotalFee * 100), // 元转分
                     currency: 'CNY'
                 },
                 scene_info: {
@@ -550,7 +550,7 @@ router.post('/singleorder', async (req, res) => {
                 out_trade_no: cleanOutTradeNo,
                 notify_url: WX_PAY_CONFIG.notifyUrl,
                 amount: {
-                    total: actualTotalFee,
+                    total: Math.round(actualTotalFee * 100), // 元转分
                     currency: 'CNY'
                 },
                 scene_info: {

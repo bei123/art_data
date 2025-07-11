@@ -519,8 +519,11 @@ const editArtwork = async (row) => {
   if (!checkLoginStatus()) return
   try {
     // 1. 直接用 axios.get 返回的 resp 作为 detail
-    const detail = await axios.get(`/original-artworks/${row.id}`)
-
+    let detail = await axios.get(`/original-artworks/${row.id}`)
+    // 兼容后端返回被包裹在data字段下的情况
+    if (detail && detail.data) {
+      detail = detail.data;
+    }
     // 2. 用详情数据填充form
     dialogType.value = 'edit'
     form.value = {
