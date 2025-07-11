@@ -63,14 +63,14 @@ console.log('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key
 // 解密回调数据
 function decryptCallbackData(associatedData, nonce, ciphertext) {
     const key = Buffer.from(WX_PAY_CONFIG.key, 'utf8'); // 32字节明文
-    const nonceBuf = Buffer.from(nonce, 'base64');
+    const nonceBuf = Buffer.from(nonce, 'utf8'); // 修正：nonce直接用utf8编码
     const data = Buffer.from(ciphertext, 'base64');
     const authTag = data.slice(data.length - 16);
     const encrypted = data.slice(0, data.length - 16);
 
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonceBuf);
     if (associatedData) {
-        decipher.setAAD(Buffer.from(associatedData, 'utf8')); // 修正为utf8
+        decipher.setAAD(Buffer.from(associatedData, 'utf8'));
     }
     decipher.setAuthTag(authTag);
 
