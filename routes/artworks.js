@@ -337,8 +337,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         discount_price = ?,
         stock = ?,
         sales = ?,
-        is_on_sale = ?,
-        price = ?
+        is_on_sale = ?
       WHERE id = ?`,
       [
         title, image, finalArtistId, year, description, long_description,
