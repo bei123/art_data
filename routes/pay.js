@@ -21,6 +21,8 @@ const WX_PAY_CONFIG = {
     serialNo: process.env.WX_PAY_SERIAL_NO || '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
     privateKey: fs.readFileSync(path.join(__dirname, '../apiclient_key.pem')), // 商户私钥
     notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
+    notify_url:'https://api.wx.2000gallery.art:2000/api/wx/pay/refund', // 退款回调地址
+
     spbillCreateIp: '127.0.0.1' // 终端IP
 };
 console.log('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key.length);
@@ -1004,7 +1006,7 @@ router.post('/refund/approve', async (req, res) => {
                 const params = {
                     out_refund_no: refund.out_refund_no,
                     reason: refund.reason,
-                    notify_url: WX_PAY_CONFIG.notifyUrl + '/refund',
+                    notify_url: WX_PAY_CONFIG.notify_url, // 使用配置中的退款回调地址
                     funds_account: 'AVAILABLE',
                     amount: amountData
                 };
