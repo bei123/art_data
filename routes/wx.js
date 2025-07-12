@@ -35,7 +35,19 @@ function md5WithSalt(password, salt, times = 3) {
 
 // 创建阿里云二要素核验客户端
 function createDytnsClient() {
-    let credential = new Credential.default();
+    // 检查必要的环境变量
+    const accessKeyId = process.env.ALIBABA_CLOUD_ACCESS_KEY_ID || process.env.OSS_ACCESS_KEY_ID;
+    const accessKeySecret = process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET || process.env.OSS_ACCESS_KEY_SECRET;
+    
+    if (!accessKeyId || !accessKeySecret) {
+        throw new Error('缺少阿里云访问密钥配置。请设置 ALIBABA_CLOUD_ACCESS_KEY_ID 和 ALIBABA_CLOUD_ACCESS_KEY_SECRET 环境变量');
+    }
+    
+    // 使用环境变量创建凭证
+    let credential = new Credential.default({
+        accessKeyId: accessKeyId,
+        accessKeySecret: accessKeySecret,
+    });
     let config = new OpenApi.Config({
         credential: credential,
     });
