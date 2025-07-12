@@ -495,7 +495,25 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
     }
     
     try {
-        // 1. 调用外部API进行实名注册，带上token
+        // 1. 先将实名信息写入数据库
+        const {
+            address, birthDate, channel, city, district, ethnic, expirationDate,
+            idCardBackUrl, idCardFrontUrl, idCardNo, issueDate, mobile, name,
+            passCard, password, province, sex, type, userChainCallbackUrl
+        } = req.body;
+        const userId = payload.userId;
+        await db.query(
+            `INSERT INTO real_name_registrations
+            (user_id, name, sex, ethnic, birth_date, address, province, city, district, id_card_no, id_card_front_url, id_card_back_url, issue_date, expiration_date, mobile, channel, type, user_chain_callback_url, pass_card, password, is_verified)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                userId, name, sex, ethnic, birthDate, address, province, city, district,
+                idCardNo, idCardFrontUrl, idCardBackUrl, issueDate, expirationDate,
+                mobile, channel, type, userChainCallbackUrl, passCard, password, 1
+            ]
+        );
+
+        // 2. 调用外部API进行实名注册，带上token
         const response = await axios.post(
             'https://yapi.licenseinfo.cn/mock/600/userApi/external/user/real_name_registration/simplify/v3',
             req.body,
@@ -505,24 +523,6 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
                     'Authorization': `Bearer ${token}`
                 }
             }
-        );
-
-        // 2. 将实名信息写入数据库
-        const {
-            address, birthDate, channel, city, district, ethnic, expirationDate,
-            idCardBackUrl, idCardFrontUrl, idCardNo, issueDate, mobile, name,
-            passCard, password, province, sex, type, userChainCallbackUrl
-        } = req.body;
-        const userId = payload.userId;
-        await db.query(
-            `INSERT INTO real_name_registrations
-            (user_id, name, sex, ethnic, birth_date, address, province, city, district, id_card_no, id_card_front_url, id_card_back_url, issue_date, expiration_date, mobile, channel, type, user_chain_callback_url, pass_card, password)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                userId, name, sex, ethnic, birthDate, address, province, city, district,
-                idCardNo, idCardFrontUrl, idCardBackUrl, issueDate, expirationDate,
-                mobile, channel, type, userChainCallbackUrl, passCard, password
-            ]
         );
 
         // 3. 直接返回外部API的响应
