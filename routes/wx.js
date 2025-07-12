@@ -538,6 +538,60 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
     }
 });
 
+// 查询用户实名状态接口
+router.get('/userVerificationStatus', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    try {
+        // 查询用户最新的实名认证记录
+        const [rows] = await db.query(
+            `SELECT 
+                is_verified,
+                name,
+                id_card_no,
+                created_at
+            FROM real_name_registrations 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT 1`,
+            [payload.userId]
+        );
+        
+        if (rows.length === 0) {
+            // 没有实名记录
+            res.json({ 
+                isVerified: false,
+                hasRecord: false,
+                message: '用户未进行实名认证'
+            });
+        } else {
+            const record = rows[0];
+            res.json({ 
+                isVerified: record.is_verified === 1,
+                hasRecord: true,
+                name: record.name,
+                idCardNo: record.id_card_no ? record.id_card_no.substring(0, 6) + '****' + record.id_card_no.substring(record.id_card_no.length - 4) : null,
+                verifiedAt: record.created_at,
+                message: record.is_verified === 1 ? '用户已完成实名认证' : '用户实名认证待审核'
+            });
+        }
+    } catch (err) {
+        console.error('查询实名状态失败:', err);
+        res.status(500).json({ error: '查询实名状态服务暂时不可用', detail: err.message });
+    }
+});
+
 // 上传身份证照片接口
 router.post('/userApi/external/user/upload/idcard', upload.fields([
     { name: 'idCardFront', maxCount: 1 },
