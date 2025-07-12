@@ -1253,6 +1253,15 @@ router.post('/refund/notify', async (req, res) => {
         }
         // 处理退款结果
         if (callbackData.refund_status === 'SUCCESS') {
+            // 回调去重
+            const callbackKey = `refund:callback:${callbackData.out_refund_no}`;
+            const processed = await redisClient.set(callbackKey, '1', { NX: true, EX: CALLBACK_EXPIRE });
+            if (!processed) {
+                console.log('【退款回调】重复回调，已忽略:', callbackData.out_refund_no);
+                return res.json({ code: 'SUCCESS', message: '重复回调，已忽略' });
+            }
+            
+            console.log('【退款回调】退款成功回调数据:', callbackData);
             const {
                 out_refund_no, // 商户退款单号
                 out_trade_no, // 商户订单号
@@ -1307,15 +1316,34 @@ router.post('/refund/notify', async (req, res) => {
                 }
                 
                 await connection.commit();
+                console.log('【退款回调】库存回补完成');
+                
+                // 只更新refund_requests表的处理状态
+                try {
+                    await connection.query(
+                        `UPDATE refund_requests SET 
+                        status = 'SUCCESS',
+                        wx_refund_id = ?,
+                        success_time = ?,
+                        updated_at = NOW()
+                        WHERE out_refund_no = ?`,
+                        [
+                            refund_id,
+                            success_time ? formatWechatTime(success_time) : new Date(),
+                            out_refund_no
+                        ]
+                    );
+                    console.log('【退款回调】退款申请状态更新完成');
+                } catch (updateError) {
+                    console.error('【退款回调】更新退款申请状态失败:', updateError);
+                    // 不影响回调应答，只记录错误
+                }
             } catch (err) {
                 await connection.rollback();
                 throw err;
             } finally {
                 connection.release();
             }
-            // TODO: 更新订单状态
-            // 这里需要根据你的业务逻辑来处理退款状态更新
-            // 例如：更新数据库中的订单状态为已退款
 
             res.json({
                 code: 'SUCCESS',
