@@ -1324,12 +1324,10 @@ router.post('/refund/notify', async (req, res) => {
                         `UPDATE refund_requests SET 
                         status = 'SUCCESS',
                         wx_refund_id = ?,
-                        success_time = ?,
                         updated_at = NOW()
                         WHERE out_refund_no = ?`,
                         [
                             refund_id,
-                            success_time ? formatWechatTime(success_time) : new Date(),
                             out_refund_no
                         ]
                     );
