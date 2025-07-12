@@ -16,6 +16,7 @@ class OcrClient {
         
         // 使用环境变量创建凭证
         let credential = new Credential.default({
+            type: 'access_key',
             accessKeyId: accessKeyId,
             accessKeySecret: accessKeySecret,
         });
