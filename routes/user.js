@@ -37,16 +37,24 @@ router.get('/purchased', authenticateToken, async (req, res) => {
         da.price as digital_price,
         da.description as digital_description,
         da.image_url as digital_image_url,
+        da.artist_id as digital_artist_id,
+        a1.name as digital_artist_name,
+        a1.avatar as digital_artist_avatar,
         oa.title as artwork_title,
         oa.original_price as artwork_original_price,
         oa.discount_price as artwork_discount_price,
         oa.description as artwork_description,
-        oa.image as artwork_image
+        oa.image as artwork_image,
+        oa.artist_id as artwork_artist_id,
+        a2.name as artwork_artist_name,
+        a2.avatar as artwork_artist_avatar
       FROM order_items oi
       LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
       LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
       LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+      LEFT JOIN artists a1 ON da.artist_id = a1.id
       LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+      LEFT JOIN artists a2 ON oa.artist_id = a2.id
       WHERE oi.order_id IN (?)
     `, [orderIds]);
     // 整理返回
@@ -61,6 +69,7 @@ router.get('/purchased', authenticateToken, async (req, res) => {
         product = {
           ...product,
           right_id: item.right_id, // 返回权益原始id
+          artist_id: null,
           title: item.right_title,
           original_price: item.right_original_price,
           description: item.right_description,
@@ -72,6 +81,9 @@ router.get('/purchased', authenticateToken, async (req, res) => {
         product = {
           ...product,
           digital_id: item.digital_artwork_id, // 返回数字艺术品原始id
+          artist_id: item.digital_artist_id,
+          artist_name: item.digital_artist_name || '',
+          artist_avatar: item.digital_artist_avatar ? (item.digital_artist_avatar.startsWith('http') ? item.digital_artist_avatar : `${BASE_URL}${item.digital_artist_avatar}`) : '',
           title: item.digital_title,
           description: item.digital_description,
           images: item.digital_image_url ? [item.digital_image_url] : []
@@ -80,6 +92,9 @@ router.get('/purchased', authenticateToken, async (req, res) => {
         product = {
           ...product,
           artwork_id: item.artwork_id, // 返回实物艺术品原始id
+          artist_id: item.artwork_artist_id,
+          artist_name: item.artwork_artist_name || '',
+          artist_avatar: item.artwork_artist_avatar ? (item.artwork_artist_avatar.startsWith('http') ? item.artwork_artist_avatar : `${BASE_URL}${item.artwork_artist_avatar}`) : '',
           title: item.artwork_title,
           original_price: item.artwork_original_price,
           discount_price: item.artwork_discount_price,
