@@ -60,6 +60,7 @@ router.get('/purchased', authenticateToken, async (req, res) => {
       if (item.type === 'right') {
         product = {
           ...product,
+          right_id: item.right_id, // 返回权益原始id
           title: item.right_title,
           original_price: item.right_original_price,
           description: item.right_description,
@@ -70,6 +71,7 @@ router.get('/purchased', authenticateToken, async (req, res) => {
       } else if (item.type === 'digital') {
         product = {
           ...product,
+          digital_id: item.digital_artwork_id, // 返回数字艺术品原始id
           title: item.digital_title,
           description: item.digital_description,
           images: item.digital_image_url ? [item.digital_image_url] : []
@@ -77,6 +79,7 @@ router.get('/purchased', authenticateToken, async (req, res) => {
       } else if (item.type === 'artwork') {
         product = {
           ...product,
+          artwork_id: item.artwork_id, // 返回实物艺术品原始id
           title: item.artwork_title,
           original_price: item.artwork_original_price,
           discount_price: item.artwork_discount_price,
