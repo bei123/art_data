@@ -1,5 +1,8 @@
+const express = require('express');
+const router = express.Router();
+const db = require('../db');
 // 搜索接口
-app.get('/api/search', async (req, res) => {
+router.get('/', async (req, res) => {
     try {
       const { keyword, type } = req.query;
       // 输入验证
