@@ -89,10 +89,10 @@ function formatWechatTime(isoString) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-// 测试路由 - 验证路由是否正确注册
-router.get('/test', (req, res) => {
-    res.json({ message: '退款路由正常工作', timestamp: new Date().toISOString() });
-});
+// // 测试路由 - 验证路由是否正确注册
+// router.get('/test', (req, res) => {
+//     res.json({ message: '退款路由正常工作', timestamp: new Date().toISOString() });
+// });
 
 // 统一下单接口
 router.post('/unifiedorder', async (req, res) => {
