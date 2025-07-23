@@ -98,3 +98,4 @@ router.get('/', async (req, res) => {
       res.status(500).json({ error: '搜索服务暂时不可用，请稍后再试' });
     }
   });
+module.exports = router;
