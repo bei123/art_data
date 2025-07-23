@@ -68,13 +68,13 @@ router.get('/', async (req, res) => {
           avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : ''
         }));
       } else if (type === 'original_artwork') {
-        // 查询作品及其艺术家信息
+        // 查询作品及其艺术家信息，支持通过艺术家名字模糊搜索
         const [artworkRows] = await db.query(
           `SELECT oa.id, oa.title, oa.image, oa.description, oa.artist_id, a.name as artist_name, a.avatar as artist_avatar, 'original_artwork' as type 
            FROM original_artworks oa
            LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE oa.title LIKE ? OR oa.description LIKE ?`,
-          [searchTerm, searchTerm]
+           WHERE oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?`,
+          [searchTerm, searchTerm, searchTerm]
         );
         results = artworkRows.map(item => ({
           ...item,
