@@ -19,7 +19,7 @@ const WX_PAY_CONFIG = {
     mchId: process.env.WX_PAY_MCH_ID || '1360639602', // 商户号
     key: process.env.WX_PAY_KEY, // API密钥
     serialNo: process.env.WX_PAY_SERIAL_NO || '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
-    privateKey: fs.readFileSync(path.join(__dirname, '../apiclient_key.pem')), // 商户私钥
+    privateKey: fs.readFileSync(path.join(__dirname, '../ssl/apiclient_key.pem')), // 商户私钥
     notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
     notify_url:'https://api.wx.2000gallery.art:2000/api/wx/pay/refund/notify', // 退款回调地址
 

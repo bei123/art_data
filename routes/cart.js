@@ -130,8 +130,7 @@ router.get('/', authenticateToken, async (req, res) => {
           type: 'digital',
           ...digital,
           image: digital.image_url || '',
-          artist_name: artist.name || '',
-          artist_avatar: artist.avatar || ''
+          artist_name: artist.name || ''
         };
       }
       if (item.type === 'artwork' && artworksMap[item.artwork_id]) {

@@ -128,8 +128,8 @@ if (!fs.existsSync('uploads')) {
 
 // SSL证书配置
 const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, 'api.wx.2000gallery.art.key')),
-  cert: fs.readFileSync(path.join(__dirname, 'api.wx.2000gallery.art.pem'))
+  key: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.key')),
+  cert: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.pem'))
 };
 
 // 添加基础URL配置
