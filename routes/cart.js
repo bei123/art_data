@@ -74,12 +74,16 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // 4. 批量查询数字艺术品信息
     let digitalsMap = {};
+    let digitalArtistIds = [];
     if (digitalIds.length > 0) {
       const [digitals] = await db.query(
-        'SELECT id, title, price, image_url, description FROM digital_artworks WHERE id IN (?)',
+        'SELECT id, title, price, image_url, description, artist_id FROM digital_artworks WHERE id IN (?)',
         [digitalIds]
       );
-      digitals.forEach(d => { digitalsMap[d.id] = d; });
+      digitals.forEach(d => {
+        digitalsMap[d.id] = d;
+        if (d.artist_id) digitalArtistIds.push(d.artist_id);
+      });
     }
 
     // 5. 批量查询艺术品信息
@@ -98,10 +102,11 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // 6. 批量查询艺术家信息
     let artistsMap = {};
-    if (artistIds.length > 0) {
+    let allArtistIds = Array.from(new Set([...artistIds, ...digitalArtistIds]));
+    if (allArtistIds.length > 0) {
       const [artists] = await db.query(
         'SELECT id, name, avatar FROM artists WHERE id IN (?)',
-        [artistIds]
+        [allArtistIds]
       );
       artists.forEach(a => { artistsMap[a.id] = a; });
     }
@@ -117,12 +122,16 @@ router.get('/', authenticateToken, async (req, res) => {
         };
       }
       if (item.type === 'digital' && digitalsMap[item.digital_artwork_id]) {
+        const digital = digitalsMap[item.digital_artwork_id];
+        const artist = artistsMap[digital.artist_id] || {};
         return {
           cart_item_id: item.id,
           ...item,
           type: 'digital',
-          ...digitalsMap[item.digital_artwork_id],
-          image: digitalsMap[item.digital_artwork_id].image_url || ''
+          ...digital,
+          image: digital.image_url || '',
+          artist_name: artist.name || '',
+          artist_avatar: artist.avatar || ''
         };
       }
       if (item.type === 'artwork' && artworksMap[item.artwork_id]) {
