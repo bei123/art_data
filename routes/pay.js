@@ -1331,9 +1331,14 @@ router.post('/refund/notify', async (req, res) => {
                             out_refund_no
                         ]
                     );
-                    console.log('【退款回调】退款申请状态更新完成');
+                    // 新增：更新订单状态为已退款
+                    await connection.query(
+                        `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款', updated_at = NOW() WHERE out_trade_no = ?`,
+                        [out_trade_no]
+                    );
+                    console.log('【退款回调】退款申请状态和订单状态更新完成');
                 } catch (updateError) {
-                    console.error('【退款回调】更新退款申请状态失败:', updateError);
+                    console.error('【退款回调】更新退款申请或订单状态失败:', updateError);
                     // 不影响回调应答，只记录错误
                 }
             } catch (err) {
