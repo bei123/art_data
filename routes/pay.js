@@ -690,7 +690,17 @@ router.post('/notify', async (req, res) => {
             const connection = await db.getConnection();
             await connection.beginTransaction();
             try {
-                // 更新订单状态
+                // 更新订单状态前先判断是否已退款
+                const [orders] = await connection.query(
+                    'SELECT trade_state FROM orders WHERE out_trade_no = ?',
+                    [out_trade_no]
+                );
+                if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
+                    console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
+                    await connection.commit();
+                    return res.json({ code: 'SUCCESS', message: '订单已退款，不再覆盖' });
+                }
+                // 只有不是REFUND才更新为SUCCESS
                 await connection.query(
                     `UPDATE orders SET 
               transaction_id = ?,
