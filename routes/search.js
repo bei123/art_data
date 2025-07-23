@@ -68,15 +68,18 @@ router.get('/', async (req, res) => {
           avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : ''
         }));
       } else if (type === 'original_artwork') {
+        // 查询作品及其艺术家信息
         const [artworkRows] = await db.query(
-          `SELECT id, title, image, description, 'original_artwork' as type 
-           FROM original_artworks 
-           WHERE title LIKE ? OR description LIKE ?`,
+          `SELECT oa.id, oa.title, oa.image, oa.description, oa.artist_id, a.name as artist_name, a.avatar as artist_avatar, 'original_artwork' as type 
+           FROM original_artworks oa
+           LEFT JOIN artists a ON oa.artist_id = a.id
+           WHERE oa.title LIKE ? OR oa.description LIKE ?`,
           [searchTerm, searchTerm]
         );
         results = artworkRows.map(item => ({
           ...item,
-          image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
+          image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
+          artist_avatar: item.artist_avatar ? (item.artist_avatar.startsWith('http') ? item.artist_avatar : `${BASE_URL}${item.artist_avatar}`) : ''
         }));
       } else if (type === 'digital_artwork') {
         const [digitalRows] = await db.query(
