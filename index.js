@@ -341,6 +341,9 @@ app.use('/api/rights', rightsRouter);
 // 使用上传路由
 app.use('/api/upload', uploadRouter);
 
+// 使用用户路由
+app.use('/api/user', userRouter);
+
 // 全局错误处理中间件
 app.use((err, req, res, next) => {
   console.error('未处理的错误:', err);
