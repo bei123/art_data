@@ -26,6 +26,7 @@ const digitalArtworksRouter = require('./routes/digital-artworks');
 const physicalCategoriesRouter = require('./routes/physical-categories');
 const rightsRouter = require('./routes/rights');
 const uploadRouter = require('./routes/upload');
+const userRouter = require('./routes/user');
 
 const app = express();
 const port = 2000;
