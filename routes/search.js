@@ -82,15 +82,18 @@ router.get('/', async (req, res) => {
           artist_avatar: item.artist_avatar ? (item.artist_avatar.startsWith('http') ? item.artist_avatar : `${BASE_URL}${item.artist_avatar}`) : ''
         }));
       } else if (type === 'digital_artwork') {
+        // 查询数字艺术品及其艺术家信息，支持通过艺术家名字模糊搜索
         const [digitalRows] = await db.query(
-          `SELECT id, title, image_url as image, description, 'digital_artwork' as type 
-           FROM digital_artworks 
-           WHERE title LIKE ? OR description LIKE ?`,
-          [searchTerm, searchTerm]
+          `SELECT da.id, da.title, da.image_url as image, da.description, da.artist_id, a.name as artist_name, a.avatar as artist_avatar, 'digital_artwork' as type 
+           FROM digital_artworks da
+           LEFT JOIN artists a ON da.artist_id = a.id
+           WHERE da.title LIKE ? OR da.description LIKE ? OR a.name LIKE ?`,
+          [searchTerm, searchTerm, searchTerm]
         );
         results = digitalRows.map(item => ({
           ...item,
-          image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
+          image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
+          artist_avatar: item.artist_avatar ? (item.artist_avatar.startsWith('http') ? item.artist_avatar : `${BASE_URL}${item.artist_avatar}`) : ''
         }));
       } else {
         return res.status(400).json({ error: '不支持的type类型' });
