@@ -186,13 +186,9 @@
         <el-divider>收藏信息</el-divider>
 
         <el-row :gutter="20">
+          <!-- 移除收藏位置表单项 -->
           <el-col :span="12">
-            <el-form-item label="收藏位置">
-              <el-input v-model="form.collection_location" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="收藏编号">
+            <el-form-item label="证书编号">
               <el-input v-model="form.collection_number" />
             </el-form-item>
           </el-col>
@@ -249,7 +245,6 @@ const form = ref({
   stock: 0,
   is_on_sale: 1,
   description: '',
-  collection_location: '',
   collection_number: '',
   collection_size: '',
   collection_material: ''
@@ -506,7 +501,7 @@ const showAddDialog = () => {
     stock: 0,
     sales: 0,
     is_on_sale: 1,
-    collection_location: '',
+    // 移除 collection_location 字段
     collection_number: '',
     collection_size: '',
     collection_material: ''
@@ -542,7 +537,7 @@ const editArtwork = async (row) => {
       stock: Number(detail.stock) || 0,
       sales: Number(detail.sales) || 0,
       is_on_sale: Number(detail.is_on_sale) || 1,
-      collection_location: detail.collection?.location || '',
+      // 移除 collection_location 字段
       collection_number: detail.collection?.number || '',
       collection_size: detail.collection?.size || '',
       collection_material: detail.collection?.material || ''
@@ -611,7 +606,7 @@ const submitForm = async () => {
       stock: Number(form.value.stock),
       sales: Number(form.value.sales),
       is_on_sale: Number(form.value.is_on_sale),
-      collection_location: form.value.collection_location,
+      // 移除 collection_location 字段
       collection_number: form.value.collection_number,
       collection_size: form.value.collection_size,
       collection_material: form.value.collection_material
