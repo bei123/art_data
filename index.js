@@ -27,6 +27,7 @@ const physicalCategoriesRouter = require('./routes/physical-categories');
 const rightsRouter = require('./routes/rights');
 const uploadRouter = require('./routes/upload');
 const userRouter = require('./routes/user');
+const searchRouter = require('./routes/search');
 
 const app = express();
 const port = 2000;
@@ -188,76 +189,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// 搜索接口
-app.get('/api/search', async (req, res) => {
-  try {
-    const { keyword } = req.query;
-    
-    // 输入验证
-    if (!keyword || typeof keyword !== 'string') {
-      return res.status(400).json({ error: '请输入有效的搜索关键词' });
-    }
-    
-    // 清理和验证关键词
-    const cleanKeyword = keyword.trim();
-    if (cleanKeyword.length < 1 || cleanKeyword.length > 100) {
-      return res.status(400).json({ error: '搜索关键词长度必须在1-100个字符之间' });
-    }
-    
-    // 检查是否包含危险字符
-    const dangerousChars = /[<>'"&]/;
-    if (dangerousChars.test(cleanKeyword)) {
-      return res.status(400).json({ error: '搜索关键词包含无效字符' });
-    }
 
-    const searchTerm = `%${cleanKeyword}%`;
-
-    // 搜索艺术家
-    const [artistRows] = await db.query(
-      `SELECT id, name, avatar, description, 'artist' as type 
-       FROM artists 
-       WHERE name LIKE ? OR description LIKE ?`,
-      [searchTerm, searchTerm]
-    );
-
-    // 搜索原创作品
-    const [artworkRows] = await db.query(
-      `SELECT id, title, image, description, 'original_artwork' as type 
-       FROM original_artworks 
-       WHERE title LIKE ? OR description LIKE ?`,
-      [searchTerm, searchTerm]
-    );
-
-    // 搜索数字作品
-    const [digitalRows] = await db.query(
-      `SELECT id, title, image_url as image, description, 'digital_artwork' as type 
-       FROM digital_artworks 
-       WHERE title LIKE ? OR description LIKE ?`,
-      [searchTerm, searchTerm]
-    );
-
-    // 合并结果并添加完整URL
-    const results = [
-      ...artistRows.map(item => ({
-        ...item,
-        avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : ''
-      })),
-      ...artworkRows.map(item => ({
-        ...item,
-        image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
-      })),
-      ...digitalRows.map(item => ({
-        ...item,
-        image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : ''
-      }))
-    ];
-
-    res.json(results);
-  } catch (error) {
-    console.error('搜索失败:', error);
-    res.status(500).json({ error: '搜索服务暂时不可用，请稍后再试' });
-  }
-});
 
 // 认证相关路由
 app.post('/api/auth/register',
@@ -344,6 +276,9 @@ app.use('/api/upload', uploadRouter);
 
 // 使用用户路由
 app.use('/api/user', userRouter);
+
+// 使用搜索路由
+app.use('/api/search', searchRouter);
 
 // 全局错误处理中间件
 app.use((err, req, res, next) => {
