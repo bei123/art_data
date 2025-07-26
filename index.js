@@ -28,6 +28,11 @@ const rightsRouter = require('./routes/rights');
 const uploadRouter = require('./routes/upload');
 const userRouter = require('./routes/user');
 const searchRouter = require('./routes/search');
+const externalApiRouter = require('./routes/external-api');
+const issuanceRouter = require('./routes/issuance');
+const assetTransferRouter = require('./routes/asset-transfer');
+const assetVerifyRouter = require('./routes/asset-verify');
+const transactionRouter = require('./routes/transaction');
 
 const app = express();
 const port = 2000;
@@ -279,6 +284,21 @@ app.use('/api/user', userRouter);
 
 // 使用搜索路由
 app.use('/api/search', searchRouter);
+
+// 使用外部API路由
+app.use('/api/external', externalApiRouter);
+
+// 使用发行铸造路由
+app.use('/api/issuance', issuanceRouter);
+
+// 使用资产过户路由
+app.use('/api/asset-transfer', assetTransferRouter);
+
+// 使用资产查证路由
+app.use('/api/asset-verify', assetVerifyRouter);
+
+// 使用交易记录路由
+app.use('/api/transaction', transactionRouter);
 
 // 全局错误处理中间件
 app.use((err, req, res, next) => {
