@@ -543,6 +543,42 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
     }
 });
 
+// 获取用户完整手机号接口（仅用于实名认证）
+router.get('/userPhone', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    try {
+        // 查询用户手机号
+        const [rows] = await db.query(
+            `SELECT phone FROM wx_users WHERE id = ?`,
+            [payload.userId]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+        
+        res.json({ 
+            phone: rows[0].phone,
+            message: '获取手机号成功'
+        });
+    } catch (err) {
+        console.error('获取手机号失败:', err);
+        res.status(500).json({ error: '获取手机号服务暂时不可用', detail: err.message });
+    }
+});
+
 // 查询用户实名状态接口
 router.get('/userVerificationStatus', async (req, res) => {
     // 解析 token
