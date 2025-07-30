@@ -178,7 +178,7 @@ router.post('/login', async (req, res) => {
                 openid: user.openid,
                 nickname: user.nickname,
                 avatar: user.avatar,
-                phone: user.phone,
+                phone: user.phone ? user.phone.substring(0, 3) + '****' + user.phone.substring(user.phone.length - 4) : null,
                 created_at: user.created_at,
                 updated_at: user.updated_at
             }
@@ -580,7 +580,7 @@ router.get('/userVerificationStatus', async (req, res) => {
             res.json({ 
                 isVerified: record.is_verified === 1,
                 hasRecord: true,
-                name: record.name,
+                name: record.name ? record.name.substring(0, 1) + '***' : null,
                 idCardNo: record.id_card_no ? record.id_card_no.substring(0, 6) + '****' + record.id_card_no.substring(record.id_card_no.length - 4) : null,
                 verifiedAt: record.created_at,
                 message: record.is_verified === 1 ? '用户已完成实名认证' : '用户实名认证待审核'
