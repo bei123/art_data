@@ -313,7 +313,12 @@ router.get('/userInfo', async (req, res) => {
             return res.status(404).json({ error: '用户不存在' });
         }
         
-        res.json(users[0]);
+        const user = users[0];
+        // 对敏感信息进行脱敏处理
+        res.json({
+            ...user,
+            phone: user.phone ? user.phone.substring(0, 3) + '****' + user.phone.substring(user.phone.length - 4) : null
+        });
     } catch (err) {
         console.error('获取用户信息失败:', err);
         res.status(500).json({ error: '获取用户信息服务暂时不可用' });
