@@ -58,10 +58,14 @@
             <el-table-column prop="title" label="标题" />
             <el-table-column label="艺术家">
               <template #default="{ row }">
-                {{ row.artist.name }}
+                {{ row.artist?.name || '未知艺术家' }}
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" label="添加时间" />
+            <el-table-column prop="created_at" label="添加时间">
+              <template #default="{ row }">
+                {{ formatDate(row.created_at) }}
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-col>
@@ -74,7 +78,16 @@
           </template>
           <el-table :data="recentDigitalArtworks" style="width: 100%">
             <el-table-column prop="title" label="标题" />
-            <el-table-column prop="created_at" label="添加时间" />
+            <el-table-column label="艺术家">
+              <template #default="{ row }">
+                {{ row.artist?.name || '未知艺术家' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="添加时间">
+              <template #default="{ row }">
+                {{ formatDate(row.created_at) }}
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-col>
@@ -95,13 +108,27 @@ const stats = ref({
 const recentOriginalArtworks = ref([])
 const recentDigitalArtworks = ref([])
 
+// 格式化日期
+const formatDate = (dateString) => {
+  if (!dateString) return ''
+  const date = new Date(dateString)
+  return date.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 const fetchStats = async () => {
   try {
-    const [originalRes, digitalRes, categoriesRes] = await Promise.all([
-      axios.get('/original-artworks'),
-      axios.get('/digital-artworks'),
-      axios.get('/physical-categories')
-    ])
+    // 获取原作艺术品数据（分页格式）
+    const originalRes = await axios.get('/original-artworks?pageSize=1000')
+    // 获取数字艺术品数据（使用分页参数获取所有数据）
+    const digitalRes = await axios.get('/digital-artworks?pageSize=1000')
+    // 获取实物分类数据（分页格式）
+    const categoriesRes = await axios.get('/physical-categories?limit=1000')
     
     console.log('Dashboard数据:', {
       original: originalRes,
@@ -109,10 +136,29 @@ const fetchStats = async () => {
       categories: categoriesRes
     })
 
-    // 确保响应数据是数组
-    const originalArtworks = Array.isArray(originalRes) ? originalRes : []
-    const digitalArtworks = Array.isArray(digitalRes) ? digitalRes : []
-    const categories = Array.isArray(categoriesRes) ? categoriesRes : []
+    // 处理原作艺术品数据（分页格式）
+    let originalArtworks = []
+    if (originalRes && originalRes.data && Array.isArray(originalRes.data)) {
+      originalArtworks = originalRes.data
+    } else if (Array.isArray(originalRes)) {
+      // 兼容旧格式
+      originalArtworks = originalRes
+    }
+
+    // 处理数字艺术品数据（直接数组格式）
+    let digitalArtworks = []
+    if (Array.isArray(digitalRes)) {
+      digitalArtworks = digitalRes
+    }
+
+    // 处理实物分类数据（分页格式）
+    let categories = []
+    if (categoriesRes && categoriesRes.data && Array.isArray(categoriesRes.data)) {
+      categories = categoriesRes.data
+    } else if (Array.isArray(categoriesRes)) {
+      // 兼容旧格式
+      categories = categoriesRes
+    }
     
     stats.value = {
       originalArtworks: originalArtworks.length,
@@ -120,8 +166,14 @@ const fetchStats = async () => {
       physicalCategories: categories.length
     }
     
-    recentOriginalArtworks.value = originalArtworks.slice(-5).reverse()
-    recentDigitalArtworks.value = digitalArtworks.slice(-5).reverse()
+    // 获取最近添加的作品（按创建时间排序）
+    recentOriginalArtworks.value = originalArtworks
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 5)
+    
+    recentDigitalArtworks.value = digitalArtworks
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 5)
   } catch (error) {
     console.error('获取统计数据失败:', error)
     stats.value = {

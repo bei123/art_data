@@ -109,17 +109,27 @@ const form = ref({
 const fetchCategories = async () => {
   try {
     const response = await axios.get('/physical-categories')
-    console.log('物理分类数据:', response.data)
-    if (response && Array.isArray(response.data)) {
-      categories.value = response.data.map(category => ({
-        ...category,
-        image: getImageUrl(category.image),
-        icon: getImageUrl(category.icon)
-      }))
+    console.log('物理分类数据:', response)
+    
+    // 处理分页格式的响应数据
+    let categoriesData = []
+    if (response && response.data && Array.isArray(response.data)) {
+      // 新格式：分页响应
+      categoriesData = response.data
+    } else if (response && Array.isArray(response)) {
+      // 旧格式：直接数组
+      categoriesData = response
     } else {
-      console.error('返回数据格式不正确:', response.data)
+      console.error('返回数据格式不正确:', response)
       categories.value = []
+      return
     }
+    
+    categories.value = categoriesData.map(category => ({
+      ...category,
+      image: getImageUrl(category.image),
+      icon: getImageUrl(category.icon)
+    }))
   } catch (error) {
     console.error('获取分类失败:', error)
     ElMessage.error('获取数据失败')
