@@ -53,6 +53,19 @@
       </el-table-column>
     </el-table>
 
+    <!-- 分页组件 -->
+    <div class="pagination-container">
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.pageSize"
+        :page-sizes="[10, 20, 50, 100]"
+        :total="pagination.total"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+      />
+    </div>
+
     <!-- 添加/编辑对话框 -->
     <el-dialog 
       :title="dialogType === 'add' ? '添加艺术品' : '编辑艺术品'" 
@@ -233,6 +246,11 @@ const artworks = ref([])
 const dialogVisible = ref(false)
 const dialogType = ref('add')
 const loading = ref(false)
+const pagination = ref({
+  page: 1,
+  pageSize: 20,
+  total: 0
+})
 const form = ref({
   title: '',
   image: '',
@@ -416,15 +434,27 @@ const fetchArtworks = async () => {
   loading.value = true
   try {
     console.log('Fetching artworks from:', `${baseUrl}/original-artworks`)
-    const response = await axios.get('/original-artworks')
+    const response = await axios.get('/original-artworks', {
+      params: {
+        page: pagination.value.page,
+        pageSize: pagination.value.pageSize
+      }
+    })
     console.log('API Response:', response)
     console.log('typeof response:', typeof response)
     console.log('Array.isArray(response):', Array.isArray(response))
     console.log('response:', response)
 
-    let data = response
+    let data = response.data || response
+    let paginationInfo = response.pagination
+
     if (Array.isArray(data)) {
-      // 直接是数组
+      // 直接是数组，兼容旧格式
+      paginationInfo = {
+        page: pagination.value.page,
+        pageSize: pagination.value.pageSize,
+        total: data.length * pagination.value.page
+      }
     } else if (data && Array.isArray(data.data)) {
       // 被包裹在 data 字段下
       data = data.data
@@ -461,6 +491,13 @@ const fetchArtworks = async () => {
 
       return artwork
     })
+
+    // 更新分页信息
+    if (paginationInfo) {
+      pagination.value.total = paginationInfo.total || 0
+      pagination.value.page = paginationInfo.page || 1
+      pagination.value.pageSize = paginationInfo.pageSize || 20
+    }
   } catch (error) {
     console.error('Error fetching artworks:', error)
     if (error.response) {
@@ -564,6 +601,8 @@ const deleteArtwork = async (row) => {
     const response = await axios.delete(`/original-artworks/${row.id}`)
     console.log('Delete response:', response.data)
     ElMessage.success('删除成功')
+    // 删除后重置到第一页
+    pagination.value.page = 1
     fetchArtworks()
   } catch (error) {
     if (error !== 'cancel') {
@@ -619,6 +658,8 @@ const submitForm = async () => {
       const response = await axios.post('/original-artworks', submitData)
       console.log('Add response:', response.data)
       ElMessage.success('添加成功')
+      // 添加后重置到第一页
+      pagination.value.page = 1
     } else {
       if (!form.value.id) {
         ElMessage.error('未获取到作品ID，无法保存')
@@ -681,8 +722,26 @@ const handleEditorCreated = (editor) => {
   }
 }
 
+// 分页事件处理
+const handleSizeChange = (newSize) => {
+  pagination.value.pageSize = newSize
+  pagination.value.page = 1 // 重置到第一页
+  fetchArtworks()
+}
+
+const handleCurrentChange = (newPage) => {
+  pagination.value.page = newPage
+  fetchArtworks()
+}
+
 onMounted(() => {
   fetchArtists()
+  // 初始化分页参数
+  pagination.value = {
+    page: 1,
+    pageSize: 20,
+    total: 0
+  }
   checkLoginStatus() && fetchArtworks()
 })
 
@@ -701,6 +760,15 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.pagination-container {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+  background-color: #f5f5f5;
+  border-radius: 4px;
 }
 
 .avatar-uploader {

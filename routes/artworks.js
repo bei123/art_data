@@ -53,8 +53,31 @@ router.get('/', async (req, res) => {
 
     const [rows] = await db.query(sql, params);
     if (!rows || !Array.isArray(rows)) {
-      return res.json([]);
+      return res.json({
+        data: [],
+        pagination: {
+          page: pageNum,
+          pageSize: sizeNum,
+          total: 0
+        }
+      });
     }
+
+    // 查询总数
+    let countSql = `
+      SELECT COUNT(*) as total
+      FROM original_artworks oa 
+      LEFT JOIN artists a ON oa.artist_id = a.id
+    `;
+    const countParams = [];
+    
+    if (artist_id) {
+      countSql += ' WHERE oa.artist_id = ?';
+      countParams.push(parseInt(artist_id));
+    }
+    
+    const [countRows] = await db.query(countSql, countParams);
+    const total = countRows[0].total;
 
     // 一次查出所有图片，避免N+1
     const artworkIds = rows.map(r => r.id);
@@ -91,9 +114,18 @@ router.get('/', async (req, res) => {
       };
     });
 
-    res.json(artworksWithFullUrls);
+    const result = {
+      data: artworksWithFullUrls,
+      pagination: {
+        page: pageNum,
+        pageSize: sizeNum,
+        total: total
+      }
+    };
+
+    res.json(result);
     // 写入redis缓存，7天过期
-    await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithFullUrls));
+    await redisClient.setEx(cacheKey, 604800, JSON.stringify(result));
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
     res.status(500).json({ error: '获取艺术品列表服务暂时不可用' });
