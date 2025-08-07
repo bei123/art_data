@@ -128,15 +128,6 @@ router.get('/', async (req, res) => {
     res.json(result);
     // 写入redis缓存，7天过期
     await redisClient.setEx(cacheKey, 604800, JSON.stringify(result));
-    
-    // 调试信息
-    console.log('API Response:', {
-      page: pageNum,
-      pageSize: sizeNum,
-      total: total,
-      dataLength: artworksWithFullUrls.length,
-      cacheKey: cacheKey
-    });
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
     res.status(500).json({ error: '获取艺术品列表服务暂时不可用' });

@@ -1,17 +1,61 @@
 <template>
   <div class="artworks-container">
-    <div class="header">
-      <h2>艺术品管理</h2>
-      <div class="header-buttons">
-        <el-button type="info" @click="refreshData" :loading="loading">刷新数据</el-button>
-        <el-button type="primary" @click="showAddDialog">添加艺术品</el-button>
-      </div>
-    </div>
+         <div class="header">
+       <h2>艺术品管理</h2>
+       <div class="header-buttons">
+         <el-button type="success" @click="toggleLazyMode">
+           {{ isLazyMode ? '分页模式' : '懒加载模式' }}
+         </el-button>
+         <el-button type="info" @click="refreshData" :loading="loading">刷新数据</el-button>
+         <el-button type="primary" @click="showAddDialog">添加艺术品</el-button>
+       </div>
+     </div>
+
+     <!-- 搜索区域 -->
+     <div class="search-container">
+       <el-row :gutter="20">
+         <el-col :span="8">
+           <el-input
+             v-model="searchKeyword"
+             placeholder="搜索艺术品标题、描述或艺术家名称"
+             clearable
+             @keyup.enter="handleSearch"
+             @clear="handleClearSearch"
+           >
+             <template #prefix>
+               <el-icon><Search /></el-icon>
+             </template>
+           </el-input>
+         </el-col>
+         <el-col :span="4">
+           <el-button type="primary" @click="handleSearch" :loading="loading">
+             搜索
+           </el-button>
+         </el-col>
+         <el-col :span="4">
+           <el-button @click="handleClearSearch" v-if="searchKeyword">
+             清除搜索
+           </el-button>
+         </el-col>
+       </el-row>
+       
+       <!-- 搜索结果提示 -->
+       <div v-if="isSearchMode && !loading" class="search-result-tip">
+         <el-alert
+           :title="`搜索'${searchKeyword}'的结果：共找到 ${pagination.total} 条记录`"
+           type="info"
+           :closable="false"
+           show-icon
+         />
+       </div>
+     </div>
 
     <el-table 
       v-loading="loading"
       :data="artworks" 
       style="width: 100%"
+      :height="isLazyMode ? '600' : 'auto'"
+      @scroll="isLazyMode ? handleTableScroll : undefined"
     >
       <el-table-column prop="title" label="标题" />
       <el-table-column label="图片" width="120">
@@ -56,29 +100,65 @@
       </el-table-column>
     </el-table>
 
-    <!-- 调试信息 -->
-    <div class="debug-info" style="margin: 20px 0; padding: 10px; background: #f0f0f0; border-radius: 4px;">
-      <h4>调试信息:</h4>
-      <p>当前页: {{ pagination.page }}</p>
-      <p>每页数量: {{ pagination.pageSize }}</p>
-      <p>总数: {{ pagination.total }}</p>
-      <p>当前数据量: {{ artworks.length }}</p>
-    </div>
+    <!-- 懒加载模式下的组件 -->
+    <template v-if="isLazyMode">
+      <!-- 加载更多按钮 -->
+      <div class="load-more-container" v-if="hasMoreData">
+        <el-button 
+          type="primary" 
+          :loading="isLoadingMore" 
+          @click="loadMoreData"
+          style="width: 200px; margin: 20px auto; display: block;"
+        >
+          {{ isLoadingMore ? '加载中...' : '加载更多' }}
+        </el-button>
+      </div>
 
-    <!-- 分页组件 -->
-    <div class="pagination-container">
-      <el-pagination
-        :current-page="pagination.page"
-        :page-size="pagination.pageSize"
-        :page-sizes="[10, 20, 50, 100]"
-        :total="pagination.total"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-        @update:current-page="(val) => pagination.page = val"
-        @update:page-size="(val) => pagination.pageSize = val"
-      />
-    </div>
+      <!-- 没有更多数据提示 -->
+      <div class="no-more-data" v-if="!hasMoreData && artworks.length > 0">
+        <el-divider>
+          <span style="color: #999; font-size: 14px;">没有更多数据了</span>
+        </el-divider>
+      </div>
+
+             <!-- 懒加载模式下的分页信息 -->
+       <div class="pagination-container">
+         <div class="pagination-info">
+           <span v-if="isSearchMode">搜索结果：</span>
+           <span>已加载 {{ artworks.length }} 条数据</span>
+           <span v-if="pagination.total > 0">，共 {{ pagination.total }} 条</span>
+         </div>
+        <el-pagination
+          :current-page="pagination.page"
+          :page-size="pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="pagination.total"
+          layout="sizes"
+          @size-change="handleSizeChange"
+          @update:page-size="(val) => pagination.pageSize = val"
+        />
+      </div>
+    </template>
+
+         <!-- 传统分页模式下的组件 -->
+     <template v-else>
+       <div class="pagination-container">
+         <div class="pagination-info" v-if="isSearchMode">
+           <span>搜索结果：共 {{ pagination.total }} 条</span>
+         </div>
+         <el-pagination
+           :current-page="pagination.page"
+           :page-size="pagination.pageSize"
+           :page-sizes="[10, 20, 50, 100]"
+           :total="pagination.total"
+           layout="total, sizes, prev, pager, next, jumper"
+           @size-change="handleSizeChange"
+           @current-change="handleCurrentChange"
+           @update:current-page="(val) => pagination.page = val"
+           @update:page-size="(val) => pagination.pageSize = val"
+         />
+       </div>
+     </template>
 
     <!-- 添加/编辑对话框 -->
     <el-dialog 
@@ -247,7 +327,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -265,6 +345,15 @@ const pagination = ref({
   pageSize: 20,
   total: 0
 })
+
+// 懒加载相关状态
+const isLoadingMore = ref(false)
+const hasMoreData = ref(true)
+const isLazyMode = ref(true) // 默认使用懒加载模式
+
+// 搜索相关状态
+const searchKeyword = ref('')
+const isSearchMode = ref(false)
 const form = ref({
   title: '',
   image: '',
@@ -328,7 +417,7 @@ const editorConfig = {
             headers: token ? { Authorization: `Bearer ${token}` } : {}
           });
           const result = await resp.json();
-          console.log('图片上传返回：', result);
+
 
           // 5. 兼容多种返回格式
           let url = '';
@@ -370,7 +459,7 @@ const editorConfig = {
             headers: token ? { Authorization: `Bearer ${token}` } : {}
           });
           const result = await resp.json();
-          console.log('视频上传返回：', result);
+
 
           // 4. 兼容多种返回格式
           let url = '';
@@ -401,16 +490,16 @@ const editorConfig = {
       maxNumberOfFiles: 1,
       // 上传进度、成功、失败、错误回调
       onProgress(progress) {
-        console.log('视频上传进度', progress);
+        // 上传进度处理
       },
       onSuccess(file, res) {
-        console.log('视频上传成功', file, res);
+        // 上传成功处理
       },
       onFailed(file, res) {
-        console.log('视频上传失败', file, res);
+        // 上传失败处理
       },
       onError(file, err, res) {
-        console.log('视频上传出错', file, err, res);
+        // 上传错误处理
       }
     }
   }
@@ -447,48 +536,29 @@ const fetchArtworks = async () => {
   
   loading.value = true
   try {
-    console.log('=== 开始获取艺术品列表 ===')
-    console.log('当前分页参数:', {
-      page: pagination.value.page,
-      pageSize: pagination.value.pageSize
-    })
-    
     const response = await axios.get('/original-artworks', {
       params: {
         page: pagination.value.page,
         pageSize: pagination.value.pageSize
       }
     })
-    
-    console.log('=== API 响应 ===')
-    console.log('完整响应:', response)
-    console.log('响应类型:', typeof response)
-    console.log('是否为数组:', Array.isArray(response))
-    console.log('是否有 data 字段:', !!response.data)
-    console.log('是否有 pagination 字段:', !!response.pagination)
 
     let data = response.data || response
     let paginationInfo = response.pagination
 
     // 检查是否是新的分页格式
     if (response.data && response.pagination) {
-      console.log('使用新分页格式')
       data = response.data
       paginationInfo = response.pagination
     } else if (Array.isArray(data)) {
-      console.log('使用旧格式（数组）')
       paginationInfo = {
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
         total: data.length // 旧格式无法获取总数，暂时使用当前页数据量
       }
     } else {
-      console.error('无效的响应格式:', response)
       throw new Error('无效的响应数据')
     }
-
-    console.log('处理后的数据:', data)
-    console.log('处理后的分页信息:', paginationInfo)
 
     // 处理数据
     artworks.value = data.map(item => {
@@ -519,21 +589,16 @@ const fetchArtworks = async () => {
       return artwork
     })
 
-    console.log('处理后的艺术品数据:', artworks.value)
-
     // 更新分页信息
     if (paginationInfo) {
-      const oldPagination = { ...pagination.value }
       pagination.value.total = paginationInfo.total || 0
       pagination.value.page = paginationInfo.page || 1
       pagination.value.pageSize = paginationInfo.pageSize || 20
-      console.log('分页信息更新:', {
-        old: oldPagination,
-        new: pagination.value
-      })
+      
+      // 检查是否还有更多数据
+      const currentTotal = artworks.value.length
+      hasMoreData.value = currentTotal < pagination.value.total
     }
-    
-    console.log('=== 获取艺术品列表完成 ===')
   } catch (error) {
     console.error('Error fetching artworks:', error)
     if (error.response) {
@@ -615,7 +680,7 @@ const editArtwork = async (row) => {
       collection_size: detail.collection?.size || '',
       collection_material: detail.collection?.material || ''
     }
-    console.log('editArtwork detail.id:', detail.id)
+
     dialogVisible.value = true
     nextTick(() => {
       longDescriptionHtml.value = form.value.long_description
@@ -633,9 +698,7 @@ const deleteArtwork = async (row) => {
     await ElMessageBox.confirm('确定要删除这个艺术品吗？', '提示', {
       type: 'warning'
     })
-    console.log('Deleting artwork:', row.id)
     const response = await axios.delete(`/original-artworks/${row.id}`)
-    console.log('Delete response:', response.data)
     ElMessage.success('删除成功')
     // 删除后重置到第一页
     pagination.value.page = 1
@@ -664,8 +727,6 @@ const submitForm = async () => {
   
   try {
     await formRef.value.validate()
-    console.log('提交时 images:', form.value.images)
-    console.log('submitForm form.value.id:', form.value.id)
     const submitData = {
       title: form.value.title,
       image: form.value.image,
@@ -687,12 +748,8 @@ const submitForm = async () => {
       collection_material: form.value.collection_material
     }
 
-    console.log('Submitting data:', submitData)
-
     if (dialogType.value === 'add') {
-      console.log('Adding new artwork...')
       const response = await axios.post('/original-artworks', submitData)
-      console.log('Add response:', response.data)
       ElMessage.success('添加成功')
       // 添加后重置到第一页
       pagination.value.page = 1
@@ -701,9 +758,7 @@ const submitForm = async () => {
         ElMessage.error('未获取到作品ID，无法保存')
         return
       }
-      console.log('Updating artwork:', form.value.id)
       const response = await axios.put(`/original-artworks/${form.value.id}`, submitData)
-      console.log('Update response:', response.data)
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false
@@ -735,7 +790,7 @@ const handleMultiImageSuccess = (response, file) => {
     name: response.name || file.name,
     uid: file.uid
   })
-  console.log('多图上传成功，当前 images:', form.value.images)
+
 }
 
 const handleMultiImageRemove = (file, fileList) => {
@@ -760,24 +815,252 @@ const handleEditorCreated = (editor) => {
 
 // 分页事件处理
 const handleSizeChange = (newSize) => {
-  console.log('handleSizeChange called with:', newSize)
   pagination.value.pageSize = newSize
   pagination.value.page = 1 // 重置到第一页
-  console.log('Pagination after size change:', pagination.value)
-  fetchArtworks()
+  // 重置懒加载状态
+  hasMoreData.value = true
+  if (isSearchMode.value) {
+    fetchSearchResults()
+  } else {
+    fetchArtworks()
+  }
+  // 回到顶部
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 const handleCurrentChange = (newPage) => {
-  console.log('handleCurrentChange called with:', newPage)
   pagination.value.page = newPage
-  console.log('Pagination after page change:', pagination.value)
+  if (isSearchMode.value) {
+    fetchSearchResults()
+  } else {
+    fetchArtworks()
+  }
+  // 回到顶部
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// 表格滚动事件处理
+const handleTableScroll = (e) => {
+  const { scrollTop, scrollHeight, clientHeight } = e.target
+  // 当滚动到底部时加载更多数据
+  if (scrollHeight - scrollTop - clientHeight < 50 && !isLoadingMore.value && hasMoreData.value) {
+    loadMoreData()
+  }
+}
+
+// 懒加载更多数据
+const loadMoreData = async () => {
+  if (isLoadingMore.value || !hasMoreData.value) return
+  
+  isLoadingMore.value = true
+  try {
+    const nextPage = pagination.value.page + 1
+    
+    // 根据当前模式选择API
+    let response
+    if (isSearchMode.value) {
+      response = await axios.get('/search', {
+        params: {
+          keyword: searchKeyword.value.trim(),
+          type: 'original_artwork',
+          page: nextPage,
+          limit: pagination.value.pageSize
+        }
+      })
+    } else {
+      response = await axios.get('/original-artworks', {
+        params: {
+          page: nextPage,
+          pageSize: pagination.value.pageSize
+        }
+      })
+    }
+
+    let data = response.data || response
+    let paginationInfo = response.pagination
+
+    // 检查是否是新的分页格式
+    if (response.data && response.pagination) {
+      data = response.data
+      paginationInfo = response.pagination
+    } else if (Array.isArray(data)) {
+      paginationInfo = {
+        page: nextPage,
+        pageSize: pagination.value.pageSize,
+        total: data.length
+      }
+    } else {
+      throw new Error('无效的响应数据')
+    }
+
+    // 处理新数据
+    const newArtworks = data.map(item => {
+      const artwork = {
+        ...item,
+        original_price: Number(item.original_price) || 0,
+        discount_price: Number(item.discount_price) || 0,
+        stock: Number(item.stock) || 0,
+        sales: Number(item.sales) || 0,
+        is_on_sale: Number(item.is_on_sale) || 0,
+        year: Number(item.year) || new Date().getFullYear(),
+        artist_name: item.artist_name || ''
+      }
+
+      // 处理图片URL
+      if (artwork.image && !artwork.image.startsWith('http')) {
+        artwork.image = `${baseUrl}${artwork.image}`
+      }
+
+      // 处理艺术家头像
+      if (artwork.artist && artwork.artist.avatar && !artwork.artist.avatar.startsWith('http')) {
+        artwork.artist.avatar = `${baseUrl}${artwork.artist.avatar}`
+      }
+
+      artwork.images = item.images || []
+      artwork.long_description = item.long_description || ''
+
+      return artwork
+    })
+
+    // 追加新数据到现有数据
+    artworks.value = [...artworks.value, ...newArtworks]
+    
+    // 更新分页信息
+    if (paginationInfo) {
+      pagination.value.page = paginationInfo.current_page || paginationInfo.page || nextPage
+      pagination.value.total = paginationInfo.total_count || paginationInfo.total || 0
+      
+      // 检查是否还有更多数据
+      const currentTotal = artworks.value.length
+      hasMoreData.value = currentTotal < pagination.value.total
+    }
+
+    // 如果没有新数据，标记为没有更多数据
+    if (newArtworks.length === 0) {
+      hasMoreData.value = false
+    }
+  } catch (error) {
+    console.error('加载更多数据失败:', error)
+    ElMessage.error('加载更多数据失败')
+  } finally {
+    isLoadingMore.value = false
+  }
+}
+
+// 切换懒加载模式
+const toggleLazyMode = () => {
+  isLazyMode.value = !isLazyMode.value
+  // 重置状态
+  hasMoreData.value = true
+  pagination.value.page = 1
+  if (isSearchMode.value) {
+    fetchSearchResults()
+  } else {
+    fetchArtworks()
+  }
+}
+
+// 搜索处理
+const handleSearch = async () => {
+  if (!searchKeyword.value.trim()) {
+    ElMessage.warning('请输入搜索关键词')
+    return
+  }
+  
+  isSearchMode.value = true
+  pagination.value.page = 1
+  hasMoreData.value = true
+  await fetchSearchResults()
+}
+
+// 清除搜索
+const handleClearSearch = () => {
+  searchKeyword.value = ''
+  isSearchMode.value = false
+  pagination.value.page = 1
+  hasMoreData.value = true
   fetchArtworks()
+}
+
+// 获取搜索结果
+const fetchSearchResults = async () => {
+  if (!checkLoginStatus()) return
+  
+  loading.value = true
+  try {
+    const response = await axios.get('/search', {
+      params: {
+        keyword: searchKeyword.value.trim(),
+        type: 'original_artwork',
+        page: pagination.value.page,
+        limit: pagination.value.pageSize
+      }
+    })
+
+    let data = response.data || []
+    let paginationInfo = response.pagination
+
+    // 处理搜索结果数据
+    artworks.value = data.map(item => {
+      const artwork = {
+        ...item,
+        original_price: Number(item.original_price) || 0,
+        discount_price: Number(item.discount_price) || 0,
+        stock: Number(item.stock) || 0,
+        sales: Number(item.sales) || 0,
+        is_on_sale: Number(item.is_on_sale) || 0,
+        year: Number(item.year) || new Date().getFullYear(),
+        artist_name: item.artist_name || ''
+      }
+
+      // 处理图片URL
+      if (artwork.image && !artwork.image.startsWith('http')) {
+        artwork.image = `${baseUrl}${artwork.image}`
+      }
+
+      artwork.images = item.images || []
+      artwork.long_description = item.long_description || ''
+
+      return artwork
+    })
+
+    // 更新分页信息
+    if (paginationInfo) {
+      pagination.value.total = paginationInfo.total_count || 0
+      pagination.value.page = paginationInfo.current_page || 1
+      pagination.value.pageSize = paginationInfo.page_size || 20
+      
+      // 检查是否还有更多数据
+      const currentTotal = artworks.value.length
+      hasMoreData.value = currentTotal < pagination.value.total
+    }
+  } catch (error) {
+    console.error('搜索失败:', error)
+    if (error.response) {
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
+      } else {
+        ElMessage.error(`搜索失败: ${error.response.data.error || '服务器错误'}`)
+      }
+    } else {
+      ElMessage.error('搜索失败，请检查网络连接')
+    }
+  } finally {
+    loading.value = false
+  }
 }
 
 // 刷新数据
 const refreshData = () => {
-  console.log('刷新数据')
-  fetchArtworks()
+  // 重置懒加载状态
+  hasMoreData.value = true
+  pagination.value.page = 1
+  if (isSearchMode.value) {
+    fetchSearchResults()
+  } else {
+    fetchArtworks()
+  }
 }
 
 onMounted(() => {
@@ -813,13 +1096,40 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.search-container {
+  margin-bottom: 20px;
+  padding: 20px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.search-result-tip {
+  margin-top: 15px;
+}
+
 .pagination-container {
   margin-top: 20px;
   display: flex;
-  justify-content: center;
-  padding: 20px 0;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
   background-color: #f5f5f5;
   border-radius: 4px;
+}
+
+.pagination-info {
+  color: #666;
+  font-size: 14px;
+}
+
+.load-more-container {
+  text-align: center;
+  margin: 20px 0;
+}
+
+.no-more-data {
+  margin: 20px 0;
 }
 
 .avatar-uploader {
