@@ -15,11 +15,12 @@ const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
-    appId: process.env.WX_APPID || 'wx96a502c78c9156d0', // 小程序appid
-    mchId: process.env.WX_PAY_MCH_ID || '1360639602', // 商户号
-    key: process.env.WX_PAY_KEY, // API密钥
-    serialNo: process.env.WX_PAY_SERIAL_NO || '34DF8EA1B52AD35997FF23DFAD7940574A1D6857', // 商户证书序列号
-    privateKey: fs.readFileSync(path.join(__dirname, '../ssl/apiclient_key.pem')), // 商户私钥
+    appId: process.env.WX_APPID, // 小程序appid
+    mchId: process.env.WX_PAY_MCH_ID, // 商户号
+      key: process.env.WX_PAY_KEY, // API密钥
+  serialNo: process.env.WX_PAY_SERIAL_NO, // 商户证书序列号
+  publicKeyId: process.env.WX_PUB_ID, // 微信支付公钥ID
+  privateKey: fs.readFileSync(path.join(__dirname, '../ssl/apiclient_key.pem')), // 商户私钥
     notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
     notify_url:'https://api.wx.2000gallery.art:2000/api/wx/pay/refund/notify', // 退款回调地址
 
@@ -336,6 +337,7 @@ router.post('/unifiedorder', async (req, res) => {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                     'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
                     'User-Agent': 'axios/1.9.0'
                 }
             });
@@ -584,6 +586,7 @@ router.post('/singleorder', async (req, res) => {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                     'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
                     'User-Agent': 'axios/1.9.0'
                 }
             });
@@ -822,6 +825,7 @@ router.post('/close', async (req, res) => {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                     'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
                     'User-Agent': 'axios/1.9.0'
                 }
             }
@@ -1051,6 +1055,7 @@ router.post('/refund/approve', async (req, res) => {
                             'Content-Type': 'application/json',
                             'Accept': 'application/json',
                             'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
                             'User-Agent': 'axios/1.9.0'
                         }
                     }
@@ -1454,6 +1459,7 @@ router.get('/query', async (req, res) => {
                 headers: {
                     'Accept': 'application/json',
                     'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
                     'User-Agent': 'axios/1.9.0'
                 }
             }
@@ -1676,6 +1682,7 @@ router.get('/orders', async (req, res) => {
                         headers: {
                             'Accept': 'application/json',
                             'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
                             'User-Agent': 'axios/1.9.0'
                         }
                     }
