@@ -44,6 +44,8 @@ router.get('/', async (req, res) => {
     let cacheKey = REDIS_ARTWORKS_LIST_KEY + `:page:${pageNum}:size:${sizeNum}`;
     if (artist_id) {
       cacheKey = REDIS_ARTWORKS_LIST_KEY_PREFIX + artist_id + `:page:${pageNum}:size:${sizeNum}`;
+    } else {
+      cacheKey = REDIS_ARTWORKS_LIST_KEY + `:all:page:${pageNum}:size:${sizeNum}`;
     }
     // 先查redis缓存
     const cache = await redisClient.get(cacheKey);
@@ -126,6 +128,15 @@ router.get('/', async (req, res) => {
     res.json(result);
     // 写入redis缓存，7天过期
     await redisClient.setEx(cacheKey, 604800, JSON.stringify(result));
+    
+    // 调试信息
+    console.log('API Response:', {
+      page: pageNum,
+      pageSize: sizeNum,
+      total: total,
+      dataLength: artworksWithFullUrls.length,
+      cacheKey: cacheKey
+    });
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
     res.status(500).json({ error: '获取艺术品列表服务暂时不可用' });

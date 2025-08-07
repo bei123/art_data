@@ -2,7 +2,10 @@
   <div class="artworks-container">
     <div class="header">
       <h2>艺术品管理</h2>
-      <el-button type="primary" @click="showAddDialog">添加艺术品</el-button>
+      <div class="header-buttons">
+        <el-button type="info" @click="refreshData" :loading="loading">刷新数据</el-button>
+        <el-button type="primary" @click="showAddDialog">添加艺术品</el-button>
+      </div>
     </div>
 
     <el-table 
@@ -53,16 +56,27 @@
       </el-table-column>
     </el-table>
 
+    <!-- 调试信息 -->
+    <div class="debug-info" style="margin: 20px 0; padding: 10px; background: #f0f0f0; border-radius: 4px;">
+      <h4>调试信息:</h4>
+      <p>当前页: {{ pagination.page }}</p>
+      <p>每页数量: {{ pagination.pageSize }}</p>
+      <p>总数: {{ pagination.total }}</p>
+      <p>当前数据量: {{ artworks.length }}</p>
+    </div>
+
     <!-- 分页组件 -->
     <div class="pagination-container">
       <el-pagination
-        v-model:current-page="pagination.page"
-        v-model:page-size="pagination.pageSize"
+        :current-page="pagination.page"
+        :page-size="pagination.pageSize"
         :page-sizes="[10, 20, 50, 100]"
         :total="pagination.total"
         layout="total, sizes, prev, pager, next, jumper"
         @size-change="handleSizeChange"
         @current-change="handleCurrentChange"
+        @update:current-page="(val) => pagination.page = val"
+        @update:page-size="(val) => pagination.pageSize = val"
       />
     </div>
 
@@ -433,35 +447,48 @@ const fetchArtworks = async () => {
   
   loading.value = true
   try {
-    console.log('Fetching artworks from:', `${baseUrl}/original-artworks`)
+    console.log('=== 开始获取艺术品列表 ===')
+    console.log('当前分页参数:', {
+      page: pagination.value.page,
+      pageSize: pagination.value.pageSize
+    })
+    
     const response = await axios.get('/original-artworks', {
       params: {
         page: pagination.value.page,
         pageSize: pagination.value.pageSize
       }
     })
-    console.log('API Response:', response)
-    console.log('typeof response:', typeof response)
-    console.log('Array.isArray(response):', Array.isArray(response))
-    console.log('response:', response)
+    
+    console.log('=== API 响应 ===')
+    console.log('完整响应:', response)
+    console.log('响应类型:', typeof response)
+    console.log('是否为数组:', Array.isArray(response))
+    console.log('是否有 data 字段:', !!response.data)
+    console.log('是否有 pagination 字段:', !!response.pagination)
 
     let data = response.data || response
     let paginationInfo = response.pagination
 
-    if (Array.isArray(data)) {
-      // 直接是数组，兼容旧格式
+    // 检查是否是新的分页格式
+    if (response.data && response.pagination) {
+      console.log('使用新分页格式')
+      data = response.data
+      paginationInfo = response.pagination
+    } else if (Array.isArray(data)) {
+      console.log('使用旧格式（数组）')
       paginationInfo = {
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
-        total: data.length * pagination.value.page
+        total: data.length // 旧格式无法获取总数，暂时使用当前页数据量
       }
-    } else if (data && Array.isArray(data.data)) {
-      // 被包裹在 data 字段下
-      data = data.data
     } else {
-      console.error('Invalid response:', response)
+      console.error('无效的响应格式:', response)
       throw new Error('无效的响应数据')
     }
+
+    console.log('处理后的数据:', data)
+    console.log('处理后的分页信息:', paginationInfo)
 
     // 处理数据
     artworks.value = data.map(item => {
@@ -492,12 +519,21 @@ const fetchArtworks = async () => {
       return artwork
     })
 
+    console.log('处理后的艺术品数据:', artworks.value)
+
     // 更新分页信息
     if (paginationInfo) {
+      const oldPagination = { ...pagination.value }
       pagination.value.total = paginationInfo.total || 0
       pagination.value.page = paginationInfo.page || 1
       pagination.value.pageSize = paginationInfo.pageSize || 20
+      console.log('分页信息更新:', {
+        old: oldPagination,
+        new: pagination.value
+      })
     }
+    
+    console.log('=== 获取艺术品列表完成 ===')
   } catch (error) {
     console.error('Error fetching artworks:', error)
     if (error.response) {
@@ -724,13 +760,23 @@ const handleEditorCreated = (editor) => {
 
 // 分页事件处理
 const handleSizeChange = (newSize) => {
+  console.log('handleSizeChange called with:', newSize)
   pagination.value.pageSize = newSize
   pagination.value.page = 1 // 重置到第一页
+  console.log('Pagination after size change:', pagination.value)
   fetchArtworks()
 }
 
 const handleCurrentChange = (newPage) => {
+  console.log('handleCurrentChange called with:', newPage)
   pagination.value.page = newPage
+  console.log('Pagination after page change:', pagination.value)
+  fetchArtworks()
+}
+
+// 刷新数据
+const refreshData = () => {
+  console.log('刷新数据')
   fetchArtworks()
 }
 
@@ -760,6 +806,11 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.header-buttons {
+  display: flex;
+  gap: 10px;
 }
 
 .pagination-container {
