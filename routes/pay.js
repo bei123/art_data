@@ -97,7 +97,7 @@ function formatWechatTime(isoString) {
 // });
 
 // 统一下单接口
-router.post('/unifiedorder', async (req, res) => {
+router.post('/unifiedorder', authenticateToken, async (req, res) => {
     try {
         const { openid, total_fee, body, out_trade_no, cart_items, address_id } = req.body;
 
@@ -377,7 +377,7 @@ router.post('/unifiedorder', async (req, res) => {
 });
 
 // 单商品下单接口
-router.post('/singleorder', async (req, res) => {
+router.post('/singleorder', authenticateToken, async (req, res) => {
     try {
         const { openid, type, quantity, price, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
 
@@ -797,7 +797,7 @@ router.post('/notify', async (req, res) => {
 });
 
 // 关闭订单接口
-router.post('/close', async (req, res) => {
+router.post('/close', authenticateToken, async (req, res) => {
     try {
         const { out_trade_no } = req.body;
 
@@ -863,7 +863,7 @@ router.post('/close', async (req, res) => {
 });
 
 // 申请退款接口
-router.post('/refund', async (req, res) => {
+router.post('/refund', authenticateToken, async (req, res) => {
     try {
         const {
             transaction_id, // 微信支付订单号
@@ -966,7 +966,7 @@ router.post('/refund', async (req, res) => {
 });
 
 // 审批退款接口
-router.post('/refund/approve', async (req, res) => {
+router.post('/refund/approve', authenticateToken, async (req, res) => {
     try {
         const { refund_id, approve, reject_reason } = req.body;
 
@@ -1126,7 +1126,7 @@ router.post('/refund/approve', async (req, res) => {
 });
 
 // 获取退款申请列表
-router.get('/refund/requests', async (req, res) => {
+router.get('/refund/requests', authenticateToken, async (req, res) => {
     try {
         const { status, page = 1, limit = 10 } = req.query;
 
@@ -1192,7 +1192,7 @@ router.get('/refund/requests', async (req, res) => {
 });
 
 // 获取退款申请详情
-router.get('/refund/requests/:id', async (req, res) => {
+router.get('/refund/requests/:id', authenticateToken, async (req, res) => {
     try {
         // 输入验证
         const refundId = req.params.id;
@@ -1396,7 +1396,7 @@ router.post('/refund/notify', async (req, res) => {
 });
 
 // 小程序调起支付签名接口
-router.post('/sign', async (req, res) => {
+router.post('/sign', authenticateToken, async (req, res) => {
     try {
         const { prepay_id } = req.body;
 
@@ -1439,7 +1439,7 @@ router.post('/sign', async (req, res) => {
 });
 
 // 查询订单详情接口
-router.get('/query', async (req, res) => {
+router.get('/query', authenticateToken, async (req, res) => {
     try {
         const { out_trade_no } = req.query;
 
