@@ -1676,6 +1676,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     oi.artwork_id,
                     oi.quantity,
                     oi.price,
+                    oi.address_id,
                     r.title as right_title,
                     r.price as right_price,
                     r.original_price as right_original_price,
@@ -1691,12 +1692,20 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     oa.original_price as artwork_original_price,
                     oa.discount_price as artwork_discount_price,
                     oa.description as artwork_description,
-                    oa.image as artwork_image
+                    oa.image as artwork_image,
+                    wa.receiver_name,
+                    wa.receiver_phone,
+                    wa.province,
+                    wa.city,
+                    wa.district,
+                    wa.detail_address,
+                    wa.is_default
                 FROM order_items oi
                 LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
                 LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
                 LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
                 LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+                LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
                 WHERE oi.order_id = ?
             `, [order.id]);
 
@@ -1706,7 +1715,19 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     id: item.id,
                     type: item.type,
                     quantity: item.quantity,
-                    price: item.price
+                    price: item.price,
+                    address_id: item.address_id,
+                    address: item.address_id ? {
+                        id: item.address_id,
+                        receiver_name: item.receiver_name,
+                        receiver_phone: item.receiver_phone,
+                        province: item.province,
+                        city: item.city,
+                        district: item.district,
+                        detail_address: item.detail_address,
+                        is_default: item.is_default === 1,
+                        full_address: `${item.province} ${item.city} ${item.district} ${item.detail_address}`
+                    } : null
                 };
 
                 // 根据类型设置相应的字段
@@ -2015,6 +2036,7 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
                     oi.artwork_id,
                     oi.quantity,
                     oi.price,
+                    oi.address_id,
                     r.title as right_title,
                     r.price as right_price,
                     r.original_price as right_original_price,
@@ -2030,12 +2052,20 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
                     oa.original_price as artwork_original_price,
                     oa.discount_price as artwork_discount_price,
                     oa.description as artwork_description,
-                    oa.image as artwork_image
+                    oa.image as artwork_image,
+                    wa.receiver_name,
+                    wa.receiver_phone,
+                    wa.province,
+                    wa.city,
+                    wa.district,
+                    wa.detail_address,
+                    wa.is_default
                 FROM order_items oi
                 LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
                 LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
                 LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
                 LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+                LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
                 WHERE oi.order_id = ?
             `, [order.id]);
 
@@ -2045,7 +2075,19 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
                     id: item.id,
                     type: item.type,
                     quantity: item.quantity,
-                    price: item.price
+                    price: item.price,
+                    address_id: item.address_id,
+                    address: item.address_id ? {
+                        id: item.address_id,
+                        receiver_name: item.receiver_name,
+                        receiver_phone: item.receiver_phone,
+                        province: item.province,
+                        city: item.city,
+                        district: item.district,
+                        detail_address: item.detail_address,
+                        is_default: item.is_default === 1,
+                        full_address: `${item.province} ${item.city} ${item.district} ${item.detail_address}`
+                    } : null
                 };
 
                 // 根据类型设置相应的字段

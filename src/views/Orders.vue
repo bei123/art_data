@@ -49,6 +49,16 @@
                 <span class="item-quantity">x{{ item.quantity }}</span>
                 <span class="item-price">¥{{ item.price }}</span>
               </div>
+              <!-- 地址信息显示 -->
+              <div v-if="item.address" class="item-address">
+                <el-icon><Location /></el-icon>
+                <span class="address-text">{{ item.address.receiver_name }} {{ item.address.receiver_phone }}</span>
+                <span class="address-detail">{{ item.address.full_address }}</span>
+              </div>
+              <div v-else class="item-address no-address">
+                <el-icon><Location /></el-icon>
+                <span class="address-text">无地址信息</span>
+              </div>
             </div>
           </div>
         </template>
@@ -150,6 +160,24 @@
                   <span class="item-quantity">数量: {{ item.quantity }}</span>
                   <span class="item-price">单价: ¥{{ item.price }}</span>
                 </div>
+                <!-- 地址信息显示 -->
+                <div v-if="item.address" class="item-address-detail">
+                  <h6>收货地址</h6>
+                  <el-descriptions :column="1" border size="small">
+                    <el-descriptions-item label="收货人">{{ item.address.receiver_name }}</el-descriptions-item>
+                    <el-descriptions-item label="联系电话">{{ item.address.receiver_phone }}</el-descriptions-item>
+                    <el-descriptions-item label="收货地址">{{ item.address.full_address }}</el-descriptions-item>
+                    <el-descriptions-item label="是否默认地址">
+                      <el-tag :type="item.address.is_default ? 'success' : 'info'" size="small">
+                        {{ item.address.is_default ? '默认地址' : '普通地址' }}
+                      </el-tag>
+                    </el-descriptions-item>
+                  </el-descriptions>
+                </div>
+                <div v-else class="item-address-detail no-address">
+                  <h6>收货地址</h6>
+                  <el-empty description="无地址信息" :image-size="60" />
+                </div>
               </div>
             </div>
           </div>
@@ -165,6 +193,7 @@ import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { useUserStore } from '../stores/user'
+import { Location } from '@element-plus/icons-vue'
 
 const orders = ref([])
 const loading = ref(false)
@@ -419,5 +448,38 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.item-address {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.item-address .address-text {
+  font-weight: 500;
+  color: #303133;
+}
+
+.item-address .address-detail {
+  font-size: 12px;
+  color: #909399;
+}
+
+.item-address.no-address {
+  color: #909399;
+}
+
+.item-address-detail {
+  margin-top: 20px;
+}
+
+.item-address-detail h6 {
+  margin-bottom: 10px;
+  color: #303133;
+  font-size: 14px;
 }
 </style>
