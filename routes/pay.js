@@ -1536,6 +1536,43 @@ router.get('/orders', authenticateToken, async (req, res) => {
             limit = 10
         } = req.query;
 
+        // 订单状态分类函数
+        const getOrderStatusType = (tradeState) => {
+            switch (tradeState) {
+                case 'NOTPAY':
+                case 'PAYERROR':
+                    return 'pending';
+                case 'SUCCESS':
+                    return 'completed';
+                case 'CLOSED':
+                case 'REVOKED':
+                    return 'cancelled';
+                case 'REFUND':
+                    return 'refunded';
+                default:
+                    return 'unknown';
+            }
+        };
+
+        const getOrderStatusText = (tradeState) => {
+            switch (tradeState) {
+                case 'NOTPAY':
+                    return '待付款';
+                case 'PAYERROR':
+                    return '支付失败';
+                case 'SUCCESS':
+                    return '已完成';
+                case 'CLOSED':
+                    return '已关闭';
+                case 'REVOKED':
+                    return '已撤销';
+                case 'REFUND':
+                    return '已退款';
+                default:
+                    return '未知状态';
+            }
+        };
+
         // 输入验证
         if (!user_id || isNaN(parseInt(user_id)) || parseInt(user_id) <= 0) {
             return res.status(400).json({ error: '缺少有效的用户ID' });
@@ -1549,8 +1586,11 @@ router.get('/orders', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: '每页数量必须在1-100之间' });
         }
         
-        if (status && !['SUCCESS', 'REFUND', 'CLOSED', 'REVOKED', 'PAYERROR', 'NOTPAY'].includes(status)) {
-            return res.status(400).json({ error: '无效的订单状态' });
+        // 定义有效的订单状态类型
+        const validStatusTypes = ['all', 'pending', 'completed', 'cancelled', 'refunded'];
+        
+        if (status && !validStatusTypes.includes(status)) {
+            return res.status(400).json({ error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, refunded' });
         }
         
         // 清理输入
@@ -1575,11 +1615,34 @@ router.get('/orders', authenticateToken, async (req, res) => {
         let params = [cleanUserId];
         let countParams = [cleanUserId];
 
-        if (cleanStatus) {
-            query += ' AND trade_state = ?';
-            countQuery += ' AND trade_state = ?';
-            params.push(cleanStatus);
-            countParams.push(cleanStatus);
+        // 根据状态类型映射到实际的微信支付状态
+        if (cleanStatus && cleanStatus !== 'all') {
+            let statusCondition = '';
+            switch (cleanStatus) {
+                case 'pending':
+                    // 待付款：NOTPAY, PAYERROR
+                    statusCondition = 'AND trade_state IN ("NOTPAY", "PAYERROR")';
+                    break;
+                case 'completed':
+                    // 已完成：SUCCESS
+                    statusCondition = 'AND trade_state = "SUCCESS"';
+                    break;
+                case 'cancelled':
+                    // 已取消：CLOSED, REVOKED
+                    statusCondition = 'AND trade_state IN ("CLOSED", "REVOKED")';
+                    break;
+                case 'refunded':
+                    // 已退款：REFUND
+                    statusCondition = 'AND trade_state = "REFUND"';
+                    break;
+                default:
+                    break;
+            }
+            
+            if (statusCondition) {
+                query += ' ' + statusCondition;
+                countQuery += ' ' + statusCondition;
+            }
         }
 
         // 添加排序和分页
@@ -1690,9 +1753,14 @@ router.get('/orders', authenticateToken, async (req, res) => {
                 );
 
                 const wxPayData = response.data;
+
                 return {
                     ...order,
                     items: orderItemsWithImages,
+                    order_status: {
+                        type: getOrderStatusType(wxPayData.trade_state || order.trade_state),
+                        text: getOrderStatusText(wxPayData.trade_state || order.trade_state)
+                    },
                     pay_status: {
                         trade_state: wxPayData.trade_state || 'UNKNOWN',
                         trade_state_desc: wxPayData.trade_state_desc || '未知状态',
@@ -1706,10 +1774,15 @@ router.get('/orders', authenticateToken, async (req, res) => {
                 };
             } catch (error) {
                 console.error('查询微信支付状态失败:', error.response?.data || error.message);
+                
                 // 如果查询微信支付状态失败，返回数据库中的订单信息
                 return {
                     ...order,
                     items: orderItemsWithImages,
+                    order_status: {
+                        type: getOrderStatusType(order.trade_state),
+                        text: getOrderStatusText(order.trade_state)
+                    },
                     pay_status: {
                         trade_state: order.trade_state || 'UNKNOWN',
                         trade_state_desc: order.trade_state_desc || '支付状态查询失败',
@@ -1724,6 +1797,18 @@ router.get('/orders', authenticateToken, async (req, res) => {
             }
         }));
 
+        // 查询各状态订单数量统计
+        const [statusStats] = await db.query(`
+            SELECT 
+                SUM(CASE WHEN trade_state IN ('NOTPAY', 'PAYERROR') THEN 1 ELSE 0 END) as pending_count,
+                SUM(CASE WHEN trade_state = 'SUCCESS' THEN 1 ELSE 0 END) as completed_count,
+                SUM(CASE WHEN trade_state IN ('CLOSED', 'REVOKED') THEN 1 ELSE 0 END) as cancelled_count,
+                SUM(CASE WHEN trade_state = 'REFUND' THEN 1 ELSE 0 END) as refunded_count,
+                COUNT(*) as total_count
+            FROM orders 
+            WHERE user_id = ?
+        `, [cleanUserId]);
+
         res.json({
             success: true,
             data: {
@@ -1732,6 +1817,13 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     total: parseInt(total),
                     page: cleanPage,
                     limit: cleanLimit
+                },
+                statistics: {
+                    pending: statusStats[0]?.pending_count || 0,
+                    completed: statusStats[0]?.completed_count || 0,
+                    cancelled: statusStats[0]?.cancelled_count || 0,
+                    refunded: statusStats[0]?.refunded_count || 0,
+                    total: statusStats[0]?.total_count || 0
                 }
             }
         });
