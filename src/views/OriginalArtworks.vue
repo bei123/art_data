@@ -187,19 +187,7 @@
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
         </el-form-item>
-        <el-form-item label="多图">
-          <el-upload
-            :file-list="form.images"
-            list-type="picture-card"
-            :action="`${baseUrl}/api/upload`"
-            :on-success="handleMultiImageSuccess"
-            :on-remove="handleMultiImageRemove"
-            :before-upload="beforeUpload"
-            multiple
-          >
-            <el-icon><Plus /></el-icon>
-          </el-upload>
-        </el-form-item>
+
         <el-form-item label="详情富文本" style="width: 100%">
           <Toolbar :editor="editorRef" style="width: 100%" />
           <Editor
@@ -357,7 +345,6 @@ const isSearchMode = ref(false)
 const form = ref({
   title: '',
   image: '',
-  images: [],
   long_description: '',
   artist_id: '',
   year: new Date().getFullYear(),
@@ -583,7 +570,7 @@ const fetchArtworks = async () => {
         artwork.artist.avatar = `${baseUrl}${artwork.artist.avatar}`
       }
 
-      artwork.images = item.images || []
+
       artwork.long_description = item.long_description || ''
 
       return artwork
@@ -627,7 +614,6 @@ const showAddDialog = () => {
   form.value = {
     title: '',
     image: '',
-    images: [],
     long_description: '',
     artist_id: '',
     year: new Date().getFullYear(),
@@ -663,7 +649,6 @@ const editArtwork = async (row) => {
       id: detail.id,
       title: detail.title || '',
       image: detail.image || '',
-      images: (detail.images || []).map((img, idx) => ({ url: img, name: `图片${idx + 1}`, uid: `${Date.now()}-${idx}` })),
       long_description: detail.long_description || '',
       artist_id: detail.artist?.id || '',
       year: Number(detail.year) || new Date().getFullYear(),
@@ -783,23 +768,7 @@ const handleUploadSuccess = (response) => {
   form.value.image = response.url
 }
 
-const handleMultiImageSuccess = (response, file) => {
-  const url = response.url || (response.data && response.data.url)
-  form.value.images.push({
-    url,
-    name: response.name || file.name,
-    uid: file.uid
-  })
 
-}
-
-const handleMultiImageRemove = (file, fileList) => {
-  form.value.images = fileList.map(f => ({
-    url: f.url,
-    name: f.name,
-    uid: f.uid
-  }))
-}
 
 const beforeUpload = async (file) => {
   const result = await uploadImageToWebpLimit5MB(file)
@@ -916,7 +885,7 @@ const loadMoreData = async () => {
         artwork.artist.avatar = `${baseUrl}${artwork.artist.avatar}`
       }
 
-      artwork.images = item.images || []
+
       artwork.long_description = item.long_description || ''
 
       return artwork
@@ -1018,7 +987,7 @@ const fetchSearchResults = async () => {
         artwork.image = `${baseUrl}${artwork.image}`
       }
 
-      artwork.images = item.images || []
+
       artwork.long_description = item.long_description || ''
 
       return artwork

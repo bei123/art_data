@@ -81,26 +81,13 @@ router.get('/', async (req, res) => {
     const [countRows] = await db.query(countSql, countParams);
     const total = countRows[0].total;
 
-    // 一次查出所有图片，避免N+1
-    const artworkIds = rows.map(r => r.id);
-    let imagesMap = {};
-    if (artworkIds.length > 0) {
-      const [allImages] = await db.query(
-        'SELECT artwork_id, image_url FROM artwork_images WHERE artwork_id IN (?) ORDER BY sort_order, id',
-        [artworkIds]
-      );
-      allImages.forEach(img => {
-        if (!imagesMap[img.artwork_id]) imagesMap[img.artwork_id] = [];
-        imagesMap[img.artwork_id].push(img.image_url);
-      });
-    }
+
 
     // 为每个图片URL添加完整URL并构建正确的数据结构
     const artworksWithFullUrls = rows.map(artwork => {
       const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
       return {
         ...processedArtwork,
-        images: imagesMap[artwork.id] || [],
         artist: {
           id: artwork.artist_id,
           name: artwork.artist_name,
@@ -167,10 +154,6 @@ router.get('/:id', async (req, res) => {
 
     const artwork = processObjectImages(rows[0], ['image', 'avatar']);
 
-    // 查询多图
-    const [imageRows] = await db.query('SELECT image_url FROM artwork_images WHERE artwork_id = ? ORDER BY sort_order, id', [artwork.id]);
-    const images = imageRows.map(row => row.image_url);
-
     const collection = {
       location: artwork.collection_location,
       number: artwork.collection_number,
@@ -190,7 +173,6 @@ router.get('/:id', async (req, res) => {
       title: artwork.title,
       year: artwork.year,
       image: artwork.image,
-      images: images,
       description: artwork.description,
       long_description: artwork.long_description,
       background: artwork.background,
@@ -219,7 +201,6 @@ router.post('/', authenticateToken, async (req, res) => {
     const {
       title,
       image,
-      images,
       artist_id,
       artist_name,
       year,
@@ -268,12 +249,7 @@ router.post('/', authenticateToken, async (req, res) => {
         collection_number, collection_size, collection_material, price, req.body.original_price, req.body.discount_price
       ]
     );
-    // 批量插入多图
-    if (Array.isArray(images) && images.length > 0) {
-      for (let i = 0; i < images.length; i++) {
-        await db.query('INSERT INTO artwork_images (artwork_id, image_url, sort_order) VALUES (?, ?, ?)', [result.insertId, images[i], i]);
-      }
-    }
+
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
@@ -287,7 +263,6 @@ router.post('/', authenticateToken, async (req, res) => {
       title,
       price,
       image,
-      images: images || [],
       year,
       description,
       long_description,
@@ -316,7 +291,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const {
       title,
       image,
-      images,
       artist_id,
       artist_name,
       year,
@@ -381,13 +355,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         req.params.id
       ]
     );
-    // 先删除原有多图，再插入新多图
-    await db.query('DELETE FROM artwork_images WHERE artwork_id = ?', [req.params.id]);
-    if (Array.isArray(images) && images.length > 0) {
-      for (let i = 0; i < images.length; i++) {
-        await db.query('INSERT INTO artwork_images (artwork_id, image_url, sort_order) VALUES (?, ?, ?)', [req.params.id, images[i], i]);
-      }
-    }
+
     // 查询艺术家信息
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
@@ -402,7 +370,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
       title,
       price,
       image,
-      images: images || [],
       year,
       description,
       long_description,
