@@ -1526,7 +1526,7 @@ router.get('/query', async (req, res) => {
 });
 
 // 根据用户ID查询订单列表接口
-router.get('/orders', async (req, res) => {
+router.get('/orders', authenticateToken, async (req, res) => {
     try {
         const {
             user_id,
