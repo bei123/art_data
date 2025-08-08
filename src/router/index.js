@@ -97,6 +97,15 @@ const routes = [
           requiresAuth: true,
           roles: ['admin'] // 只有管理员可以访问
         }
+      },
+      {
+        path: '/orders',
+        name: 'Orders',
+        component: () => import('@/views/Orders.vue'),
+        meta: {
+          title: '订单管理',
+          requiresAuth: true
+        }
       }
     ]
   },

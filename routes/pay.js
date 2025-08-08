@@ -1846,5 +1846,212 @@ router.get('/digital-identity/purchases/:user_id', async (req, res) => {
     }
 });
 
+// 管理员查询所有订单接口
+router.get('/admin/orders', async (req, res) => {
+    try {
+        const {
+            status,
+            type,
+            page = 1,
+            limit = 20
+        } = req.query;
+        
+        if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
+            return res.status(400).json({ error: '页码必须是正整数' });
+        }
+        
+        if (limit && (isNaN(parseInt(limit)) || parseInt(limit) <= 0 || parseInt(limit) > 100)) {
+            return res.status(400).json({ error: '每页数量必须在1-100之间' });
+        }
+        
+        if (status && !['SUCCESS', 'REFUND', 'CLOSED', 'REVOKED', 'PAYERROR', 'NOTPAY'].includes(status)) {
+            return res.status(400).json({ error: '无效的订单状态' });
+        }
+        
+        // 清理输入
+        const cleanPage = parseInt(page);
+        const cleanLimit = parseInt(limit);
+        const cleanStatus = status ? status.trim() : null;
+
+        // 构建查询条件
+        let query = `
+            SELECT o.*, u.nickname as user_nickname, u.avatar_url as user_avatar
+            FROM orders o
+            LEFT JOIN wx_users u ON o.user_id = u.id
+        `;
+        let countQuery = 'SELECT COUNT(*) as total FROM orders o';
+        let params = [];
+        let countParams = [];
+
+        // 添加状态筛选
+        if (cleanStatus) {
+            query += ' WHERE o.trade_state = ?';
+            countQuery += ' WHERE o.trade_state = ?';
+            params.push(cleanStatus);
+            countParams.push(cleanStatus);
+        }
+
+        // 添加排序和分页
+        query += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
+        const offset = (cleanPage - 1) * cleanLimit;
+        params.push(cleanLimit, offset);
+
+        // 执行查询
+        const [orders] = await db.query(query, params);
+        const [[{ total }]] = await db.query(countQuery, countParams);
+
+        // 查询每个订单的订单项
+        const ordersWithItems = await Promise.all(orders.map(async (order) => {
+            // 查询订单项
+            const [orderItems] = await db.query(`
+                SELECT 
+                    oi.id,
+                    oi.type,
+                    oi.right_id,
+                    oi.digital_artwork_id,
+                    oi.artwork_id,
+                    oi.quantity,
+                    oi.price,
+                    r.title as right_title,
+                    r.price as right_price,
+                    r.original_price as right_original_price,
+                    r.description as right_description,
+                    r.status as right_status,
+                    r.remaining_count as right_remaining_count,
+                    ri.image_url as right_image_url,
+                    da.title as digital_title,
+                    da.price as digital_price,
+                    da.description as digital_description,
+                    da.image_url as digital_image_url,
+                    oa.title as artwork_title,
+                    oa.original_price as artwork_original_price,
+                    oa.discount_price as artwork_discount_price,
+                    oa.description as artwork_description,
+                    oa.image as artwork_image
+                FROM order_items oi
+                LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+                LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
+                LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+                LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+                WHERE oi.order_id = ?
+            `, [order.id]);
+
+            // 处理订单项数据
+            const orderItemsWithImages = orderItems.map(item => {
+                let processedItem = {
+                    id: item.id,
+                    type: item.type,
+                    quantity: item.quantity,
+                    price: item.price
+                };
+
+                // 根据类型设置相应的字段
+                if (item.type === 'right') {
+                    processedItem = {
+                        ...processedItem,
+                        title: item.right_title,
+                        original_price: item.right_original_price,
+                        description: item.right_description,
+                        status: item.right_status,
+                        remaining_count: item.right_remaining_count,
+                        images: item.right_image_url ? [item.right_image_url] : []
+                    };
+                } else if (item.type === 'digital') {
+                    processedItem = {
+                        ...processedItem,
+                        title: item.digital_title,
+                        description: item.digital_description,
+                        images: item.digital_image_url ? [item.digital_image_url] : []
+                    };
+                } else if (item.type === 'artwork') {
+                    processedItem = {
+                        ...processedItem,
+                        title: item.artwork_title,
+                        original_price: item.artwork_original_price,
+                        discount_price: item.artwork_discount_price,
+                        description: item.artwork_description,
+                        images: item.artwork_image ? [item.artwork_image] : []
+                    };
+                }
+
+                return processedItem;
+            });
+
+            // 查询微信支付订单状态
+            try {
+                const timestamp = Math.floor(Date.now() / 1000).toString();
+                const nonceStr = generateNonceStr();
+                const method = 'GET';
+                const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`;
+                const body = '';
+                const signature = generateSignV3(method, url, timestamp, nonceStr, body);
+
+                const response = await axios.get(
+                    `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`,
+                    {
+                        headers: {
+                            'Accept': 'application/json',
+                            'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
+                            'User-Agent': 'axios/1.9.0'
+                        }
+                    }
+                );
+
+                const wxPayData = response.data;
+                return {
+                    ...order,
+                    items: orderItemsWithImages,
+                    pay_status: {
+                        trade_state: wxPayData.trade_state || 'UNKNOWN',
+                        trade_state_desc: wxPayData.trade_state_desc || '未知状态',
+                        success_time: wxPayData.success_time || null,
+                        amount: wxPayData.amount ? {
+                            total: wxPayData.amount.total,
+                            currency: wxPayData.amount.currency
+                        } : null,
+                        transaction_id: wxPayData.transaction_id || null
+                    }
+                };
+            } catch (error) {
+                console.error('查询微信支付状态失败:', error.response?.data || error.message);
+                // 如果查询微信支付状态失败，返回数据库中的订单信息
+                return {
+                    ...order,
+                    items: orderItemsWithImages,
+                    pay_status: {
+                        trade_state: order.trade_state || 'UNKNOWN',
+                        trade_state_desc: order.trade_state_desc || '支付状态查询失败',
+                        success_time: order.success_time || null,
+                        amount: order.total_fee ? {
+                            total: order.total_fee,
+                            currency: 'CNY'
+                        } : null,
+                        transaction_id: order.transaction_id || null
+                    }
+                };
+            }
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                orders: ordersWithItems,
+                pagination: {
+                    total: parseInt(total),
+                    page: cleanPage,
+                    limit: cleanLimit
+                }
+            }
+        });
+    } catch (error) {
+        console.error('管理员查询订单列表失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '管理员查询订单列表失败'
+        });
+    }
+});
+
 
 module.exports = router; 

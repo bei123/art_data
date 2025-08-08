@@ -71,6 +71,13 @@
       </el-icon>
       <template #title>退款审批</template>
     </el-menu-item>
+
+    <el-menu-item index="/orders">
+      <el-icon>
+        <Document />
+      </el-icon>
+      <template #title>订单管理</template>
+    </el-menu-item>
   </el-menu>
 </template>
 
