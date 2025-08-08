@@ -1875,7 +1875,7 @@ router.get('/admin/orders', async (req, res) => {
 
         // 构建查询条件
         let query = `
-            SELECT o.*, u.nickname as user_nickname, u.avatar_url as user_avatar
+            SELECT o.*, u.nickname as user_nickname, u.avatar as user_avatar
             FROM orders o
             LEFT JOIN wx_users u ON o.user_id = u.id
         `;
