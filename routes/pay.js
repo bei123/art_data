@@ -99,7 +99,7 @@ function formatWechatTime(isoString) {
 // 统一下单接口
 router.post('/unifiedorder', async (req, res) => {
     try {
-        const { openid, total_fee, body, out_trade_no, cart_items } = req.body;
+        const { openid, total_fee, body, out_trade_no, cart_items, address_id } = req.body;
 
         // 输入验证
         if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
@@ -132,6 +132,11 @@ router.post('/unifiedorder', async (req, res) => {
         
         if (cart_items.length > 20) {
             return res.status(400).json({ error: '购物车商品数量不能超过20个' });
+        }
+        
+        // 验证地址ID（可选，但建议提供）
+        if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
+            return res.status(400).json({ error: '地址ID格式无效' });
         }
         
         // 幂等性锁
@@ -282,15 +287,15 @@ router.post('/unifiedorder', async (req, res) => {
             // 创建订单项，支持三种类型
             const orderItems = cart_items.map(item => {
                 if (item.type === 'right') {
-                    return [orderId, 'right', item.right_id, null, null, item.quantity, parseFloat(item.price)];
+                    return [orderId, 'right', item.right_id, null, null, item.quantity, parseFloat(item.price), address_id || null];
                 } else if (item.type === 'digital') {
-                    return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, parseFloat(item.price)];
+                    return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, parseFloat(item.price), address_id || null];
                 } else if (item.type === 'artwork') {
-                    return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, parseFloat(item.price)];
+                    return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, parseFloat(item.price), address_id || null];
                 }
             });
             await connection.query(
-                'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price) VALUES ?',
+                'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES ?',
                 [orderItems]
             );
 
@@ -374,7 +379,7 @@ router.post('/unifiedorder', async (req, res) => {
 // 单商品下单接口
 router.post('/singleorder', async (req, res) => {
     try {
-        const { openid, type, quantity, price, body, out_trade_no, right_id, digital_artwork_id, artwork_id } = req.body;
+        const { openid, type, quantity, price, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
 
         // 输入验证
         if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
@@ -409,6 +414,11 @@ router.post('/singleorder', async (req, res) => {
             (type === 'artwork' && (!artwork_id || isNaN(parseInt(artwork_id))))
         ) {
             return res.status(400).json({ error: '缺少有效的商品ID' });
+        }
+        
+        // 验证地址ID（可选，但建议提供）
+        if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
+            return res.status(400).json({ error: '地址ID格式无效' });
         }
 
         // 幂等性锁
@@ -532,14 +542,14 @@ router.post('/singleorder', async (req, res) => {
             // 创建订单项
             let orderItem;
             if (cleanType === 'right') {
-                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, cleanPrice];
+                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, cleanPrice, address_id || null];
             } else if (cleanType === 'digital') {
-                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, cleanPrice];
+                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, cleanPrice, address_id || null];
             } else if (cleanType === 'artwork') {
-                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, cleanPrice];
+                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, cleanPrice, address_id || null];
             }
             await connection.query(
-                'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 orderItem
             );
 
