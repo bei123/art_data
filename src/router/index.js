@@ -32,6 +32,15 @@ const routes = [
         component: () => import('@/views/ArtistDetail.vue')
       },
       {
+        path: 'institutions',
+        name: 'Institutions',
+        component: () => import('@/views/Institutions.vue'),
+        meta: {
+          title: '机构管理',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'digital-artworks',
         name: 'DigitalArtworks',
         component: () => import('@/views/DigitalArtworks.vue')

@@ -17,6 +17,14 @@
       </el-table-column>
       <el-table-column prop="name" label="姓名" />
       <el-table-column prop="era" label="时代" />
+      <el-table-column label="所属机构" width="150">
+        <template #default="{ row }">
+          <el-tag v-if="row.institution" type="info">
+            {{ row.institution.name }}
+          </el-tag>
+          <span v-else class="text-muted">独立艺术家</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="艺术历程" :show-overflow-tooltip="true" />
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
@@ -37,6 +45,17 @@
         </el-form-item>
         <el-form-item label="所属时代">
           <el-input v-model="form.era" />
+        </el-form-item>
+        <el-form-item label="所属机构">
+          <el-select v-model="form.institution_id" placeholder="请选择机构" clearable>
+            <el-option label="独立艺术家" :value="null" />
+            <el-option
+              v-for="institution in institutions"
+              :key="institution.id"
+              :label="institution.name"
+              :value="institution.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="头像">
           <el-upload
@@ -101,6 +120,7 @@ import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const router = useRouter()
 const artists = ref([])
+const institutions = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 
@@ -111,7 +131,8 @@ const form = ref({
   banner: '',
   description: '',
   biography: '',
-  journey: ''
+  journey: '',
+  institution_id: null
 })
 
 const fetchArtists = async () => {
@@ -133,6 +154,18 @@ const fetchArtists = async () => {
   }
 }
 
+const fetchInstitutions = async () => {
+  try {
+    const data = await axios.get('/institutions')
+    if (Array.isArray(data)) {
+      institutions.value = data
+    }
+  } catch (error) {
+    console.error('获取机构列表失败：', error)
+    institutions.value = []
+  }
+}
+
 const handleAdd = () => {
   isEdit.value = false
   form.value = {
@@ -142,7 +175,8 @@ const handleAdd = () => {
     banner: '',
     description: '',
     biography: '',
-    journey: ''
+    journey: '',
+    institution_id: null
   }
   dialogVisible.value = true
 }
@@ -157,7 +191,8 @@ const handleEdit = (row) => {
     banner: row.banner,
     description: row.description,
     biography: row.biography,
-    journey: row.journey
+    journey: row.journey,
+    institution_id: row.institution ? row.institution.id : null
   }
   dialogVisible.value = true
 }
@@ -233,6 +268,7 @@ const beforeBannerUpload = async (file) => {
 // 页面加载时获取数据
 onMounted(() => {
   fetchArtists()
+  fetchInstitutions()
 })
 </script>
 

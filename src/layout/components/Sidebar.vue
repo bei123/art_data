@@ -23,6 +23,13 @@
       <template #title>艺术家管理</template>
     </el-menu-item>
 
+    <el-menu-item index="/institutions">
+      <el-icon>
+        <OfficeBuilding />
+      </el-icon>
+      <template #title>机构管理</template>
+    </el-menu-item>
+
     <el-menu-item index="/digital-artworks">
       <el-icon>
         <PictureFilled />
@@ -79,7 +86,8 @@ import {
   Files,
   Document,
   Money,
-  Shop
+  Shop,
+  OfficeBuilding
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
