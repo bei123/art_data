@@ -1628,8 +1628,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     statusCondition = 'AND trade_state = "SUCCESS"';
                     break;
                 case 'cancelled':
-                    // 已取消：CLOSED, REVOKED
-                    statusCondition = 'AND trade_state IN ("CLOSED", "REVOKED")';
+                    // 已取消：CLOSED, REVOKED，或者 trade_state, trade_state_desc, trade_type 都为 null
+                    statusCondition = 'AND (trade_state IN ("CLOSED", "REVOKED") OR (trade_state IS NULL AND trade_state_desc IS NULL AND trade_type IS NULL))';
                     break;
                 case 'refunded':
                     // 已退款：REFUND
@@ -1802,7 +1802,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
             SELECT 
                 SUM(CASE WHEN trade_state IN ('NOTPAY', 'PAYERROR') THEN 1 ELSE 0 END) as pending_count,
                 SUM(CASE WHEN trade_state = 'SUCCESS' THEN 1 ELSE 0 END) as completed_count,
-                SUM(CASE WHEN trade_state IN ('CLOSED', 'REVOKED') THEN 1 ELSE 0 END) as cancelled_count,
+                SUM(CASE WHEN trade_state IN ('CLOSED', 'REVOKED') OR (trade_state IS NULL AND trade_state_desc IS NULL AND trade_type IS NULL) THEN 1 ELSE 0 END) as cancelled_count,
                 SUM(CASE WHEN trade_state = 'REFUND' THEN 1 ELSE 0 END) as refunded_count,
                 COUNT(*) as total_count
             FROM orders 
