@@ -211,13 +211,43 @@ const handleAdd = () => {
   dialogVisible.value = true
 }
 
-const handleEdit = (row) => {
+const handleEdit = async (row) => {
   isEdit.value = true
-  form.value = { ...row }
-  if (form.value.issue_year === undefined) form.value.issue_year = new Date().getFullYear()
-  if (form.value.batch_quantity === undefined) form.value.batch_quantity = 1
-  if (form.value.price === undefined) form.value.price = 0
-  dialogVisible.value = true
+  try {
+    // 获取详细信息
+    let detail = await axios.get(`/digital-artworks/${row.id}`)
+    // 兼容后端返回被包裹在data字段下的情况
+    if (detail && detail.data) {
+      detail = detail.data;
+    }
+    
+    // 用详情数据填充form
+    form.value = {
+      id: detail.id,
+      title: detail.title || '',
+      image_url: detail.image_url || '',
+      artist_id: detail.artist?.id || '',
+      description: detail.description || '',
+      registration_certificate: detail.registration_certificate || '',
+      license_rights: detail.license_rights || '',
+      license_period: detail.license_period || '',
+      owner_rights: detail.owner_rights || '',
+      license_items: detail.license_items || '',
+      project_name: detail.project_name || '',
+      product_name: detail.product_name || '',
+      project_owner: detail.project_owner || '',
+      issuer: detail.issuer || '',
+      issue_batch: detail.issue_batch || '',
+      issue_year: Number(detail.issue_year) || new Date().getFullYear(),
+      batch_quantity: Number(detail.batch_quantity) || 1,
+      price: Number(detail.price) || 0
+    }
+    
+    dialogVisible.value = true
+  } catch (error) {
+    console.error('获取详细信息失败:', error)
+    ElMessage.error('获取详细信息失败，无法编辑')
+  }
 }
 
 const handleDelete = (row) => {
