@@ -1124,4 +1124,515 @@ router.post('/verifyPassword', async (req, res) => {
     }
 });
 
+// 微信用户地址管理API
+
+// 获取用户地址列表
+router.get('/addresses', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    try {
+        // 查询用户的所有地址
+        const [addresses] = await db.query(`
+            SELECT 
+                id,
+                user_id,
+                receiver_name,
+                receiver_phone,
+                province,
+                city,
+                district,
+                detail_address,
+                is_default,
+                created_at,
+                updated_at
+            FROM wx_user_addresses 
+            WHERE user_id = ? 
+            ORDER BY is_default DESC, created_at DESC
+        `, [payload.userId]);
+        
+        res.json({
+            success: true,
+            data: addresses,
+            message: '获取地址列表成功'
+        });
+    } catch (err) {
+        console.error('获取地址列表失败:', err);
+        res.status(500).json({ error: '获取地址列表服务暂时不可用', detail: err.message });
+    }
+});
+
+// 获取单个地址详情
+router.get('/addresses/:id', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const addressId = parseInt(req.params.id);
+    if (isNaN(addressId) || addressId <= 0) {
+        return res.status(400).json({ error: '无效的地址ID' });
+    }
+
+    try {
+        // 查询指定地址，确保只能查看自己的地址
+        const [addresses] = await db.query(`
+            SELECT 
+                id,
+                user_id,
+                receiver_name,
+                receiver_phone,
+                province,
+                city,
+                district,
+                detail_address,
+                is_default,
+                created_at,
+                updated_at
+            FROM wx_user_addresses 
+            WHERE id = ? AND user_id = ?
+        `, [addressId, payload.userId]);
+        
+        if (addresses.length === 0) {
+            return res.status(404).json({ error: '地址不存在' });
+        }
+        
+        res.json({
+            success: true,
+            data: addresses[0],
+            message: '获取地址详情成功'
+        });
+    } catch (err) {
+        console.error('获取地址详情失败:', err);
+        res.status(500).json({ error: '获取地址详情服务暂时不可用', detail: err.message });
+    }
+});
+
+// 添加新地址
+router.post('/addresses', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const { 
+        receiver_name, 
+        receiver_phone, 
+        province, 
+        city, 
+        district, 
+        detail_address, 
+        is_default = false 
+    } = req.body;
+    
+    // 输入验证
+    if (!receiver_name || typeof receiver_name !== 'string' || receiver_name.trim().length === 0) {
+        return res.status(400).json({ error: '收货人姓名不能为空' });
+    }
+    
+    if (receiver_name.length > 50) {
+        return res.status(400).json({ error: '收货人姓名长度不能超过50个字符' });
+    }
+    
+    if (!receiver_phone || typeof receiver_phone !== 'string' || receiver_phone.trim().length === 0) {
+        return res.status(400).json({ error: '收货人手机号不能为空' });
+    }
+    
+    // 验证手机号格式
+    const phoneRegex = /^1[3-9]\d{9}$/;
+    if (!phoneRegex.test(receiver_phone.trim())) {
+        return res.status(400).json({ error: '手机号格式不正确' });
+    }
+    
+    if (!province || typeof province !== 'string' || province.trim().length === 0) {
+        return res.status(400).json({ error: '省份不能为空' });
+    }
+    
+    if (!city || typeof city !== 'string' || city.trim().length === 0) {
+        return res.status(400).json({ error: '城市不能为空' });
+    }
+    
+    if (!district || typeof district !== 'string' || district.trim().length === 0) {
+        return res.status(400).json({ error: '区县不能为空' });
+    }
+    
+    if (!detail_address || typeof detail_address !== 'string' || detail_address.trim().length === 0) {
+        return res.status(400).json({ error: '详细地址不能为空' });
+    }
+    
+    if (detail_address.length > 200) {
+        return res.status(400).json({ error: '详细地址长度不能超过200个字符' });
+    }
+
+    try {
+        // 如果设置为默认地址，先取消其他默认地址
+        if (is_default) {
+            await db.query('UPDATE wx_user_addresses SET is_default = 0 WHERE user_id = ?', [payload.userId]);
+        }
+
+        // 插入新地址
+        const [result] = await db.query(`
+            INSERT INTO wx_user_addresses 
+            (user_id, receiver_name, receiver_phone, province, city, district, detail_address, is_default) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            payload.userId,
+            receiver_name.trim(),
+            receiver_phone.trim(),
+            province.trim(),
+            city.trim(),
+            district.trim(),
+            detail_address.trim(),
+            is_default ? 1 : 0
+        ]);
+
+        // 查询新插入的地址
+        const [newAddress] = await db.query(`
+            SELECT 
+                id,
+                user_id,
+                receiver_name,
+                receiver_phone,
+                province,
+                city,
+                district,
+                detail_address,
+                is_default,
+                created_at,
+                updated_at
+            FROM wx_user_addresses 
+            WHERE id = ?
+        `, [result.insertId]);
+
+        res.json({
+            success: true,
+            data: newAddress[0],
+            message: '地址添加成功'
+        });
+    } catch (err) {
+        console.error('添加地址失败:', err);
+        res.status(500).json({ error: '添加地址服务暂时不可用', detail: err.message });
+    }
+});
+
+// 修改地址
+router.put('/addresses/:id', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const addressId = parseInt(req.params.id);
+    if (isNaN(addressId) || addressId <= 0) {
+        return res.status(400).json({ error: '无效的地址ID' });
+    }
+
+    const { 
+        receiver_name, 
+        receiver_phone, 
+        province, 
+        city, 
+        district, 
+        detail_address, 
+        is_default 
+    } = req.body;
+    
+    // 输入验证
+    if (!receiver_name || typeof receiver_name !== 'string' || receiver_name.trim().length === 0) {
+        return res.status(400).json({ error: '收货人姓名不能为空' });
+    }
+    
+    if (receiver_name.length > 50) {
+        return res.status(400).json({ error: '收货人姓名长度不能超过50个字符' });
+    }
+    
+    if (!receiver_phone || typeof receiver_phone !== 'string' || receiver_phone.trim().length === 0) {
+        return res.status(400).json({ error: '收货人手机号不能为空' });
+    }
+    
+    // 验证手机号格式
+    const phoneRegex = /^1[3-9]\d{9}$/;
+    if (!phoneRegex.test(receiver_phone.trim())) {
+        return res.status(400).json({ error: '手机号格式不正确' });
+    }
+    
+    if (!province || typeof province !== 'string' || province.trim().length === 0) {
+        return res.status(400).json({ error: '省份不能为空' });
+    }
+    
+    if (!city || typeof city !== 'string' || city.trim().length === 0) {
+        return res.status(400).json({ error: '城市不能为空' });
+    }
+    
+    if (!district || typeof district !== 'string' || district.trim().length === 0) {
+        return res.status(400).json({ error: '区县不能为空' });
+    }
+    
+    if (!detail_address || typeof detail_address !== 'string' || detail_address.trim().length === 0) {
+        return res.status(400).json({ error: '详细地址不能为空' });
+    }
+    
+    if (detail_address.length > 200) {
+        return res.status(400).json({ error: '详细地址长度不能超过200个字符' });
+    }
+
+    try {
+        // 检查地址是否存在且属于当前用户
+        const [existingAddresses] = await db.query(`
+            SELECT id, is_default FROM wx_user_addresses 
+            WHERE id = ? AND user_id = ?
+        `, [addressId, payload.userId]);
+        
+        if (existingAddresses.length === 0) {
+            return res.status(404).json({ error: '地址不存在' });
+        }
+
+        // 如果设置为默认地址，先取消其他默认地址
+        if (is_default) {
+            await db.query('UPDATE wx_user_addresses SET is_default = 0 WHERE user_id = ? AND id != ?', [payload.userId, addressId]);
+        }
+
+        // 更新地址
+        await db.query(`
+            UPDATE wx_user_addresses 
+            SET receiver_name = ?, receiver_phone = ?, province = ?, city = ?, district = ?, 
+                detail_address = ?, is_default = ?, updated_at = NOW()
+            WHERE id = ? AND user_id = ?
+        `, [
+            receiver_name.trim(),
+            receiver_phone.trim(),
+            province.trim(),
+            city.trim(),
+            district.trim(),
+            detail_address.trim(),
+            is_default ? 1 : 0,
+            addressId,
+            payload.userId
+        ]);
+
+        // 查询更新后的地址
+        const [updatedAddress] = await db.query(`
+            SELECT 
+                id,
+                user_id,
+                receiver_name,
+                receiver_phone,
+                province,
+                city,
+                district,
+                detail_address,
+                is_default,
+                created_at,
+                updated_at
+            FROM wx_user_addresses 
+            WHERE id = ?
+        `, [addressId]);
+
+        res.json({
+            success: true,
+            data: updatedAddress[0],
+            message: '地址修改成功'
+        });
+    } catch (err) {
+        console.error('修改地址失败:', err);
+        res.status(500).json({ error: '修改地址服务暂时不可用', detail: err.message });
+    }
+});
+
+// 删除地址
+router.delete('/addresses/:id', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const addressId = parseInt(req.params.id);
+    if (isNaN(addressId) || addressId <= 0) {
+        return res.status(400).json({ error: '无效的地址ID' });
+    }
+
+    try {
+        // 检查地址是否存在且属于当前用户
+        const [existingAddresses] = await db.query(`
+            SELECT id, is_default FROM wx_user_addresses 
+            WHERE id = ? AND user_id = ?
+        `, [addressId, payload.userId]);
+        
+        if (existingAddresses.length === 0) {
+            return res.status(404).json({ error: '地址不存在' });
+        }
+
+        const address = existingAddresses[0];
+        let wasDefault = address.is_default === 1;
+
+        // 删除地址
+        await db.query('DELETE FROM wx_user_addresses WHERE id = ? AND user_id = ?', [addressId, payload.userId]);
+
+        // 如果删除的是默认地址，将最新的地址设为默认地址
+        if (wasDefault) {
+            const [remainingAddresses] = await db.query(`
+                SELECT id FROM wx_user_addresses 
+                WHERE user_id = ? 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            `, [payload.userId]);
+            
+            if (remainingAddresses.length > 0) {
+                await db.query('UPDATE wx_user_addresses SET is_default = 1 WHERE id = ?', [remainingAddresses[0].id]);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: '地址删除成功'
+        });
+    } catch (err) {
+        console.error('删除地址失败:', err);
+        res.status(500).json({ error: '删除地址服务暂时不可用', detail: err.message });
+    }
+});
+
+// 设置默认地址
+router.put('/addresses/:id/default', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    const addressId = parseInt(req.params.id);
+    if (isNaN(addressId) || addressId <= 0) {
+        return res.status(400).json({ error: '无效的地址ID' });
+    }
+
+    try {
+        // 检查地址是否存在且属于当前用户
+        const [existingAddresses] = await db.query(`
+            SELECT id FROM wx_user_addresses 
+            WHERE id = ? AND user_id = ?
+        `, [addressId, payload.userId]);
+        
+        if (existingAddresses.length === 0) {
+            return res.status(404).json({ error: '地址不存在' });
+        }
+
+        // 先取消所有默认地址
+        await db.query('UPDATE wx_user_addresses SET is_default = 0 WHERE user_id = ?', [payload.userId]);
+
+        // 设置指定地址为默认地址
+        await db.query('UPDATE wx_user_addresses SET is_default = 1 WHERE id = ? AND user_id = ?', [addressId, payload.userId]);
+
+        res.json({
+            success: true,
+            message: '默认地址设置成功'
+        });
+    } catch (err) {
+        console.error('设置默认地址失败:', err);
+        res.status(500).json({ error: '设置默认地址服务暂时不可用', detail: err.message });
+    }
+});
+
+// 获取用户默认地址
+router.get('/addresses/default', async (req, res) => {
+    // 解析 token
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return res.status(401).json({ error: '未登录' });
+    }
+    const token = authHeader.replace('Bearer ', '');
+    let payload;
+    try {
+        payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+        return res.status(401).json({ error: 'token无效' });
+    }
+
+    try {
+        // 查询用户的默认地址
+        const [addresses] = await db.query(`
+            SELECT 
+                id,
+                user_id,
+                receiver_name,
+                receiver_phone,
+                province,
+                city,
+                district,
+                detail_address,
+                is_default,
+                created_at,
+                updated_at
+            FROM wx_user_addresses 
+            WHERE user_id = ? AND is_default = 1
+            LIMIT 1
+        `, [payload.userId]);
+        
+        if (addresses.length === 0) {
+            return res.json({
+                success: true,
+                data: null,
+                message: '用户暂无默认地址'
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: addresses[0],
+            message: '获取默认地址成功'
+        });
+    } catch (err) {
+        console.error('获取默认地址失败:', err);
+        res.status(500).json({ error: '获取默认地址服务暂时不可用', detail: err.message });
+    }
+});
+
 module.exports = router; 
