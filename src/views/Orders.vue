@@ -198,7 +198,7 @@ const fetchOrders = async () => {
     }
     
     // 后台管理页面，始终查询所有订单
-    const response = await axios.get('/pay/admin/orders', { params })
+    const response = await axios.get('/api/wx/pay/admin/orders', { params })
     
     if (response.success) {
       orders.value = response.data.orders
