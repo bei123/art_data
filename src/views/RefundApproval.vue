@@ -149,7 +149,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
+import axios from '../utils/axios'
+import { API_BASE_URL } from '../config'
 
 const loading = ref(false)
 const refunds = ref([])
@@ -174,7 +175,7 @@ const approveForm = ref({
 const loadRefunds = async () => {
   try {
     loading.value = true;
-    const response = await axios.get('https://api.wx.2000gallery.art:2000/api/wx/pay/refund/requests', {
+    const response = await axios.get('/wx/pay/refund/requests', {
       params: {
         status: filterStatus.value,
         page: currentPage.value,
@@ -182,30 +183,18 @@ const loadRefunds = async () => {
       }
     });
     
-    console.log('退款申请列表响应:', response.data);
+    console.log('退款申请列表响应:', response);
     
-    if (response.data.success) {
-      refunds.value = response.data.data;
-      total.value = response.data.total;
+    if (response.success) {
+      refunds.value = response.data;
+      total.value = response.total || 0;
     } else {
-      console.error('加载退款申请列表失败:', response.data.error);
-      ElMessage.error(response.data.error || '加载退款申请列表失败');
+      console.error('加载退款申请列表失败:', response.error);
+      ElMessage.error(response.error || '加载退款申请列表失败');
     }
   } catch (error) {
     console.error('加载退款申请列表失败:', error);
-    if (error.response) {
-      // 服务器返回了错误响应
-      console.error('错误响应:', error.response.data);
-      ElMessage.error(error.response.data.error || '加载退款申请列表失败');
-    } else if (error.request) {
-      // 请求已发出但没有收到响应
-      console.error('请求错误:', error.request);
-      ElMessage.error('网络错误，请检查网络连接');
-    } else {
-      // 请求配置出错
-      console.error('配置错误:', error.message);
-      ElMessage.error('请求配置错误');
-    }
+    ElMessage.error('加载退款申请列表失败');
   } finally {
     loading.value = false;
   }
@@ -239,31 +228,22 @@ const handleApprove = async () => {
   }
 
   try {
-    const response = await axios.post('https://api.wx.2000gallery.art:2000/api/wx/pay/refund/approve', {
+    const response = await axios.post('/wx/pay/refund/approve', {
       refund_id: approveForm.value.id,
       approve: approveForm.value.approve,
       reject_reason: approveForm.value.reject_reason
     })
 
-    if (response.data.success) {
+    if (response.success) {
       ElMessage.success('审批成功')
       approveDialogVisible.value = false
       loadRefunds()
     } else {
-      ElMessage.error(response.data.error || '审批失败')
+      ElMessage.error(response.error || '审批失败')
     }
   } catch (error) {
     console.error('审批失败:', error)
-    if (error.response) {
-      console.error('错误响应:', error.response.data)
-      ElMessage.error(error.response.data.error || '审批失败')
-    } else if (error.request) {
-      console.error('请求错误:', error.request)
-      ElMessage.error('网络错误，请检查网络连接')
-    } else {
-      console.error('配置错误:', error.message)
-      ElMessage.error('请求配置错误')
-    }
+    ElMessage.error('审批失败')
   }
 }
 
