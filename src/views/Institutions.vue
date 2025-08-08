@@ -20,9 +20,10 @@
       <el-table-column prop="address" label="地址" :show-overflow-tooltip="true" />
       <el-table-column prop="phone" label="电话" width="120" />
       <el-table-column prop="website" label="网站" width="150" />
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="250">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button type="success" size="small" @click="handleViewArtists(row)">查看艺术家</el-button>
           <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -73,6 +74,36 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 机构艺术家列表对话框 -->
+    <el-dialog
+      v-model="artistsDialogVisible"
+      :title="`${selectedInstitution?.name || ''} - 艺术家列表`"
+      width="80%"
+    >
+      <div v-if="institutionArtists.length === 0" class="empty-state">
+        <el-empty description="该机构下暂无艺术家" />
+      </div>
+      <el-table v-else :data="institutionArtists" style="width: 100%">
+        <el-table-column label="头像" width="100">
+          <template #default="{ row }">
+            <el-image
+              style="width: 50px; height: 50px"
+              :src="row.avatar"
+              fit="cover"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="姓名" />
+        <el-table-column prop="era" label="时代" />
+        <el-table-column prop="description" label="艺术历程" :show-overflow-tooltip="true" />
+        <el-table-column label="操作" width="150">
+          <template #default="{ row }">
+            <el-button type="primary" size="small" @click="handleEditArtist(row)">编辑艺术家</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -88,6 +119,9 @@ const router = useRouter()
 const institutions = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const artistsDialogVisible = ref(false)
+const selectedInstitution = ref(null)
+const institutionArtists = ref([])
 
 const form = ref({
   name: '',
@@ -154,6 +188,26 @@ const handleDelete = (row) => {
     } catch (error) {
       ElMessage.error('删除失败')
     }
+  })
+}
+
+const handleViewArtists = async (row) => {
+  try {
+    selectedInstitution.value = row
+    const response = await axios.get(`/institutions/${row.id}/artists`)
+    institutionArtists.value = response.artists || []
+    artistsDialogVisible.value = true
+  } catch (error) {
+    console.error('获取机构艺术家失败：', error)
+    ElMessage.error('获取机构艺术家失败')
+  }
+}
+
+const handleEditArtist = (artist) => {
+  // 跳转到艺术家管理页面并打开编辑对话框
+  router.push({
+    path: '/artists',
+    query: { edit: artist.id }
   })
 }
 
@@ -258,5 +312,10 @@ onMounted(() => {
 
 :deep(.el-image:hover) {
   transform: scale(1.02);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 0;
 }
 </style>

@@ -61,6 +61,62 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// 获取机构下的所有艺术家（公开接口）
+router.get('/:id/artists', async (req, res) => {
+  try {
+    // 验证ID参数
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: '无效的机构ID' });
+    }
+    
+    // 检查机构是否存在
+    const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [id]);
+    if (institutionRows.length === 0) {
+      return res.status(404).json({ error: '机构不存在' });
+    }
+    
+    // 获取该机构下的所有艺术家
+    const [artists] = await db.query(`
+      SELECT 
+        a.*,
+        i.id as institution_id,
+        i.name as institution_name,
+        i.logo as institution_logo,
+        i.description as institution_description
+      FROM artists a
+      LEFT JOIN institutions i ON a.institution_id = i.id
+      WHERE a.institution_id = ?
+      ORDER BY a.created_at DESC
+    `, [id]);
+    
+    const artistsWithProcessedImages = artists.map(artist => {
+      const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
+      return {
+        ...processedArtist,
+        institution: artist.institution_id ? {
+          id: artist.institution_id,
+          name: artist.institution_name,
+          logo: artist.institution_logo,
+          description: artist.institution_description
+        } : null
+      };
+    });
+    
+    res.json({
+      institution: {
+        id: institutionRows[0].id,
+        name: institutionRows[0].name
+      },
+      artists: artistsWithProcessedImages,
+      total: artistsWithProcessedImages.length
+    });
+  } catch (error) {
+    console.error('获取机构艺术家列表失败:', error);
+    res.status(500).json({ error: '获取机构艺术家列表失败' });
+  }
+});
+
 // 创建机构（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
   try {

@@ -10,6 +10,59 @@ const REDIS_ARTIST_DETAIL_KEY_PREFIX = 'artists:detail:';
 // 获取艺术家列表（公开接口）
 router.get('/', async (req, res) => {
   try {
+    const { institution_id } = req.query;
+    
+    // 如果指定了机构ID，直接查询该机构的艺术家
+    if (institution_id) {
+      const institutionId = parseInt(institution_id);
+      if (isNaN(institutionId) || institutionId <= 0) {
+        return res.status(400).json({ error: '无效的机构ID' });
+      }
+      
+      // 检查机构是否存在
+      const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [institutionId]);
+      if (institutionRows.length === 0) {
+        return res.status(404).json({ error: '机构不存在' });
+      }
+      
+      // 获取该机构下的所有艺术家
+      const [rows] = await db.query(`
+        SELECT 
+          a.*,
+          i.id as institution_id,
+          i.name as institution_name,
+          i.logo as institution_logo,
+          i.description as institution_description
+        FROM artists a
+        LEFT JOIN institutions i ON a.institution_id = i.id
+        WHERE a.institution_id = ?
+        ORDER BY a.created_at DESC
+      `, [institutionId]);
+      
+      const artistsWithProcessedImages = rows.map(artist => {
+        const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
+        return {
+          ...processedArtist,
+          institution: artist.institution_id ? {
+            id: artist.institution_id,
+            name: artist.institution_name,
+            logo: artist.institution_logo,
+            description: artist.institution_description
+          } : null
+        };
+      });
+      
+      return res.json({
+        institution: {
+          id: institutionRows[0].id,
+          name: institutionRows[0].name
+        },
+        artists: artistsWithProcessedImages,
+        total: artistsWithProcessedImages.length
+      });
+    }
+    
+    // 否则获取所有艺术家
     // 先查redis缓存
     const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
     if (cache) {

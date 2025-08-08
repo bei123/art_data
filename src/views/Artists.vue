@@ -2,10 +2,21 @@
   <div>
     <div class="header">
       <h3>艺术家管理</h3>
-      <el-button type="primary" @click="handleAdd">添加艺术家</el-button>
+      <div class="header-actions">
+        <el-select v-model="selectedInstitutionId" placeholder="按机构筛选" clearable @change="handleInstitutionFilter">
+          <el-option label="全部艺术家" :value="null" />
+          <el-option
+            v-for="institution in institutions"
+            :key="institution.id"
+            :label="institution.name"
+            :value="institution.id"
+          />
+        </el-select>
+        <el-button type="primary" @click="handleAdd">添加艺术家</el-button>
+      </div>
     </div>
 
-    <el-table :data="artists" style="width: 100%">
+    <el-table :data="filteredArtists" style="width: 100%">
       <el-table-column label="头像">
         <template #default="{ row }">
           <el-image
@@ -123,6 +134,8 @@ const artists = ref([])
 const institutions = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const selectedInstitutionId = ref(null)
+const filteredArtists = ref([])
 
 const form = ref({
   name: '',
@@ -141,16 +154,40 @@ const fetchArtists = async () => {
     console.log('API返回的原始数据：', data)
     if (Array.isArray(data)) {
       artists.value = data
+      filteredArtists.value = data
       console.log('设置后的艺术家数据：', artists.value)
     } else {
       console.error('返回的数据不是数组：', data)
       artists.value = []
+      filteredArtists.value = []
       ElMessage.error('获取数据格式不正确')
     }
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     artists.value = []
+    filteredArtists.value = []
     ElMessage.error('获取艺术家列表失败')
+  }
+}
+
+const handleInstitutionFilter = async () => {
+  if (!selectedInstitutionId.value) {
+    // 显示全部艺术家
+    filteredArtists.value = artists.value
+    return
+  }
+  
+  try {
+    const response = await axios.get(`/artists?institution_id=${selectedInstitutionId.value}`)
+    if (response.artists) {
+      filteredArtists.value = response.artists
+    } else {
+      filteredArtists.value = []
+    }
+  } catch (error) {
+    console.error('按机构筛选失败：', error)
+    ElMessage.error('按机构筛选失败')
+    filteredArtists.value = []
   }
 }
 
@@ -207,6 +244,8 @@ const handleDelete = (row) => {
       await axios.delete(`/artists/${row.id}`)
       ElMessage.success('删除成功')
       fetchArtists()
+      // 重新应用筛选
+      handleInstitutionFilter()
     } catch (error) {
       ElMessage.error('删除失败')
     }
@@ -248,6 +287,8 @@ const handleSubmit = async () => {
     ElMessage.success('保存成功')
     dialogVisible.value = false
     fetchArtists()
+    // 重新应用筛选
+    handleInstitutionFilter()
   } catch (error) {
     ElMessage.error('保存失败')
   }
@@ -278,6 +319,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .avatar-uploader,
