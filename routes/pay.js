@@ -11,6 +11,7 @@ const redisClient = require('../utils/redisClient');
 const LOCK_EXPIRE = 30; // 30秒
 const CALLBACK_EXPIRE = 600; // 10分钟
 const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
+const { authenticateToken } = require('../auth');
 
 
 // 微信支付V3配置
@@ -1847,7 +1848,7 @@ router.get('/digital-identity/purchases/:user_id', async (req, res) => {
 });
 
 // 管理员查询所有订单接口
-router.get('/admin/orders', async (req, res) => {
+router.get('/admin/orders', authenticateToken, async (req, res) => {
     try {
         const {
             status,
