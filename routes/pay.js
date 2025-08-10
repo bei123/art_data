@@ -1653,6 +1653,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
         const getOrderStatusType = (tradeState) => {
             switch (tradeState) {
                 case 'NOTPAY':
+                case null:
+                case undefined:
                     return 'pending';
                 case 'PAYERROR':
                     return 'payment_failed';
@@ -1663,8 +1665,6 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return 'cancelled';
                 case 'REFUND':
                     return 'refunded';
-                case null:
-                case undefined:
                 default:
                     return 'unknown';
             }
@@ -1673,6 +1673,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
         const getOrderStatusText = (tradeState) => {
             switch (tradeState) {
                 case 'NOTPAY':
+                case null:
+                case undefined:
                     return '待付款';
                 case 'PAYERROR':
                     return '支付失败';
@@ -1684,8 +1686,6 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return '已撤销';
                 case 'REFUND':
                     return '已退款';
-                case null:
-                case undefined:
                 default:
                     return '未知状态';
             }
@@ -1738,8 +1738,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
             let statusCondition = '';
             switch (cleanStatus) {
                 case 'pending':
-                    // 待付款：只查询 trade_state 为 NOTPAY 的订单
-                    statusCondition = 'AND trade_state = "NOTPAY"';
+                    // 待付款：查询 trade_state 为 NOTPAY 或 NULL 的订单（根据 getOrderStatusType 和 getOrderStatusText 的逻辑）
+                    statusCondition = 'AND (trade_state = "NOTPAY" OR trade_state IS NULL)';
                     break;
                 case 'completed':
                     // 已完成：SUCCESS
@@ -1939,7 +1939,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
         // 查询各状态订单数量统计
         const [statusStats] = await db.query(`
             SELECT 
-                SUM(CASE WHEN trade_state = 'NOTPAY' THEN 1 ELSE 0 END) as pending_count,
+                SUM(CASE WHEN trade_state = 'NOTPAY' OR trade_state IS NULL THEN 1 ELSE 0 END) as pending_count,
                 SUM(CASE WHEN trade_state = 'SUCCESS' THEN 1 ELSE 0 END) as completed_count,
                 SUM(CASE WHEN trade_state IN ('CLOSED', 'REVOKED') THEN 1 ELSE 0 END) as cancelled_count,
                 SUM(CASE WHEN trade_state = 'REFUND' THEN 1 ELSE 0 END) as refunded_count,
