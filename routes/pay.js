@@ -2464,6 +2464,7 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
             },
             items: orderItems.map(item => ({
                 id: item.id,
+                sku_id: item.sku_id = item.type === 'right' ? item.right_id : item.type === 'digital' ? item.digital_artwork_id : item.artwork_id,
                 type: item.type,
                 quantity: item.quantity,
                 price: item.price,
