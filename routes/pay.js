@@ -1653,8 +1653,6 @@ router.get('/orders', authenticateToken, async (req, res) => {
         const getOrderStatusType = (tradeState) => {
             switch (tradeState) {
                 case 'NOTPAY':
-                case null:
-                case undefined:
                     return 'pending';
                 case 'PAYERROR':
                     return 'payment_failed';
@@ -1665,6 +1663,11 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return 'cancelled';
                 case 'REFUND':
                     return 'refunded';
+                case null:
+                case undefined:
+                    // 对于null或undefined的订单，需要进一步判断
+                    // 这里暂时返回pending，但实际应该根据订单创建时间等判断
+                    return 'pending';
                 default:
                     return 'unknown';
             }
@@ -1673,19 +1676,20 @@ router.get('/orders', authenticateToken, async (req, res) => {
         const getOrderStatusText = (tradeState) => {
             switch (tradeState) {
                 case 'NOTPAY':
-                case null:
-                case undefined:
-                    return '待付款';
+                    return '待支付';
                 case 'PAYERROR':
                     return '支付失败';
                 case 'SUCCESS':
-                    return '已完成';
+                    return '支付成功';
                 case 'CLOSED':
                     return '已关闭';
                 case 'REVOKED':
                     return '已撤销';
                 case 'REFUND':
                     return '已退款';
+                case null:
+                case undefined:
+                    return '待支付';
                 default:
                     return '未知状态';
             }
@@ -1738,12 +1742,11 @@ router.get('/orders', authenticateToken, async (req, res) => {
             let statusCondition = '';
             switch (cleanStatus) {
                 case 'pending':
-                    // 待付款：查询 order_status.type 为 pending 的订单
-                    // 对应 trade_state 为 NOTPAY 或 NULL 的订单，但排除 CLOSED 和 REVOKED 订单（对应 order_status.type 为 cancelled）
-                    statusCondition = 'AND (trade_state = "NOTPAY" OR trade_state IS NULL) AND trade_state NOT IN ("CLOSED", "REVOKED")';
+                    // 待支付：查询 trade_state 为 NOTPAY 的订单
+                    statusCondition = 'AND trade_state = "NOTPAY"';
                     break;
                 case 'completed':
-                    // 已完成：SUCCESS
+                    // 支付成功：SUCCESS
                     statusCondition = 'AND trade_state = "SUCCESS"';
                     break;
                 case 'cancelled':
@@ -1871,7 +1874,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
                 return processedItem;
             });
 
-            // 查询微信支付订单状态
+            // 查询微信支付订单状态（仅用于获取详细信息，不影响状态判断）
             try {
                 const timestamp = Math.floor(Date.now() / 1000).toString();
                 const nonceStr = generateNonceStr();
@@ -1902,17 +1905,17 @@ router.get('/orders', authenticateToken, async (req, res) => {
                         text: getOrderStatusText(order.trade_state)
                     },
                     pay_status: {
-                        trade_state: wxPayData.trade_state || order.trade_state || 'UNKNOWN',
-                        trade_state_desc: wxPayData.trade_state_desc || order.trade_state_desc || '未知状态',
-                        success_time: wxPayData.success_time || order.success_time || null,
-                        amount: wxPayData.amount ? {
-                            total: wxPayData.amount.total,
-                            currency: wxPayData.amount.currency
-                        } : (order.total_fee ? {
+                        trade_state: order.trade_state || 'UNKNOWN',
+                        trade_state_desc: order.trade_state_desc || wxPayData.trade_state_desc || '未知状态',
+                        success_time: order.success_time || wxPayData.success_time || null,
+                        amount: order.total_fee ? {
                             total: order.total_fee,
                             currency: 'CNY'
+                        } : (wxPayData.amount ? {
+                            total: wxPayData.amount.total,
+                            currency: wxPayData.amount.currency
                         } : null),
-                        transaction_id: wxPayData.transaction_id || order.transaction_id || null
+                        transaction_id: order.transaction_id || wxPayData.transaction_id || null
                     }
                 };
             } catch (error) {
@@ -1940,10 +1943,10 @@ router.get('/orders', authenticateToken, async (req, res) => {
             }
         }));
 
-        // 查询各状态订单数量统计（基于 order_status.type 的逻辑）
+        // 查询各状态订单数量统计（基于 trade_state 的逻辑）
         const [statusStats] = await db.query(`
             SELECT 
-                SUM(CASE WHEN trade_state = 'NOTPAY' OR trade_state IS NULL THEN 1 ELSE 0 END) as pending_count,
+                SUM(CASE WHEN trade_state = 'NOTPAY' THEN 1 ELSE 0 END) as pending_count,
                 SUM(CASE WHEN trade_state = 'SUCCESS' THEN 1 ELSE 0 END) as completed_count,
                 SUM(CASE WHEN trade_state IN ('CLOSED', 'REVOKED') THEN 1 ELSE 0 END) as cancelled_count,
                 SUM(CASE WHEN trade_state = 'REFUND' THEN 1 ELSE 0 END) as refunded_count,
