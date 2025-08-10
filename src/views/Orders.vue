@@ -5,9 +5,9 @@
       <div class="filters">
         <el-select v-model="filters.status" placeholder="订单状态" clearable style="width: 150px; margin-right: 10px;">
           <el-option label="全部" value="" />
-          <el-option label="待支付" value="NOTPAY" />
+          <el-option label="未支付" value="NOTPAY" />
           <el-option label="支付成功" value="SUCCESS" />
-          <el-option label="已退款" value="REFUND" />
+          <el-option label="转入退款" value="REFUND" />
           <el-option label="已关闭" value="CLOSED" />
           <el-option label="已撤销" value="REVOKED" />
           <el-option label="支付失败" value="PAYERROR" />
@@ -294,8 +294,8 @@ const getStatusType = (status) => {
 const getStatusLabel = (status) => {
   const statusMap = {
     'SUCCESS': '支付成功',
-    'NOTPAY': '待支付',
-    'REFUND': '已退款',
+    'NOTPAY': '未支付',
+    'REFUND': '转入退款',
     'CLOSED': '已关闭',
     'REVOKED': '已撤销',
     'PAYERROR': '支付失败'

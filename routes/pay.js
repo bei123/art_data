@@ -1676,7 +1676,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
         const getOrderStatusText = (tradeState) => {
             switch (tradeState) {
                 case 'NOTPAY':
-                    return '待支付';
+                    return '未支付';
                 case 'PAYERROR':
                     return '支付失败';
                 case 'SUCCESS':
@@ -1686,10 +1686,10 @@ router.get('/orders', authenticateToken, async (req, res) => {
                 case 'REVOKED':
                     return '已撤销';
                 case 'REFUND':
-                    return '已退款';
+                    return '转入退款';
                 case null:
                 case undefined:
-                    return '待支付';
+                    return '未支付';
                 default:
                     return '未知状态';
             }
@@ -1742,7 +1742,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
             let statusCondition = '';
             switch (cleanStatus) {
                 case 'pending':
-                    // 待支付：查询 trade_state 为 NOTPAY 的订单
+                    // 未支付：查询 trade_state 为 NOTPAY 的订单
                     statusCondition = 'AND trade_state = "NOTPAY"';
                     break;
                 case 'completed':
@@ -1901,21 +1901,21 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     ...order,
                     items: orderItemsWithImages,
                     order_status: {
-                        type: getOrderStatusType(order.trade_state),
-                        text: getOrderStatusText(order.trade_state)
+                        type: getOrderStatusType(wxPayData.trade_state || order.trade_state),
+                        text: getOrderStatusText(wxPayData.trade_state || order.trade_state)
                     },
                     pay_status: {
-                        trade_state: order.trade_state || 'UNKNOWN',
-                        trade_state_desc: order.trade_state_desc || wxPayData.trade_state_desc || '未知状态',
-                        success_time: order.success_time || wxPayData.success_time || null,
-                        amount: order.total_fee ? {
-                            total: order.total_fee,
-                            currency: 'CNY'
-                        } : (wxPayData.amount ? {
+                        trade_state: wxPayData.trade_state || order.trade_state || 'UNKNOWN',
+                        trade_state_desc: wxPayData.trade_state_desc || order.trade_state_desc || '未知状态',
+                        success_time: wxPayData.success_time || order.success_time || null,
+                        amount: wxPayData.amount ? {
                             total: wxPayData.amount.total,
                             currency: wxPayData.amount.currency
+                        } : (order.total_fee ? {
+                            total: order.total_fee,
+                            currency: 'CNY'
                         } : null),
-                        transaction_id: order.transaction_id || wxPayData.transaction_id || null
+                        transaction_id: wxPayData.transaction_id || order.transaction_id || null
                     }
                 };
             } catch (error) {
