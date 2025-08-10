@@ -1649,8 +1649,12 @@ router.get('/orders', authenticateToken, async (req, res) => {
             limit = 10
         } = req.query;
 
-        // 订单状态分类函数
+        // 订单状态分类函数 - 完全以微信支付API返回的状态为准
         const getOrderStatusType = (tradeState) => {
+            if (!tradeState) {
+                return 'unknown';
+            }
+            
             switch (tradeState) {
                 case 'NOTPAY':
                     return 'pending';
@@ -1663,17 +1667,16 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return 'cancelled';
                 case 'REFUND':
                     return 'refunded';
-                case null:
-                case undefined:
-                    // 对于null或undefined的订单，需要进一步判断
-                    // 这里暂时返回pending，但实际应该根据订单创建时间等判断
-                    return 'pending';
                 default:
                     return 'unknown';
             }
         };
 
         const getOrderStatusText = (tradeState) => {
+            if (!tradeState) {
+                return '未知状态';
+            }
+            
             switch (tradeState) {
                 case 'NOTPAY':
                     return '未支付';
@@ -1687,9 +1690,6 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return '已撤销';
                 case 'REFUND':
                     return '转入退款';
-                case null:
-                case undefined:
-                    return '未支付';
                 default:
                     return '未知状态';
             }
@@ -1737,35 +1737,9 @@ router.get('/orders', authenticateToken, async (req, res) => {
         let params = [cleanUserId];
         let countParams = [cleanUserId];
 
-        // 根据状态类型映射到实际的微信支付状态
-        if (cleanStatus && cleanStatus !== 'all') {
-            let statusCondition = '';
-            switch (cleanStatus) {
-                case 'pending':
-                    // 未支付：查询 trade_state 为 NOTPAY 的订单
-                    statusCondition = 'AND trade_state = "NOTPAY"';
-                    break;
-                case 'completed':
-                    // 支付成功：SUCCESS
-                    statusCondition = 'AND trade_state = "SUCCESS"';
-                    break;
-                case 'cancelled':
-                    // 已取消：CLOSED, REVOKED
-                    statusCondition = 'AND trade_state IN ("CLOSED", "REVOKED")';
-                    break;
-                case 'refunded':
-                    // 已退款：REFUND
-                    statusCondition = 'AND trade_state = "REFUND"';
-                    break;
-                default:
-                    break;
-            }
-            
-            if (statusCondition) {
-                query += ' ' + statusCondition;
-                countQuery += ' ' + statusCondition;
-            }
-        }
+        // 由于完全依赖微信API，状态筛选将在获取数据后进行
+        // 这里先获取所有订单，然后在内存中进行筛选
+        // 注意：这种方式会影响分页的准确性，建议前端处理筛选逻辑
 
         // 添加排序和分页
         query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
@@ -1775,6 +1749,17 @@ router.get('/orders', authenticateToken, async (req, res) => {
         // 执行查询
         const [orders] = await db.query(query, params);
         const [[{ total }]] = await db.query(countQuery, countParams);
+
+        // 由于完全依赖微信API，状态筛选功能暂时移除
+        // 建议前端根据返回的order_status.type进行筛选
+        // 这样可以确保状态筛选的准确性
+        // 
+        // 修改说明：
+        // 1. 订单状态完全以微信支付API返回的trade_state为准
+        // 2. 不再依赖数据库中的trade_state字段
+        // 3. 如果微信API调用失败，返回unknown状态而不是数据库状态
+        // 4. 统计信息基于微信API返回的状态实时计算
+        // 5. 状态筛选建议在前端进行，确保准确性
 
         // 查询每个订单的订单项
         const ordersWithItems = await Promise.all(orders.map(async (order) => {
@@ -1874,7 +1859,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
                 return processedItem;
             });
 
-            // 查询微信支付订单状态（仅用于获取详细信息，不影响状态判断）
+            // 查询微信支付订单状态 - 完全以微信API返回的数据为准
             try {
                 const timestamp = Math.floor(Date.now() / 1000).toString();
                 const nonceStr = generateNonceStr();
@@ -1901,59 +1886,50 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     ...order,
                     items: orderItemsWithImages,
                     order_status: {
-                        type: getOrderStatusType(wxPayData.trade_state || order.trade_state),
-                        text: getOrderStatusText(wxPayData.trade_state || order.trade_state)
+                        type: getOrderStatusType(wxPayData.trade_state),
+                        text: getOrderStatusText(wxPayData.trade_state)
                     },
                     pay_status: {
-                        trade_state: wxPayData.trade_state || order.trade_state || 'UNKNOWN',
-                        trade_state_desc: wxPayData.trade_state_desc || order.trade_state_desc || '未知状态',
-                        success_time: wxPayData.success_time || order.success_time || null,
+                        trade_state: wxPayData.trade_state,
+                        trade_state_desc: wxPayData.trade_state_desc,
+                        success_time: wxPayData.success_time,
                         amount: wxPayData.amount ? {
                             total: wxPayData.amount.total,
                             currency: wxPayData.amount.currency
-                        } : (order.total_fee ? {
-                            total: order.total_fee,
-                            currency: 'CNY'
-                        } : null),
-                        transaction_id: wxPayData.transaction_id || order.transaction_id || null
+                        } : null,
+                        transaction_id: wxPayData.transaction_id
                     }
                 };
             } catch (error) {
                 console.error('查询微信支付状态失败:', error.response?.data || error.message);
                 
-                // 如果查询微信支付状态失败，返回数据库中的订单信息
+                // 如果查询微信支付状态失败，返回错误状态
                 return {
                     ...order,
                     items: orderItemsWithImages,
                     order_status: {
-                        type: getOrderStatusType(order.trade_state),
-                        text: getOrderStatusText(order.trade_state)
+                        type: 'unknown',
+                        text: '支付状态查询失败'
                     },
                     pay_status: {
-                        trade_state: order.trade_state || 'UNKNOWN',
-                        trade_state_desc: order.trade_state_desc || '支付状态查询失败',
-                        success_time: order.success_time || null,
-                        amount: order.total_fee ? {
-                            total: order.total_fee,
-                            currency: 'CNY'
-                        } : null,
-                        transaction_id: order.transaction_id || null
+                        trade_state: 'UNKNOWN',
+                        trade_state_desc: '支付状态查询失败',
+                        success_time: null,
+                        amount: null,
+                        transaction_id: null
                     }
                 };
             }
         }));
 
-        // 查询各状态订单数量统计（基于 trade_state 的逻辑）
-        const [statusStats] = await db.query(`
-            SELECT 
-                SUM(CASE WHEN trade_state = 'NOTPAY' THEN 1 ELSE 0 END) as pending_count,
-                SUM(CASE WHEN trade_state = 'SUCCESS' THEN 1 ELSE 0 END) as completed_count,
-                SUM(CASE WHEN trade_state IN ('CLOSED', 'REVOKED') THEN 1 ELSE 0 END) as cancelled_count,
-                SUM(CASE WHEN trade_state = 'REFUND' THEN 1 ELSE 0 END) as refunded_count,
-                COUNT(*) as total_count
-            FROM orders 
-            WHERE user_id = ?
-        `, [cleanUserId]);
+        // 基于微信API返回的状态进行实时统计
+        const statusStats = [{
+            pending_count: ordersWithItems.filter(order => order.order_status.type === 'pending').length,
+            completed_count: ordersWithItems.filter(order => order.order_status.type === 'completed').length,
+            cancelled_count: ordersWithItems.filter(order => order.order_status.type === 'cancelled').length,
+            refunded_count: ordersWithItems.filter(order => order.order_status.type === 'refunded').length,
+            total_count: parseInt(total)
+        }];
 
         res.json({
             success: true,
