@@ -329,8 +329,8 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             } else {
                 // 创建新订单
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
-                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, cleanBody]
+                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -636,8 +636,8 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
             } else {
                 // 创建新订单
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
-                    [userId, cleanOutTradeNo, total_fee, actualTotalFee, availableDiscount, cleanBody]
+                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, cleanOutTradeNo, total_fee, actualTotalFee, availableDiscount, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -1665,7 +1665,6 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return 'refunded';
                 case null:
                 case undefined:
-                    return 'unknown';
                 default:
                     return 'unknown';
             }
@@ -1687,7 +1686,6 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     return '已退款';
                 case null:
                 case undefined:
-                    return '未知状态';
                 default:
                     return '未知状态';
             }
@@ -1739,10 +1737,10 @@ router.get('/orders', authenticateToken, async (req, res) => {
         if (cleanStatus && cleanStatus !== 'all') {
             let statusCondition = '';
             switch (cleanStatus) {
-                            case 'pending':
-                // 待付款：只判断 trade_state 是否为 NOTPAY
-                statusCondition = 'AND trade_state = "NOTPAY" AND trade_state_desc = "订单未支付"';
-                break;
+                case 'pending':
+                    // 待付款：只查询 trade_state 为 NOTPAY 的订单
+                    statusCondition = 'AND trade_state = "NOTPAY"';
+                    break;
                 case 'completed':
                     // 已完成：SUCCESS
                     statusCondition = 'AND trade_state = "SUCCESS"';
