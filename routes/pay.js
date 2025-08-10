@@ -1738,8 +1738,9 @@ router.get('/orders', authenticateToken, async (req, res) => {
             let statusCondition = '';
             switch (cleanStatus) {
                 case 'pending':
-                    // 待付款：查询 trade_state 为 NOTPAY 或 NULL 的订单（根据 getOrderStatusType 和 getOrderStatusText 的逻辑）
-                    statusCondition = 'AND (trade_state = "NOTPAY" OR trade_state IS NULL)';
+                    // 待付款：查询 order_status.type 为 pending 的订单
+                    // 对应 trade_state 为 NOTPAY 或 NULL 的订单，但排除 CLOSED 订单
+                    statusCondition = 'AND (trade_state = "NOTPAY" OR trade_state IS NULL) AND trade_state != "CLOSED"';
                     break;
                 case 'completed':
                     // 已完成：SUCCESS
@@ -1936,7 +1937,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
             }
         }));
 
-        // 查询各状态订单数量统计
+        // 查询各状态订单数量统计（基于 order_status.type 的逻辑）
         const [statusStats] = await db.query(`
             SELECT 
                 SUM(CASE WHEN trade_state = 'NOTPAY' OR trade_state IS NULL THEN 1 ELSE 0 END) as pending_count,
