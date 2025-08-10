@@ -1739,8 +1739,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
             switch (cleanStatus) {
                 case 'pending':
                     // 待付款：查询 order_status.type 为 pending 的订单
-                    // 对应 trade_state 为 NOTPAY 或 NULL 的订单，但排除 CLOSED 订单
-                    statusCondition = 'AND (trade_state = "NOTPAY" OR trade_state IS NULL) AND trade_state != "CLOSED"';
+                    // 对应 trade_state 为 NOTPAY 或 NULL 的订单，但排除 CLOSED 和 REVOKED 订单（对应 order_status.type 为 cancelled）
+                    statusCondition = 'AND (trade_state = "NOTPAY" OR trade_state IS NULL) AND trade_state NOT IN ("CLOSED", "REVOKED")';
                     break;
                 case 'completed':
                     // 已完成：SUCCESS
