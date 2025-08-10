@@ -1741,7 +1741,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
             switch (cleanStatus) {
                             case 'pending':
                 // 待付款：只判断 trade_state 是否为 NOTPAY
-                statusCondition = 'AND trade_state = "NOTPAY"';
+                statusCondition = 'AND trade_state = "NOTPAY" AND trade_state_desc = "订单未支付"';
                 break;
                 case 'completed':
                     // 已完成：SUCCESS
