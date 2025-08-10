@@ -139,13 +139,6 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: '地址ID格式无效' });
         }
         
-        // 幂等性锁
-        const lockKey = `pay:order:lock:${out_trade_no}`;
-        const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
-        if (!lock) {
-            return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
-        }
-
         // 清理输入
         const cleanOpenid = openid.trim();
         const cleanTotalFee = parseFloat(total_fee);
@@ -169,6 +162,50 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             }
 
             const userId = users[0].id;
+
+            // 检查订单状态，允许未完成订单重复支付
+            const [existingOrders] = await connection.query(
+                'SELECT id, trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                [cleanOutTradeNo]
+            );
+
+            if (existingOrders.length > 0) {
+                const existingOrder = existingOrders[0];
+                
+                // 如果订单已支付成功，不允许重复支付
+                if (existingOrder.trade_state === 'SUCCESS') {
+                    await connection.rollback();
+                    return res.status(400).json({ error: '订单已支付成功，不能重复支付' });
+                }
+                
+                // 如果订单已退款，不允许重复支付
+                if (existingOrder.trade_state === 'REFUND') {
+                    await connection.rollback();
+                    return res.status(400).json({ error: '订单已退款，不能重复支付' });
+                }
+                
+                // 检查是否是同一用户的订单
+                if (existingOrder.user_id !== userId) {
+                    await connection.rollback();
+                    return res.status(403).json({ error: '只能支付自己的订单' });
+                }
+                
+                // 如果是同一用户的未完成订单，允许重复支付，但需要幂等性锁防止并发
+                const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
+                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+                if (!lock) {
+                    await connection.rollback();
+                    return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
+                }
+            } else {
+                // 新订单，使用原有的幂等性锁
+                const lockKey = `pay:order:lock:${cleanOutTradeNo}`;
+                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+                if (!lock) {
+                    await connection.rollback();
+                    return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
+                }
+            }
 
             // 获取用户可用的抵扣金额
             const [discounts] = await connection.query(`
@@ -276,13 +313,27 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             // 计算实际支付金额（考虑抵扣）
             const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
-            // 创建订单
-            const [orderResult] = await connection.query(
-                'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
-                [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, cleanBody]
-            );
-
-            const orderId = orderResult.insertId;
+            let orderId;
+            
+            // 检查是否已存在订单
+            if (existingOrders.length > 0) {
+                // 更新已存在的订单
+                orderId = existingOrders[0].id;
+                await connection.query(
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, body = ?, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, cleanBody, orderId]
+                );
+                
+                // 删除旧的订单项
+                await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
+            } else {
+                // 创建新订单
+                const [orderResult] = await connection.query(
+                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
+                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, cleanBody]
+                );
+                orderId = orderResult.insertId;
+            }
 
             // 创建订单项，支持三种类型
             const orderItems = cart_items.map(item => {
@@ -421,13 +472,6 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: '地址ID格式无效' });
         }
 
-        // 幂等性锁
-        const lockKey = `pay:order:lock:${out_trade_no}`;
-        const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
-        if (!lock) {
-            return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
-        }
-
         // 清理输入
         const cleanOpenid = openid.trim();
         const cleanType = type;
@@ -451,6 +495,50 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
                 return res.status(404).json({ error: '用户不存在' });
             }
             const userId = users[0].id;
+
+            // 检查订单状态，允许未完成订单重复支付
+            const [existingOrders] = await connection.query(
+                'SELECT id, trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                [cleanOutTradeNo]
+            );
+
+            if (existingOrders.length > 0) {
+                const existingOrder = existingOrders[0];
+                
+                // 如果订单已支付成功，不允许重复支付
+                if (existingOrder.trade_state === 'SUCCESS') {
+                    await connection.rollback();
+                    return res.status(400).json({ error: '订单已支付成功，不能重复支付' });
+                }
+                
+                // 如果订单已退款，不允许重复支付
+                if (existingOrder.trade_state === 'REFUND') {
+                    await connection.rollback();
+                    return res.status(400).json({ error: '订单已退款，不能重复支付' });
+                }
+                
+                // 检查是否是同一用户的订单
+                if (existingOrder.user_id !== userId) {
+                    await connection.rollback();
+                    return res.status(403).json({ error: '只能支付自己的订单' });
+                }
+                
+                // 如果是同一用户的未完成订单，允许重复支付，但需要幂等性锁防止并发
+                const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
+                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+                if (!lock) {
+                    await connection.rollback();
+                    return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
+                }
+            } else {
+                // 新订单，使用原有的幂等性锁
+                const lockKey = `pay:order:lock:${cleanOutTradeNo}`;
+                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+                if (!lock) {
+                    await connection.rollback();
+                    return res.status(429).json({ error: '订单正在处理中，请勿重复提交' });
+                }
+            }
 
             // 获取用户可用的抵扣金额
             const [discounts] = await connection.query(`
@@ -532,12 +620,27 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
             const total_fee = cleanPrice * cleanQuantity;
             const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
-            // 创建订单
-            const [orderResult] = await connection.query(
-                'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
-                [userId, cleanOutTradeNo, total_fee, actualTotalFee, availableDiscount, cleanBody]
-            );
-            const orderId = orderResult.insertId;
+            let orderId;
+            
+            // 检查是否已存在订单
+            if (existingOrders.length > 0) {
+                // 更新已存在的订单
+                orderId = existingOrders[0].id;
+                await connection.query(
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, body = ?, updated_at = NOW() WHERE id = ?',
+                    [total_fee, actualTotalFee, availableDiscount, cleanBody, orderId]
+                );
+                
+                // 删除旧的订单项
+                await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
+            } else {
+                // 创建新订单
+                const [orderResult] = await connection.query(
+                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body) VALUES (?, ?, ?, ?, ?, ?)',
+                    [userId, cleanOutTradeNo, total_fee, actualTotalFee, availableDiscount, cleanBody]
+                );
+                orderId = orderResult.insertId;
+            }
 
             // 创建订单项
             let orderItem;
@@ -2194,6 +2297,193 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
         res.status(500).json({
             success: false,
             error: '管理员查询订单列表失败'
+        });
+    }
+});
+
+// 检查订单是否可以重复支付接口
+router.get('/check-repayable', authenticateToken, async (req, res) => {
+    try {
+        const { out_trade_no, openid } = req.query;
+
+        // 输入验证
+        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的商户订单号' });
+        }
+        
+        if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
+            return res.status(400).json({ error: '缺少有效的openid' });
+        }
+        
+        if (out_trade_no.length > 64) {
+            return res.status(400).json({ error: '商户订单号长度不能超过64个字符' });
+        }
+        
+        const cleanOutTradeNo = out_trade_no.trim();
+        const cleanOpenid = openid.trim();
+
+        // 查询订单信息
+        const [orders] = await db.query(`
+            SELECT o.*, u.id as user_id 
+            FROM orders o 
+            JOIN wx_users u ON o.user_id = u.id 
+            WHERE o.out_trade_no = ? AND u.openid = ?
+        `, [cleanOutTradeNo, cleanOpenid]);
+
+        if (orders.length === 0) {
+            return res.status(404).json({ 
+                error: '订单不存在或不属于当前用户',
+                repayable: false,
+                reason: '订单不存在'
+            });
+        }
+
+        const order = orders[0];
+
+        // 检查订单状态
+        if (order.trade_state === 'SUCCESS') {
+            return res.json({
+                repayable: false,
+                reason: '订单已支付成功，不能重复支付',
+                order_status: 'SUCCESS',
+                order_info: {
+                    out_trade_no: order.out_trade_no,
+                    total_fee: order.total_fee,
+                    actual_fee: order.actual_fee,
+                    trade_state: order.trade_state,
+                    success_time: order.success_time
+                }
+            });
+        }
+
+        if (order.trade_state === 'REFUND') {
+            return res.json({
+                repayable: false,
+                reason: '订单已退款，不能重复支付',
+                order_status: 'REFUND',
+                order_info: {
+                    out_trade_no: order.out_trade_no,
+                    total_fee: order.total_fee,
+                    actual_fee: order.actual_fee,
+                    trade_state: order.trade_state
+                }
+            });
+        }
+
+        // 查询订单项信息
+        const [orderItems] = await db.query(`
+            SELECT 
+                oi.*,
+                r.title as right_title,
+                r.price as right_price,
+                r.original_price as right_original_price,
+                r.description as right_description,
+                r.status as right_status,
+                r.remaining_count as right_remaining_count,
+                ri.image_url as right_image_url,
+                da.title as digital_title,
+                da.price as digital_price,
+                da.description as digital_description,
+                da.image_url as digital_image_url,
+                oa.title as artwork_title,
+                oa.original_price as artwork_original_price,
+                oa.discount_price as artwork_discount_price,
+                oa.description as artwork_description,
+                oa.image as artwork_image,
+                oa.stock as artwork_stock
+            FROM order_items oi
+            LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+            LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
+            LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+            LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+            WHERE oi.order_id = ?
+        `, [order.id]);
+
+        // 检查商品库存和状态
+        const stockCheck = orderItems.map(item => {
+            if (item.type === 'right') {
+                return {
+                    type: 'right',
+                    id: item.right_id,
+                    title: item.right_title,
+                    available: item.right_status === 'onsale' && item.right_remaining_count >= item.quantity,
+                    stock: item.right_remaining_count,
+                    required: item.quantity,
+                    status: item.right_status
+                };
+            } else if (item.type === 'artwork') {
+                return {
+                    type: 'artwork',
+                    id: item.artwork_id,
+                    title: item.artwork_title,
+                    available: item.artwork_stock >= item.quantity,
+                    stock: item.artwork_stock,
+                    required: item.quantity
+                };
+            } else if (item.type === 'digital') {
+                return {
+                    type: 'digital',
+                    id: item.digital_artwork_id,
+                    title: item.digital_title,
+                    available: true, // 数字商品无库存限制
+                    stock: null,
+                    required: item.quantity
+                };
+            }
+        });
+
+        const unavailableItems = stockCheck.filter(item => !item.available);
+        
+        if (unavailableItems.length > 0) {
+            return res.json({
+                repayable: false,
+                reason: '部分商品库存不足或已下架',
+                unavailable_items: unavailableItems,
+                order_status: order.trade_state || 'NOTPAY',
+                order_info: {
+                    out_trade_no: order.out_trade_no,
+                    total_fee: order.total_fee,
+                    actual_fee: order.actual_fee,
+                    trade_state: order.trade_state
+                }
+            });
+        }
+
+        // 可以重复支付
+        return res.json({
+            repayable: true,
+            reason: '订单可以重复支付',
+            order_status: order.trade_state || 'NOTPAY',
+            order_info: {
+                out_trade_no: order.out_trade_no,
+                total_fee: order.total_fee,
+                actual_fee: order.actual_fee,
+                trade_state: order.trade_state,
+                created_at: order.created_at,
+                updated_at: order.updated_at
+            },
+            items: orderItems.map(item => ({
+                id: item.id,
+                type: item.type,
+                quantity: item.quantity,
+                price: item.price,
+                title: item.type === 'right' ? item.right_title : 
+                       item.type === 'digital' ? item.digital_title : 
+                       item.artwork_title,
+                description: item.type === 'right' ? item.right_description : 
+                           item.type === 'digital' ? item.digital_description : 
+                           item.artwork_description,
+                image: item.type === 'right' ? item.right_image_url : 
+                      item.type === 'digital' ? item.digital_image_url : 
+                      item.artwork_image
+            }))
+        });
+
+    } catch (error) {
+        console.error('检查订单重复支付状态失败:', error);
+        res.status(500).json({
+            success: false,
+            error: '检查订单重复支付状态失败'
         });
     }
 });
