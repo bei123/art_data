@@ -1898,18 +1898,21 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     ...order,
                     items: orderItemsWithImages,
                     order_status: {
-                        type: getOrderStatusType(wxPayData.trade_state || order.trade_state),
-                        text: getOrderStatusText(wxPayData.trade_state || order.trade_state)
+                        type: getOrderStatusType(order.trade_state),
+                        text: getOrderStatusText(order.trade_state)
                     },
                     pay_status: {
-                        trade_state: wxPayData.trade_state || 'UNKNOWN',
-                        trade_state_desc: wxPayData.trade_state_desc || '未知状态',
-                        success_time: wxPayData.success_time || null,
+                        trade_state: wxPayData.trade_state || order.trade_state || 'UNKNOWN',
+                        trade_state_desc: wxPayData.trade_state_desc || order.trade_state_desc || '未知状态',
+                        success_time: wxPayData.success_time || order.success_time || null,
                         amount: wxPayData.amount ? {
                             total: wxPayData.amount.total,
                             currency: wxPayData.amount.currency
-                        } : null,
-                        transaction_id: wxPayData.transaction_id || null
+                        } : (order.total_fee ? {
+                            total: order.total_fee,
+                            currency: 'CNY'
+                        } : null),
+                        transaction_id: wxPayData.transaction_id || order.transaction_id || null
                     }
                 };
             } catch (error) {
