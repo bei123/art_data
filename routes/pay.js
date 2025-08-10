@@ -1654,6 +1654,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
             switch (tradeState) {
                 case 'NOTPAY':
                 case 'PAYERROR':
+                case null:
+                case undefined:
                     return 'pending';
                 case 'SUCCESS':
                     return 'completed';
@@ -1670,6 +1672,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
         const getOrderStatusText = (tradeState) => {
             switch (tradeState) {
                 case 'NOTPAY':
+                case null:
+                case undefined:
                     return '待付款';
                 case 'PAYERROR':
                     return '支付失败';
@@ -1741,8 +1745,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
                     statusCondition = 'AND trade_state = "SUCCESS"';
                     break;
                 case 'cancelled':
-                    // 已取消：CLOSED, REVOKED，或者 trade_state, trade_state_desc, trade_type 都为 null
-                    statusCondition = 'AND (trade_state IN ("CLOSED", "REVOKED") OR (trade_state IS NULL AND trade_state_desc IS NULL AND trade_type IS NULL))';
+                    // 已取消：CLOSED, REVOKED
+                    statusCondition = 'AND trade_state IN ("CLOSED", "REVOKED")';
                     break;
                 case 'refunded':
                     // 已退款：REFUND
