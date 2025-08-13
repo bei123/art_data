@@ -67,8 +67,9 @@ router.get('/', async (req, res) => {
       params.push(parseInt(artist_id));
     }
 
-    sql += ' ORDER BY oa.created_at DESC LIMIT ? OFFSET ?';
-    params.push(sizeNum, offset);
+    // 修复SQL语法：使用MySQL兼容的LIMIT语法
+    sql += ' ORDER BY oa.created_at DESC LIMIT ?, ?';
+    params.push(offset, sizeNum);
 
     const [rows] = await db.query(sql, params);
     const queryTime = Date.now() - queryStartTime;

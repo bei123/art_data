@@ -1,7 +1,7 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-// 数据库配置 - 性能优化版本
+// 数据库配置 - 修复版本（只使用MySQL2支持的选项）
 const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'data',
@@ -10,9 +10,6 @@ const dbConfig = {
     waitForConnections: true,
     connectionLimit: 20,        // 增加连接数
     queueLimit: 10,             // 限制队列长度，避免内存问题
-    acquireTimeout: 60000,      // 获取连接超时时间
-    timeout: 60000,             // 查询超时时间
-    reconnect: true,            // 自动重连
     charset: 'utf8mb4',         // 字符集
     // 连接池优化
     enableKeepAlive: true,      // 启用连接保活
@@ -23,11 +20,9 @@ const dbConfig = {
     // 性能优化
     supportBigNumbers: true,    // 支持大数字
     bigNumberStrings: true,     // 大数字作为字符串返回
-    // 连接优化
-    acquireTimeout: 60000,      // 获取连接超时
-    timeout: 60000,             // 查询超时
-    reconnect: true,            // 自动重连
-    // 查询缓存
+    // 连接超时设置
+    acquireTimeout: 60000,      // 获取连接超时时间
+    // 查询格式化
     queryFormat: function (query, values) {
         if (!values) return query;
         return query.replace(/\:(\w+)/g, function (txt, key) {
