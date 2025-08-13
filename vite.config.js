@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    historyApiFallback: true,
     proxy: {
       '/api': {
         target: process.env.NODE_ENV === 'development' 

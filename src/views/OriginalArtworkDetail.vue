@@ -31,10 +31,23 @@
             :show-file-list="false"
             :on-success="handleImageSuccess"
             :before-upload="beforeImageUpload"
+            :drag="true"
+            :accept="'image/*'"
             name="file"
+            @drop="handleDrop"
+            @dragover="handleDragOver"
+            @dragleave="handleDragLeave"
           >
-            <img v-if="form.image" :src="form.image" class="avatar" />
-            <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+            <div class="upload-area" :class="{ 'drag-over': isDragOver }">
+              <img v-if="form.image" :src="form.image" class="avatar" />
+              <div v-else class="upload-placeholder">
+                <el-icon class="avatar-uploader-icon"><Plus /></el-icon>
+                <div class="upload-text">
+                  <p>点击或拖拽图片到此处上传</p>
+                  <p class="upload-hint">支持 JPG、PNG、GIF 格式，文件大小不超过 5MB</p>
+                </div>
+              </div>
+            </div>
           </el-upload>
         </el-form-item>
 
@@ -161,6 +174,7 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const artists = ref([])
+const isDragOver = ref(false)
 
 // 检查登录状态
 const checkLoginStatus = () => {
@@ -277,6 +291,18 @@ const beforeImageUpload = async (file) => {
   return result;
 }
 
+const handleDrop = () => {
+  isDragOver.value = false;
+};
+
+const handleDragOver = () => {
+  isDragOver.value = true;
+};
+
+const handleDragLeave = () => {
+  isDragOver.value = false;
+};
+
 const handleEdit = async () => {
   if (!checkLoginStatus()) return
   try {
@@ -348,5 +374,47 @@ onMounted(() => {
   width: 178px;
   height: 178px;
   display: block;
+}
+
+.upload-area {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f7fa;
+  border: 2px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.3s ease;
+}
+
+.upload-area.drag-over {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.upload-text {
+  text-align: center;
+  color: #606266;
+  margin-top: 10px;
+}
+
+.upload-text p {
+  margin: 5px 0;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #909399;
 }
 </style> 

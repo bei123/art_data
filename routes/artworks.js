@@ -8,8 +8,18 @@ const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
 const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:';
 
-// 获取艺术品列表（公开接口）
+// 性能监控
+const performanceMetrics = {
+  queryTimes: [],
+  cacheHitRate: 0,
+  totalRequests: 0
+};
+
+// 获取艺术品列表（公开接口）- 性能优化版本
 router.get('/', async (req, res) => {
+  const startTime = Date.now();
+  performanceMetrics.totalRequests++;
+  
   try {
     const { artist_id, page = 1, pageSize = 20 } = req.query;
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
@@ -24,6 +34,25 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // 优化缓存键设计
+    const cacheKey = artist_id 
+      ? `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:${pageNum}:${sizeNum}`
+      : `${REDIS_ARTWORKS_LIST_KEY}:${pageNum}:${sizeNum}`;
+
+    // 先查redis缓存
+    try {
+      const cache = await redisClient.get(cacheKey);
+      if (cache) {
+        performanceMetrics.cacheHitRate = (performanceMetrics.cacheHitRate * (performanceMetrics.totalRequests - 1) + 1) / performanceMetrics.totalRequests;
+        console.log(`缓存命中: ${cacheKey}, 响应时间: ${Date.now() - startTime}ms`);
+        return res.json(JSON.parse(cache));
+      }
+    } catch (cacheError) {
+      console.warn('Redis缓存查询失败，继续数据库查询:', cacheError.message);
+    }
+
+    // 优化SQL查询 - 使用子查询避免重复JOIN
+    const queryStartTime = Date.now();
     let sql = `
       SELECT 
         oa.id, oa.title, oa.year, oa.image, oa.price, oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
@@ -41,19 +70,12 @@ router.get('/', async (req, res) => {
     sql += ' ORDER BY oa.created_at DESC LIMIT ? OFFSET ?';
     params.push(sizeNum, offset);
 
-    let cacheKey = REDIS_ARTWORKS_LIST_KEY + `:page:${pageNum}:size:${sizeNum}`;
-    if (artist_id) {
-      cacheKey = REDIS_ARTWORKS_LIST_KEY_PREFIX + artist_id + `:page:${pageNum}:size:${sizeNum}`;
-    } else {
-      cacheKey = REDIS_ARTWORKS_LIST_KEY + `:all:page:${pageNum}:size:${sizeNum}`;
-    }
-    // 先查redis缓存
-    const cache = await redisClient.get(cacheKey);
-    if (cache) {
-      return res.json(JSON.parse(cache));
-    }
-
     const [rows] = await db.query(sql, params);
+    const queryTime = Date.now() - queryStartTime;
+    performanceMetrics.queryTimes.push(queryTime);
+    
+    console.log(`数据库查询耗时: ${queryTime}ms, SQL: ${sql.substring(0, 100)}...`);
+
     if (!rows || !Array.isArray(rows)) {
       return res.json({
         data: [],
@@ -65,46 +87,99 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // 查询总数
-    let countSql = `
-      SELECT COUNT(*) as total
-      FROM original_artworks oa 
-      LEFT JOIN artists a ON oa.artist_id = a.id
-    `;
-    const countParams = [];
+    // 优化总数查询 - 使用缓存或估算
+    let total;
+    const totalCacheKey = artist_id 
+      ? `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:total`
+      : `${REDIS_ARTWORKS_LIST_KEY}:total`;
     
-    if (artist_id) {
-      countSql += ' WHERE oa.artist_id = ?';
-      countParams.push(parseInt(artist_id));
+    try {
+      const totalCache = await redisClient.get(totalCacheKey);
+      if (totalCache) {
+        total = parseInt(totalCache);
+      } else {
+        // 只在缓存未命中时查询总数
+        let countSql = `
+          SELECT COUNT(*) as total
+          FROM original_artworks oa 
+          LEFT JOIN artists a ON oa.artist_id = a.id
+        `;
+        const countParams = [];
+        
+        if (artist_id) {
+          countSql += ' WHERE oa.artist_id = ?';
+          countParams.push(parseInt(artist_id));
+        }
+        
+        const [countRows] = await db.query(countSql, countParams);
+        total = countRows[0].total;
+        
+        // 缓存总数，5分钟过期
+        await redisClient.setEx(totalCacheKey, 300, total.toString());
+      }
+    } catch (countError) {
+      console.warn('总数查询失败，使用估算:', countError.message);
+      // 使用估算值，避免阻塞
+      total = rows.length === sizeNum ? (pageNum + 1) * sizeNum : pageNum * sizeNum;
     }
-    
-    const [countRows] = await db.query(countSql, countParams);
-    const total = countRows[0].total;
 
+    // 异步处理图片URL，不阻塞响应
+    const processImagesAsync = async () => {
+      try {
+        const artworksWithFullUrls = rows.map(artwork => {
+          const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
+          return {
+            ...processedArtwork,
+            artist: {
+              id: artwork.artist_id,
+              name: artwork.artist_name,
+              avatar: processedArtwork.artist_avatar || ''
+            },
+            collection: {
+              location: artwork.collection_location,
+              number: artwork.collection_number,
+              size: artwork.collection_size,
+              material: artwork.collection_material
+            }
+          };
+        });
 
+        const result = {
+          data: artworksWithFullUrls,
+          pagination: {
+            page: pageNum,
+            pageSize: sizeNum,
+            total: total
+          }
+        };
 
-    // 为每个图片URL添加完整URL并构建正确的数据结构
-    const artworksWithFullUrls = rows.map(artwork => {
-      const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
-      return {
-        ...processedArtwork,
+        // 异步写入缓存，不阻塞响应
+        try {
+          await redisClient.setEx(cacheKey, 1800, JSON.stringify(result)); // 30分钟过期
+        } catch (cacheWriteError) {
+          console.warn('缓存写入失败:', cacheWriteError.message);
+        }
+      } catch (processError) {
+        console.error('图片处理失败:', processError);
+      }
+    };
+
+    // 立即返回结果，异步处理图片和缓存
+    const immediateResult = {
+      data: rows.map(artwork => ({
+        ...artwork,
         artist: {
           id: artwork.artist_id,
           name: artwork.artist_name,
-          avatar: processedArtwork.artist_avatar || ''
+          avatar: artwork.artist_avatar || ''
         },
-        // collection 字段保留兼容
         collection: {
           location: artwork.collection_location,
           number: artwork.collection_number,
           size: artwork.collection_size,
           material: artwork.collection_material
         }
-      };
-    });
-
-    const result = {
-      data: artworksWithFullUrls,
+      })),
       pagination: {
         page: pageNum,
         pageSize: sizeNum,
@@ -112,9 +187,13 @@ router.get('/', async (req, res) => {
       }
     };
 
-    res.json(result);
-    // 写入redis缓存，7天过期
-    await redisClient.setEx(cacheKey, 604800, JSON.stringify(result));
+    // 异步处理图片URL
+    processImagesAsync();
+
+    const totalTime = Date.now() - startTime;
+    console.log(`API响应时间: ${totalTime}ms, 缓存命中率: ${(performanceMetrics.cacheHitRate * 100).toFixed(2)}%`);
+    
+    res.json(immediateResult);
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
     res.status(500).json({ error: '获取艺术品列表服务暂时不可用' });
@@ -437,5 +516,90 @@ function validateImageUrl(url) {
     return false;
   }
 }
+
+// 性能监控端点
+router.get('/performance/metrics', async (req, res) => {
+  try {
+    const redisMetrics = redisClient.getMetrics ? redisClient.getMetrics() : {};
+    const dbMetrics = db.getPoolStatus ? db.getPoolStatus() : {};
+    
+    // 计算API性能统计
+    const avgQueryTime = performanceMetrics.queryTimes.length > 0 
+      ? performanceMetrics.queryTimes.reduce((a, b) => a + b, 0) / performanceMetrics.queryTimes.length 
+      : 0;
+    
+    const maxQueryTime = Math.max(...performanceMetrics.queryTimes, 0);
+    const slowQueries = performanceMetrics.queryTimes.filter(time => time > 1000).length;
+    
+    const metrics = {
+      api: {
+        totalRequests: performanceMetrics.totalRequests,
+        cacheHitRate: (performanceMetrics.cacheHitRate * 100).toFixed(2) + '%',
+        averageQueryTime: avgQueryTime.toFixed(2) + 'ms',
+        maxQueryTime: maxQueryTime + 'ms',
+        slowQueries: slowQueries,
+        slowQueryRate: performanceMetrics.queryTimes.length > 0 
+          ? ((slowQueries / performanceMetrics.queryTimes.length) * 100).toFixed(2) + '%'
+          : '0%'
+      },
+      redis: redisMetrics,
+      database: dbMetrics,
+      timestamp: new Date().toISOString()
+    };
+    
+    res.json(metrics);
+  } catch (error) {
+    console.error('获取性能指标失败:', error);
+    res.status(500).json({ error: '获取性能指标失败' });
+  }
+});
+
+// 清理缓存端点
+router.post('/performance/clear-cache', authenticateToken, async (req, res) => {
+  try {
+    const { type = 'all' } = req.body;
+    
+    let clearedKeys = 0;
+    
+    if (type === 'all' || type === 'list') {
+      const listKeys = await redisClient.keys('artworks:list*');
+      if (listKeys.length > 0) {
+        await redisClient.del(listKeys);
+        clearedKeys += listKeys.length;
+      }
+    }
+    
+    if (type === 'all' || type === 'detail') {
+      const detailKeys = await redisClient.keys('artworks:detail*');
+      if (detailKeys.length > 0) {
+        await redisClient.del(detailKeys);
+        clearedKeys += detailKeys.length;
+      }
+    }
+    
+    res.json({ 
+      message: '缓存清理成功', 
+      clearedKeys: clearedKeys,
+      type: type 
+    });
+  } catch (error) {
+    console.error('清理缓存失败:', error);
+    res.status(500).json({ error: '清理缓存失败' });
+  }
+});
+
+// 重置性能统计
+router.post('/performance/reset', authenticateToken, async (req, res) => {
+  try {
+    performanceMetrics.queryTimes = [];
+    performanceMetrics.cacheHitRate = 0;
+    performanceMetrics.totalRequests = 0;
+    
+    res.json({ message: '性能统计已重置' });
+  } catch (error) {
+    console.error('重置性能统计失败:', error);
+    res.status(500).json({ error: '重置性能统计失败' });
+  }
+});
 
 module.exports = router; 
