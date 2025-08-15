@@ -68,6 +68,13 @@ pool.getConnection()
 const query = async (sql, params) => {
     const startTime = Date.now();
     try {
+        // 检查连接池状态
+        if (!pool || pool._closed) {
+            console.error('连接池已关闭，尝试重新创建...');
+            // 这里可以添加重新创建连接池的逻辑
+            throw new Error('数据库连接池已关闭');
+        }
+        
         // 只在开发环境打印SQL
         if (process.env.NODE_ENV === 'development') {
             console.log('执行SQL查询:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
@@ -92,6 +99,12 @@ const query = async (sql, params) => {
         console.error(`数据库查询错误 (${queryTime}ms):`, error);
         console.error('SQL:', sql);
         console.error('参数:', params);
+        
+        // 如果是连接池关闭错误，提供更详细的错误信息
+        if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
+            console.error('连接池已关闭，请检查数据库配置或重启应用');
+        }
+        
         throw error;
     }
 };
@@ -109,14 +122,33 @@ const getConnection = async () => {
 // 获取连接池状态
 const getPoolStatus = () => {
     return {
-        threadId: pool.threadId,
+        isClosed: pool._closed || false,
         connectionLimit: pool.config.connectionLimit,
         queueLimit: pool.config.queueLimit,
         // 注意：mysql2 不直接暴露这些属性，这里只是示例
     };
 };
 
-// 定期清理连接池
+// 检查连接池健康状态
+const checkPoolHealth = async () => {
+    try {
+        if (pool._closed) {
+            return { healthy: false, error: '连接池已关闭' };
+        }
+        
+        const connection = await pool.getConnection();
+        await connection.ping();
+        connection.release();
+        return { healthy: true };
+    } catch (error) {
+        return { healthy: false, error: error.message };
+    }
+};
+
+// 定期清理连接池 - 修复版本
+// 注意：不要在生产环境中定期关闭连接池，这会导致服务中断
+// 如果需要定期清理，应该重新创建连接池而不是关闭它
+/*
 setInterval(() => {
     pool.end((err) => {
         if (err) {
@@ -126,10 +158,30 @@ setInterval(() => {
         }
     });
 }, 24 * 60 * 60 * 1000); // 24小时清理一次
+*/
+
+// 优雅关闭处理
+const gracefulShutdown = () => {
+    console.log('正在关闭数据库连接池...');
+    pool.end((err) => {
+        if (err) {
+            console.error('关闭连接池时出错:', err);
+            process.exit(1);
+        } else {
+            console.log('数据库连接池已安全关闭');
+            process.exit(0);
+        }
+    });
+};
+
+// 监听进程退出信号
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 module.exports = {
     pool,
     query,
     getConnection,
-    getPoolStatus
+    getPoolStatus,
+    checkPoolHealth
 }; 

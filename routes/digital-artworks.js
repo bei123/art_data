@@ -8,6 +8,30 @@ const REDIS_DIGITAL_ARTWORKS_LIST_KEY = 'digital_artworks:list';
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX = 'digital_artworks:list:artist:';
 const REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX = 'digital_artworks:detail:';
 
+// 数据库健康检查端点
+router.get('/health', async (req, res) => {
+  try {
+    const poolStatus = db.getPoolStatus();
+    const healthCheck = await db.checkPoolHealth();
+    
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      database: {
+        poolStatus,
+        healthCheck
+      }
+    });
+  } catch (error) {
+    console.error('健康检查失败:', error);
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
 // 验证图片URL的函数
 function validateImageUrl(url) {
   if (!url) return false;
@@ -76,6 +100,15 @@ router.get('/', async (req, res) => {
     await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithProcessedImages));
   } catch (error) {
     console.error('获取数字艺术品列表失败:', error);
+    
+    // 检查是否是连接池问题
+    if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
+      return res.status(503).json({ 
+        error: '数据库连接暂时不可用，请稍后重试',
+        code: 'DB_POOL_CLOSED'
+      });
+    }
+    
     res.status(500).json({ error: '获取数字艺术品列表失败' });
   }
 });
@@ -132,6 +165,15 @@ router.get('/:id', async (req, res) => {
     await redisClient.setEx(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
   } catch (error) {
     console.error('获取数字艺术品详情失败:', error);
+    
+    // 检查是否是连接池问题
+    if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
+      return res.status(503).json({ 
+        error: '数据库连接暂时不可用，请稍后重试',
+        code: 'DB_POOL_CLOSED'
+      });
+    }
+    
     res.status(500).json({ error: '获取数字艺术品详情服务暂时不可用' });
   }
 });
