@@ -109,24 +109,26 @@ router.get('/', async (req, res) => {
           avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : ''
         }));
       } else if (type === 'original_artwork') {
-        // 获取总数
+        // 获取总数 - 使用全文搜索优化
         const [countResult] = await db.query(
           `SELECT COUNT(*) as count 
            FROM original_artworks oa
            LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?`,
-          [searchTerm, searchTerm, searchTerm]
+           WHERE MATCH(oa.title, oa.description) AGAINST(? IN NATURAL LANGUAGE MODE) 
+              OR MATCH(a.name) AGAINST(? IN NATURAL LANGUAGE MODE)`,
+          [cleanKeyword, cleanKeyword]
         );
         totalCount = countResult[0].count;
         
-        // 查询作品及其艺术家信息，支持通过艺术家名字模糊搜索
+        // 查询作品及其艺术家信息，使用全文搜索优化
         const [artworkRows] = await db.query(
           `SELECT oa.id, oa.title, oa.image, oa.description, oa.artist_id, a.name as artist_name, a.avatar as artist_avatar, 'original_artwork' as type 
            FROM original_artworks oa
            LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?
+           WHERE MATCH(oa.title, oa.description) AGAINST(? IN NATURAL LANGUAGE MODE) 
+              OR MATCH(a.name) AGAINST(? IN NATURAL LANGUAGE MODE)
            LIMIT ? OFFSET ?`,
-          [searchTerm, searchTerm, searchTerm, limitNum, offset]
+          [cleanKeyword, cleanKeyword, limitNum, offset]
         );
         results = artworkRows.map(item => ({
           ...item,

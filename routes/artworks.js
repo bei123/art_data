@@ -51,13 +51,13 @@ router.get('/', async (req, res) => {
       console.warn('Redis缓存查询失败，继续数据库查询:', cacheError.message);
     }
 
-    // 优化SQL查询 - 使用子查询避免重复JOIN
+    // 优化SQL查询 - 强制使用索引避免全表扫描
     const queryStartTime = Date.now();
     let sql = `
       SELECT 
         oa.id, oa.title, oa.year, oa.image, oa.price, oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
-      FROM original_artworks oa 
+      FROM original_artworks oa FORCE INDEX (idx_created_at)
       LEFT JOIN artists a ON oa.artist_id = a.id
     `;
     const params = [];
@@ -67,7 +67,7 @@ router.get('/', async (req, res) => {
       params.push(parseInt(artist_id));
     }
 
-    // 修复SQL语法：使用MySQL兼容的LIMIT语法
+    // 使用索引优化的排序
     sql += ' ORDER BY oa.created_at DESC LIMIT ?, ?';
     params.push(offset, sizeNum);
 

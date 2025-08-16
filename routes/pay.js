@@ -1731,9 +1731,9 @@ router.get('/orders', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: '用户不存在' });
         }
 
-        // 构建查询条件
-        let query = 'SELECT * FROM orders WHERE user_id = ?';
-        let countQuery = 'SELECT COUNT(*) as total FROM orders WHERE user_id = ?';
+        // 构建查询条件 - 使用索引优化
+        let query = 'SELECT * FROM orders FORCE INDEX (idx_orders_user_id) WHERE user_id = ?';
+        let countQuery = 'SELECT COUNT(*) as total FROM orders FORCE INDEX (idx_orders_user_id) WHERE user_id = ?';
         let params = [cleanUserId];
         let countParams = [cleanUserId];
 
@@ -1741,7 +1741,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
         // 这里先获取所有订单，然后在内存中进行筛选
         // 注意：这种方式会影响分页的准确性，建议前端处理筛选逻辑
 
-        // 添加排序和分页
+        // 添加排序和分页 - 使用索引优化
         query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
         const offset = (cleanPage - 1) * cleanLimit;
         params.push(cleanLimit, offset);
