@@ -3,40 +3,73 @@
 
 USE data;
 
+-- 创建存储过程来安全地添加索引
+DELIMITER //
+CREATE PROCEDURE AddIndexIfNotExists(
+    IN tableName VARCHAR(64),
+    IN indexName VARCHAR(64),
+    IN indexDefinition TEXT
+)
+BEGIN
+    DECLARE indexExists INT DEFAULT 0;
+    
+    -- 检查索引是否存在
+    SELECT COUNT(*) INTO indexExists 
+    FROM information_schema.statistics 
+    WHERE table_schema = 'data' 
+    AND table_name = tableName 
+    AND index_name = indexName;
+    
+    -- 如果索引不存在，则创建
+    IF indexExists = 0 THEN
+        SET @sql = CONCAT('CREATE INDEX ', indexName, ' ON ', tableName, '(', indexDefinition, ')');
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+        SELECT CONCAT('Created index: ', indexName, ' on table: ', tableName) AS result;
+    ELSE
+        SELECT CONCAT('Index already exists: ', indexName, ' on table: ', tableName) AS result;
+    END IF;
+END //
+DELIMITER ;
+
 -- 1. 为orders表添加缺失的索引
-CREATE INDEX idx_orders_trade_state ON orders(trade_state);
-CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
-CREATE INDEX idx_orders_user_state ON orders(user_id, trade_state);
-CREATE INDEX idx_orders_user_created ON orders(user_id, created_at DESC);
+CALL AddIndexIfNotExists('orders', 'idx_orders_trade_state', 'trade_state');
+CALL AddIndexIfNotExists('orders', 'idx_orders_created_at', 'created_at DESC');
+CALL AddIndexIfNotExists('orders', 'idx_orders_user_state', 'user_id, trade_state');
+CALL AddIndexIfNotExists('orders', 'idx_orders_user_created', 'user_id, created_at DESC');
 
 -- 2. 为artists表添加搜索索引
-CREATE INDEX idx_artists_name ON artists(name);
+CALL AddIndexIfNotExists('artists', 'idx_artists_name', 'name');
 
 -- 3. 为digital_artworks表添加索引
-CREATE INDEX idx_digital_artworks_artist_id ON digital_artworks(artist_id);
-CREATE INDEX idx_digital_artworks_title ON digital_artworks(title(255));
-CREATE INDEX idx_digital_artworks_description ON digital_artworks(description(255));
+CALL AddIndexIfNotExists('digital_artworks', 'idx_digital_artworks_artist_id', 'artist_id');
+CALL AddIndexIfNotExists('digital_artworks', 'idx_digital_artworks_title', 'title(255)');
+CALL AddIndexIfNotExists('digital_artworks', 'idx_digital_artworks_description', 'description(255)');
 
 -- 4. 为rights表添加索引
-CREATE INDEX idx_rights_status ON rights(status);
-CREATE INDEX idx_rights_category_id ON rights(category_id);
-CREATE INDEX idx_rights_title ON rights(title(255));
+CALL AddIndexIfNotExists('rights', 'idx_rights_status', 'status');
+CALL AddIndexIfNotExists('rights', 'idx_rights_category_id', 'category_id');
+CALL AddIndexIfNotExists('rights', 'idx_rights_title', 'title(255)');
 
 -- 5. 为order_items表添加索引
-CREATE INDEX idx_order_items_order_id ON order_items(order_id);
-CREATE INDEX idx_order_items_type ON order_items(type);
-CREATE INDEX idx_order_items_right_id ON order_items(right_id);
-CREATE INDEX idx_order_items_digital_id ON order_items(digital_artwork_id);
-CREATE INDEX idx_order_items_artwork_id ON order_items(artwork_id);
+CALL AddIndexIfNotExists('order_items', 'idx_order_items_order_id', 'order_id');
+CALL AddIndexIfNotExists('order_items', 'idx_order_items_type', 'type');
+CALL AddIndexIfNotExists('order_items', 'idx_order_items_right_id', 'right_id');
+CALL AddIndexIfNotExists('order_items', 'idx_order_items_digital_id', 'digital_artwork_id');
+CALL AddIndexIfNotExists('order_items', 'idx_order_items_artwork_id', 'artwork_id');
 
 -- 6. 为wx_users表添加索引
-CREATE INDEX idx_wx_users_openid ON wx_users(openid);
-CREATE INDEX idx_wx_users_unionid ON wx_users(unionid);
+CALL AddIndexIfNotExists('wx_users', 'idx_wx_users_openid', 'openid');
+CALL AddIndexIfNotExists('wx_users', 'idx_wx_users_unionid', 'unionid');
 
 -- 7. 为其他相关表添加索引
-CREATE INDEX idx_right_images_right_id ON right_images(right_id);
-CREATE INDEX idx_wx_user_addresses_user_id ON wx_user_addresses(user_id);
-CREATE INDEX idx_merchant_images_merchant_id ON merchant_images(merchant_id);
+CALL AddIndexIfNotExists('right_images', 'idx_right_images_right_id', 'right_id');
+CALL AddIndexIfNotExists('wx_user_addresses', 'idx_wx_user_addresses_user_id', 'user_id');
+CALL AddIndexIfNotExists('merchant_images', 'idx_merchant_images_merchant_id', 'merchant_id');
+
+-- 删除存储过程
+DROP PROCEDURE IF EXISTS AddIndexIfNotExists;
 
 -- 8. 分析表统计信息
 ANALYZE TABLE original_artworks;
