@@ -1,5 +1,5 @@
--- 数据库性能优化修复脚本
--- 执行这些SQL语句来修复全表扫描问题
+-- 继续执行数据库优化脚本
+-- 从上次停止的地方继续
 
 USE data;
 
@@ -33,37 +33,27 @@ BEGIN
 END //
 DELIMITER ;
 
--- 1. 为orders表添加缺失的索引
-CALL AddIndexIfNotExists('orders', 'idx_orders_trade_state', 'trade_state');
-CALL AddIndexIfNotExists('orders', 'idx_orders_created_at', 'created_at DESC');
-CALL AddIndexIfNotExists('orders', 'idx_orders_user_state', 'user_id, trade_state');
-CALL AddIndexIfNotExists('orders', 'idx_orders_user_created', 'user_id, created_at DESC');
-
--- 2. 为artists表添加搜索索引
-CALL AddIndexIfNotExists('artists', 'idx_artists_name', 'name');
-
--- 3. 为digital_artworks表添加索引
-CALL AddIndexIfNotExists('digital_artworks', 'idx_digital_artworks_artist_id', 'artist_id');
+-- 继续创建剩余的索引
 CALL AddIndexIfNotExists('digital_artworks', 'idx_digital_artworks_title', 'title');
 CALL AddIndexIfNotExists('digital_artworks', 'idx_digital_artworks_description', 'description');
 
--- 4. 为rights表添加索引
+-- 为rights表添加索引
 CALL AddIndexIfNotExists('rights', 'idx_rights_status', 'status');
 CALL AddIndexIfNotExists('rights', 'idx_rights_category_id', 'category_id');
 CALL AddIndexIfNotExists('rights', 'idx_rights_title', 'title');
 
--- 5. 为order_items表添加索引
+-- 为order_items表添加索引
 CALL AddIndexIfNotExists('order_items', 'idx_order_items_order_id', 'order_id');
 CALL AddIndexIfNotExists('order_items', 'idx_order_items_type', 'type');
 CALL AddIndexIfNotExists('order_items', 'idx_order_items_right_id', 'right_id');
 CALL AddIndexIfNotExists('order_items', 'idx_order_items_digital_id', 'digital_artwork_id');
 CALL AddIndexIfNotExists('order_items', 'idx_order_items_artwork_id', 'artwork_id');
 
--- 6. 为wx_users表添加索引
+-- 为wx_users表添加索引
 CALL AddIndexIfNotExists('wx_users', 'idx_wx_users_openid', 'openid');
 CALL AddIndexIfNotExists('wx_users', 'idx_wx_users_unionid', 'unionid');
 
--- 7. 为其他相关表添加索引
+-- 为其他相关表添加索引
 CALL AddIndexIfNotExists('right_images', 'idx_right_images_right_id', 'right_id');
 CALL AddIndexIfNotExists('wx_user_addresses', 'idx_wx_user_addresses_user_id', 'user_id');
 CALL AddIndexIfNotExists('merchant_images', 'idx_merchant_images_merchant_id', 'merchant_id');
@@ -71,7 +61,7 @@ CALL AddIndexIfNotExists('merchant_images', 'idx_merchant_images_merchant_id', '
 -- 删除存储过程
 DROP PROCEDURE IF EXISTS AddIndexIfNotExists;
 
--- 8. 分析表统计信息
+-- 分析表统计信息
 ANALYZE TABLE original_artworks;
 ANALYZE TABLE orders;
 ANALYZE TABLE cart_items;
@@ -81,7 +71,7 @@ ANALYZE TABLE rights;
 ANALYZE TABLE order_items;
 ANALYZE TABLE wx_users;
 
--- 9. 检查索引创建结果
+-- 检查索引创建结果
 SELECT 
     table_name,
     index_name,
@@ -92,7 +82,7 @@ WHERE table_schema = 'data'
 AND table_name IN ('original_artworks', 'orders', 'cart_items', 'artists', 'digital_artworks', 'rights', 'order_items', 'wx_users')
 ORDER BY table_name, index_name;
 
--- 10. 性能测试查询
+-- 性能测试查询
 -- 测试original_artworks分页查询
 EXPLAIN SELECT 
   oa.id, oa.title, oa.year, oa.image, oa.price, oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
