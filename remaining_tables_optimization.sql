@@ -15,7 +15,10 @@ CREATE INDEX idx_digital_artworks_artist_created ON digital_artworks(artist_id, 
 CREATE INDEX idx_digital_artworks_title_created ON digital_artworks(title, created_at DESC);
 
 -- 复合索引：description + created_at（搜索优化）
-CREATE INDEX idx_digital_artworks_desc_created ON digital_artworks(description, created_at DESC);
+CREATE INDEX idx_digital_artworks_desc_created ON digital_artworks(description(255), created_at DESC);
+
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_digital_artworks_search ON digital_artworks(title, description);
 
 -- 2. 为wx_users表添加索引（基于代码分析）
 
@@ -35,6 +38,9 @@ CREATE INDEX idx_wx_users_phone_id ON wx_users(phone, id);
 -- 复合索引：nickname + id（昵称查询）
 CREATE INDEX idx_wx_users_nickname_id ON wx_users(nickname, id);
 
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_wx_users_search ON wx_users(nickname, phone);
+
 -- 3. 为artists表添加索引（基于代码分析）
 
 -- 主要查询模式：ORDER BY created_at DESC（列表查询）
@@ -49,6 +55,9 @@ CREATE INDEX idx_artists_name_created ON artists(name, created_at DESC);
 -- 复合索引：id + institution_id（详情查询）
 CREATE INDEX idx_artists_id_institution ON artists(id, institution_id);
 
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_artists_search ON artists(name, description);
+
 -- 4. 为user_sessions表添加索引（基于代码分析）
 
 -- 主要查询模式：WHERE user_id = ?（会话查询）
@@ -61,6 +70,9 @@ CREATE INDEX idx_user_sessions_user_created ON user_sessions(user_id, created_at
 -- 复合索引：user_id + id（按用户和ID排序）
 CREATE INDEX idx_user_sessions_user_id_order ON user_sessions(user_id, id);
 
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_user_sessions_search ON user_sessions(session_data);
+
 -- 5. 为institutions表添加索引（基于代码分析）
 
 -- 主要查询模式：ORDER BY created_at DESC（列表查询）
@@ -71,6 +83,9 @@ CREATE INDEX idx_institutions_name_created ON institutions(name, created_at DESC
 
 -- 复合索引：id + name（详情查询）
 CREATE INDEX idx_institutions_id_name ON institutions(id, name);
+
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_institutions_search ON institutions(name, description);
 
 -- 6. 为physical_categories表添加索引（基于代码分析）
 
@@ -83,6 +98,9 @@ CREATE INDEX idx_physical_categories_title_created ON physical_categories(title,
 -- 复合索引：id + title（详情查询）
 CREATE INDEX idx_physical_categories_id_title ON physical_categories(id, title);
 
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_physical_categories_search ON physical_categories(title, description);
+
 -- 7. 为banners表添加索引（基于代码分析）
 
 -- 主要查询模式：ORDER BY sort_order ASC（轮播图排序）
@@ -93,6 +111,9 @@ CREATE INDEX idx_banners_status_sort ON banners(status, sort_order ASC);
 
 -- 复合索引：created_at + sort_order（按时间和排序）
 CREATE INDEX idx_banners_created_sort ON banners(created_at DESC, sort_order ASC);
+
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_banners_search ON banners(title, description);
 
 -- 8. 为favorites表添加索引（基于代码分析）
 
@@ -108,6 +129,9 @@ CREATE INDEX idx_favorites_user_item_type ON favorites(user_id, item_id, type);
 
 -- 复合索引：item_id + type + user_id（反向查询）
 CREATE INDEX idx_favorites_item_type_user ON favorites(item_id, type, user_id);
+
+-- 全文索引：用于搜索优化
+CREATE FULLTEXT INDEX ft_favorites_search ON favorites(notes);
 
 -- 9. 分析表统计信息
 ANALYZE TABLE digital_artworks;
