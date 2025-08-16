@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
           i.name as institution_name,
           i.logo as institution_logo,
           i.description as institution_description
-        FROM artists a FORCE INDEX (idx_artists_institution_created)
+        FROM artists a
         LEFT JOIN institutions i ON a.institution_id = i.id
         WHERE a.institution_id = ?
         ORDER BY a.created_at DESC
@@ -77,7 +77,7 @@ router.get('/', async (req, res) => {
         i.name as institution_name,
         i.logo as institution_logo,
         i.description as institution_description
-      FROM artists a FORCE INDEX (idx_artists_created_at)
+      FROM artists a
       LEFT JOIN institutions i ON a.institution_id = i.id
       ORDER BY a.created_at DESC
     `);

@@ -146,7 +146,7 @@ router.post('/login', async (req, res) => {
         }
 
         // 2. 在你自己的数据库查找或注册用户（表名改为 wx_users）
-        let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users FORCE INDEX (openid) WHERE openid = ?', [openid]);
+        let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?', [openid]);
         let user;
         
         if (users.length === 0) {
@@ -237,7 +237,7 @@ router.post('/bindUserInfo', async (req, res) => {
 
     try {
         // 先查询用户，判断是否已存在自定义信息，只查询必要字段
-        const [existingUsers] = await db.query('SELECT id, nickname, avatar FROM wx_users FORCE INDEX (PRIMARY) WHERE id = ?', [payload.userId]);
+        const [existingUsers] = await db.query('SELECT id, nickname, avatar FROM wx_users WHERE id = ?', [payload.userId]);
         if (existingUsers.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
@@ -303,10 +303,10 @@ router.get('/userInfo', async (req, res) => {
                 avatar,
                 phone,
                 password_hash,
-                created_at,
-                updated_at
-            FROM wx_users FORCE INDEX (PRIMARY)
-            WHERE id = ?
+                                        created_at,
+                        updated_at
+                    FROM wx_users
+                        WHERE id = ?
         `, [payload.userId]);
         
         if (!users || users.length === 0) {

@@ -57,7 +57,7 @@ router.get('/', async (req, res) => {
       SELECT 
         oa.id, oa.title, oa.year, oa.image, oa.price, oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
-      FROM original_artworks oa FORCE INDEX (idx_created_at)
+      FROM original_artworks oa
       LEFT JOIN artists a ON oa.artist_id = a.id
     `;
     const params = [];
