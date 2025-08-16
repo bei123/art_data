@@ -4,39 +4,39 @@
 USE data;
 
 -- 1. 为orders表添加缺失的索引
-CREATE INDEX IF NOT EXISTS idx_orders_trade_state ON orders(trade_state);
-CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_orders_user_state ON orders(user_id, trade_state);
-CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC);
+CREATE INDEX idx_orders_trade_state ON orders(trade_state);
+CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
+CREATE INDEX idx_orders_user_state ON orders(user_id, trade_state);
+CREATE INDEX idx_orders_user_created ON orders(user_id, created_at DESC);
 
 -- 2. 为artists表添加搜索索引
-CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
+CREATE INDEX idx_artists_name ON artists(name);
 
--- 3. 为digital_artworks表添加索引（如果不存在）
-CREATE INDEX IF NOT EXISTS idx_digital_artworks_artist_id ON digital_artworks(artist_id);
-CREATE INDEX IF NOT EXISTS idx_digital_artworks_title ON digital_artworks(title(255));
-CREATE INDEX IF NOT EXISTS idx_digital_artworks_description ON digital_artworks(description(255));
+-- 3. 为digital_artworks表添加索引
+CREATE INDEX idx_digital_artworks_artist_id ON digital_artworks(artist_id);
+CREATE INDEX idx_digital_artworks_title ON digital_artworks(title(255));
+CREATE INDEX idx_digital_artworks_description ON digital_artworks(description(255));
 
--- 4. 为rights表添加索引（如果不存在）
-CREATE INDEX IF NOT EXISTS idx_rights_status ON rights(status);
-CREATE INDEX IF NOT EXISTS idx_rights_category_id ON rights(category_id);
-CREATE INDEX IF NOT EXISTS idx_rights_title ON rights(title(255));
+-- 4. 为rights表添加索引
+CREATE INDEX idx_rights_status ON rights(status);
+CREATE INDEX idx_rights_category_id ON rights(category_id);
+CREATE INDEX idx_rights_title ON rights(title(255));
 
--- 5. 为order_items表添加索引（如果不存在）
-CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
-CREATE INDEX IF NOT EXISTS idx_order_items_type ON order_items(type);
-CREATE INDEX IF NOT EXISTS idx_order_items_right_id ON order_items(right_id);
-CREATE INDEX IF NOT EXISTS idx_order_items_digital_id ON order_items(digital_artwork_id);
-CREATE INDEX IF NOT EXISTS idx_order_items_artwork_id ON order_items(artwork_id);
+-- 5. 为order_items表添加索引
+CREATE INDEX idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX idx_order_items_type ON order_items(type);
+CREATE INDEX idx_order_items_right_id ON order_items(right_id);
+CREATE INDEX idx_order_items_digital_id ON order_items(digital_artwork_id);
+CREATE INDEX idx_order_items_artwork_id ON order_items(artwork_id);
 
--- 6. 为wx_users表添加索引（如果不存在）
-CREATE INDEX IF NOT EXISTS idx_wx_users_openid ON wx_users(openid);
-CREATE INDEX IF NOT EXISTS idx_wx_users_unionid ON wx_users(unionid);
+-- 6. 为wx_users表添加索引
+CREATE INDEX idx_wx_users_openid ON wx_users(openid);
+CREATE INDEX idx_wx_users_unionid ON wx_users(unionid);
 
 -- 7. 为其他相关表添加索引
-CREATE INDEX IF NOT EXISTS idx_right_images_right_id ON right_images(right_id);
-CREATE INDEX IF NOT EXISTS idx_wx_user_addresses_user_id ON wx_user_addresses(user_id);
-CREATE INDEX IF NOT EXISTS idx_merchant_images_merchant_id ON merchant_images(merchant_id);
+CREATE INDEX idx_right_images_right_id ON right_images(right_id);
+CREATE INDEX idx_wx_user_addresses_user_id ON wx_user_addresses(user_id);
+CREATE INDEX idx_merchant_images_merchant_id ON merchant_images(merchant_id);
 
 -- 8. 分析表统计信息
 ANALYZE TABLE original_artworks;
