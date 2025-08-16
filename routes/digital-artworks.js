@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
-      FROM digital_artworks da 
+      FROM digital_artworks da FORCE INDEX (idx_digital_artworks_created_at)
       LEFT JOIN artists a ON da.artist_id = a.id
     `;
     
@@ -66,6 +66,7 @@ router.get('/', async (req, res) => {
     
     // 如果提供了 artist_id 参数，添加筛选条件
     if (artist_id) {
+      query = query.replace('FORCE INDEX (idx_digital_artworks_created_at)', 'FORCE INDEX (idx_digital_artworks_artist_created)');
       query += ` WHERE da.artist_id = ?`;
       queryParams.push(artist_id);
     }
