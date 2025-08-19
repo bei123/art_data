@@ -13,6 +13,21 @@ const CALLBACK_EXPIRE = 600; // 10分钟
 const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
 const { authenticateToken } = require('../auth');
 
+const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
+
+// 清理实物分类相关缓存
+async function clearPhysicalCategoriesCache() {
+    try {
+        const keys = await redisClient.keys(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`);
+        if (keys.length > 0) {
+            await redisClient.del(...keys);
+            console.log(`Cleared ${keys.length} physical categories cache keys`);
+        }
+    } catch (error) {
+        console.error('Error clearing physical categories cache:', error);
+    }
+}
+
 
 // 微信支付V3配置
 const WX_PAY_CONFIG = {
@@ -872,6 +887,10 @@ router.post('/notify', async (req, res) => {
                 }
                 await connection.commit();
                 console.log('支付回调处理完成，库存已更新');
+                
+                // 清理相关缓存
+                await clearPhysicalCategoriesCache();
+                
                 res.json({
                     code: 'SUCCESS',
                     message: 'OK'
@@ -1446,6 +1465,9 @@ router.post('/refund/notify', async (req, res) => {
                 
                 await connection.commit();
                 console.log('【退款回调】库存回补完成');
+                
+                // 清理相关缓存
+                await clearPhysicalCategoriesCache();
                 
                 // 只更新refund_requests表的处理状态
                 try {

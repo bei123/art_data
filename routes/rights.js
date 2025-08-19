@@ -6,6 +6,7 @@ const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
 const REDIS_RIGHTS_LIST_KEY = 'rights:list';
 const REDIS_RIGHT_DETAIL_KEY_PREFIX = 'rights:detail:';
+const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 
 // 清理所有版权实物相关缓存
 async function clearRightsCache() {
@@ -17,6 +18,19 @@ async function clearRightsCache() {
         }
     } catch (error) {
         console.error('Error clearing rights cache:', error);
+    }
+}
+
+// 清理实物分类相关缓存
+async function clearPhysicalCategoriesCache() {
+    try {
+        const keys = await redisClient.keys(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`);
+        if (keys.length > 0) {
+            await redisClient.del(...keys);
+            console.log(`Cleared ${keys.length} physical categories cache keys`);
+        }
+    } catch (error) {
+        console.error('Error clearing physical categories cache:', error);
     }
 }
 
@@ -256,6 +270,7 @@ router.post('/', authenticateToken, async (req, res) => {
             
             // 清理缓存
             await redisClient.del(REDIS_RIGHTS_LIST_KEY);
+            await clearPhysicalCategoriesCache();
         } catch (error) {
             await connection.rollback();
             throw error;
@@ -394,6 +409,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             // 清理缓存
             await clearRightsCache();
             await redisClient.del(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
+            await clearPhysicalCategoriesCache();
         } catch (error) {
             await connection.rollback();
             throw error;
@@ -456,6 +472,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             // 清理缓存
             await clearRightsCache();
             await redisClient.del(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
+            await clearPhysicalCategoriesCache();
         } catch (error) {
             await connection.rollback();
             throw error;
