@@ -82,7 +82,8 @@ router.get('/', async (req, res) => {
                 r.category_id,
                 r.created_at,
                 r.updated_at,
-                c.title as category_title
+                c.title as category_title,
+                r.rich_text
             FROM rights r
             LEFT JOIN physical_categories c ON r.category_id = c.id
             ${whereClause}
