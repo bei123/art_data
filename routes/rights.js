@@ -287,8 +287,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: '标题长度不能超过200个字符' });
         }
         
-        if (!status || !['onsale', 'sold', 'draft'].includes(status)) {
-            return res.status(400).json({ error: '状态必须是 onsale、sold 或 draft' });
+        if (!status || !['onsale', 'soldout', 'upcoming', 'sold', 'draft'].includes(status)) {
+            return res.status(400).json({ error: '状态必须是 onsale、soldout、upcoming、sold 或 draft' });
         }
         
         if (!price || isNaN(parseFloat(price)) || parseFloat(price) < 0) {

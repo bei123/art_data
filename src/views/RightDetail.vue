@@ -71,6 +71,10 @@
               style="width: 100%; min-width: 400px; height: 300px; border: 1px solid #ccc"
               @onCreated="handleEditorCreated"
             />
+            <div style="margin-top: 10px;">
+              <el-button type="primary" @click="saveEdit">保存</el-button>
+              <el-button @click="cancelEdit">取消</el-button>
+            </div>
           </div>
         </el-form-item>
 
@@ -235,7 +239,7 @@ const handleEditorCreated = (editor) => {
 const fetchRightDetail = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`/api/rights/detail/${route.params.id}`)
+    const response = await axios.get(`/api/rights/${route.params.id}`)
     const data = response.data
     form.value = {
       ...data,
@@ -244,6 +248,8 @@ const fetchRightDetail = async () => {
       rules: data.rules || [],
       rich_text: data.rich_text || ''
     }
+    // 确保富文本内容同步到编辑器
+    richTextHtml.value = data.rich_text || ''
   } catch (error) {
     ElMessage.error('获取版权实物详情失败')
   } finally {
@@ -304,6 +310,7 @@ const handleEdit = async () => {
     return;
   }
   isEditing.value = true
+  // 确保富文本内容正确同步
   richTextHtml.value = form.value.rich_text || ''
 }
 
@@ -333,6 +340,11 @@ const saveEdit = async () => {
   } catch (error) {
     ElMessage.error('更新失败');
   }
+}
+
+const cancelEdit = () => {
+  isEditing.value = false
+  richTextHtml.value = form.value.rich_text || ''
 }
 
 const goBack = () => {
