@@ -215,6 +215,20 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: '图片必须是数组格式' });
         }
         
+        // 验证艺术家ID（如果提供）
+        if (artist_id) {
+            const artistId = parseInt(artist_id);
+            if (isNaN(artistId) || artistId <= 0) {
+                return res.status(400).json({ error: '无效的艺术家ID' });
+            }
+            
+            // 检查艺术家是否存在
+            const [artistRows] = await db.query('SELECT id FROM artists WHERE id = ?', [artistId]);
+            if (artistRows.length === 0) {
+                return res.status(400).json({ error: '指定的艺术家不存在' });
+            }
+        }
+        
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -349,6 +363,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
         
         if (images && !Array.isArray(images)) {
             return res.status(400).json({ error: '图片必须是数组格式' });
+        }
+        
+        // 验证艺术家ID（如果提供）
+        if (artist_id) {
+            const artistId = parseInt(artist_id);
+            if (isNaN(artistId) || artistId <= 0) {
+                return res.status(400).json({ error: '无效的艺术家ID' });
+            }
+            
+            // 检查艺术家是否存在
+            const [artistRows] = await db.query('SELECT id FROM artists WHERE id = ?', [artistId]);
+            if (artistRows.length === 0) {
+                return res.status(400).json({ error: '指定的艺术家不存在' });
+            }
         }
         
         // 开始事务
