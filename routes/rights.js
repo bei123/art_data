@@ -430,6 +430,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
                 return res.status(404).json({ error: '版权实物不存在' });
             }
             
+            // 先删除购物车中的相关项目
+            await connection.query('DELETE FROM cart_items WHERE right_id = ?', [id]);
+            
             // 先删除相关的订单项
             await connection.query('DELETE FROM order_items WHERE right_id = ?', [id]);
 
