@@ -154,9 +154,6 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="作品数量">
-          <el-input-number v-model="form.count" :min="0" />
-        </el-form-item>
         <el-form-item label="描述">
           <el-input type="textarea" v-model="form.description" />
         </el-form-item>
@@ -206,7 +203,6 @@ const progressColors = [
 const form = ref({
   title: '',
   image: '',
-  count: 0,
   description: ''
 })
 
@@ -244,7 +240,6 @@ const handleAdd = () => {
   form.value = {
     title: '',
     image: '',
-    count: 0,
     description: ''
   }
   dialogVisible.value = true

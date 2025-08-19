@@ -59,17 +59,19 @@ router.get('/', async (req, res) => {
     // 查询总数
     const [[{ total }]] = await db.query('SELECT COUNT(*) as total FROM physical_categories');
     
-    // 查询分类数据，只查询必要字段
+    // 查询分类数据，统计每个分类下的作品数量
     const [rows] = await db.query(`
       SELECT 
-        id,
-        title,
-        image,
-        count,
-        description,
-        created_at,
-        updated_at
-      FROM physical_categories 
+        pc.id,
+        pc.title,
+        pc.image,
+        pc.description,
+        pc.created_at,
+        pc.updated_at,
+        COALESCE(COUNT(r.id), 0) as count
+      FROM physical_categories pc
+      LEFT JOIN rights r ON pc.id = r.category_id
+      GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
       ORDER BY ${cleanSort} ${cleanOrder.toUpperCase()}
       LIMIT ? OFFSET ?
     `, [cleanLimit, offset]);
@@ -119,7 +121,7 @@ router.get('/', async (req, res) => {
 // 创建实物分类（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, image, count, description } = req.body;
+    const { title, image, description } = req.body;
     
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -132,12 +134,6 @@ router.post('/', authenticateToken, async (req, res) => {
     
     if (description && description.length > 1000) {
       return res.status(400).json({ error: '描述长度不能超过1000个字符' });
-    }
-    
-    // 验证数量
-    const cleanCount = parseInt(count) || 0;
-    if (cleanCount < 0 || cleanCount > 999999) {
-      return res.status(400).json({ error: '数量必须在0-999999之间' });
     }
     
     const cleanTitle = title.trim();
@@ -154,22 +150,24 @@ router.post('/', authenticateToken, async (req, res) => {
     }
     
     const [result] = await db.query(
-      'INSERT INTO physical_categories (title, image, count, description) VALUES (?, ?, ?, ?)',
-      [cleanTitle, image, cleanCount, cleanDescription]
+      'INSERT INTO physical_categories (title, image, description) VALUES (?, ?, ?)',
+      [cleanTitle, image, cleanDescription]
     );
     
-    // 查询新创建的记录
+    // 查询新创建的记录，统计作品数量
     const [newCategory] = await db.query(`
       SELECT 
-        id,
-        title,
-        image,
-        count,
-        description,
-        created_at,
-        updated_at
-      FROM physical_categories 
-      WHERE id = ?
+        pc.id,
+        pc.title,
+        pc.image,
+        pc.description,
+        pc.created_at,
+        pc.updated_at,
+        COALESCE(COUNT(r.id), 0) as count
+      FROM physical_categories pc
+      LEFT JOIN rights r ON pc.id = r.category_id
+      WHERE pc.id = ?
+      GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
     `, [result.insertId]);
     
     if (!newCategory || newCategory.length === 0) {
@@ -197,7 +195,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: '无效的分类ID' });
     }
     
-    const { title, image, count, description } = req.body;
+    const { title, image, description } = req.body;
     
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -210,12 +208,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
     
     if (description && description.length > 1000) {
       return res.status(400).json({ error: '描述长度不能超过1000个字符' });
-    }
-    
-    // 验证数量
-    const cleanCount = parseInt(count) || 0;
-    if (cleanCount < 0 || cleanCount > 999999) {
-      return res.status(400).json({ error: '数量必须在0-999999之间' });
     }
     
     const cleanTitle = title.trim();
@@ -242,22 +234,24 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     
     await db.query(
-      'UPDATE physical_categories SET title = ?, image = ?, count = ?, description = ?, updated_at = NOW() WHERE id = ?',
-      [cleanTitle, image, cleanCount, cleanDescription, id]
+      'UPDATE physical_categories SET title = ?, image = ?, description = ?, updated_at = NOW() WHERE id = ?',
+      [cleanTitle, image, cleanDescription, id]
     );
     
-    // 查询更新后的记录
+    // 查询更新后的记录，统计作品数量
     const [updatedCategory] = await db.query(`
       SELECT 
-        id,
-        title,
-        image,
-        count,
-        description,
-        created_at,
-        updated_at
-      FROM physical_categories 
-      WHERE id = ?
+        pc.id,
+        pc.title,
+        pc.image,
+        pc.description,
+        pc.created_at,
+        pc.updated_at,
+        COALESCE(COUNT(r.id), 0) as count
+      FROM physical_categories pc
+      LEFT JOIN rights r ON pc.id = r.category_id
+      WHERE pc.id = ?
+      GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
     `, [id]);
     
     if (!updatedCategory || updatedCategory.length === 0) {
@@ -322,18 +316,20 @@ router.get('/:id', async (req, res) => {
       return res.status(400).json({ error: '无效的分类ID' });
     }
     
-    // 查询分类详情，只查询必要字段
+    // 查询分类详情，统计作品数量
     const [categories] = await db.query(`
       SELECT 
-        id,
-        title,
-        image,
-        count,
-        description,
-        created_at,
-        updated_at
-      FROM physical_categories 
-      WHERE id = ?
+        pc.id,
+        pc.title,
+        pc.image,
+        pc.description,
+        pc.created_at,
+        pc.updated_at,
+        COALESCE(COUNT(r.id), 0) as count
+      FROM physical_categories pc
+      LEFT JOIN rights r ON pc.id = r.category_id
+      WHERE pc.id = ?
+      GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
     `, [id]);
     
     if (!categories || categories.length === 0) {
