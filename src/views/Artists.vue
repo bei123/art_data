@@ -68,43 +68,246 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="头像">
-          <el-upload
-            class="avatar-uploader"
-            :action="`${API_BASE_URL}/api/upload`"
-            :show-file-list="false"
-            :on-success="handleAvatarSuccess"
-            :before-upload="beforeAvatarUpload"
-            name="file"
-          >
-            <el-image
-              style="width: 100%; height: 200px"
-              :src="getImageUrl(form.avatar)"
-              fit="cover"
+        <el-form-item label="头像" required>
+          <div class="image-upload-container">
+            <!-- 图片预览区域 -->
+            <div class="image-preview" v-if="form.avatar">
+              <img :src="getImageUrl(form.avatar)" class="preview-image" alt="头像" />
+              <div class="image-overlay">
+                <el-button 
+                  type="danger" 
+                  size="small" 
+                  circle 
+                  @click="removeAvatar"
+                  class="remove-btn"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+                <el-button 
+                  type="primary" 
+                  size="small" 
+                  @click="triggerAvatarInput"
+                  class="replace-btn"
+                >
+                  更换头像
+                </el-button>
+              </div>
+            </div>
+
+            <!-- 上传区域 -->
+            <div 
+              v-else
+              class="upload-zone"
+              :class="{ 
+                'drag-over': isAvatarDragOver, 
+                'uploading': isAvatarUploading || isAvatarProcessing 
+              }"
+              @click="triggerAvatarInput"
+              @dragenter="handleAvatarDragEnter"
+              @dragleave="handleAvatarDragLeave"
+              @dragover="handleAvatarDragOver"
+              @drop="handleAvatarDrop"
+            >
+              <div class="upload-content">
+                <el-icon class="upload-icon" :class="{ 'spinning': isAvatarUploading || isAvatarProcessing }">
+                  <component :is="(isAvatarUploading || isAvatarProcessing) ? 'Loading' : 'Upload'" />
+                </el-icon>
+                <div class="upload-text">
+                  <p class="upload-title">
+                    {{ isAvatarProcessing ? '正在处理图片...' : isAvatarUploading ? '正在上传...' : '点击或拖拽图片到此处上传' }}
+                  </p>
+                  <p class="upload-hint">支持 JPG、PNG、GIF 格式，自动转换为 WebP 格式并压缩至 5MB 以内</p>
+                </div>
+              </div>
+              
+              <!-- 拖拽提示遮罩 -->
+              <div v-if="isAvatarDragOver && !form.avatar" class="drag-overlay">
+                <el-icon class="drag-icon"><Upload /></el-icon>
+                <p>释放鼠标上传图片</p>
+              </div>
+            </div>
+
+            <!-- 隐藏的文件输入 -->
+            <input
+              ref="avatarInput"
+              type="file"
+              accept="image/*"
+              style="display: none"
+              @change="handleAvatarFileSelect"
             />
-          </el-upload>
+
+            <!-- 图片处理提示 -->
+            <div v-if="isAvatarProcessing" class="upload-progress">
+              <div class="progress-header">
+                <span class="progress-title">图片处理中</span>
+                <span class="progress-percentage">处理中...</span>
+              </div>
+              <el-progress 
+                :percentage="0" 
+                :stroke-width="6"
+                :show-text="false"
+                :indeterminate="true"
+                :color="progressColors"
+              />
+              <div class="progress-info">
+                <span class="file-name">{{ avatarFileName }}</span>
+                <span class="file-size">{{ formatFileSize(avatarFileSize) }}</span>
+              </div>
+              <div class="processing-hint">
+                <p>正在将图片转换为 WebP 格式并压缩...</p>
+              </div>
+            </div>
+
+            <!-- 上传进度条 -->
+            <div v-if="avatarUploadProgress > 0 && avatarUploadProgress < 100 && !isAvatarProcessing" class="upload-progress">
+              <div class="progress-header">
+                <span class="progress-title">上传进度</span>
+                <span class="progress-percentage">{{ avatarUploadProgress }}%</span>
+              </div>
+              <el-progress 
+                :percentage="avatarUploadProgress" 
+                :stroke-width="6"
+                :show-text="false"
+                :color="progressColors"
+              />
+              <div class="progress-info">
+                <span class="file-name">{{ avatarFileName }}</span>
+                <span class="file-size">{{ formatFileSize(avatarFileSize) }}</span>
+              </div>
+            </div>
+
+            <!-- 上传完成提示 -->
+            <div v-if="avatarUploadProgress === 100" class="upload-success">
+              <el-alert
+                title="图片上传成功！"
+                type="success"
+                :closable="false"
+                show-icon
+              />
+            </div>
+          </div>
         </el-form-item>
-        <el-form-item label="背景图">
-          <el-upload
-            class="banner-uploader"
-            :action="`${API_BASE_URL}/api/upload`"
-            :show-file-list="false"
-            :on-success="handleBannerSuccess"
-            :before-upload="beforeBannerUpload"
-            name="file"
-          >
-            <el-image
-              style="width: 100%; height: 200px"
-              :src="getImageUrl(form.banner)"
-              fit="cover"
+        <el-form-item label="背景图" required>
+          <div class="image-upload-container">
+            <!-- 图片预览区域 -->
+            <div class="image-preview" v-if="form.banner">
+              <img :src="getImageUrl(form.banner)" class="preview-image" alt="背景图" />
+              <div class="image-overlay">
+                <el-button 
+                  type="danger" 
+                  size="small" 
+                  circle 
+                  @click="removeBanner"
+                  class="remove-btn"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+                <el-button 
+                  type="primary" 
+                  size="small" 
+                  @click="triggerBannerInput"
+                  class="replace-btn"
+                >
+                  更换背景图
+                </el-button>
+              </div>
+            </div>
+
+            <!-- 上传区域 -->
+            <div 
+              v-else
+              class="upload-zone"
+              :class="{ 
+                'drag-over': isBannerDragOver, 
+                'uploading': isBannerUploading || isBannerProcessing 
+              }"
+              @click="triggerBannerInput"
+              @dragenter="handleBannerDragEnter"
+              @dragleave="handleBannerDragLeave"
+              @dragover="handleBannerDragOver"
+              @drop="handleBannerDrop"
+            >
+              <div class="upload-content">
+                <el-icon class="upload-icon" :class="{ 'spinning': isBannerUploading || isBannerProcessing }">
+                  <component :is="(isBannerUploading || isBannerProcessing) ? 'Loading' : 'Upload'" />
+                </el-icon>
+                <div class="upload-text">
+                  <p class="upload-title">
+                    {{ isBannerProcessing ? '正在处理图片...' : isBannerUploading ? '正在上传...' : '点击或拖拽图片到此处上传' }}
+                  </p>
+                  <p class="upload-hint">支持 JPG、PNG、GIF 格式，自动转换为 WebP 格式并压缩至 5MB 以内</p>
+                </div>
+              </div>
+              
+              <!-- 拖拽提示遮罩 -->
+              <div v-if="isBannerDragOver && !form.banner" class="drag-overlay">
+                <el-icon class="drag-icon"><Upload /></el-icon>
+                <p>释放鼠标上传图片</p>
+              </div>
+            </div>
+
+            <!-- 隐藏的文件输入 -->
+            <input
+              ref="bannerInput"
+              type="file"
+              accept="image/*"
+              style="display: none"
+              @change="handleBannerFileSelect"
             />
-          </el-upload>
+
+            <!-- 图片处理提示 -->
+            <div v-if="isBannerProcessing" class="upload-progress">
+              <div class="progress-header">
+                <span class="progress-title">图片处理中</span>
+                <span class="progress-percentage">处理中...</span>
+              </div>
+              <el-progress 
+                :percentage="0" 
+                :stroke-width="6"
+                :show-text="false"
+                :indeterminate="true"
+                :color="progressColors"
+              />
+              <div class="progress-info">
+                <span class="file-name">{{ bannerFileName }}</span>
+                <span class="file-size">{{ formatFileSize(bannerFileSize) }}</span>
+              </div>
+              <div class="processing-hint">
+                <p>正在将图片转换为 WebP 格式并压缩...</p>
+              </div>
+            </div>
+
+            <!-- 上传进度条 -->
+            <div v-if="bannerUploadProgress > 0 && bannerUploadProgress < 100 && !isBannerProcessing" class="upload-progress">
+              <div class="progress-header">
+                <span class="progress-title">上传进度</span>
+                <span class="progress-percentage">{{ bannerUploadProgress }}%</span>
+              </div>
+              <el-progress 
+                :percentage="bannerUploadProgress" 
+                :stroke-width="6"
+                :show-text="false"
+                :color="progressColors"
+              />
+              <div class="progress-info">
+                <span class="file-name">{{ bannerFileName }}</span>
+                <span class="file-size">{{ formatFileSize(bannerFileSize) }}</span>
+              </div>
+            </div>
+
+            <!-- 上传完成提示 -->
+            <div v-if="bannerUploadProgress === 100" class="upload-success">
+              <el-alert
+                title="图片上传成功！"
+                type="success"
+                :closable="false"
+                show-icon
+              />
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="简介">
           <el-input v-model="form.description" type="textarea" :rows="4" />
-        </el-form-item>
-        <el-form-item label="传记">
-          <el-input v-model="form.biography" type="textarea" :rows="6" />
         </el-form-item>
         <el-form-item label="艺术历程">
           <el-input v-model="form.journey" type="textarea" :rows="6" placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等" />
@@ -121,10 +324,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -137,13 +340,39 @@ const isEdit = ref(false)
 const selectedInstitutionId = ref(null)
 const filteredArtists = ref([])
 
+// 头像上传相关状态
+const avatarInput = ref(null)
+const isAvatarDragOver = ref(false)
+const avatarUploadProgress = ref(0)
+const isAvatarUploading = ref(false)
+const isAvatarProcessing = ref(false)
+const avatarFileName = ref('')
+const avatarFileSize = ref(0)
+
+// 背景图上传相关状态
+const bannerInput = ref(null)
+const isBannerDragOver = ref(false)
+const bannerUploadProgress = ref(0)
+const isBannerUploading = ref(false)
+const isBannerProcessing = ref(false)
+const bannerFileName = ref('')
+const bannerFileSize = ref(0)
+
+// 进度条颜色配置
+const progressColors = [
+  { color: '#f56c6c', percentage: 20 },
+  { color: '#e6a23c', percentage: 40 },
+  { color: '#5cb87a', percentage: 60 },
+  { color: '#1989fa', percentage: 80 },
+  { color: '#6f7ad3', percentage: 100 }
+]
+
 const form = ref({
   name: '',
   era: '',
   avatar: '',
   banner: '',
   description: '',
-  biography: '',
   journey: '',
   institution_id: null
 })
@@ -211,7 +440,6 @@ const handleAdd = () => {
     avatar: '',
     banner: '',
     description: '',
-    biography: '',
     journey: '',
     institution_id: null
   }
@@ -227,7 +455,6 @@ const handleEdit = (row) => {
     avatar: row.avatar,
     banner: row.banner,
     description: row.description,
-    biography: row.biography,
     journey: row.journey,
     institution_id: row.institution ? row.institution.id : null
   }
@@ -252,12 +479,348 @@ const handleDelete = (row) => {
   })
 }
 
-const handleAvatarSuccess = (response) => {
-  form.value.avatar = response.url
+// 头像上传相关函数
+const triggerAvatarInput = () => {
+  if (!isAvatarUploading.value && !isAvatarProcessing.value) {
+    avatarInput.value?.click()
+  }
 }
 
-const handleBannerSuccess = (response) => {
-  form.value.banner = response.url;
+const handleAvatarFileSelect = (event) => {
+  const file = event.target.files[0]
+  if (file) {
+    uploadAvatarFile(file)
+  }
+  event.target.value = ''
+}
+
+const uploadAvatarFile = async (file) => {
+  avatarUploadProgress.value = 0
+  isAvatarUploading.value = true
+  isAvatarProcessing.value = true
+  avatarFileName.value = file.name
+  avatarFileSize.value = file.size
+
+  try {
+    console.log('开始处理头像文件:', file.name, file.size)
+    const processedFile = await uploadImageToWebpLimit5MB(file)
+    
+    if (!processedFile) {
+      console.log('头像处理失败，终止上传')
+      resetAvatarUploadState()
+      return
+    }
+
+    console.log('头像处理成功:', processedFile.name, processedFile.size)
+    
+    isAvatarProcessing.value = false
+    avatarFileName.value = processedFile.name
+    avatarFileSize.value = processedFile.size
+
+    const formData = new FormData()
+    formData.append('file', processedFile)
+
+    const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          avatarUploadProgress.value = percent
+        } else {
+          avatarUploadProgress.value = Math.min(avatarUploadProgress.value + 10, 90)
+        }
+      }
+    })
+
+    handleAvatarUploadSuccess(response)
+  } catch (error) {
+    handleAvatarUploadError(error)
+  }
+}
+
+const handleAvatarUploadSuccess = (response) => {
+  console.log('头像上传成功响应:', response)
+  
+  let imageUrl = ''
+  
+  if (response && response.url) {
+    imageUrl = response.url
+  } else if (response && response.data && response.data.url) {
+    imageUrl = response.data.url
+  } else if (response && response.data && typeof response.data === 'string') {
+    imageUrl = response.data
+  } else if (typeof response === 'string') {
+    imageUrl = response
+  } else if (response && response.path) {
+    imageUrl = response.path
+  } else if (response && response.file) {
+    imageUrl = response.file
+  } else if (response && response.filename) {
+    imageUrl = response.filename
+  }
+
+  if (imageUrl) {
+    form.value.avatar = imageUrl
+    avatarUploadProgress.value = 100
+    
+    setTimeout(() => {
+      avatarUploadProgress.value = 0
+      isAvatarUploading.value = false
+      avatarFileName.value = ''
+      avatarFileSize.value = 0
+    }, 2000)
+    
+    ElMessage.success('头像上传成功')
+  } else {
+    console.error('无法从响应中提取URL，完整响应:', response)
+    ElMessage.error('头像上传失败：未获取到图片URL')
+    resetAvatarUploadState()
+  }
+}
+
+const handleAvatarUploadError = (error) => {
+  console.error('头像上传错误:', error)
+  ElMessage.error('头像上传失败：' + (error.response?.data?.message || '未知错误'))
+  resetAvatarUploadState()
+}
+
+const resetAvatarUploadState = () => {
+  avatarUploadProgress.value = 0
+  isAvatarUploading.value = false
+  isAvatarProcessing.value = false
+  avatarFileName.value = ''
+  avatarFileSize.value = 0
+}
+
+const removeAvatar = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这张头像吗？',
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    form.value.avatar = ''
+    ElMessage.success('头像已删除')
+  } catch {
+    // 用户取消删除
+  }
+}
+
+// 背景图上传相关函数
+const triggerBannerInput = () => {
+  if (!isBannerUploading.value && !isBannerProcessing.value) {
+    bannerInput.value?.click()
+  }
+}
+
+const handleBannerFileSelect = (event) => {
+  const file = event.target.files[0]
+  if (file) {
+    uploadBannerFile(file)
+  }
+  event.target.value = ''
+}
+
+const uploadBannerFile = async (file) => {
+  bannerUploadProgress.value = 0
+  isBannerUploading.value = true
+  isBannerProcessing.value = true
+  bannerFileName.value = file.name
+  bannerFileSize.value = file.size
+
+  try {
+    console.log('开始处理背景图文件:', file.name, file.size)
+    const processedFile = await uploadImageToWebpLimit5MB(file)
+    
+    if (!processedFile) {
+      console.log('背景图处理失败，终止上传')
+      resetBannerUploadState()
+      return
+    }
+
+    console.log('背景图处理成功:', processedFile.name, processedFile.size)
+    
+    isBannerProcessing.value = false
+    bannerFileName.value = processedFile.name
+    bannerFileSize.value = processedFile.size
+
+    const formData = new FormData()
+    formData.append('file', processedFile)
+
+    const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          bannerUploadProgress.value = percent
+        } else {
+          bannerUploadProgress.value = Math.min(bannerUploadProgress.value + 10, 90)
+        }
+      }
+    })
+
+    handleBannerUploadSuccess(response)
+  } catch (error) {
+    handleBannerUploadError(error)
+  }
+}
+
+const handleBannerUploadSuccess = (response) => {
+  console.log('背景图上传成功响应:', response)
+  
+  let imageUrl = ''
+  
+  if (response && response.url) {
+    imageUrl = response.url
+  } else if (response && response.data && response.data.url) {
+    imageUrl = response.data.url
+  } else if (response && response.data && typeof response.data === 'string') {
+    imageUrl = response.data
+  } else if (typeof response === 'string') {
+    imageUrl = response
+  } else if (response && response.path) {
+    imageUrl = response.path
+  } else if (response && response.file) {
+    imageUrl = response.file
+  } else if (response && response.filename) {
+    imageUrl = response.filename
+  }
+
+  if (imageUrl) {
+    form.value.banner = imageUrl
+    bannerUploadProgress.value = 100
+    
+    setTimeout(() => {
+      bannerUploadProgress.value = 0
+      isBannerUploading.value = false
+      bannerFileName.value = ''
+      bannerFileSize.value = 0
+    }, 2000)
+    
+    ElMessage.success('背景图上传成功')
+  } else {
+    console.error('无法从响应中提取URL，完整响应:', response)
+    ElMessage.error('背景图上传失败：未获取到图片URL')
+    resetBannerUploadState()
+  }
+}
+
+const handleBannerUploadError = (error) => {
+  console.error('背景图上传错误:', error)
+  ElMessage.error('背景图上传失败：' + (error.response?.data?.message || '未知错误'))
+  resetBannerUploadState()
+}
+
+const resetBannerUploadState = () => {
+  bannerUploadProgress.value = 0
+  isBannerUploading.value = false
+  isBannerProcessing.value = false
+  bannerFileName.value = ''
+  bannerFileSize.value = 0
+}
+
+const removeBanner = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这张背景图吗？',
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    form.value.banner = ''
+    ElMessage.success('背景图已删除')
+  } catch {
+    // 用户取消删除
+  }
+}
+
+// 拖拽处理函数
+const handleAvatarDragEnter = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!isAvatarUploading.value && !isAvatarProcessing.value && !form.value.avatar) {
+    isAvatarDragOver.value = true
+  }
+}
+
+const handleAvatarDragLeave = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    isAvatarDragOver.value = false
+  }
+}
+
+const handleAvatarDragOver = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+const handleAvatarDrop = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isAvatarDragOver.value = false
+  
+  if (isAvatarUploading.value || isAvatarProcessing.value || form.value.avatar) return
+  
+  const files = e.dataTransfer.files
+  if (files.length > 0) {
+    uploadAvatarFile(files[0])
+  }
+}
+
+const handleBannerDragEnter = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!isBannerUploading.value && !isBannerProcessing.value && !form.value.banner) {
+    isBannerDragOver.value = true
+  }
+}
+
+const handleBannerDragLeave = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    isBannerDragOver.value = false
+  }
+}
+
+const handleBannerDragOver = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+const handleBannerDrop = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isBannerDragOver.value = false
+  
+  if (isBannerUploading.value || isBannerProcessing.value || form.value.banner) return
+  
+  const files = e.dataTransfer.files
+  if (files.length > 0) {
+    uploadBannerFile(files[0])
+  }
+}
+
+// 格式化文件大小
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const getImageUrl = (url) => {
@@ -294,17 +857,7 @@ const handleSubmit = async () => {
   }
 }
 
-const beforeAvatarUpload = async (file) => {
-  const result = await uploadImageToWebpLimit5MB(file);
-  if (!result) return false;
-  return result;
-}
 
-const beforeBannerUpload = async (file) => {
-  const result = await uploadImageToWebpLimit5MB(file);
-  if (!result) return false;
-  return result;
-}
 
 // 页面加载时获取数据
 onMounted(() => {
@@ -327,53 +880,244 @@ onMounted(() => {
   align-items: center;
 }
 
-.avatar-uploader,
-.banner-uploader {
-  border: 1px dashed #d9d9d9;
-  border-radius: 6px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: border-color 0.3s;
+/* 图片上传容器 */
+.image-upload-container {
+  width: 100%;
+  max-width: 400px;
 }
 
-.avatar-uploader {
+/* 图片预览 */
+.image-preview {
+  position: relative;
   width: 200px;
   height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
 }
 
-.banner-uploader {
-  width: 400px;
-  height: 200px;
+.image-preview:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
-.avatar-uploader:hover,
-.banner-uploader:hover {
-  border-color: #409eff;
-}
-
-.avatar-uploader :deep(.el-image),
-.banner-uploader :deep(.el-image) {
+.preview-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.avatar-uploader :deep(.el-upload),
-.banner-uploader :deep(.el-upload) {
-  width: 100%;
-  height: 100%;
-}
-
-.avatar-uploader-icon,
-.banner-uploader-icon {
-  font-size: 28px;
-  color: #8c939d;
-  width: 100%;
-  height: 100%;
+.image-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  gap: 10px;
+}
+
+.image-preview:hover .image-overlay {
+  opacity: 1;
+}
+
+.remove-btn {
+  background: rgba(245, 108, 108, 0.9);
+  border: none;
+}
+
+.remove-btn:hover {
+  background: #f56c6c;
+}
+
+.replace-btn {
+  background: rgba(64, 158, 255, 0.9);
+  border: none;
+}
+
+.replace-btn:hover {
+  background: #409eff;
+}
+
+/* 上传区域 */
+.upload-zone {
+  width: 200px;
+  height: 200px;
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.upload-zone:hover {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.upload-zone.drag-over {
+  border-color: #409eff;
+  background: #ecf5ff;
+  transform: scale(1.02);
+  box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
+}
+
+.upload-zone.uploading {
+  opacity: 0.7;
+  pointer-events: none;
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.upload-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.upload-icon {
+  font-size: 48px;
+  color: #8c939d;
+  margin-bottom: 16px;
+  transition: all 0.3s ease;
+}
+
+.upload-icon.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.upload-text {
+  text-align: center;
+}
+
+.upload-title {
+  margin: 0 0 8px 0;
+  color: #606266;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.upload-hint {
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* 拖拽遮罩 */
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(64, 158, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #409eff;
+  font-weight: bold;
+  z-index: 10;
+  border-radius: 8px;
+}
+
+.drag-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+}
+
+/* 上传进度 */
+.upload-progress {
+  margin-top: 16px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.progress-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.progress-percentage {
+  font-size: 14px;
+  font-weight: bold;
+  color: #409eff;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.file-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.processing-hint {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.processing-hint p {
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* 上传成功提示 */
+.upload-success {
+  margin-top: 16px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .image-upload-container {
+    max-width: 100%;
+  }
+  
+  .image-preview,
+  .upload-zone {
+    width: 100%;
+    max-width: 300px;
+    height: 200px;
+  }
 }
 
 :deep(.el-table .el-image) {

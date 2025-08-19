@@ -142,33 +142,68 @@
           <el-input v-model="form.title" />
         </el-form-item>
                  <el-form-item label="图片" required>
-           <el-upload
-             class="avatar-uploader"
-             :action="`${baseUrl}/api/upload`"
-             :show-file-list="false"
-             :on-success="handleUploadSuccess"
-             :before-upload="beforeUpload"
-           >
-             <el-image 
-               v-if="form.image" 
-               :src="form.image" 
-               class="avatar"
-               lazy
-               fit="cover"
-             >
-               <template #placeholder>
-                 <div class="upload-placeholder">
-                   <el-icon><Picture /></el-icon>
+                       <el-upload
+              class="avatar-uploader"
+              :class="{ 'uploading': isUploading }"
+              :action="`${baseUrl}/api/upload`"
+              :show-file-list="false"
+              :on-success="handleUploadSuccess"
+              :before-upload="beforeUpload"
+              :drag="true"
+              :accept="'image/*'"
+              name="file"
+              :http-request="customUpload"
+              @dragenter="handleDragEnter"
+              @dragleave="handleDragLeave"
+              @dragover="handleDragOver"
+              @drop="handleDrop"
+            >
+             <div class="upload-area" :class="{ 'drag-over': isDragOver, 'uploading': isUploading }">
+               <el-image 
+                 v-if="form.image" 
+                 :src="form.image" 
+                 class="avatar"
+                 lazy
+                 fit="cover"
+               >
+                 <template #placeholder>
+                   <div class="upload-placeholder">
+                     <el-icon><Picture /></el-icon>
+                   </div>
+                 </template>
+                 <template #error>
+                   <div class="upload-error">
+                     <el-icon><Picture /></el-icon>
+                   </div>
+                 </template>
+               </el-image>
+               <div v-else class="upload-placeholder">
+                 <el-icon class="avatar-uploader-icon"><Plus /></el-icon>
+                 <div class="upload-text">
+                   <p>点击或拖拽图片到此处上传</p>
+                   <p class="upload-hint">支持 JPG、PNG、GIF 格式，文件大小不超过 5MB</p>
                  </div>
-               </template>
-               <template #error>
-                 <div class="upload-error">
-                   <el-icon><Picture /></el-icon>
-                 </div>
-               </template>
-             </el-image>
-             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+               </div>
+             </div>
+             <div v-if="isDragOver" class="drag-overlay">
+               <el-icon class="drag-icon"><Upload /></el-icon>
+               <p>释放鼠标上传图片</p>
+             </div>
            </el-upload>
+           
+           <!-- 上传进度条 -->
+           <div v-if="uploadProgress > 0" class="upload-progress">
+             <el-progress 
+               :percentage="uploadProgress" 
+               :stroke-width="8"
+               :show-text="true"
+               :status="uploadProgress === 100 ? 'success' : ''"
+             />
+             <p class="progress-text">
+               <span v-if="uploadProgress < 100">正在上传图片... {{ uploadProgress }}%</span>
+               <span v-else class="success-text">上传完成！</span>
+             </p>
+           </div>
          </el-form-item>
 
                  <el-form-item label="详情富文本" style="width: 100%">
@@ -312,7 +347,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Picture } from '@element-plus/icons-vue'
+import { Plus, Search, Picture, Upload } from '@element-plus/icons-vue'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -351,6 +386,12 @@ const form = ref({
 })
 
 const formRef = ref(null)
+
+// 拖拽上传相关状态
+const isDragOver = ref(false)
+const uploadProgress = ref(0)
+const isUploading = ref(false)
+
 const rules = {
   original_price: [
     { required: true, message: '请输入原价', trigger: 'blur' },
@@ -369,6 +410,44 @@ const artistOptions = ref([])
 
 const editorRef = ref(null)
 const longDescriptionHtml = ref('')
+
+// 重置表单的通用函数
+const resetForm = () => {
+  // 重置表单数据
+  form.value = {
+    title: '',
+    image: '',
+    long_description: '',
+    artist_id: '',
+    year: new Date().getFullYear(),
+    description: '',
+    background: '',
+    features: '',
+    original_price: 0,
+    discount_price: 0,
+    stock: 0,
+    sales: 0,
+    is_on_sale: 1,
+    collection_number: '',
+    collection_size: '',
+    collection_material: ''
+  }
+  
+  // 重置富文本编辑器内容
+  longDescriptionHtml.value = ''
+  
+  // 重置拖拽上传状态
+  isDragOver.value = false
+  uploadProgress.value = 0
+  isUploading.value = false
+  
+  // 确保富文本编辑器内容被清空
+  nextTick(() => {
+    if (editorRef.value && editorRef.value.setHtml) {
+      editorRef.value.setHtml('')
+    }
+  })
+}
 
 // 图片缓存和预加载
 const imageCache = new Map()
@@ -660,27 +739,7 @@ const fetchArtworks = async () => {
 const showAddDialog = () => {
   if (!checkLoginStatus()) return
   dialogType.value = 'add'
-  form.value = {
-    title: '',
-    image: '',
-    long_description: '',
-    artist_id: '',
-    year: new Date().getFullYear(),
-    description: '',
-    background: '',
-    features: '',
-    original_price: 0,
-    discount_price: 0,
-    stock: 0,
-    sales: 0,
-    is_on_sale: 1,
-    // 移除 collection_location 字段
-    collection_number: '',
-    collection_size: '',
-    collection_material: ''
-  }
-  // 重置富文本编辑器内容
-  longDescriptionHtml.value = ''
+  resetForm()
   dialogVisible.value = true
 }
 
@@ -719,6 +778,10 @@ const editArtwork = async (row) => {
 
     // 设置富文本编辑器内容
     longDescriptionHtml.value = form.value.long_description || ''
+    // 重置拖拽上传状态
+    isDragOver.value = false
+    uploadProgress.value = 0
+    isUploading.value = false
     dialogVisible.value = true
   } catch (error) {
     console.error('获取详细信息失败:', error)
@@ -798,8 +861,7 @@ const submitForm = async () => {
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false
-    // 重置富文本编辑器内容
-    longDescriptionHtml.value = ''
+    resetForm()
     fetchArtworks().then(() => {
       scrollToTop()
     })
@@ -820,12 +882,152 @@ const submitForm = async () => {
 
 // 上传图片相关方法
 const handleUploadSuccess = (response) => {
-  form.value.image = response.url
+  console.log('handleUploadSuccess 收到的响应:', response);
+  console.log('响应类型:', typeof response);
+  console.log('响应是否为对象:', typeof response === 'object');
+  
+  // 防重复处理：如果响应为空或undefined，直接返回
+  if (!response) {
+    console.log('响应为空，跳过处理');
+    return;
+  }
+  
+  // 兼容多种返回格式
+  let url = '';
+  
+  // 检查 response.url
+  if (response && response.url) {
+    console.log('找到 response.url:', response.url);
+    url = response.url;
+  } 
+  // 检查 response.data.url
+  else if (response && response.data && response.data.url) {
+    console.log('找到 response.data.url:', response.data.url);
+    url = response.data.url;
+  } 
+  // 检查 response.data（如果data本身就是url字符串）
+  else if (response && response.data && typeof response.data === 'string') {
+    console.log('找到 response.data (字符串):', response.data);
+    url = response.data;
+  }
+  // 检查 response 本身是否为字符串
+  else if (typeof response === 'string') {
+    console.log('response 本身是字符串:', response);
+    url = response;
+  }
+  // 检查其他可能的字段
+  else if (response && response.path) {
+    console.log('找到 response.path:', response.path);
+    url = response.path;
+  }
+  else if (response && response.file) {
+    console.log('找到 response.file:', response.file);
+    url = response.file;
+  }
+  else if (response && response.filename) {
+    console.log('找到 response.filename:', response.filename);
+    url = response.filename;
+  }
+  
+  console.log('最终提取的URL:', url);
+  
+  if (url) {
+    form.value.image = url;
+    ElMessage.success('图片上传成功');
+  } else {
+    console.error('无法从响应中提取URL，完整响应:', response);
+    ElMessage.error('图片上传失败：未获取到图片URL');
+  }
 }
 
+const customUpload = async (options) => {
+  const { onSuccess, onError, file, onProgress } = options;
+  const formData = new FormData();
+  formData.append('file', file);
 
+  try {
+    const response = await axios.post(`${baseUrl}/api/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          uploadProgress.value = percent;
+          onProgress({ percent });
+        } else {
+          // 如果没有total，模拟进度
+          uploadProgress.value = Math.min(uploadProgress.value + 10, 90);
+          onProgress({ percent: uploadProgress.value });
+        }
+      }
+    });
+    
+    console.log('customUpload 收到的完整响应:', response);
+    console.log('customUpload response.data:', response.data);
+    
+    // 上传完成
+    uploadProgress.value = 100;
+    setTimeout(() => {
+      uploadProgress.value = 0;
+      isUploading.value = false;
+    }, 1000);
+    
+         // 确保传递正确的数据给 onSuccess
+     console.log('调用 onSuccess，传递数据:', response);
+     onSuccess(response);
+  } catch (error) {
+    console.error('customUpload 错误:', error);
+    uploadProgress.value = 0;
+    isUploading.value = false;
+    onError(error);
+    ElMessage.error('上传失败：' + (error.response?.data?.message || '未知错误'));
+  }
+};
+
+// 监听拖拽状态
+const handleDragEnter = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  isDragOver.value = true;
+};
+
+const handleDragLeave = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  isDragOver.value = false;
+};
+
+const handleDragOver = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+};
+
+const handleDrop = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  isDragOver.value = false;
+};
 
 const beforeUpload = async (file) => {
+  // 文件类型验证
+  const isImage = file.type.startsWith('image/')
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件!')
+    return false
+  }
+
+  // 文件大小验证 (5MB)
+  const isLt5M = file.size / 1024 / 1024 < 5
+  if (!isLt5M) {
+    ElMessage.error('图片大小不能超过 5MB!')
+    return false
+  }
+
+  // 重置进度和上传状态
+  uploadProgress.value = 0
+  isUploading.value = true
+
   const result = await uploadImageToWebpLimit5MB(file)
   if (!result) return false
   return Promise.resolve(result)
@@ -1075,8 +1277,9 @@ const getPerformanceSummary = () => {
 // 监听对话框关闭，清理富文本编辑器内容和缓存
 watch(dialogVisible, (newVal) => {
   if (!newVal) {
-    // 对话框关闭时重置富文本编辑器内容
-    longDescriptionHtml.value = ''
+    // 对话框关闭时完全重置状态
+    resetForm()
+    
     // 输出性能监控总结
     const performanceSummary = getPerformanceSummary();
     if (performanceSummary) {
@@ -1161,10 +1364,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
   width: 178px;
   height: 178px;
+  transition: all 0.3s ease;
 }
 
 .avatar-uploader:hover {
   border-color: #409EFF;
+}
+
+.avatar-uploader.uploading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .avatar-uploader-icon {
@@ -1180,6 +1389,102 @@ onBeforeUnmount(() => {
   width: 178px;
   height: 178px;
   display: block;
+  object-fit: cover;
+}
+
+.upload-area {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f7fa;
+  border: 2px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  min-height: 178px;
+}
+
+.upload-area.drag-over {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+  transform: scale(1.02);
+  box-shadow: 0 0 10px rgba(64, 158, 255, 0.3);
+}
+
+.upload-area.uploading {
+  background-color: #f0f9ff;
+  border-color: #409eff;
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(64, 158, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #409eff;
+  font-weight: bold;
+  z-index: 10;
+  border-radius: 6px;
+}
+
+.drag-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.upload-text {
+  text-align: center;
+  color: #606266;
+  margin-top: 10px;
+}
+
+.upload-text p {
+  margin: 5px 0;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.upload-progress {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.progress-text {
+  margin: 10px 0 0 0;
+  text-align: center;
+  color: #606266;
+  font-size: 14px;
+}
+
+.success-text {
+  color: #67c23a;
+  font-weight: bold;
 }
 
 .original-price {

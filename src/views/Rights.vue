@@ -99,19 +99,111 @@
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="图片">
-          <el-upload
-            class="upload-list"
-            :action="`${API_BASE_URL}/api/upload`"
-            list-type="picture-card"
-            :on-success="handleImageSuccess"
-            :on-remove="handleImageRemove"
-            :before-upload="beforeImageUpload"
-            :file-list="fileList"
-            name="file"
-          >
-            <el-icon><Plus /></el-icon>
-          </el-upload>
+        <el-form-item label="图片" required>
+          <div class="images-upload-container">
+            <!-- 已上传的图片列表 -->
+            <div class="images-list" v-if="form.images.length > 0">
+              <div 
+                v-for="(image, index) in form.images" 
+                :key="index"
+                class="image-item"
+              >
+                <img :src="getImageUrl(image)" class="item-image" alt="图片" />
+                <div class="item-overlay">
+                  <el-button 
+                    type="danger" 
+                    size="small" 
+                    circle 
+                    @click="removeImage(index)"
+                    class="remove-btn"
+                  >
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 添加图片按钮 -->
+            <div 
+              v-if="form.images.length < 5"
+              class="add-image-btn"
+              :class="{ 
+                'drag-over': isImageDragOver, 
+                'uploading': isImageUploading || isImageProcessing 
+              }"
+              @click="triggerImageInput"
+              @dragenter="handleImageDragEnter"
+              @dragleave="handleImageDragLeave"
+              @dragover="handleImageDragOver"
+              @drop="handleImageDrop"
+            >
+              <el-icon class="add-icon" :class="{ 'spinning': isImageUploading || isImageProcessing }">
+                <component :is="(isImageUploading || isImageProcessing) ? 'Loading' : 'Plus'" />
+              </el-icon>
+              <p class="add-text">添加图片</p>
+              <p class="add-hint">最多5张，支持拖拽</p>
+            </div>
+
+            <!-- 隐藏的文件输入 -->
+            <input
+              ref="imageInput"
+              type="file"
+              accept="image/*"
+              multiple
+              style="display: none"
+              @change="handleImageFileSelect"
+            />
+
+            <!-- 图片处理提示 -->
+            <div v-if="isImageProcessing" class="upload-progress">
+              <div class="progress-header">
+                <span class="progress-title">图片处理中</span>
+                <span class="progress-percentage">处理中...</span>
+              </div>
+              <el-progress 
+                :percentage="0" 
+                :stroke-width="6"
+                :show-text="false"
+                :indeterminate="true"
+                :color="progressColors"
+              />
+              <div class="progress-info">
+                <span class="file-name">{{ imageFileName }}</span>
+                <span class="file-size">{{ formatFileSize(imageFileSize) }}</span>
+              </div>
+              <div class="processing-hint">
+                <p>正在将图片转换为 WebP 格式并压缩...</p>
+              </div>
+            </div>
+
+            <!-- 上传进度条 -->
+            <div v-if="imageUploadProgress > 0 && imageUploadProgress < 100 && !isImageProcessing" class="upload-progress">
+              <div class="progress-header">
+                <span class="progress-title">上传进度</span>
+                <span class="progress-percentage">{{ imageUploadProgress }}%</span>
+              </div>
+              <el-progress 
+                :percentage="imageUploadProgress" 
+                :stroke-width="6"
+                :show-text="false"
+                :color="progressColors"
+              />
+              <div class="progress-info">
+                <span class="file-name">{{ imageFileName }}</span>
+                <span class="file-size">{{ formatFileSize(imageFileSize) }}</span>
+              </div>
+            </div>
+
+            <!-- 上传完成提示 -->
+            <div v-if="imageUploadProgress === 100" class="upload-success">
+              <el-alert
+                title="图片上传成功！"
+                type="success"
+                :closable="false"
+                show-icon
+              />
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="富文本内容">
           <Toolbar :editor="editorRef" style="width: 100%" />
@@ -135,10 +227,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, onBeforeUnmount } from 'vue'
+import { ref, onMounted, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -168,6 +260,24 @@ const form = ref({
 
 const editorRef = ref(null)
 const richTextHtml = ref('')
+
+// 图片上传相关状态
+const imageInput = ref(null)
+const isImageDragOver = ref(false)
+const imageUploadProgress = ref(0)
+const isImageUploading = ref(false)
+const isImageProcessing = ref(false)
+const imageFileName = ref('')
+const imageFileSize = ref(0)
+
+// 进度条颜色配置
+const progressColors = [
+  { color: '#f56c6c', percentage: 20 },
+  { color: '#e6a23c', percentage: 40 },
+  { color: '#5cb87a', percentage: 60 },
+  { color: '#1989fa', percentage: 80 },
+  { color: '#6f7ad3', percentage: 100 }
+]
 
 const editorConfig = {
   MENU_CONF: {
@@ -339,18 +449,191 @@ const handleDelete = (row) => {
   })
 }
 
-const handleImageSuccess = (response, file, fileListParam) => {
-  if (!form.value.images) form.value.images = []
-  let url = response.url
-  if (!url) return
-  if (!url.startsWith('http') && !url.startsWith('/')) url = '/' + url
-  if (!form.value.images.includes(url)) {
-    form.value.images.push(url)
+// 图片上传相关函数
+const triggerImageInput = () => {
+  if (!isImageUploading.value && !isImageProcessing.value) {
+    imageInput.value?.click()
   }
 }
 
-const handleImageRemove = (file) => {
-  form.value.images = form.value.images.filter(url => getImageUrl(url) !== file.url)
+const handleImageFileSelect = (event) => {
+  const files = Array.from(event.target.files)
+  if (files.length > 0) {
+    uploadImageFiles(files)
+  }
+  event.target.value = ''
+}
+
+const uploadImageFiles = async (files) => {
+  for (const file of files) {
+    if (form.value.images.length >= 5) {
+      ElMessage.warning('最多只能上传5张图片')
+      break
+    }
+    
+    imageUploadProgress.value = 0
+    isImageUploading.value = true
+    isImageProcessing.value = true
+    imageFileName.value = file.name
+    imageFileSize.value = file.size
+
+    try {
+      console.log('开始处理图片文件:', file.name, file.size)
+      const processedFile = await uploadImageToWebpLimit5MB(file)
+      
+      if (!processedFile) {
+        console.log('图片处理失败，跳过此文件')
+        resetImageUploadState()
+        continue
+      }
+
+      console.log('图片处理成功:', processedFile.name, processedFile.size)
+      
+      isImageProcessing.value = false
+      imageFileName.value = processedFile.name
+      imageFileSize.value = processedFile.size
+
+      const formData = new FormData()
+      formData.append('file', processedFile)
+
+      const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            imageUploadProgress.value = percent
+          } else {
+            imageUploadProgress.value = Math.min(imageUploadProgress.value + 10, 90)
+          }
+        }
+      })
+
+      handleImageUploadSuccess(response)
+    } catch (error) {
+      handleImageUploadError(error)
+    }
+  }
+}
+
+const handleImageUploadSuccess = (response) => {
+  console.log('图片上传成功响应:', response)
+  
+  let imageUrl = ''
+  
+  if (response && response.url) {
+    imageUrl = response.url
+  } else if (response && response.data && response.data.url) {
+    imageUrl = response.data.url
+  } else if (response && response.data && typeof response.data === 'string') {
+    imageUrl = response.data
+  } else if (typeof response === 'string') {
+    imageUrl = response
+  } else if (response && response.path) {
+    imageUrl = response.path
+  } else if (response && response.file) {
+    imageUrl = response.file
+  } else if (response && response.filename) {
+    imageUrl = response.filename
+  }
+
+  if (imageUrl) {
+    if (!form.value.images) form.value.images = []
+    if (!form.value.images.includes(imageUrl)) {
+      form.value.images.push(imageUrl)
+    }
+    imageUploadProgress.value = 100
+    
+    setTimeout(() => {
+      imageUploadProgress.value = 0
+      isImageUploading.value = false
+      imageFileName.value = ''
+      imageFileSize.value = 0
+    }, 2000)
+    
+    ElMessage.success('图片上传成功')
+  } else {
+    console.error('无法从响应中提取URL，完整响应:', response)
+    ElMessage.error('图片上传失败：未获取到图片URL')
+    resetImageUploadState()
+  }
+}
+
+const handleImageUploadError = (error) => {
+  console.error('图片上传错误:', error)
+  ElMessage.error('图片上传失败：' + (error.response?.data?.message || '未知错误'))
+  resetImageUploadState()
+}
+
+const resetImageUploadState = () => {
+  imageUploadProgress.value = 0
+  isImageUploading.value = false
+  isImageProcessing.value = false
+  imageFileName.value = ''
+  imageFileSize.value = 0
+}
+
+const removeImage = async (index) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这张图片吗？',
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    form.value.images.splice(index, 1)
+    ElMessage.success('图片已删除')
+  } catch {
+    // 用户取消删除
+  }
+}
+
+// 拖拽处理函数
+const handleImageDragEnter = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!isImageUploading.value && !isImageProcessing.value && form.value.images.length < 5) {
+    isImageDragOver.value = true
+  }
+}
+
+const handleImageDragLeave = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    isImageDragOver.value = false
+  }
+}
+
+const handleImageDragOver = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+const handleImageDrop = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isImageDragOver.value = false
+  
+  if (isImageUploading.value || isImageProcessing.value || form.value.images.length >= 5) return
+  
+  const files = Array.from(e.dataTransfer.files)
+  if (files.length > 0) {
+    uploadImageFiles(files)
+  }
+}
+
+// 格式化文件大小
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const getImageUrl = (url) => {
@@ -359,12 +642,6 @@ const getImageUrl = (url) => {
     return url;
   }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
-}
-
-const beforeImageUpload = async (file) => {
-  const result = await uploadImageToWebpLimit5MB(file)
-  if (!result) return false
-  return Promise.resolve(result)
 }
 
 const handleEditorCreated = (editor) => {
@@ -446,10 +723,192 @@ onBeforeUnmount(() => {
   margin-bottom: 20px;
 }
 
-.upload-list {
+/* 多图片上传容器 */
+.images-upload-container {
+  width: 100%;
+}
+
+/* 图片列表 */
+.images-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.image-item {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.image-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.item-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.item-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.image-item:hover .item-overlay {
+  opacity: 1;
+}
+
+.remove-btn {
+  background: rgba(245, 108, 108, 0.9);
+  border: none;
+}
+
+.remove-btn:hover {
+  background: #f56c6c;
+}
+
+/* 添加图片按钮 */
+.add-image-btn {
+  width: 120px;
+  height: 120px;
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.add-image-btn:hover {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.add-image-btn.drag-over {
+  border-color: #409eff;
+  background: #ecf5ff;
+  transform: scale(1.02);
+  box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
+}
+
+.add-image-btn.uploading {
+  opacity: 0.7;
+  pointer-events: none;
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.add-icon {
+  font-size: 32px;
+  color: #8c939d;
+  margin-bottom: 8px;
+  transition: all 0.3s ease;
+}
+
+.add-icon.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.add-text {
+  margin: 0 0 4px 0;
+  color: #606266;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.add-hint {
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* 上传进度 */
+.upload-progress {
+  margin-top: 16px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.progress-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.progress-percentage {
+  font-size: 14px;
+  font-weight: bold;
+  color: #409eff;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.file-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.processing-hint {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.processing-hint p {
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* 上传成功提示 */
+.upload-success {
+  margin-top: 16px;
 }
 
 .discount-info {
@@ -458,9 +917,16 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-.image-preview {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .images-list {
+    gap: 8px;
+  }
+  
+  .image-item,
+  .add-image-btn {
+    width: 100px;
+    height: 100px;
+  }
 }
 </style> 

@@ -65,7 +65,6 @@ router.get('/', async (req, res) => {
         id,
         title,
         image,
-        icon,
         count,
         description,
         created_at,
@@ -92,7 +91,7 @@ router.get('/', async (req, res) => {
     
     // 处理图片URL，添加WebP转换
     const categoriesWithProcessedImages = rows.map(category => 
-      processObjectImages(category, ['image', 'icon'])
+      processObjectImages(category, ['image'])
     );
     
     const result = {
@@ -120,7 +119,7 @@ router.get('/', async (req, res) => {
 // 创建实物分类（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, image, icon, count, description } = req.body;
+    const { title, image, count, description } = req.body;
     
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -155,8 +154,8 @@ router.post('/', authenticateToken, async (req, res) => {
     }
     
     const [result] = await db.query(
-      'INSERT INTO physical_categories (title, image, icon, count, description) VALUES (?, ?, ?, ?, ?)',
-      [cleanTitle, image, icon, cleanCount, cleanDescription]
+      'INSERT INTO physical_categories (title, image, count, description) VALUES (?, ?, ?, ?)',
+      [cleanTitle, image, cleanCount, cleanDescription]
     );
     
     // 查询新创建的记录
@@ -165,7 +164,6 @@ router.post('/', authenticateToken, async (req, res) => {
         id,
         title,
         image,
-        icon,
         count,
         description,
         created_at,
@@ -179,7 +177,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
     
     // 处理返回的图片URL，添加WebP转换
-    const processedCategory = processObjectImages(newCategory[0], ['image', 'icon']);
+    const processedCategory = processObjectImages(newCategory[0], ['image']);
     
     // 清理缓存
     await clearPhysicalCategoriesCache();
@@ -199,7 +197,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: '无效的分类ID' });
     }
     
-    const { title, image, icon, count, description } = req.body;
+    const { title, image, count, description } = req.body;
     
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -244,8 +242,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     
     await db.query(
-      'UPDATE physical_categories SET title = ?, image = ?, icon = ?, count = ?, description = ?, updated_at = NOW() WHERE id = ?',
-      [cleanTitle, image, icon, cleanCount, cleanDescription, id]
+      'UPDATE physical_categories SET title = ?, image = ?, count = ?, description = ?, updated_at = NOW() WHERE id = ?',
+      [cleanTitle, image, cleanCount, cleanDescription, id]
     );
     
     // 查询更新后的记录
@@ -254,7 +252,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
         id,
         title,
         image,
-        icon,
         count,
         description,
         created_at,
@@ -268,7 +265,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     
     // 处理返回的图片URL，添加WebP转换
-    const processedCategory = processObjectImages(updatedCategory[0], ['image', 'icon']);
+    const processedCategory = processObjectImages(updatedCategory[0], ['image']);
     
     // 清理缓存
     await clearPhysicalCategoriesCache();
@@ -331,7 +328,6 @@ router.get('/:id', async (req, res) => {
         id,
         title,
         image,
-        icon,
         count,
         description,
         created_at,
@@ -345,7 +341,7 @@ router.get('/:id', async (req, res) => {
     }
     
     // 处理图片URL，添加WebP转换
-    const processedCategory = processObjectImages(categories[0], ['image', 'icon']);
+    const processedCategory = processObjectImages(categories[0], ['image']);
     
     res.json(processedCategory);
   } catch (error) {

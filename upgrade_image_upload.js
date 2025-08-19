@@ -1,41 +1,18 @@
-<template>
-  <div>
-    <div class="header">
-      <h3>实物分类管理</h3>
-      <el-button type="primary" @click="handleAdd">添加分类</el-button>
-    </div>
+// 批量升级图片上传功能脚本
+// 这个脚本将帮助快速升级所有页面的图片上传功能
 
-    <el-table :data="categories" style="width: 100%">
-      <el-table-column prop="title" label="标题" />
-      <el-table-column label="图片">
-        <template #default="{ row }">
-          <el-image
-            style="width: 100px; height: 100px"
-            :src="getImageUrl(row.image)"
-            fit="cover"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column prop="count" label="作品数量" />
-      <el-table-column prop="description" label="描述" />
-      <el-table-column label="操作" width="200">
-        <template #default="{ row }">
-          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+const pagesToUpgrade = [
+  'src/views/PhysicalCategories.vue',
+  'src/views/Rights.vue', 
+  'src/views/RightDetail.vue',
+  'src/views/ArtistDetail.vue',
+  'src/views/DigitalArtworks.vue',
+  'src/views/Banners.vue'
+];
 
-    <el-dialog
-      v-model="dialogVisible"
-      :title="isEdit ? '编辑分类' : '添加分类'"
-      width="50%"
-    >
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="标题">
-          <el-input v-model="form.title" />
-        </el-form-item>
-        <el-form-item label="图片" required>
+// 标准图片上传模板
+const standardImageUploadTemplate = `
+        <el-form-item label="图片">
           <div class="image-upload-container">
             <!-- 图片预览区域 -->
             <div class="image-preview" v-if="form.image">
@@ -154,35 +131,10 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="作品数量">
-          <el-input-number v-model="form.count" :min="0" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input type="textarea" v-model="form.description" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
-  </div>
-</template>
+`;
 
-<script setup>
-import { ref, onMounted, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
-import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
-import { uploadImageToWebpLimit5MB } from '../utils/image'
-
-const categories = ref([])
-const dialogVisible = ref(false)
-const isEdit = ref(false)
-
+// 标准状态变量模板
+const standardStateVariables = `
 // 图片上传相关状态
 const imageInput = ref(null)
 const isImageDragOver = ref(false)
@@ -192,8 +144,6 @@ const isImageProcessing = ref(false)
 const imageFileName = ref('')
 const imageFileSize = ref(0)
 
-
-
 // 进度条颜色配置
 const progressColors = [
   { color: '#f56c6c', percentage: 20 },
@@ -202,76 +152,10 @@ const progressColors = [
   { color: '#1989fa', percentage: 80 },
   { color: '#6f7ad3', percentage: 100 }
 ]
+`;
 
-const form = ref({
-  title: '',
-  image: '',
-  count: 0,
-  description: ''
-})
-
-const fetchCategories = async () => {
-  try {
-    const response = await axios.get('/physical-categories')
-    console.log('物理分类数据:', response)
-    
-    // 处理分页格式的响应数据
-    let categoriesData = []
-    if (response && response.data && Array.isArray(response.data)) {
-      // 新格式：分页响应
-      categoriesData = response.data
-    } else if (response && Array.isArray(response)) {
-      // 旧格式：直接数组
-      categoriesData = response
-    } else {
-      console.error('返回数据格式不正确:', response)
-      categories.value = []
-      return
-    }
-    
-    categories.value = categoriesData.map(category => ({
-      ...category,
-      image: getImageUrl(category.image)
-    }))
-  } catch (error) {
-    console.error('获取分类失败:', error)
-    ElMessage.error('获取数据失败')
-  }
-}
-
-const handleAdd = () => {
-  isEdit.value = false
-  form.value = {
-    title: '',
-    image: '',
-    count: 0,
-    description: ''
-  }
-  dialogVisible.value = true
-}
-
-const handleEdit = (row) => {
-  isEdit.value = true
-  form.value = { ...row }
-  dialogVisible.value = true
-}
-
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个分类吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/physical-categories/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchCategories()
-    } catch (error) {
-      ElMessage.error('删除失败')
-    }
-  })
-}
-
+// 标准上传函数模板
+const standardUploadFunctions = `
 // 图片上传相关函数
 const triggerImageInput = () => {
   if (!isImageUploading.value && !isImageProcessing.value) {
@@ -313,7 +197,7 @@ const uploadImageFile = async (file) => {
     const formData = new FormData()
     formData.append('file', processedFile)
 
-    const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+    const response = await axios.post(\`\${API_BASE_URL}/api/upload\`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -327,7 +211,7 @@ const uploadImageFile = async (file) => {
       }
     })
 
-    handleImageUploadSuccess(response)
+    handleImageUploadSuccess(response.data)
   } catch (error) {
     handleImageUploadError(error)
   }
@@ -405,7 +289,7 @@ const removeImage = async () => {
   }
 }
 
-// 图片拖拽处理函数
+// 拖拽处理函数
 const handleImageDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
@@ -440,8 +324,6 @@ const handleImageDrop = (e) => {
   }
 }
 
-
-
 // 格式化文件大小
 const formatFileSize = (bytes) => {
   if (bytes === 0) return '0 B'
@@ -450,52 +332,10 @@ const formatFileSize = (bytes) => {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
+`;
 
-const getImageUrl = (url) => {
-  if (!url) return '';
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
-}
-
-const handleSubmit = async () => {
-  if (!form.value.title.trim()) {
-    ElMessage.warning('请输入分类标题');
-    return;
-  }
-
-  try {
-    // 确保提交的图片URL是相对路径
-    const submitData = {
-      ...form.value,
-      image: form.value.image ? (form.value.image.startsWith('http') ? form.value.image.replace(API_BASE_URL, '') : form.value.image) : ''
-    };
-
-    if (isEdit.value) {
-      await axios.put(`/physical-categories/${form.value.id}`, submitData)
-    } else {
-      await axios.post('/physical-categories', submitData)
-    }
-    ElMessage.success('保存成功')
-    dialogVisible.value = false
-    fetchCategories()
-  } catch (error) {
-    ElMessage.error('保存失败')
-  }
-}
-
-// 页面加载时获取数据
-onMounted(() => {
-  fetchCategories()
-})
-</script>
-
-<style scoped>
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
+// 标准样式模板
+const standardStyles = `
 /* 图片上传容器 */
 .image-upload-container {
   width: 100%;
@@ -735,26 +575,8 @@ onMounted(() => {
     height: 200px;
   }
 }
+`;
 
-:deep(.el-table .el-image) {
-  width: 80px;
-  height: 80px;
-  border-radius: 4px;
-}
-
-:deep(.el-dialog .el-form-item) {
-  margin-bottom: 22px;
-}
-
-:deep(.el-upload:hover) {
-  border-color: #409eff;
-}
-
-:deep(.el-image) {
-  transition: transform 0.3s;
-}
-
-:deep(.el-image:hover) {
-  transform: scale(1.02);
-}
-</style> 
+console.log('批量升级脚本已创建完成！');
+console.log('需要升级的页面：', pagesToUpgrade);
+console.log('请根据模板手动升级各个页面的图片上传功能。');
