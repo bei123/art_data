@@ -44,6 +44,17 @@
         </template>
       </el-table-column>
       <el-table-column prop="category_title" label="所属分类" />
+      <el-table-column label="关联艺术家">
+        <template #default="{ row }">
+          <div v-if="row.artist">
+            <div class="artist-info">
+              <el-avatar :size="30" :src="getImageUrl(row.artist.avatar)" />
+              <span class="artist-name">{{ row.artist.name }}</span>
+            </div>
+          </div>
+          <span v-else class="no-artist">未关联</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
@@ -94,6 +105,21 @@
               :label="cat.title"
               :value="cat.id"
             />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关联艺术家">
+          <el-select v-model="form.artist_id" placeholder="请选择艺术家" clearable>
+            <el-option
+              v-for="artist in artists"
+              :key="artist.id"
+              :label="artist.name"
+              :value="artist.id"
+            >
+              <div class="artist-option">
+                <el-avatar :size="24" :src="getImageUrl(artist.avatar)" />
+                <span class="artist-name">{{ artist.name }}</span>
+              </div>
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="描述">
@@ -242,6 +268,7 @@ const rights = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const categories = ref([])
+const artists = ref([])
 const fileList = ref([])
 
 const form = ref({
@@ -255,7 +282,8 @@ const form = ref({
   remainingCount: 0,
   description: '',
   images: [],
-  category_id: null
+  category_id: null,
+  artist_id: null
 })
 
 const editorRef = ref(null)
@@ -374,6 +402,20 @@ const fetchCategories = async () => {
   }
 }
 
+const fetchArtists = async () => {
+  try {
+    const response = await axios.get('/artists')
+    if (Array.isArray(response.data)) {
+      artists.value = response.data
+    } else {
+      artists.value = []
+    }
+  } catch (error) {
+    console.error('获取艺术家列表失败：', error)
+    artists.value = []
+  }
+}
+
 const getStatusType = (status) => {
   const types = {
     onsale: 'success',
@@ -406,6 +448,7 @@ const handleAdd = () => {
     description: '',
     images: [],
     category_id: null,
+    artist_id: null,
     rich_text: ''
   }
   dialogVisible.value = true
@@ -427,6 +470,7 @@ const handleEdit = (row) => {
     description: row.description,
     images: row.images || [],
     category_id: row.category_id,
+    artist_id: row.artist_id,
     rich_text: row.rich_text || ''
   }
   dialogVisible.value = true
@@ -709,6 +753,7 @@ const handleSubmit = async () => {
 onMounted(() => {
   fetchRights()
   fetchCategories()
+  fetchArtists()
 })
 onBeforeUnmount(() => {
   if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
@@ -915,6 +960,35 @@ onBeforeUnmount(() => {
   color: #f56c6c;
   font-size: 12px;
   margin-top: 4px;
+}
+
+/* 艺术家相关样式 */
+.artist-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artist-name {
+  font-size: 14px;
+  color: #606266;
+}
+
+.no-artist {
+  color: #909399;
+  font-size: 14px;
+  font-style: italic;
+}
+
+.artist-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artist-option .artist-name {
+  font-size: 14px;
+  color: #303133;
 }
 
 /* 响应式设计 */

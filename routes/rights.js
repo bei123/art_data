@@ -94,12 +94,17 @@ router.get('/', async (req, res) => {
                 r.remaining_count,
                 r.description,
                 r.category_id,
+                r.artist_id,
                 r.created_at,
                 r.updated_at,
                 c.title as category_title,
+                a.id as artist_id,
+                a.name as artist_name,
+                a.avatar as artist_avatar,
                 r.rich_text
             FROM rights r
             LEFT JOIN physical_categories c ON r.category_id = c.id
+            LEFT JOIN artists a ON r.artist_id = a.id
             ${whereClause}
             ORDER BY r.${cleanSort} ${cleanOrder.toUpperCase()}
             LIMIT ? OFFSET ?
@@ -138,7 +143,12 @@ router.get('/', async (req, res) => {
         // 组装数据
         const rightsWithImages = rows.map(right => ({
             ...right,
-            images: imagesMap.get(right.id) || []
+            images: imagesMap.get(right.id) || [],
+            artist: right.artist_id ? {
+                id: right.artist_id,
+                name: right.artist_name,
+                avatar: right.artist_avatar
+            } : null
         }));
 
         const result = {
@@ -166,7 +176,7 @@ router.get('/', async (req, res) => {
 // 新增版权实物（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, rich_text } = req.body;
+        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text } = req.body;
         
         // 输入验证
         if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -212,8 +222,8 @@ router.post('/', authenticateToken, async (req, res) => {
         try {
             // 插入版权实物基本信息
             const [insertResult] = await connection.query(
-                'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description, category_id, rich_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [title.trim(), status, parseFloat(price), originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, rich_text]
+                'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description, category_id, artist_id, rich_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [title.trim(), status, parseFloat(price), originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, artist_id || null, rich_text]
             );
 
             const rightId = insertResult.insertId;
@@ -242,12 +252,17 @@ router.post('/', authenticateToken, async (req, res) => {
                     r.remaining_count,
                     r.description,
                     r.category_id,
+                    r.artist_id,
                     r.rich_text,
                     r.created_at,
                     r.updated_at,
-                    c.title as category_title
+                    c.title as category_title,
+                    a.id as artist_id,
+                    a.name as artist_name,
+                    a.avatar as artist_avatar
                 FROM rights r
                 LEFT JOIN physical_categories c ON r.category_id = c.id
+                LEFT JOIN artists a ON r.artist_id = a.id
                 WHERE r.id = ?
             `, [rightId]);
 
@@ -263,7 +278,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
             const result = {
                 ...newRight[0],
-                images: rightImages.map(img => img.image_url || '')
+                images: rightImages.map(img => img.image_url || ''),
+                artist: newRight[0].artist_id ? {
+                    id: newRight[0].artist_id,
+                    name: newRight[0].artist_name,
+                    avatar: newRight[0].artist_avatar
+                } : null
             };
 
             res.json(result);
@@ -286,7 +306,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // 编辑版权实物（需要认证）
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, rich_text } = req.body;
+        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text } = req.body;
         
         // 验证ID参数
         const id = parseInt(req.params.id);
@@ -349,8 +369,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
             
             // 更新版权实物基本信息
             await connection.query(
-                'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, rich_text = ?, updated_at = NOW() WHERE id = ?',
-                [title.trim(), status, parseFloat(price), originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, rich_text, id]
+                'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, artist_id = ?, rich_text = ?, updated_at = NOW() WHERE id = ?',
+                [title.trim(), status, parseFloat(price), originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, artist_id || null, rich_text, id]
             );
 
             // 删除旧图片
@@ -380,12 +400,17 @@ router.put('/:id', authenticateToken, async (req, res) => {
                     r.remaining_count,
                     r.description,
                     r.category_id,
+                    r.artist_id,
                     r.rich_text,
                     r.created_at,
                     r.updated_at,
-                    c.title as category_title
+                    c.title as category_title,
+                    a.id as artist_id,
+                    a.name as artist_name,
+                    a.avatar as artist_avatar
                 FROM rights r
                 LEFT JOIN physical_categories c ON r.category_id = c.id
+                LEFT JOIN artists a ON r.artist_id = a.id
                 WHERE r.id = ?
             `, [id]);
 
@@ -401,7 +426,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
             const result = {
                 ...updatedRight[0],
-                images: rightImages.map(img => img.image_url || '')
+                images: rightImages.map(img => img.image_url || ''),
+                artist: updatedRight[0].artist_id ? {
+                    id: updatedRight[0].artist_id,
+                    name: updatedRight[0].artist_name,
+                    avatar: updatedRight[0].artist_avatar
+                } : null
             };
 
             res.json(result);
@@ -513,12 +543,17 @@ router.get('/:id', async (req, res) => {
                 r.remaining_count,
                 r.description,
                 r.category_id,
+                r.artist_id,
                 r.rich_text,
                 r.created_at,
                 r.updated_at,
-                c.title as category_title
+                c.title as category_title,
+                a.id as artist_id,
+                a.name as artist_name,
+                a.avatar as artist_avatar
             FROM rights r
             LEFT JOIN physical_categories c ON r.category_id = c.id
+            LEFT JOIN artists a ON r.artist_id = a.id
             WHERE r.id = ?
         `, [id]);
 
@@ -541,7 +576,12 @@ router.get('/:id', async (req, res) => {
             category: {
                 id: right.category_id,
                 title: right.category_title
-            }
+            },
+            artist: right.artist_id ? {
+                id: right.artist_id,
+                name: right.artist_name,
+                avatar: right.artist_avatar
+            } : null
         };
         
         res.json(result);
