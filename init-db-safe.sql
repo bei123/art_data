@@ -1,4 +1,4 @@
--- 数据库初始化脚本
+-- 安全的数据库初始化脚本
 -- 创建用户认证相关的表结构
 
 -- 角色表
@@ -59,13 +59,45 @@ INSERT IGNORE INTO `roles` (`name`, `description`) VALUES
 INSERT IGNORE INTO `users` (`username`, `email`, `password_hash`, `role_id`, `status`) VALUES
 ('admin', 'admin@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3bp.gS.Oi.', 3, 'active');
 
--- 创建索引优化查询性能
--- 注意：MySQL不支持CREATE INDEX IF NOT EXISTS，需要手动检查是否存在
--- 这些索引可能已经存在，如果执行失败请忽略错误
+-- 创建存储过程来安全地创建索引
+DELIMITER $$
 
--- 为users表创建复合索引
-CREATE INDEX `idx_users_username_email` ON `users` (`username`, `email`);
+CREATE PROCEDURE CreateIndexIfNotExists(
+    IN tableName VARCHAR(64),
+    IN indexName VARCHAR(64),
+    IN indexColumns VARCHAR(255)
+)
+BEGIN
+    DECLARE indexExists INT DEFAULT 0;
+    
+    -- 检查索引是否存在
+    SELECT COUNT(1) INTO indexExists
+    FROM information_schema.statistics 
+    WHERE table_schema = DATABASE()
+    AND table_name = tableName
+    AND index_name = indexName;
+    
+    -- 如果索引不存在，则创建
+    IF indexExists = 0 THEN
+        SET @sql = CONCAT('CREATE INDEX `', indexName, '` ON `', tableName, '` (', indexColumns, ')');
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+        SELECT CONCAT('Index ', indexName, ' created successfully') AS result;
+    ELSE
+        SELECT CONCAT('Index ', indexName, ' already exists') AS result;
+    END IF;
+END$$
 
--- 为user_sessions表创建复合索引
-CREATE INDEX `idx_sessions_user_expires` ON `user_sessions` (`user_id`, `expires_at`);
-CREATE INDEX `idx_sessions_token_expires` ON `user_sessions` (`token`, `expires_at`);
+DELIMITER ;
+
+-- 使用存储过程创建索引
+CALL CreateIndexIfNotExists('users', 'idx_users_username_email', '`username`, `email`');
+CALL CreateIndexIfNotExists('user_sessions', 'idx_sessions_user_expires', '`user_id`, `expires_at`');
+CALL CreateIndexIfNotExists('user_sessions', 'idx_sessions_token_expires', '`token`, `expires_at`');
+
+-- 删除存储过程
+DROP PROCEDURE IF EXISTS CreateIndexIfNotExists;
+
+-- 显示创建结果
+SELECT 'Database initialization completed successfully!' AS status;

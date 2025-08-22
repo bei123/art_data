@@ -1,4 +1,4 @@
--- 数据库初始化脚本
+-- 简单的数据库初始化脚本
 -- 创建用户认证相关的表结构
 
 -- 角色表
@@ -59,13 +59,5 @@ INSERT IGNORE INTO `roles` (`name`, `description`) VALUES
 INSERT IGNORE INTO `users` (`username`, `email`, `password_hash`, `role_id`, `status`) VALUES
 ('admin', 'admin@example.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3bp.gS.Oi.', 3, 'active');
 
--- 创建索引优化查询性能
--- 注意：MySQL不支持CREATE INDEX IF NOT EXISTS，需要手动检查是否存在
--- 这些索引可能已经存在，如果执行失败请忽略错误
-
--- 为users表创建复合索引
-CREATE INDEX `idx_users_username_email` ON `users` (`username`, `email`);
-
--- 为user_sessions表创建复合索引
-CREATE INDEX `idx_sessions_user_expires` ON `user_sessions` (`user_id`, `expires_at`);
-CREATE INDEX `idx_sessions_token_expires` ON `user_sessions` (`token`, `expires_at`);
+-- 显示创建结果
+SELECT 'Database initialization completed successfully!' AS status;
