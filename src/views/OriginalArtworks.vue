@@ -181,7 +181,7 @@
                  <el-icon class="avatar-uploader-icon"><Plus /></el-icon>
                  <div class="upload-text">
                    <p>点击或拖拽图片到此处上传</p>
-                   <p class="upload-hint">支持 JPG、PNG、GIF 格式，文件大小不超过 5MB</p>
+                   <p class="upload-hint">支持 JPG、PNG、GIF 格式，文件大小不超过 50MB</p>
                  </div>
                </div>
              </div>
@@ -1018,9 +1018,9 @@ const beforeUpload = async (file) => {
   }
 
   // 文件大小验证 (5MB)
-  const isLt5M = file.size / 1024 / 1024 < 5
+  const isLt5M = file.size / 1024 / 1024 < 50
   if (!isLt5M) {
-    ElMessage.error('图片大小不能超过 5MB!')
+    ElMessage.error('图片大小不能超过 50MB!')
     return false
   }
 

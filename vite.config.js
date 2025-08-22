@@ -9,6 +9,43 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // 将Vue相关库分离
+          'vue-vendor': ['vue', 'vue-router'],
+          // 将Element Plus分离
+          'element-plus': ['element-plus'],
+          // 将Pinia状态管理分离
+          'pinia': ['pinia'],
+          // 将工具库分离
+          'utils': ['axios', 'uuid'],
+          // 将阿里云相关库分离
+          'aliyun': [
+            '@alicloud/credentials',
+            '@alicloud/dytnsapi20200217',
+            '@alicloud/ocr-api20210707',
+            '@alicloud/openapi-client',
+            '@alicloud/tea-console',
+            '@alicloud/tea-typescript',
+            '@alicloud/tea-util',
+            'ali-oss'
+          ],
+          // 将编辑器相关库分离
+          'editor': ['@wangeditor/editor', '@wangeditor/editor-for-vue'],
+          // 将图片处理相关库分离
+          'image-utils': ['browser-image-compression', 'sharp']
+        }
+      }
+    },
+    // 调整chunk大小警告限制
+    chunkSizeWarningLimit: 1000,
+    // 启用代码分割
+    target: 'es2015',
+    // 启用CSS代码分割
+    cssCodeSplit: true
+  },
   server: {
     port: 5173,
     historyApiFallback: true,

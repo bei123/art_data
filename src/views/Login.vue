@@ -48,7 +48,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import axios from '../utils/axios'
+import { login, register, initAuth } from '../utils/auth'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -95,38 +95,45 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     loading.value = true
     
-    const endpoint = isLogin.value ? '/auth/login' : '/auth/register'
-    console.log('发送请求到:', endpoint)
-    console.log('请求数据:', form)
-    
-    const response = await axios.post(endpoint, form)
-    console.log('响应数据:', response.data)
+    console.log('发送请求数据:', form)
     
     if (isLogin.value) {
-      // 保存token和用户信息
-      localStorage.setItem('token', response.data.token)
-      // 设置 token 过期时间（24小时）
-      const expiryTime = Date.now() + (24 * 60 * 60 * 1000)
-      localStorage.setItem('tokenExpiry', expiryTime.toString())
-      localStorage.setItem('user', JSON.stringify(response.data.user))
+      // 登录
+      const response = await login(form.username, form.password)
+      console.log('登录响应:', response)
       
-      // 新增：存入pinia
-      userStore.setUserInfo(response.data.user)
-      
-      ElMessage.success('登录成功')
-      router.push('/')
+      if (response.success) {
+        // 初始化认证状态
+        initAuth()
+        
+        // 存入pinia
+        userStore.setUserInfo(response.data.user)
+        
+        ElMessage.success('登录成功')
+        router.push('/')
+      }
     } else {
-      ElMessage.success('注册成功，请登录')
-      isLogin.value = true
-      form.username = ''
-      form.email = ''
-      form.password = ''
+      // 注册
+      const response = await register(form.username, form.email, form.password)
+      console.log('注册响应:', response)
+      
+      if (response.success) {
+        // 初始化认证状态
+        initAuth()
+        
+        // 存入pinia
+        userStore.setUserInfo(response.data)
+        
+        ElMessage.success('注册成功，已自动登录')
+        router.push('/')
+      }
     }
   } catch (error) {
     console.error('操作失败:', error)
     if (error.response) {
       console.error('错误响应:', error.response.data)
-      ElMessage.error(error.response.data.error || '操作失败')
+      const errorMessage = error.response.data.error || error.response.data.message || '操作失败'
+      ElMessage.error(errorMessage)
     } else if (error.request) {
       console.error('请求错误:', error.request)
       ElMessage.error('网络请求失败，请检查网络连接')

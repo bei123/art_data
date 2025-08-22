@@ -198,13 +198,11 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
 
 // 认证相关路由
-app.post('/api/auth/register',
-
-  [
-    body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
-    body('email').isEmail().withMessage('请输入有效的邮箱地址'),
-    body('password').isLength({ min: 6 }).withMessage('密码至少6个字符')
-  ], auth.register);
+app.post('/api/auth/register', [
+  body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
+  body('email').isEmail().withMessage('请输入有效的邮箱地址'),
+  body('password').isLength({ min: 6 }).withMessage('密码至少6个字符')
+], auth.register);
 
 app.post('/api/auth/login', [
   body('username').notEmpty().withMessage('请输入用户名'),
@@ -214,6 +212,13 @@ app.post('/api/auth/login', [
 app.get('/api/auth/me', auth.authenticateToken, auth.getCurrentUser);
 
 app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
+
+app.post('/api/auth/refresh', auth.authenticateToken, auth.refreshToken);
+
+// 管理员认证路由
+app.get('/api/auth/sessions', auth.authenticateToken, auth.requireAdmin, auth.getUserSessions);
+
+app.post('/api/auth/force-logout/:userId', auth.authenticateToken, auth.requireAdmin, auth.forceLogout);
 
 // 保护需要认证的路由
 // app.use('/api/original-artworks', auth.authenticateToken);

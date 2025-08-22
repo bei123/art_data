@@ -36,7 +36,7 @@ export async function uploadImageToWebpLimit5MB(file) {
     return false;
   }
   const options = {
-    maxSizeMB: 5,
+    maxSizeMB: 50,
     maxWidthOrHeight: 4096,
     fileType: 'image/webp',
     useWebWorker: true
