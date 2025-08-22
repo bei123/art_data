@@ -103,6 +103,8 @@ const handleSubmit = async () => {
       console.log('登录响应:', response)
       
       if (response.success) {
+        console.log('登录成功，准备跳转...')
+        
         // 初始化认证状态
         initAuth()
         
@@ -110,7 +112,23 @@ const handleSubmit = async () => {
         userStore.setUserInfo(response.data.user)
         
         ElMessage.success('登录成功')
-        router.push('/')
+        
+        // 添加延迟确保状态更新
+        setTimeout(() => {
+          console.log('执行路由跳转...')
+          console.log('当前路径:', window.location.pathname)
+          console.log('用户信息:', userStore.userInfo)
+          console.log('认证状态:', userStore.isAuthenticated)
+          
+          // 尝试多种跳转方式
+          try {
+            router.push('/')
+          } catch (error) {
+            console.error('路由跳转失败:', error)
+            // 备用跳转方式
+            window.location.href = '/'
+          }
+        }, 100)
       }
     } else {
       // 注册
