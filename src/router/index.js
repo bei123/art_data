@@ -1,6 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useUserStore } from '../stores/user'
-import { isAuthenticated, hasRole } from '../utils/auth'
 import Login from '../views/Login.vue'
 
 const routes = [
@@ -126,29 +124,14 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
-  const userStore = useUserStore()
+  const token = localStorage.getItem('token')
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
-  const requiredRoles = to.meta.roles
 
-  // 检查是否需要认证
-  if (requiresAuth && !isAuthenticated()) {
+  if (requiresAuth && !token) {
     next('/login')
-    return
+  } else {
+    next()
   }
-
-  // 检查角色权限
-  if (requiredRoles && !hasRole(requiredRoles)) {
-    next('/login')
-    return
-  }
-
-  // 如果已登录且访问登录页，重定向到首页
-  if (to.path === '/login' && isAuthenticated()) {
-    next('/')
-    return
-  }
-
-  next()
 })
 
 export default router 
