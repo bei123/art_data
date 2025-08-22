@@ -21,9 +21,7 @@ const generateToken = (userId, role) => {
   return jwt.sign(
     { 
       userId, 
-      role,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24小时
+      role
     }, 
     JWT_SECRET, 
     { expiresIn: JWT_EXPIRES_IN }
