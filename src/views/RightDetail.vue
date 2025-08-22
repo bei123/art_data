@@ -54,52 +54,6 @@
           </el-col>
         </el-row>
 
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="关联艺术家">
-              <div v-if="!isEditing">
-                <div v-if="form.artist" class="artist-info">
-                  <el-avatar :size="40" :src="getImageUrl(form.artist.avatar)" />
-                  <div class="artist-details">
-                    <div class="artist-name">{{ form.artist.name }}</div>
-                    <div v-if="form.artist.description" class="artist-description">{{ form.artist.description }}</div>
-                  </div>
-                </div>
-                <span v-else class="no-artist">未关联艺术家</span>
-              </div>
-              <el-select v-else v-model="form.artist_id" placeholder="请选择艺术家" clearable>
-                <el-option
-                  v-for="artist in artists"
-                  :key="artist.id"
-                  :label="artist.name"
-                  :value="artist.id"
-                >
-                  <div class="artist-option">
-                    <el-avatar :size="24" :src="getImageUrl(artist.avatar)" />
-                    <span class="artist-name">{{ artist.name }}</span>
-                  </div>
-                </el-option>
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="所属分类">
-              <div v-if="!isEditing">
-                <span v-if="form.category">{{ form.category.title }}</span>
-                <span v-else class="no-category">未分类</span>
-              </div>
-              <el-select v-else v-model="form.category_id" placeholder="请选择分类">
-                <el-option
-                  v-for="cat in categories"
-                  :key="cat.id"
-                  :label="cat.title"
-                  :value="cat.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
         <el-form-item label="总数量">
           <el-input-number v-model="form.totalCount" :min="0" />
         </el-form-item>
@@ -313,15 +267,8 @@ const form = ref({
   images: [],
   details: [],
   rules: [],
-  rich_text: '',
-  category_id: null,
-  artist_id: null,
-  category: null,
-  artist: null
+  rich_text: ''
 })
-
-const categories = ref([])
-const artists = ref([])
 
 const fileList = ref([])
 
@@ -417,37 +364,6 @@ const fetchRightDetail = async () => {
     ElMessage.error('获取版权实物详情失败')
   } finally {
     loading.value = false
-  }
-}
-
-const fetchCategories = async () => {
-  try {
-    const response = await axios.get('/physical-categories')
-    if (Array.isArray(response.data)) {
-      categories.value = response.data
-    } else {
-      categories.value = []
-    }
-  } catch (error) {
-    console.error('获取分类列表失败：', error)
-    categories.value = []
-  }
-}
-
-const fetchArtists = async () => {
-  try {
-    const response = await axios.get('/artists')
-    console.log('详情页艺术家API响应:', response)
-    if (Array.isArray(response)) {
-      artists.value = response
-      console.log('详情页设置艺术家数据:', artists.value)
-    } else {
-      artists.value = []
-      console.log('详情页艺术家数据格式不正确:', response)
-    }
-  } catch (error) {
-    console.error('获取艺术家列表失败：', error)
-    artists.value = []
   }
 }
 
@@ -717,8 +633,6 @@ const goBack = () => {
 
 onMounted(() => {
   fetchRightDetail()
-  fetchCategories()
-  fetchArtists()
 })
 
 onBeforeUnmount(() => {
@@ -948,52 +862,5 @@ onBeforeUnmount(() => {
   padding: 10px;
   border: 1px solid #ebeef5;
   border-radius: 4px;
-}
-
-/* 艺术家相关样式 */
-.artist-info {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.artist-details {
-  flex: 1;
-}
-
-.artist-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 4px;
-}
-
-.artist-description {
-  font-size: 14px;
-  color: #606266;
-  line-height: 1.4;
-}
-
-.no-artist,
-.no-category {
-  color: #909399;
-  font-size: 14px;
-  font-style: italic;
-}
-
-.artist-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.artist-option .artist-name {
-  font-size: 14px;
-  color: #303133;
-  font-weight: normal;
 }
 </style> 

@@ -405,13 +405,10 @@ const fetchCategories = async () => {
 const fetchArtists = async () => {
   try {
     const response = await axios.get('/artists')
-    console.log('艺术家API响应:', response)
-    if (Array.isArray(response)) {
-      artists.value = response
-      console.log('设置艺术家数据:', artists.value)
+    if (Array.isArray(response.data)) {
+      artists.value = response.data
     } else {
       artists.value = []
-      console.log('艺术家数据格式不正确:', response)
     }
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
