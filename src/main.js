@@ -24,15 +24,4 @@ initAuth()
 const userStore = useUserStore()
 userStore.initUserState()
 
-// 全局错误处理
-app.config.errorHandler = (err, vm, info) => {
-  console.error('Vue错误:', err)
-  console.error('错误信息:', info)
-}
-
-// 全局未处理的Promise拒绝处理
-window.addEventListener('unhandledrejection', event => {
-  console.error('未处理的Promise拒绝:', event.reason)
-})
-
 app.mount('#app') 
