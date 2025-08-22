@@ -408,9 +408,13 @@ const handleInstitutionFilter = async () => {
   
   try {
     const response = await axios.get(`/artists?institution_id=${selectedInstitutionId.value}`)
-    if (response.artists) {
+    console.log('按机构筛选艺术家API返回的原始数据：', response)
+    if (response && response.artists && Array.isArray(response.artists)) {
       filteredArtists.value = response.artists
+    } else if (Array.isArray(response)) {
+      filteredArtists.value = response
     } else {
+      console.error('返回的数据格式不正确：', response)
       filteredArtists.value = []
     }
   } catch (error) {
@@ -423,8 +427,13 @@ const handleInstitutionFilter = async () => {
 const fetchInstitutions = async () => {
   try {
     const data = await axios.get('/institutions')
+    console.log('机构API返回的原始数据：', data)
     if (Array.isArray(data)) {
       institutions.value = data
+      console.log('设置后的机构数据：', institutions.value)
+    } else {
+      console.error('返回的数据不是数组：', data)
+      institutions.value = []
     }
   } catch (error) {
     console.error('获取机构列表失败：', error)

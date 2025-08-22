@@ -323,8 +323,17 @@ const fetchArtists = async () => {
   if (!checkLoginStatus()) return
   try {
     const response = await axios.get('/artists')
-    artists.value = response.data
+    console.log('原作艺术品详情艺术家API返回的原始数据：', response)
+    if (Array.isArray(response)) {
+      artists.value = response
+      console.log('设置后的艺术家数据：', artists.value)
+    } else {
+      console.error('返回的数据不是数组：', response)
+      artists.value = []
+      ElMessage.error('获取艺术家数据格式不正确')
+    }
   } catch (error) {
+    console.error('获取艺术家列表失败：', error)
     if (error.response) {
       if (error.response.status === 401) {
         ElMessage.error('登录已过期，请重新登录')
@@ -335,6 +344,7 @@ const fetchArtists = async () => {
     } else {
       ElMessage.error('获取艺术家列表失败')
     }
+    artists.value = []
   }
 }
 

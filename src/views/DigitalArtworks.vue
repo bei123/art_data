@@ -300,12 +300,17 @@ const fetchArtworks = async () => {
 const fetchArtists = async () => {
   try {
     const data = await axios.get('/artists')
+    console.log('数字艺术品艺术家API返回的原始数据：', data)
     if (Array.isArray(data)) {
       artistOptions.value = data
+      console.log('设置后的艺术家数据：', artistOptions.value)
     } else {
+      console.error('返回的数据不是数组：', data)
       artistOptions.value = []
+      ElMessage.error('获取艺术家数据格式不正确')
     }
   } catch (error) {
+    console.error('获取艺术家列表失败：', error)
     artistOptions.value = []
     ElMessage.error('获取艺术家列表失败')
   }

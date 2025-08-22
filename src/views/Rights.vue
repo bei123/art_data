@@ -364,12 +364,12 @@ watch(dialogVisible, (val) => {
 const fetchRights = async () => {
   try {
     const response = await axios.get('/rights')
-    console.log('API返回的原始数据：', response.data)
+    console.log('版权实物API返回的原始数据：', response)
     let arr = []
-    if (Array.isArray(response.data)) {
+    if (Array.isArray(response)) {
+      arr = response
+    } else if (response && Array.isArray(response.data)) {
       arr = response.data
-    } else if (response.data && Array.isArray(response.data.data)) {
-      arr = response.data.data
     }
     if (arr.length) {
       rights.value = arr.map(right => ({
@@ -378,7 +378,7 @@ const fetchRights = async () => {
       }))
       console.log('设置后的版权实物数据：', rights.value)
     } else {
-      console.error('返回的数据不是数组：', response.data)
+      console.error('返回的数据不是数组：', response)
       rights.value = []
       ElMessage.error('获取数据格式不正确')
     }
@@ -392,12 +392,19 @@ const fetchRights = async () => {
 const fetchCategories = async () => {
   try {
     const response = await axios.get('/physical-categories')
-    if (Array.isArray(response.data)) {
+    console.log('分类API返回的原始数据：', response)
+    if (response && response.data && Array.isArray(response.data)) {
       categories.value = response.data
+      console.log('设置后的分类数据：', categories.value)
+    } else if (Array.isArray(response)) {
+      categories.value = response
+      console.log('设置后的分类数据：', categories.value)
     } else {
+      console.error('返回的分类数据格式不正确：', response)
       categories.value = []
     }
   } catch (error) {
+    console.error('获取分类列表失败：', error)
     categories.value = []
   }
 }
@@ -405,14 +412,19 @@ const fetchCategories = async () => {
 const fetchArtists = async () => {
   try {
     const response = await axios.get('/artists')
-    if (Array.isArray(response.data)) {
-      artists.value = response.data
+    console.log('艺术家API返回的原始数据：', response)
+    if (Array.isArray(response)) {
+      artists.value = response
+      console.log('设置后的艺术家数据：', artists.value)
     } else {
+      console.error('返回的数据不是数组：', response)
       artists.value = []
+      ElMessage.error('获取艺术家数据格式不正确')
     }
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     artists.value = []
+    ElMessage.error('获取艺术家列表失败')
   }
 }
 
