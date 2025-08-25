@@ -191,24 +191,28 @@ router.post('/', authenticateToken, async (req, res) => {
       if (right[0].remaining_count <= 0) {
         return res.status(400).json({ error: '库存不足' });
       }
-      // 检查购物车中是否已存在该商品
-      const [existingItem] = await db.query(
-        'SELECT id, quantity FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
-        [userId, right_id]
-      );
-      if (existingItem && existingItem.length > 0) {
-        // 更新数量
-        await db.query(
-          'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ? AND type = "right"',
-          [cleanQuantity, userId, right_id]
-        );
-      } else {
-        // 新增商品
-        await db.query(
-          'INSERT INTO cart_items (user_id, type, right_id, quantity) VALUES (?, "right", ?, ?)',
-          [userId, right_id, cleanQuantity]
-        );
-      }
+             // 检查购物车中是否已存在该商品
+       const [existingItem] = await db.query(
+         'SELECT id, quantity FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
+         [userId, right_id]
+       );
+       const cartQuantity = (existingItem && existingItem.length > 0) ? existingItem[0].quantity : 0;
+       if (cartQuantity + cleanQuantity > right[0].remaining_count) {
+         return res.status(400).json({ error: '加入购物车数量超过商品库存' });
+       }
+       if (existingItem && existingItem.length > 0) {
+         // 更新数量
+         await db.query(
+           'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ? AND type = "right"',
+           [cleanQuantity, userId, right_id]
+         );
+       } else {
+         // 新增商品
+         await db.query(
+           'INSERT INTO cart_items (user_id, type, right_id, quantity) VALUES (?, "right", ?, ?)',
+           [userId, right_id, cleanQuantity]
+         );
+       }
       res.json({ message: '添加成功' });
     } else if (type === 'digital') {
       if (!digital_artwork_id) {
@@ -344,13 +348,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
         return res.status(400).json({ error: '库存不足' });
       }
     } else if (cartItem.type === 'digital') {
-      // 检查数字艺术品是否存在
+      // 检查数字艺术品是否存在且库存充足
       const [digitalRows] = await db.query(
-        'SELECT id FROM digital_artworks WHERE id = ?',
+        'SELECT id, batch_quantity FROM digital_artworks WHERE id = ?',
         [cartItem.digital_artwork_id]
       );
       if (!digitalRows || digitalRows.length === 0) {
         return res.status(404).json({ error: '数字艺术品不存在' });
+      }
+      if (digitalRows[0].batch_quantity < quantity) {
+        return res.status(400).json({ error: '数字艺术品库存不足' });
       }
     } else {
       return res.status(400).json({ error: '不支持的商品类型' });
