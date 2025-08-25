@@ -34,10 +34,15 @@ router.get('/', async (req, res) => {
       };
     }
 
-    res.json(titleData);
-    
     // 写入redis缓存，设置1小时过期
-    await redisClient.setex(REDIS_HOME_TITLES_KEY, 3600, JSON.stringify(titleData));
+    try {
+      await redisClient.setEx(REDIS_HOME_TITLES_KEY, 3600, JSON.stringify(titleData));
+    } catch (redisError) {
+      console.error('Redis缓存写入失败:', redisError);
+      // Redis错误不影响API响应
+    }
+
+    res.json(titleData);
   } catch (error) {
     console.error('获取首页标题失败:', error);
     // 出错时返回默认值
@@ -88,7 +93,12 @@ router.put('/', authenticateToken, async (req, res) => {
     }
 
     // 清除缓存
-    await redisClient.del(REDIS_HOME_TITLES_KEY);
+    try {
+      await redisClient.del(REDIS_HOME_TITLES_KEY);
+    } catch (redisError) {
+      console.error('Redis缓存清除失败:', redisError);
+      // Redis错误不影响API响应
+    }
 
     res.json({ 
       message: '首页标题更新成功',
