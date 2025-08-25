@@ -34,6 +34,7 @@ const assetTransferRouter = require('./routes/asset-transfer');
 const assetVerifyRouter = require('./routes/asset-verify');
 const transactionRouter = require('./routes/transaction');
 const institutionsRouter = require('./routes/institutions');
+const homeTitlesRouter = require('./routes/home-titles');
 
 const app = express();
 const port = 2000;
@@ -303,6 +304,9 @@ app.use('/api/transaction', transactionRouter);
 
 // 使用机构路由
 app.use('/api/institutions', institutionsRouter);
+
+// 使用首页标题路由
+app.use('/api/home-titles', homeTitlesRouter);
 
 // 全局错误处理中间件
 app.use((err, req, res, next) => {
