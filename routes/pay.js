@@ -274,7 +274,7 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             // 批量查询digitals
             if (digitalIds.length > 0) {
                 const [digitals] = await connection.query(
-                    'SELECT id, price FROM digital_artworks WHERE id IN (?)',
+                    'SELECT id, price, batch_quantity FROM digital_artworks WHERE id IN (?)',
                     [digitalIds]
                 );
                 digitals.forEach(digital => {
@@ -300,6 +300,10 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
                 if (item.type === 'artwork' && goods.stock < item.quantity) {
                     await connection.rollback();
                     return res.status(400).json({ error: `艺术品ID ${item.artwork_id} 库存不足` });
+                }
+                if (item.type === 'digital' && goods.batch_quantity < item.quantity) {
+                    await connection.rollback();
+                    return res.status(400).json({ error: `数字艺术品ID ${item.digital_artwork_id} 库存不足` });
                 }
 
                 // 验证价格
@@ -614,12 +618,16 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
             } else if (cleanType === 'digital') {
                 itemId = parseInt(digital_artwork_id);
                 const [digitals] = await connection.query(
-                    'SELECT id, price FROM digital_artworks WHERE id = ?',
+                    'SELECT id, price, batch_quantity FROM digital_artworks WHERE id = ?',
                     [itemId]
                 );
                 if (!digitals || digitals.length === 0) {
                     await connection.rollback();
                     return res.status(404).json({ error: `数字艺术品ID ${itemId} 不存在` });
+                }
+                if (digitals[0].batch_quantity < cleanQuantity) {
+                    await connection.rollback();
+                    return res.status(400).json({ error: `数字艺术品ID ${itemId} 库存不足` });
                 }
                 dbPrice = parseFloat(digitals[0].price);
                 if (Math.abs(cleanPrice - dbPrice) > 0.01) {
@@ -855,17 +863,20 @@ router.post('/notify', async (req, res) => {
                 `, [out_trade_no]);
                 console.log('订单项:', orderItems);
                 
-                // 批量更新商品库存
-                const rightUpdates = [];
-                const artworkUpdates = [];
-                
-                for (const item of orderItems) {
-                    if (item.type === 'right') {
-                        rightUpdates.push([item.quantity, item.right_id]);
-                    } else if (item.type === 'artwork') {
-                        artworkUpdates.push([item.quantity, item.artwork_id]);
-                    }
-                }
+                                 // 批量更新商品库存
+                 const rightUpdates = [];
+                 const artworkUpdates = [];
+                 const digitalUpdates = [];
+                 
+                 for (const item of orderItems) {
+                     if (item.type === 'right') {
+                         rightUpdates.push([item.quantity, item.right_id]);
+                     } else if (item.type === 'artwork') {
+                         artworkUpdates.push([item.quantity, item.artwork_id]);
+                     } else if (item.type === 'digital') {
+                         digitalUpdates.push([item.quantity, item.digital_artwork_id]);
+                     }
+                 }
                 
                 // 批量更新rights库存
                 if (rightUpdates.length > 0) {
@@ -878,37 +889,48 @@ router.post('/notify', async (req, res) => {
                     console.log(`批量扣减right库存: ${rightUpdates.length}条记录`);
                 }
                 
-                                 // 批量更新artworks库存
-                 if (artworkUpdates.length > 0) {
-                     for (const [quantity, artworkId] of artworkUpdates) {
-                         await connection.query(
-                             'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
-                             [quantity, artworkId]
-                         );
-                     }
-                     console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
-                 }
+                                                  // 批量更新artworks库存
+                  if (artworkUpdates.length > 0) {
+                      for (const [quantity, artworkId] of artworkUpdates) {
+                          await connection.query(
+                              'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
+                              [quantity, artworkId]
+                          );
+                      }
+                      console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
+                  }
+                  
+                  // 批量更新digital_artworks库存
+                  if (digitalUpdates.length > 0) {
+                      for (const [quantity, digitalArtworkId] of digitalUpdates) {
+                          await connection.query(
+                              'UPDATE digital_artworks SET batch_quantity = batch_quantity - ? WHERE id = ?',
+                              [quantity, digitalArtworkId]
+                          );
+                      }
+                      console.log(`批量扣减digital_artwork库存: ${digitalUpdates.length}条记录`);
+                  }
+                  
+                  // 处理数字身份购买记录
+                  const digitalPurchaseUpdates = [];
+                  for (const item of orderItems) {
+                      if (item.type === 'digital') {
+                          digitalPurchaseUpdates.push([item.order_id, item.digital_artwork_id, item.quantity, item.price]);
+                      }
+                  }
                  
-                 // 处理数字身份购买记录
-                 const digitalUpdates = [];
-                 for (const item of orderItems) {
-                     if (item.type === 'digital') {
-                         digitalUpdates.push([item.order_id, item.digital_artwork_id, item.quantity, item.price]);
-                     }
-                 }
-                 
-                 if (digitalUpdates.length > 0) {
-                     for (const [orderId, digitalArtworkId, quantity, price] of digitalUpdates) {
-                         // 计算抵扣金额（这里可以根据业务逻辑调整）
-                         const discountAmount = 0; // 数字身份购买暂时不设置抵扣
-                         
-                         await connection.query(
-                             'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date) VALUES (?, ?, ?, NOW())',
-                             [userId, digitalArtworkId, discountAmount]
-                         );
-                     }
-                     console.log(`记录数字身份购买: ${digitalUpdates.length}条记录`);
-                 }
+                                   if (digitalPurchaseUpdates.length > 0) {
+                      for (const [orderId, digitalArtworkId, quantity, price] of digitalPurchaseUpdates) {
+                          // 计算抵扣金额（这里可以根据业务逻辑调整）
+                          const discountAmount = 0; // 数字身份购买暂时不设置抵扣
+                          
+                                                     await connection.query(
+                               'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
+                               [userId, digitalArtworkId, discountAmount, orderId]
+                           );
+                      }
+                      console.log(`记录数字身份购买: ${digitalPurchaseUpdates.length}条记录`);
+                  }
                  
                  await connection.commit();
                  console.log('支付回调处理完成，库存已更新，数字身份购买已记录');
@@ -1456,17 +1478,20 @@ router.post('/refund/notify', async (req, res) => {
                     WHERE o.out_trade_no = ?
                 `, [out_trade_no]);
                 
-                // 批量更新库存
-                const rightUpdates = [];
-                const artworkUpdates = [];
-                
-                for (const item of orderItems) {
-                    if (item.type === 'right') {
-                        rightUpdates.push([item.quantity, item.right_id]);
-                    } else if (item.type === 'artwork') {
-                        artworkUpdates.push([item.quantity, item.artwork_id]);
-                    }
-                }
+                                 // 批量更新库存
+                 const rightUpdates = [];
+                 const artworkUpdates = [];
+                 const digitalUpdates = [];
+                 
+                 for (const item of orderItems) {
+                     if (item.type === 'right') {
+                         rightUpdates.push([item.quantity, item.right_id]);
+                     } else if (item.type === 'artwork') {
+                         artworkUpdates.push([item.quantity, item.artwork_id]);
+                     } else if (item.type === 'digital') {
+                         digitalUpdates.push([item.quantity, item.digital_artwork_id]);
+                     }
+                 }
                 
                 // 批量更新rights库存
                 if (rightUpdates.length > 0) {
@@ -1478,32 +1503,43 @@ router.post('/refund/notify', async (req, res) => {
                     }
                 }
                 
-                                 // 批量更新artworks库存
-                 if (artworkUpdates.length > 0) {
-                     for (const [quantity, artworkId] of artworkUpdates) {
-                         await connection.query(
-                             'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
-                             [quantity, artworkId]
-                         );
-                     }
-                 }
+                                                  // 批量更新artworks库存
+                  if (artworkUpdates.length > 0) {
+                      for (const [quantity, artworkId] of artworkUpdates) {
+                          await connection.query(
+                              'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
+                              [quantity, artworkId]
+                          );
+                      }
+                  }
+                  
+                  // 批量更新digital_artworks库存
+                  if (digitalUpdates.length > 0) {
+                      for (const [quantity, digitalArtworkId] of digitalUpdates) {
+                          await connection.query(
+                              'UPDATE digital_artworks SET batch_quantity = batch_quantity + ? WHERE id = ?',
+                              [quantity, digitalArtworkId]
+                          );
+                      }
+                      console.log('【退款回调】回补digital_artwork库存:', digitalUpdates.length, '条记录');
+                  }
                  
-                 // 处理数字身份购买记录回滚
-                 const digitalItems = [];
-                 for (const item of orderItems) {
-                     if (item.type === 'digital') {
-                         digitalItems.push(item.digital_artwork_id);
-                     }
-                 }
-                 
-                 if (digitalItems.length > 0) {
-                     // 删除相关的数字身份购买记录
-                     await connection.query(
-                         'DELETE FROM digital_identity_purchases WHERE digital_artwork_id IN (?)',
-                         [digitalItems]
-                     );
-                     console.log('【退款回调】删除数字身份购买记录:', digitalItems.length, '条');
-                 }
+                                   // 处理数字身份购买记录回滚
+                  const orderIds = [];
+                  for (const item of orderItems) {
+                      if (item.type === 'digital') {
+                          orderIds.push(item.order_id);
+                      }
+                  }
+                  
+                  if (orderIds.length > 0) {
+                      // 删除相关的数字身份购买记录（基于订单号）
+                      await connection.query(
+                          'DELETE FROM digital_identity_purchases WHERE order_id IN (?)',
+                          [orderIds]
+                      );
+                      console.log('【退款回调】删除数字身份购买记录:', orderIds.length, '条');
+                  }
                  
                  await connection.commit();
                  console.log('【退款回调】库存回补完成，数字身份购买记录已删除');
@@ -1827,28 +1863,29 @@ router.get('/orders', authenticateToken, async (req, res) => {
 
         // 查询每个订单的订单项
         const ordersWithItems = await Promise.all(orders.map(async (order) => {
-            // 查询订单项 - 优化查询，避免复杂CASE WHEN
-            const [orderItems] = await db.query(`
-                SELECT 
-                    oi.id,
-                    oi.type,
-                    oi.right_id,
-                    oi.digital_artwork_id,
-                    oi.artwork_id,
-                    oi.quantity,
-                    oi.price,
-                    oi.address_id,
-                    r.title as right_title,
-                    r.price as right_price,
-                    r.original_price as right_original_price,
-                    r.description as right_description,
-                    r.status as right_status,
-                    r.remaining_count as right_remaining_count,
-                    ri.image_url as right_image_url,
-                    da.title as digital_title,
-                    da.price as digital_price,
-                    da.description as digital_description,
-                    da.image_url as digital_image_url,
+                            // 查询订单项 - 优化查询，避免复杂CASE WHEN
+                const [orderItems] = await db.query(`
+                    SELECT 
+                        oi.id,
+                        oi.type,
+                        oi.right_id,
+                        oi.digital_artwork_id,
+                        oi.artwork_id,
+                        oi.quantity,
+                        oi.price,
+                        oi.address_id,
+                        r.title as right_title,
+                        r.price as right_price,
+                        r.original_price as right_original_price,
+                        r.description as right_description,
+                        r.status as right_status,
+                        r.remaining_count as right_remaining_count,
+                        ri.image_url as right_image_url,
+                        da.title as digital_title,
+                        da.price as digital_price,
+                        da.description as digital_description,
+                        da.image_url as digital_image_url,
+                        da.batch_quantity as digital_batch_quantity,
                     oa.title as artwork_title,
                     oa.original_price as artwork_original_price,
                     oa.discount_price as artwork_discount_price,
@@ -2035,20 +2072,23 @@ router.get('/digital-identity/purchases/:user_id', async (req, res) => {
         
         const cleanUserId = parseInt(userId);
         
-        const [purchases] = await db.query(`
-            SELECT 
-                dip.id,
-                dip.user_id,
-                dip.digital_artwork_id,
-                dip.discount_amount,
-                dip.purchase_date,
-                da.title as artwork_title,
-                da.image_url as artwork_image
-            FROM digital_identity_purchases dip
-            JOIN digital_artworks da ON dip.digital_artwork_id = da.id
-            WHERE dip.user_id = ?
-            ORDER BY dip.purchase_date DESC
-        `, [cleanUserId]);
+                 const [purchases] = await db.query(`
+             SELECT 
+                 dip.id,
+                 dip.user_id,
+                 dip.digital_artwork_id,
+                 dip.discount_amount,
+                 dip.purchase_date,
+                 dip.order_id,
+                 da.title as artwork_title,
+                 da.image_url as artwork_image,
+                 o.out_trade_no as order_no
+             FROM digital_identity_purchases dip
+             JOIN digital_artworks da ON dip.digital_artwork_id = da.id
+             LEFT JOIN orders o ON dip.order_id = o.id
+             WHERE dip.user_id = ?
+             ORDER BY dip.purchase_date DESC
+         `, [cleanUserId]);
 
         res.json(purchases);
     } catch (error) {
@@ -2113,28 +2153,29 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
 
         // 查询每个订单的订单项
         const ordersWithItems = await Promise.all(orders.map(async (order) => {
-            // 查询订单项
-            const [orderItems] = await db.query(`
-                SELECT 
-                    oi.id,
-                    oi.type,
-                    oi.right_id,
-                    oi.digital_artwork_id,
-                    oi.artwork_id,
-                    oi.quantity,
-                    oi.price,
-                    oi.address_id,
-                    r.title as right_title,
-                    r.price as right_price,
-                    r.original_price as right_original_price,
-                    r.description as right_description,
-                    r.status as right_status,
-                    r.remaining_count as right_remaining_count,
-                    ri.image_url as right_image_url,
-                    da.title as digital_title,
-                    da.price as digital_price,
-                    da.description as digital_description,
-                    da.image_url as digital_image_url,
+                         // 查询订单项
+             const [orderItems] = await db.query(`
+                 SELECT 
+                     oi.id,
+                     oi.type,
+                     oi.right_id,
+                     oi.digital_artwork_id,
+                     oi.artwork_id,
+                     oi.quantity,
+                     oi.price,
+                     oi.address_id,
+                     r.title as right_title,
+                     r.price as right_price,
+                     r.original_price as right_original_price,
+                     r.description as right_description,
+                     r.status as right_status,
+                     r.remaining_count as right_remaining_count,
+                     ri.image_url as right_image_url,
+                     da.title as digital_title,
+                     da.price as digital_price,
+                     da.description as digital_description,
+                     da.image_url as digital_image_url,
+                     da.batch_quantity as digital_batch_quantity,
                     oa.title as artwork_title,
                     oa.original_price as artwork_original_price,
                     oa.discount_price as artwork_discount_price,
@@ -2354,21 +2395,22 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
             });
         }
 
-        // 查询订单项信息
-        const [orderItems] = await db.query(`
-            SELECT 
-                oi.*,
-                r.title as right_title,
-                r.price as right_price,
-                r.original_price as right_original_price,
-                r.description as right_description,
-                r.status as right_status,
-                r.remaining_count as right_remaining_count,
-                ri.image_url as right_image_url,
-                da.title as digital_title,
-                da.price as digital_price,
-                da.description as digital_description,
-                da.image_url as digital_image_url,
+                 // 查询订单项信息
+         const [orderItems] = await db.query(`
+             SELECT 
+                 oi.*,
+                 r.title as right_title,
+                 r.price as right_price,
+                 r.original_price as right_original_price,
+                 r.description as right_description,
+                 r.status as right_status,
+                 r.remaining_count as right_remaining_count,
+                 ri.image_url as right_image_url,
+                 da.title as digital_title,
+                 da.price as digital_price,
+                 da.description as digital_description,
+                 da.image_url as digital_image_url,
+                 da.batch_quantity as digital_batch_quantity,
                 oa.title as artwork_title,
                 oa.original_price as artwork_original_price,
                 oa.discount_price as artwork_discount_price,
@@ -2404,16 +2446,16 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
                     stock: item.artwork_stock,
                     required: item.quantity
                 };
-            } else if (item.type === 'digital') {
-                return {
-                    type: 'digital',
-                    id: item.digital_artwork_id,
-                    title: item.digital_title,
-                    available: true, // 数字商品无库存限制
-                    stock: null,
-                    required: item.quantity
-                };
-            }
+                         } else if (item.type === 'digital') {
+                 return {
+                     type: 'digital',
+                     id: item.digital_artwork_id,
+                     title: item.digital_title,
+                     available: item.digital_batch_quantity >= item.quantity,
+                     stock: item.digital_batch_quantity,
+                     required: item.quantity
+                 };
+             }
         });
 
         const unavailableItems = stockCheck.filter(item => !item.available);
