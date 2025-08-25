@@ -52,7 +52,7 @@ if (!WX_PAY_CONFIG.key) {
 
 // 生成随机字符串
 function generateNonceStr() {
-    return Math.random().toString(36).substr(2, 15);
+    return Math.random().toString(36).substring(2, 17);
 }
 
 // 生成签名
@@ -84,8 +84,8 @@ function decryptCallbackData(associatedData, nonce, ciphertext) {
     const key = Buffer.from(WX_PAY_CONFIG.key, 'utf8'); // 32字节明文
     const nonceBuf = Buffer.from(nonce, 'utf8'); // 修正：nonce直接用utf8编码
     const data = Buffer.from(ciphertext, 'base64');
-    const authTag = data.slice(data.length - 16);
-    const encrypted = data.slice(0, data.length - 16);
+    const authTag = data.subarray(data.length - 16);
+    const encrypted = data.subarray(0, data.length - 16);
 
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonceBuf);
     if (associatedData) {
@@ -818,21 +818,24 @@ router.post('/notify', async (req, res) => {
                 success_time, // 支付完成时间
                 amount // 订单金额
             } = callbackData;
-            // 开始事务
-            const connection = await db.getConnection();
-            await connection.beginTransaction();
-            try {
-                // 更新订单状态前先判断是否已退款
-                const [orders] = await connection.query(
-                    'SELECT trade_state FROM orders WHERE out_trade_no = ?',
-                    [out_trade_no]
-                );
-                if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
-                    console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
-                    await connection.commit();
-                    return res.json({ code: 'SUCCESS', message: '订单已退款，不再覆盖' });
-                }
-                // 只有不是REFUND才更新为SUCCESS
+                         // 开始事务
+             const connection = await db.getConnection();
+             await connection.beginTransaction();
+             try {
+                 // 更新订单状态前先判断是否已退款，同时获取用户ID
+                 const [orders] = await connection.query(
+                     'SELECT trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                     [out_trade_no]
+                 );
+                                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
+                     console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
+                     await connection.commit();
+                     return res.json({ code: 'SUCCESS', message: '订单已退款，不再覆盖' });
+                 }
+                 
+                 const userId = orders[0].user_id;
+                 
+                 // 只有不是REFUND才更新为SUCCESS
                 await connection.query(
                     `UPDATE orders SET 
               transaction_id = ?,
@@ -875,18 +878,40 @@ router.post('/notify', async (req, res) => {
                     console.log(`批量扣减right库存: ${rightUpdates.length}条记录`);
                 }
                 
-                // 批量更新artworks库存
-                if (artworkUpdates.length > 0) {
-                    for (const [quantity, artworkId] of artworkUpdates) {
-                        await connection.query(
-                            'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
-                            [quantity, artworkId]
-                        );
-                    }
-                    console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
-                }
-                await connection.commit();
-                console.log('支付回调处理完成，库存已更新');
+                                 // 批量更新artworks库存
+                 if (artworkUpdates.length > 0) {
+                     for (const [quantity, artworkId] of artworkUpdates) {
+                         await connection.query(
+                             'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
+                             [quantity, artworkId]
+                         );
+                     }
+                     console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
+                 }
+                 
+                 // 处理数字身份购买记录
+                 const digitalUpdates = [];
+                 for (const item of orderItems) {
+                     if (item.type === 'digital') {
+                         digitalUpdates.push([item.order_id, item.digital_artwork_id, item.quantity, item.price]);
+                     }
+                 }
+                 
+                 if (digitalUpdates.length > 0) {
+                     for (const [orderId, digitalArtworkId, quantity, price] of digitalUpdates) {
+                         // 计算抵扣金额（这里可以根据业务逻辑调整）
+                         const discountAmount = 0; // 数字身份购买暂时不设置抵扣
+                         
+                         await connection.query(
+                             'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date) VALUES (?, ?, ?, NOW())',
+                             [userId, digitalArtworkId, discountAmount]
+                         );
+                     }
+                     console.log(`记录数字身份购买: ${digitalUpdates.length}条记录`);
+                 }
+                 
+                 await connection.commit();
+                 console.log('支付回调处理完成，库存已更新，数字身份购买已记录');
                 
                 // 清理相关缓存
                 await clearPhysicalCategoriesCache();
@@ -1453,18 +1478,35 @@ router.post('/refund/notify', async (req, res) => {
                     }
                 }
                 
-                // 批量更新artworks库存
-                if (artworkUpdates.length > 0) {
-                    for (const [quantity, artworkId] of artworkUpdates) {
-                        await connection.query(
-                            'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
-                            [quantity, artworkId]
-                        );
-                    }
-                }
-                
-                await connection.commit();
-                console.log('【退款回调】库存回补完成');
+                                 // 批量更新artworks库存
+                 if (artworkUpdates.length > 0) {
+                     for (const [quantity, artworkId] of artworkUpdates) {
+                         await connection.query(
+                             'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
+                             [quantity, artworkId]
+                         );
+                     }
+                 }
+                 
+                 // 处理数字身份购买记录回滚
+                 const digitalItems = [];
+                 for (const item of orderItems) {
+                     if (item.type === 'digital') {
+                         digitalItems.push(item.digital_artwork_id);
+                     }
+                 }
+                 
+                 if (digitalItems.length > 0) {
+                     // 删除相关的数字身份购买记录
+                     await connection.query(
+                         'DELETE FROM digital_identity_purchases WHERE digital_artwork_id IN (?)',
+                         [digitalItems]
+                     );
+                     console.log('【退款回调】删除数字身份购买记录:', digitalItems.length, '条');
+                 }
+                 
+                 await connection.commit();
+                 console.log('【退款回调】库存回补完成，数字身份购买记录已删除');
                 
                 // 清理相关缓存
                 await clearPhysicalCategoriesCache();
@@ -1980,75 +2022,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
     }
 });
 
-// 记录数字身份购买
-router.post('/digital-identity/purchase', async (req, res) => {
-    try {
-        const { user_id, digital_artwork_id, discount_amount } = req.body;
-
-        // 输入验证
-        if (!user_id || isNaN(parseInt(user_id)) || parseInt(user_id) <= 0) {
-            return res.status(400).json({ error: '缺少有效的用户ID' });
-        }
-        
-        if (!digital_artwork_id || isNaN(parseInt(digital_artwork_id)) || parseInt(digital_artwork_id) <= 0) {
-            return res.status(400).json({ error: '缺少有效的数字艺术品ID' });
-        }
-        
-        if (!discount_amount || isNaN(parseFloat(discount_amount)) || parseFloat(discount_amount) < 0) {
-            return res.status(400).json({ error: '缺少有效的抵扣金额' });
-        }
-        
-        // 清理输入
-        const cleanUserId = parseInt(user_id);
-        const cleanDigitalArtworkId = parseInt(digital_artwork_id);
-        const cleanDiscountAmount = parseFloat(discount_amount);
-
-        // 开始事务
-        const connection = await db.getConnection();
-        await connection.beginTransaction();
-
-        try {
-            // 检查用户是否存在
-            const [users] = await connection.query(
-                'SELECT id FROM wx_users WHERE id = ?',
-                [cleanUserId]
-            );
-
-            if (!users || users.length === 0) {
-                await connection.rollback();
-                return res.status(404).json({ error: '用户不存在' });
-            }
-
-            // 检查数字艺术品是否存在
-            const [artworks] = await connection.query(
-                'SELECT id FROM digital_artworks WHERE id = ?',
-                [cleanDigitalArtworkId]
-            );
-
-            if (!artworks || artworks.length === 0) {
-                await connection.rollback();
-                return res.status(404).json({ error: '数字艺术品不存在' });
-            }
-
-            // 记录购买
-            await connection.query(
-                'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount) VALUES (?, ?, ?)',
-                [cleanUserId, cleanDigitalArtworkId, cleanDiscountAmount]
-            );
-
-            await connection.commit();
-            res.json({ message: '购买记录创建成功' });
-        } catch (error) {
-            await connection.rollback();
-            throw error;
-        } finally {
-            connection.release();
-        }
-    } catch (error) {
-        console.error('记录数字身份购买失败:', error);
-        res.status(500).json({ error: '记录数字身份购买失败' });
-    }
-});
+// 数字身份购买记录在支付成功回调中处理，这里移除单独的接口
 
 // 获取用户的数字身份购买记录
 router.get('/digital-identity/purchases/:user_id', async (req, res) => {
