@@ -67,8 +67,8 @@ app.use(helmet({
 
 // 速率限制配置
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15分钟
-  max: 1000, // 限制每个IP 15分钟内最多1000个请求
+  windowMs: 1 * 60 * 1000, // 1分钟
+  max: 10000, // 限制每个IP 1分钟内最多10000个请求
   message: {
     error: '请求过于频繁，请稍后再试'
   },
