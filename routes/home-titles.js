@@ -23,13 +23,13 @@ router.get('/', async (req, res) => {
     let titleData;
     if (titles.length > 0) {
       titleData = {
-        main_title: titles[0].main_title || '可信数字生态',
+        main_title: titles[0].main_title || '可信数字版权生态',
         sub_title: titles[0].sub_title || '数字艺术事业中心'
       };
     } else {
       // 如果没有配置，使用默认值
       titleData = {
-        main_title: '可信数字生态',
+        main_title: '可信数字版权生态',
         sub_title: '数字艺术事业中心'
       };
     }
@@ -47,7 +47,7 @@ router.get('/', async (req, res) => {
     console.error('获取首页标题失败:', error);
     // 出错时返回默认值
     res.json({
-      main_title: '可信数字生态',
+      main_title: '可信数字版权生态',
       sub_title: '数字艺术事业中心'
     });
   }
