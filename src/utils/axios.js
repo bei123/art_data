@@ -2,6 +2,7 @@ import axios from 'axios';
 import { API_BASE_URL, CONFIG } from '../config';
 import { ElMessage } from 'element-plus';
 import router from '../router';
+import { checkAndHandleTokenExpiry, clearUserDataAndRedirect } from './tokenManager';
 
 // 创建axios实例
 const instance = axios.create({
@@ -16,6 +17,11 @@ const instance = axios.create({
 // 请求拦截器
 instance.interceptors.request.use(
   config => {
+    // 在发送请求前检查token是否过期
+    if (checkAndHandleTokenExpiry()) {
+      return Promise.reject(new Error('Token expired'))
+    }
+
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -78,10 +84,8 @@ instance.interceptors.response.use(
     if (error.response) {
       const { status, data } = error.response;
       if (status === 401 || status === 403) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        router.push('/login');
-        ElMessage.error('登录已过期或无权限，请重新登录');
+        // 使用新的token管理工具
+        clearUserDataAndRedirect();
       } else {
         ElMessage.error(data?.error || '操作失败');
       }

@@ -7,6 +7,9 @@ export const useUserStore = defineStore('user', {
   actions: {
     setUserInfo(info) {
       this.userInfo = info
+    },
+    clearUserInfo() {
+      this.userInfo = {}
     }
   }
 }) 

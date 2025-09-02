@@ -11,6 +11,17 @@ export const CONFIG = {
   allowedFileTypes: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
   // 请求超时时间（毫秒）
   requestTimeout: 30000,
+  // Token相关配置
+  token: {
+    // token过期时间（小时）
+    expiryHours: 24,
+    // 过期前提醒时间（分钟）
+    warningMinutes: 5,
+    // 检查间隔（秒）
+    checkIntervalSeconds: 60,
+    // 警告检查间隔（秒）
+    warningCheckIntervalSeconds: 30
+  },
   // API相关配置
   api: {
     baseURL: API_BASE_URL,

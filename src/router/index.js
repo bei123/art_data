@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Login from '../views/Login.vue'
+import { checkAndHandleTokenExpiry } from '../utils/tokenManager'
 
 const routes = [
   {
@@ -124,6 +125,12 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
+  // 检查token是否过期
+  if (checkAndHandleTokenExpiry()) {
+    next('/login')
+    return
+  }
+  
   const token = localStorage.getItem('token')
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
 

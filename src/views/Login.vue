@@ -50,6 +50,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import { useUserStore } from '@/stores/user'
+import { CONFIG } from '@/config'
 
 const router = useRouter()
 const formRef = ref(null)
@@ -105,8 +106,8 @@ const handleSubmit = async () => {
     if (isLogin.value) {
       // 保存token和用户信息
       localStorage.setItem('token', response.data.token)
-      // 设置 token 过期时间（24小时）
-      const expiryTime = Date.now() + (24 * 60 * 60 * 1000)
+      // 使用配置文件中的token过期时间设置
+      const expiryTime = Date.now() + (CONFIG.token.expiryHours * 60 * 60 * 1000)
       localStorage.setItem('tokenExpiry', expiryTime.toString())
       localStorage.setItem('user', JSON.stringify(response.data.user))
       
