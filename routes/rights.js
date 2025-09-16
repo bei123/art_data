@@ -34,24 +34,44 @@ async function clearPhysicalCategoriesCache() {
     }
 }
 
-// 确保折扣相关表结构存在
-async function ensureDiscountSchema(connectionOrDb) {
-    // rights 表增加 discount_price 字段
-    await (connectionOrDb.query || connectionOrDb.execute).call(connectionOrDb, `
-        ALTER TABLE rights
-        ADD COLUMN IF NOT EXISTS discount_price DECIMAL(10,2) NULL DEFAULT NULL
-    `);
-    // 建立可享受折扣的数字资产映射表
-    await (connectionOrDb.query || connectionOrDb.execute).call(connectionOrDb, `
-        CREATE TABLE IF NOT EXISTS right_discount_eligibles (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            right_id INT NOT NULL,
-            digital_artwork_id INT NOT NULL,
-            UNIQUE KEY uniq_right_digital (right_id, digital_artwork_id),
-            INDEX idx_right_id (right_id),
-            CONSTRAINT fk_rde_right FOREIGN KEY (right_id) REFERENCES rights(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
+// 确保折扣相关表结构存在（兼容不支持 IF NOT EXISTS 的 MySQL 版本）
+async function ensureDiscountSchema(connection) {
+    // 1) 检查并添加 rights.discount_price 字段
+    try {
+        const [cols] = await connection.query(
+            `SELECT COUNT(*) AS cnt
+             FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'rights'
+               AND COLUMN_NAME = 'discount_price'`
+        );
+        const exists = cols && cols[0] && cols[0].cnt > 0;
+        if (!exists) {
+            await connection.query(
+                'ALTER TABLE rights ADD COLUMN discount_price DECIMAL(10,2) NULL DEFAULT NULL'
+            );
+        }
+    } catch (e) {
+        console.error('检查/新增 rights.discount_price 字段失败:', e);
+        throw e;
+    }
+
+    // 2) 创建映射表（若不存在）
+    try {
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS right_discount_eligibles (
+                id INT PRIMARY KEY AUTO_INCREMENT,
+                right_id INT NOT NULL,
+                digital_artwork_id INT NOT NULL,
+                UNIQUE KEY uniq_right_digital (right_id, digital_artwork_id),
+                INDEX idx_right_id (right_id),
+                CONSTRAINT fk_rde_right FOREIGN KEY (right_id) REFERENCES rights(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        `);
+    } catch (e) {
+        console.error('创建 right_discount_eligibles 表失败:', e);
+        throw e;
+    }
 }
 
 // 获取版权实物列表（需要认证）

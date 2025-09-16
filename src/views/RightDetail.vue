@@ -386,8 +386,7 @@ const handleEditorCreated = (editor) => {
 const fetchRightDetail = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`/api/rights/${route.params.id}`)
-    const data = response.data
+    const data = await axios.get(`/rights/${route.params.id}`)
     form.value = {
       ...data,
       images: data.images || [],
@@ -408,8 +407,8 @@ const fetchRightDetail = async () => {
 const fetchDigitalOptions = async () => {
   try {
     // 管理端列表（包含隐藏作品，方便配置）
-    const { data } = await axios.get('/api/digital-artworks/admin', { params: { page: 1, pageSize: 200 } })
-    digitalOptions.value = Array.isArray(data) ? data : []
+    const arr = await axios.get('/digital-artworks/admin', { params: { page: 1, pageSize: 200 } })
+    digitalOptions.value = Array.isArray(arr) ? arr : []
   } catch (e) {
     digitalOptions.value = []
   }

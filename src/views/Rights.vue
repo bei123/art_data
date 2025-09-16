@@ -82,8 +82,35 @@
         <el-form-item label="价格">
           <el-input-number v-model="form.price" :precision="2" :step="0.1" :min="0" />
         </el-form-item>
+        <el-form-item label="优惠价">
+          <el-input-number v-model="form.discount_price" :precision="2" :step="0.1" :min="0" />
+        </el-form-item>
         <el-form-item label="原价">
           <el-input-number v-model="form.originalPrice" :precision="2" :step="0.1" :min="0" />
+        </el-form-item>
+        <el-form-item label="可享优惠的数字资产">
+          <el-select
+            v-model="form.eligible_digital_artwork_ids"
+            multiple
+            clearable
+            filterable
+            placeholder="选择拥有即可享受优惠的数字艺术品"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in digitalOptions"
+              :key="item.id"
+              :label="item.title"
+              :value="item.id"
+            >
+              <div class="digital-option">
+                <img v-if="item.image_url" :src="getImageUrl(item.image_url)" class="digital-thumb" />
+                <span class="digital-title">{{ item.title }}（ID: {{ item.id }}）</span>
+                <span class="digital-price">¥{{ item.price || 0 }}</span>
+              </div>
+            </el-option>
+          </el-select>
+          <div class="hint">不选择则不限制，设置后仅拥有所选数字资产的用户可享受优惠价。</div>
         </el-form-item>
         <el-form-item label="可抵扣金额">
           <el-input-number v-model="form.discountAmount" :precision="2" :step="0.1" :min="0" />
@@ -269,12 +296,14 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const categories = ref([])
 const artists = ref([])
+const digitalOptions = ref([])
 const fileList = ref([])
 
 const form = ref({
   title: '',
   status: '',
   price: 0,
+  discount_price: 0,
   originalPrice: 0,
   discountAmount: 0,
   period: '',
@@ -283,7 +312,8 @@ const form = ref({
   description: '',
   images: [],
   category_id: null,
-  artist_id: null
+  artist_id: null,
+  eligible_digital_artwork_ids: []
 })
 
 const editorRef = ref(null)
@@ -389,6 +419,15 @@ const fetchRights = async () => {
   }
 }
 
+const fetchDigitalOptions = async () => {
+  try {
+    const arr = await axios.get('/digital-artworks/admin', { params: { page: 1, pageSize: 200 } })
+    digitalOptions.value = Array.isArray(arr) ? arr : []
+  } catch (e) {
+    digitalOptions.value = []
+  }
+}
+
 const fetchCategories = async () => {
   try {
     const response = await axios.get('/physical-categories')
@@ -452,6 +491,7 @@ const handleAdd = () => {
     title: '',
     status: '',
     price: 0,
+    discount_price: 0,
     originalPrice: 0,
     discountAmount: 0,
     period: '',
@@ -461,10 +501,12 @@ const handleAdd = () => {
     images: [],
     category_id: null,
     artist_id: null,
-    rich_text: ''
+    rich_text: '',
+    eligible_digital_artwork_ids: []
   }
   dialogVisible.value = true
   richTextHtml.value = ''
+  fetchDigitalOptions()
 }
 
 const handleEdit = (row) => {
@@ -474,6 +516,7 @@ const handleEdit = (row) => {
     title: row.title,
     status: row.status,
     price: parseFloat(row.price),
+    discount_price: row.discount_price ? parseFloat(row.discount_price) : 0,
     originalPrice: parseFloat(row.original_price),
     discountAmount: parseFloat(row.discount_amount || 0),
     period: row.period,
@@ -483,10 +526,16 @@ const handleEdit = (row) => {
     images: row.images || [],
     category_id: row.category_id,
     artist_id: row.artist_id,
-    rich_text: row.rich_text || ''
+    rich_text: row.rich_text || '',
+    eligible_digital_artwork_ids: []
   }
   dialogVisible.value = true
   richTextHtml.value = row.rich_text || ''
+  fetchDigitalOptions()
+  // 取详情以加载可选资格ID
+  axios.get(`/rights/${row.id}`).then(data => {
+    form.value.eligible_digital_artwork_ids = Array.isArray(data.eligible_digital_artwork_ids) ? data.eligible_digital_artwork_ids : []
+  }).catch(() => {})
 }
 
 const handleDelete = (row) => {
@@ -745,7 +794,9 @@ const handleSubmit = async () => {
       }),
       category_id: form.value.category_id,
       discount_amount: form.value.discountAmount,
-      rich_text: richTextHtml.value
+      rich_text: richTextHtml.value,
+      eligible_digital_artwork_ids: Array.isArray(form.value.eligible_digital_artwork_ids) ? form.value.eligible_digital_artwork_ids : [],
+      discount_price: form.value.discount_price
     }
 
     if (isEdit.value) {
