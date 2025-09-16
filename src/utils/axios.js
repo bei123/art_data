@@ -17,13 +17,16 @@ const instance = axios.create({
 // 请求拦截器
 instance.interceptors.request.use(
   config => {
-    // 在发送请求前检查token是否过期
-    if (checkAndHandleTokenExpiry()) {
-      return Promise.reject(new Error('Token expired'))
-    }
+    const url = config?.url || ''
+    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/register')
 
     const token = localStorage.getItem('token');
-    if (token) {
+
+    // 仅当存在token且不是认证接口时，才检查过期
+    if (!isAuthEndpoint && token) {
+      if (checkAndHandleTokenExpiry()) {
+        return Promise.reject(new Error('Token expired'))
+      }
       config.headers.Authorization = `Bearer ${token}`;
     }
 

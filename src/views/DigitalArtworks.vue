@@ -26,9 +26,23 @@
       <el-table-column prop="batch_quantity" label="本批发行数量" />
       <el-table-column prop="price" label="价格" />
       <el-table-column prop="created_at" label="创建时间" />
-      <el-table-column label="操作" width="200">
+      <el-table-column label="状态" width="80">
+        <template #default="{ row }">
+          <el-tag :type="row.is_hidden ? 'danger' : 'success'">
+            {{ row.is_hidden ? '隐藏' : '显示' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button 
+            :type="row.is_hidden ? 'success' : 'warning'" 
+            size="small" 
+            @click="handleToggleVisibility(row)"
+          >
+            {{ row.is_hidden ? '显示' : '隐藏' }}
+          </el-button>
           <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -277,12 +291,13 @@ const form = ref({
 
 const fetchArtworks = async () => {
   try {
-    const data = await axios.get('/digital-artworks')
+    const data = await axios.get('/digital-artworks/admin')
     console.log('API返回的原始数据：', data)
     if (Array.isArray(data)) {
       artworks.value = data.map(artwork => ({
         ...artwork,
-        image_url: getImageUrl(artwork.image_url)
+        image_url: getImageUrl(artwork.image_url),
+        is_hidden: artwork.is_hidden || false
       }))
       console.log('设置后的数字艺术品数据：', artworks.value)
     } else {
@@ -377,6 +392,30 @@ const handleEdit = async (row) => {
     console.error('获取详细信息失败:', error)
     ElMessage.error('获取详细信息失败，无法编辑')
   }
+}
+
+const handleToggleVisibility = (row) => {
+  const action = row.is_hidden ? '显示' : '隐藏'
+  ElMessageBox.confirm(`确定要${action}这个作品吗？`, '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(async () => {
+    try {
+      await axios.patch(`/digital-artworks/${row.id}/hide`, {
+        is_hidden: !row.is_hidden
+      })
+      ElMessage.success(`${action}成功`)
+      fetchArtworks()
+    } catch (error) {
+      console.error(`${action}失败:`, error)
+      if (error.response) {
+        ElMessage.error(error.response.data.error || `${action}失败`)
+      } else {
+        ElMessage.error(`${action}失败`)
+      }
+    }
+  })
 }
 
 const handleDelete = (row) => {

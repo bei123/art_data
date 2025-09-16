@@ -46,6 +46,67 @@ function validateImageUrl(url) {
   }
 }
 
+// 获取数字艺术品列表（管理员接口，包含隐藏作品）
+router.get('/admin', authenticateToken, async (req, res) => {
+  try {
+    const { artist_id, page = 1, pageSize = 20 } = req.query;
+    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
+    const offset = (pageNum - 1) * sizeNum;
+    
+    let query = `
+      SELECT 
+        da.id, da.title, da.image_url, da.description, da.price, da.created_at, da.is_hidden,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
+      FROM digital_artworks da
+      LEFT JOIN artists a ON da.artist_id = a.id
+    `;
+    
+    const queryParams = [];
+    
+    // 如果提供了 artist_id 参数，添加筛选条件
+    if (artist_id) {
+      query += ` WHERE da.artist_id = ?`;
+      queryParams.push(artist_id);
+    }
+    
+    query += ` ORDER BY da.created_at DESC LIMIT ? OFFSET ?`;
+    queryParams.push(sizeNum, offset);
+    
+    const [rows] = await db.query(query, queryParams);
+    
+    if (!rows || !Array.isArray(rows)) {
+      return res.json([]);
+    }
+    
+    const artworksWithProcessedImages = rows.map(artwork => {
+      const processedArtwork = processObjectImages(artwork, ['image_url', 'avatar']);
+      return {
+        ...processedArtwork,
+        artist: {
+          id: artwork.artist_id,
+          name: artwork.artist_name,
+          avatar: processedArtwork.artist_avatar || ''
+        }
+      };
+    });
+    
+    res.json(artworksWithProcessedImages);
+  } catch (error) {
+    console.error('获取数字艺术品列表失败:', error);
+    
+    // 检查是否是连接池问题
+    if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
+      return res.status(503).json({ 
+        error: '数据库连接暂时不可用，请稍后重试',
+        code: 'DB_POOL_CLOSED'
+      });
+    }
+    
+    res.status(500).json({ error: '获取数字艺术品列表失败' });
+  }
+});
+
 // 获取数字艺术品列表（公开接口）
 router.get('/', async (req, res) => {
   try {
@@ -60,13 +121,14 @@ router.get('/', async (req, res) => {
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM digital_artworks da
       LEFT JOIN artists a ON da.artist_id = a.id
+      WHERE da.is_hidden = 0
     `;
     
     const queryParams = [];
     
     // 如果提供了 artist_id 参数，添加筛选条件
     if (artist_id) {
-      query += ` WHERE da.artist_id = ?`;
+      query += ` AND da.artist_id = ?`;
       queryParams.push(artist_id);
     }
     
@@ -196,12 +258,12 @@ router.get('/public', async (req, res) => {
       }
     }
     
-    let query = 'SELECT id, title, image_url, description, price, created_at FROM digital_artworks';
+    let query = 'SELECT id, title, image_url, description, price, created_at FROM digital_artworks WHERE is_hidden = 0';
     const queryParams = [];
     
     // 如果提供了 artist_id 参数，添加筛选条件
     if (artist_id) {
-      query += ' WHERE artist_id = ?';
+      query += ' AND artist_id = ?';
       queryParams.push(parseInt(artist_id));
     }
     
@@ -377,6 +439,49 @@ router.put('/:id', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating digital artwork:', error);
+    res.status(500).json({ error: '更新失败' });
+  }
+});
+
+// 隐藏/显示数字艺术品（需要认证）
+router.patch('/:id/hide', authenticateToken, async (req, res) => {
+  try {
+    const { is_hidden } = req.body;
+    
+    // 验证参数
+    if (typeof is_hidden !== 'boolean') {
+      return res.status(400).json({ error: 'is_hidden 参数必须是布尔值' });
+    }
+
+    // 验证ID参数
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: '无效的作品ID' });
+    }
+
+    // 先查询artist_id用于清理缓存
+    const [artworkRows] = await db.query('SELECT artist_id FROM digital_artworks WHERE id = ?', [id]);
+    if (artworkRows.length === 0) {
+      return res.status(404).json({ error: '作品不存在' });
+    }
+    const artistId = artworkRows[0].artist_id;
+
+    // 更新隐藏状态
+    await db.query('UPDATE digital_artworks SET is_hidden = ? WHERE id = ?', [is_hidden ? 1 : 0, id]);
+
+    // 清理缓存
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+    if (artistId) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artistId);
+    }
+    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
+
+    res.json({ 
+      message: is_hidden ? '作品已隐藏' : '作品已显示',
+      is_hidden: is_hidden
+    });
+  } catch (error) {
+    console.error('Error updating artwork visibility:', error);
     res.status(500).json({ error: '更新失败' });
   }
 });

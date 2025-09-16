@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Login from '../views/Login.vue'
-import { checkAndHandleTokenExpiry } from '../utils/tokenManager'
 
 const routes = [
   {
@@ -96,7 +95,7 @@ const routes = [
         meta: {
           title: '退款审批',
           requiresAuth: true,
-          roles: ['admin'] // 只有管理员可以访问
+          roles: ['admin']
         }
       },
       {
@@ -125,14 +124,26 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
-  // 检查token是否过期
-  if (checkAndHandleTokenExpiry()) {
-    next('/login')
-    return
-  }
-  
   const token = localStorage.getItem('token')
+  const tokenExpiry = localStorage.getItem('tokenExpiry')
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
+
+  // 简单的本地过期检查，避免引入循环依赖
+  const isExpired = () => {
+    if (!token || !tokenExpiry) return true
+    const expiryTime = parseInt(tokenExpiry)
+    return Number.isFinite(expiryTime) && Date.now() >= expiryTime
+  }
+
+  if (isExpired()) {
+    localStorage.removeItem('token')
+    localStorage.removeItem('tokenExpiry')
+    localStorage.removeItem('user')
+    if (to.path !== '/login') {
+      next('/login')
+      return
+    }
+  }
 
   if (requiresAuth && !token) {
     next('/login')
