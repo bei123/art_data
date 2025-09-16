@@ -35,8 +35,42 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
+            <el-form-item label="优惠价">
+              <el-input-number v-model="form.discount_price" :precision="2" :step="0.1" :min="0" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
             <el-form-item label="原价">
               <el-input-number v-model="form.originalPrice" :precision="2" :step="0.1" :min="0" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="可享优惠的数字资产">
+              <el-select
+                v-model="form.eligible_digital_artwork_ids"
+                multiple
+                clearable
+                filterable
+                placeholder="选择拥有即可享受优惠的数字艺术品"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in digitalOptions"
+                  :key="item.id"
+                  :label="item.title"
+                  :value="item.id"
+                >
+                  <div class="digital-option">
+                    <img v-if="item.image_url" :src="getImageUrl(item.image_url)" class="digital-thumb" />
+                    <span class="digital-title">{{ item.title }}（ID: {{ item.id }}）</span>
+                    <span class="digital-price">¥{{ item.price || 0 }}</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="hint">不选择则不限制，设置后仅拥有所选数字资产的用户可享受优惠价。</div>
             </el-form-item>
           </el-col>
         </el-row>
@@ -254,10 +288,12 @@ import { onBeforeUnmount } from 'vue'
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
+const digitalOptions = ref([])
 
 const form = ref({
   title: '',
   price: 0,
+  discount_price: 0,
   originalPrice: 0,
   description: '',
   status: '',
@@ -267,7 +303,8 @@ const form = ref({
   images: [],
   details: [],
   rules: [],
-  rich_text: ''
+  rich_text: '',
+  eligible_digital_artwork_ids: []
 })
 
 const fileList = ref([])
@@ -356,7 +393,8 @@ const fetchRightDetail = async () => {
       images: data.images || [],
       details: data.details || [],
       rules: data.rules || [],
-      rich_text: data.rich_text || ''
+      rich_text: data.rich_text || '',
+      eligible_digital_artwork_ids: data.eligible_digital_artwork_ids || []
     }
     // 确保富文本内容同步到编辑器
     richTextHtml.value = data.rich_text || ''
@@ -364,6 +402,16 @@ const fetchRightDetail = async () => {
     ElMessage.error('获取版权实物详情失败')
   } finally {
     loading.value = false
+  }
+}
+
+const fetchDigitalOptions = async () => {
+  try {
+    // 管理端列表（包含隐藏作品，方便配置）
+    const { data } = await axios.get('/api/digital-artworks/admin', { params: { page: 1, pageSize: 200 } })
+    digitalOptions.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    digitalOptions.value = []
   }
 }
 
@@ -611,7 +659,8 @@ const saveEdit = async () => {
           return image;
         }
         return image.url || image;
-      })
+      }),
+      eligible_digital_artwork_ids: Array.isArray(form.value.eligible_digital_artwork_ids) ? form.value.eligible_digital_artwork_ids : []
     };
     await axios.put(`/api/rights/${route.params.id}`, submitData);
     ElMessage.success('更新成功');
@@ -633,6 +682,7 @@ const goBack = () => {
 
 onMounted(() => {
   fetchRightDetail()
+  fetchDigitalOptions()
 })
 
 onBeforeUnmount(() => {

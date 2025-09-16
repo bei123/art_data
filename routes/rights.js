@@ -34,6 +34,26 @@ async function clearPhysicalCategoriesCache() {
     }
 }
 
+// 确保折扣相关表结构存在
+async function ensureDiscountSchema(connectionOrDb) {
+    // rights 表增加 discount_price 字段
+    await (connectionOrDb.query || connectionOrDb.execute).call(connectionOrDb, `
+        ALTER TABLE rights
+        ADD COLUMN IF NOT EXISTS discount_price DECIMAL(10,2) NULL DEFAULT NULL
+    `);
+    // 建立可享受折扣的数字资产映射表
+    await (connectionOrDb.query || connectionOrDb.execute).call(connectionOrDb, `
+        CREATE TABLE IF NOT EXISTS right_discount_eligibles (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            right_id INT NOT NULL,
+            digital_artwork_id INT NOT NULL,
+            UNIQUE KEY uniq_right_digital (right_id, digital_artwork_id),
+            INDEX idx_right_id (right_id),
+            CONSTRAINT fk_rde_right FOREIGN KEY (right_id) REFERENCES rights(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+}
+
 // 获取版权实物列表（需要认证）
 router.get('/', async (req, res) => {
     try {
@@ -88,6 +108,7 @@ router.get('/', async (req, res) => {
                 r.title,
                 r.status,
                 r.price,
+                r.discount_price,
                 r.original_price,
                 r.period,
                 r.total_count,
@@ -176,7 +197,7 @@ router.get('/', async (req, res) => {
 // 新增版权实物（需要认证）
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text } = req.body;
+        const { title, status, price, discount_price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text, eligible_digital_artwork_ids } = req.body;
         
         // 输入验证
         if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -197,6 +218,9 @@ router.post('/', authenticateToken, async (req, res) => {
         
         if (originalPrice && (isNaN(parseFloat(originalPrice)) || parseFloat(originalPrice) < 0)) {
             return res.status(400).json({ error: '原价必须是有效的正数' });
+        }
+        if (discount_price && (isNaN(parseFloat(discount_price)) || parseFloat(discount_price) < 0)) {
+            return res.status(400).json({ error: '优惠价必须是有效的正数' });
         }
         
         if (totalCount && (isNaN(parseInt(totalCount)) || parseInt(totalCount) < 0)) {
@@ -220,10 +244,12 @@ router.post('/', authenticateToken, async (req, res) => {
         await connection.beginTransaction();
 
         try {
+            // 确保表结构
+            await ensureDiscountSchema(connection);
             // 插入版权实物基本信息
             const [insertResult] = await connection.query(
-                'INSERT INTO rights (title, status, price, original_price, period, total_count, remaining_count, description, category_id, artist_id, rich_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [title.trim(), status, parseFloat(price), originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, artist_id || null, rich_text]
+                'INSERT INTO rights (title, status, price, discount_price, original_price, period, total_count, remaining_count, description, category_id, artist_id, rich_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [title.trim(), status, parseFloat(price), discount_price ? parseFloat(discount_price) : null, originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, artist_id || null, rich_text]
             );
 
             const rightId = insertResult.insertId;
@@ -237,6 +263,19 @@ router.post('/', authenticateToken, async (req, res) => {
                 );
             }
 
+            // 保存可享受折扣的数字资产ID
+            if (eligible_digital_artwork_ids && Array.isArray(eligible_digital_artwork_ids) && eligible_digital_artwork_ids.length > 0) {
+                const values = eligible_digital_artwork_ids
+                    .filter(id => !isNaN(parseInt(id)))
+                    .map(id => [rightId, parseInt(id)]);
+                if (values.length > 0) {
+                    await connection.query(
+                        'INSERT IGNORE INTO right_discount_eligibles (right_id, digital_artwork_id) VALUES ?',
+                        [values]
+                    );
+                }
+            }
+
             await connection.commit();
             
             // 查询新创建的版权实物信息，只查询必要字段
@@ -246,6 +285,7 @@ router.post('/', authenticateToken, async (req, res) => {
                     r.title,
                     r.status,
                     r.price,
+                    r.discount_price,
                     r.original_price,
                     r.period,
                     r.total_count,
@@ -276,9 +316,16 @@ router.post('/', authenticateToken, async (req, res) => {
                 [rightId]
             );
 
+            // 读取折扣资格列表
+            const [eligibleList] = await db.query(
+                'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
+                [rightId]
+            );
+
             const result = {
                 ...newRight[0],
                 images: rightImages.map(img => img.image_url || ''),
+                eligible_digital_artwork_ids: (eligibleList || []).map(x => x.digital_artwork_id),
                 artist: newRight[0].artist_id ? {
                     id: newRight[0].artist_id,
                     name: newRight[0].artist_name,
@@ -306,7 +353,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // 编辑版权实物（需要认证）
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { title, status, price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text } = req.body;
+        const { title, status, price, discount_price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text, eligible_digital_artwork_ids } = req.body;
         
         // 验证ID参数
         const id = parseInt(req.params.id);
@@ -329,6 +376,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
         
         if (!price || isNaN(parseFloat(price)) || parseFloat(price) < 0) {
             return res.status(400).json({ error: '价格必须是有效的正数' });
+        }
+        if (discount_price && (isNaN(parseFloat(discount_price)) || parseFloat(discount_price) < 0)) {
+            return res.status(400).json({ error: '优惠价必须是有效的正数' });
         }
         
         if (originalPrice && (isNaN(parseFloat(originalPrice)) || parseFloat(originalPrice) < 0)) {
@@ -356,6 +406,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         await connection.beginTransaction();
 
         try {
+            await ensureDiscountSchema(connection);
             // 检查版权实物是否存在
             const [existing] = await connection.query(
                 'SELECT id FROM rights WHERE id = ?',
@@ -369,8 +420,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
             
             // 更新版权实物基本信息
             await connection.query(
-                'UPDATE rights SET title = ?, status = ?, price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, artist_id = ?, rich_text = ?, updated_at = NOW() WHERE id = ?',
-                [title.trim(), status, parseFloat(price), originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, artist_id || null, rich_text, id]
+                'UPDATE rights SET title = ?, status = ?, price = ?, discount_price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, artist_id = ?, rich_text = ?, updated_at = NOW() WHERE id = ?',
+                [title.trim(), status, parseFloat(price), discount_price ? parseFloat(discount_price) : null, originalPrice ? parseFloat(originalPrice) : null, period, totalCount ? parseInt(totalCount) : null, remainingCount ? parseInt(remainingCount) : null, description ? description.trim() : '', category_id, artist_id || null, rich_text, id]
             );
 
             // 删除旧图片
@@ -385,6 +436,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 );
             }
 
+            // 更新折扣资格列表
+            await connection.query('DELETE FROM right_discount_eligibles WHERE right_id = ?', [id]);
+            if (eligible_digital_artwork_ids && Array.isArray(eligible_digital_artwork_ids) && eligible_digital_artwork_ids.length > 0) {
+                const values = eligible_digital_artwork_ids
+                    .filter(did => !isNaN(parseInt(did)))
+                    .map(did => [id, parseInt(did)]);
+                if (values.length > 0) {
+                    await connection.query(
+                        'INSERT IGNORE INTO right_discount_eligibles (right_id, digital_artwork_id) VALUES ?',
+                        [values]
+                    );
+                }
+            }
+
             await connection.commit();
             
             // 查询更新后的版权实物信息，只查询必要字段
@@ -394,6 +459,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
                     r.title,
                     r.status,
                     r.price,
+                    r.discount_price,
                     r.original_price,
                     r.period,
                     r.total_count,
@@ -424,9 +490,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 [id]
             );
 
+            const [eligibleList] = await db.query(
+                'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
+                [id]
+            );
+
             const result = {
                 ...updatedRight[0],
                 images: rightImages.map(img => img.image_url || ''),
+                eligible_digital_artwork_ids: (eligibleList || []).map(x => x.digital_artwork_id),
                 artist: updatedRight[0].artist_id ? {
                     id: updatedRight[0].artist_id,
                     name: updatedRight[0].artist_name,
@@ -537,6 +609,7 @@ router.get('/:id', async (req, res) => {
                 r.title,
                 r.status,
                 r.price,
+                r.discount_price,
                 r.original_price,
                 r.period,
                 r.total_count,
@@ -569,10 +642,17 @@ router.get('/:id', async (req, res) => {
             [right.id]
         );
 
+        // 读取折扣资格列表
+        const [eligibleList] = await db.query(
+            'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
+            [right.id]
+        );
+
         const result = {
             ...right,
             rich_text: right.rich_text,
             images: images.map(img => processObjectImages(img, ['image_url']).image_url),
+            eligible_digital_artwork_ids: (eligibleList || []).map(x => x.digital_artwork_id),
             category: {
                 id: right.category_id,
                 title: right.category_title

@@ -252,7 +252,7 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             // 批量查询rights
             if (rightIds.length > 0) {
                 const [rights] = await connection.query(
-                    'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id IN (?) AND status = "onsale"',
+                    'SELECT id, price, discount_price, remaining_count FROM rights WHERE id IN (?) AND status = "onsale"',
                     [rightIds]
                 );
                 rights.forEach(right => {
@@ -309,7 +309,31 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
                 // 验证价格
                 const itemPrice = parseFloat(item.price);
                 let dbPrice;
-                if (item.type === 'right' || item.type === 'digital') {
+                if (item.type === 'right') {
+                    // 判断是否享受优惠价
+                    let effectivePrice = parseFloat(goods.price);
+                    if (goods.discount_price && parseFloat(goods.discount_price) > 0) {
+                        // 查询权益的优惠资格所需数字资产列表
+                        const [eligible] = await connection.query(
+                            'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
+                            [item.right_id]
+                        );
+                        if (eligible && eligible.length > 0) {
+                            // 查询用户是否拥有其中任一数字资产
+                            const eligibleIds = eligible.map(e => e.digital_artwork_id);
+                            if (eligibleIds.length > 0) {
+                                const [owned] = await connection.query(
+                                    'SELECT 1 FROM digital_identity_purchases WHERE user_id = ? AND digital_artwork_id IN (?) LIMIT 1',
+                                    [userId, eligibleIds]
+                                );
+                                if (owned && owned.length > 0) {
+                                    effectivePrice = parseFloat(goods.discount_price);
+                                }
+                            }
+                        }
+                    }
+                    dbPrice = effectivePrice;
+                } else if (item.type === 'digital') {
                     dbPrice = parseFloat(goods.price);
                 } else if (item.type === 'artwork') {
                     dbPrice = (goods.discount_price && goods.discount_price > 0 && goods.discount_price < goods.original_price)
@@ -572,7 +596,7 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
             if (cleanType === 'right') {
                 itemId = parseInt(right_id);
                 const [rights] = await connection.query(
-                    'SELECT id, price, remaining_count, discount_amount FROM rights WHERE id = ? AND status = "onsale"',
+                    'SELECT id, price, discount_price, remaining_count FROM rights WHERE id = ? AND status = "onsale"',
                     [itemId]
                 );
                 if (!rights || rights.length === 0) {
@@ -583,7 +607,27 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
                     await connection.rollback();
                     return res.status(400).json({ error: `商品ID ${itemId} 库存不足` });
                 }
-                dbPrice = parseFloat(rights[0].price);
+                // 计算有效价格（若满足资格则使用优惠价）
+                let effectivePrice = parseFloat(rights[0].price);
+                if (rights[0].discount_price && parseFloat(rights[0].discount_price) > 0) {
+                    const [eligible] = await connection.query(
+                        'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
+                        [itemId]
+                    );
+                    if (eligible && eligible.length > 0) {
+                        const eligibleIds = eligible.map(e => e.digital_artwork_id);
+                        if (eligibleIds.length > 0) {
+                            const [owned] = await connection.query(
+                                'SELECT 1 FROM digital_identity_purchases WHERE user_id = ? AND digital_artwork_id IN (?) LIMIT 1',
+                                [userId, eligibleIds]
+                            );
+                            if (owned && owned.length > 0) {
+                                effectivePrice = parseFloat(rights[0].discount_price);
+                            }
+                        }
+                    }
+                }
+                dbPrice = effectivePrice;
                 if (Math.abs(cleanPrice - dbPrice) > 0.01) {
                     await connection.rollback();
                     return res.status(400).json({
