@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
   performanceMetrics.totalRequests++;
   
   try {
-    const { artist_id, page = 1, pageSize = 20 } = req.query;
+    const { artist_id, artwork_ids, page = 1, pageSize = 20 } = req.query;
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
     const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
     const offset = (pageNum - 1) * sizeNum;
@@ -34,10 +34,35 @@ router.get('/', async (req, res) => {
       }
     }
 
+    // 解析与校验 artwork_ids（可选，逗号分隔的ID列表）
+    let selectedArtworkIds = [];
+    if (artwork_ids) {
+      selectedArtworkIds = String(artwork_ids)
+        .split(',')
+        .map(id => parseInt(id.trim()))
+        .filter(id => !isNaN(id) && id > 0);
+      // 去重
+      selectedArtworkIds = Array.from(new Set(selectedArtworkIds));
+      if (selectedArtworkIds.length === 0) {
+        return res.status(400).json({ error: '无效的作品ID列表' });
+      }
+      // 限制数量，避免过长的 SQL 或缓存键
+      if (selectedArtworkIds.length > 200) {
+        return res.status(400).json({ error: '一次最多指定200个作品ID' });
+      }
+    }
+
     // 优化缓存键设计
-    const cacheKey = artist_id 
-      ? `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:${pageNum}:${sizeNum}`
-      : `${REDIS_ARTWORKS_LIST_KEY}:${pageNum}:${sizeNum}`;
+    // 根据 artist 和 指定的作品列表 生成缓存键
+    let cacheKey;
+    if (artist_id && selectedArtworkIds.length > 0) {
+      const idsKey = selectedArtworkIds.slice().sort((a,b) => a - b).join('-');
+      cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:${pageNum}:${sizeNum}`;
+    } else if (artist_id) {
+      cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:${pageNum}:${sizeNum}`;
+    } else {
+      cacheKey = `${REDIS_ARTWORKS_LIST_KEY}:${pageNum}:${sizeNum}`;
+    }
 
     // 先查redis缓存
     try {
@@ -60,11 +85,21 @@ router.get('/', async (req, res) => {
       FROM original_artworks oa
       LEFT JOIN artists a ON oa.artist_id = a.id
     `;
+    const whereClauses = [];
     const params = [];
 
     if (artist_id) {
-      sql += ' WHERE oa.artist_id = ?';
+      whereClauses.push('oa.artist_id = ?');
       params.push(parseInt(artist_id));
+    }
+    if (selectedArtworkIds.length > 0) {
+      // 仅返回指定的作品ID集合
+      whereClauses.push(`oa.id IN (${selectedArtworkIds.map(() => '?').join(',')})`);
+      params.push(...selectedArtworkIds);
+    }
+
+    if (whereClauses.length > 0) {
+      sql += ' WHERE ' + whereClauses.join(' AND ');
     }
 
     // 使用索引优化的排序
@@ -90,9 +125,15 @@ router.get('/', async (req, res) => {
 
     // 优化总数查询 - 使用缓存或估算
     let total;
-    const totalCacheKey = artist_id 
-      ? `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:total`
-      : `${REDIS_ARTWORKS_LIST_KEY}:total`;
+    let totalCacheKey;
+    if (artist_id && selectedArtworkIds.length > 0) {
+      const idsKey = selectedArtworkIds.slice().sort((a,b) => a - b).join('-');
+      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:total`;
+    } else if (artist_id) {
+      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:total`;
+    } else {
+      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY}:total`;
+    }
     
     try {
       const totalCache = await redisClient.get(totalCacheKey);
@@ -105,13 +146,19 @@ router.get('/', async (req, res) => {
           FROM original_artworks oa 
           LEFT JOIN artists a ON oa.artist_id = a.id
         `;
+        const countWhere = [];
         const countParams = [];
-        
         if (artist_id) {
-          countSql += ' WHERE oa.artist_id = ?';
+          countWhere.push('oa.artist_id = ?');
           countParams.push(parseInt(artist_id));
         }
-        
+        if (selectedArtworkIds.length > 0) {
+          countWhere.push(`oa.id IN (${selectedArtworkIds.map(() => '?').join(',')})`);
+          countParams.push(...selectedArtworkIds);
+        }
+        if (countWhere.length > 0) {
+          countSql += ' WHERE ' + countWhere.join(' AND ');
+        }
         const [countRows] = await db.query(countSql, countParams);
         total = countRows[0].total;
         
@@ -483,6 +530,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     // 先查artist_id
     const [rows] = await db.query('SELECT artist_id FROM original_artworks WHERE id = ?', [req.params.id]);
     await db.query('DELETE FROM original_artworks WHERE id = ?', [req.params.id]);
+    // 删除代表作品关联
+    try {
+      await db.query('DELETE FROM artist_featured_artworks WHERE artwork_id = ?', [req.params.id]);
+    } catch (assocErr) {
+      console.warn('清理代表作品关联失败:', assocErr.message);
+    }
     // 清理所有artworks:list相关缓存（包括分页）
     const listKeys = await redisClient.keys('artworks:list*');
     if (listKeys.length > 0) {

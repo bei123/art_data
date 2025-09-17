@@ -103,11 +103,7 @@
               :label="item.title"
               :value="item.id"
             >
-              <div class="digital-option">
-                <img v-if="item.image_url" :src="getImageUrl(item.image_url)" class="digital-thumb" />
-                <span class="digital-title">{{ item.title }}（ID: {{ item.id }}）</span>
-                <span class="digital-price">¥{{ item.price || 0 }}</span>
-              </div>
+              {{ item.title }}
             </el-option>
           </el-select>
           <div class="hint">不选择则不限制，设置后仅拥有所选数字资产的用户可享受优惠价。</div>

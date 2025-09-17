@@ -292,6 +292,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // 先删除与艺术家相关的作品
     await connection.query('DELETE FROM original_artworks WHERE artist_id = ?', [req.params.id]);
+    // 删除代表作品关联
+    await connection.query('DELETE FROM artist_featured_artworks WHERE artist_id = ?', [req.params.id]);
     
     // 然后删除艺术家
     await connection.query('DELETE FROM artists WHERE id = ?', [req.params.id]);
@@ -327,5 +329,113 @@ function validateImageUrl(url) {
     return false;
   }
 }
+
+// 设置艺术家的代表作品（需要认证）
+router.put('/:id/featured-artworks', authenticateToken, async (req, res) => {
+  const connection = await db.getConnection();
+  try {
+    const artistId = parseInt(req.params.id);
+    if (isNaN(artistId) || artistId <= 0) {
+      return res.status(400).json({ error: '无效的艺术家ID' });
+    }
+
+    // 兼容 array 或 逗号分隔字符串
+    let artworkIds = req.body.artwork_ids;
+    if (!artworkIds) {
+      return res.status(400).json({ error: '缺少作品ID列表 artwork_ids' });
+    }
+    if (typeof artworkIds === 'string') {
+      artworkIds = artworkIds.split(',');
+    }
+    if (!Array.isArray(artworkIds)) {
+      return res.status(400).json({ error: 'artwork_ids 参数必须为数组或逗号分隔字符串' });
+    }
+    let parsedIds = artworkIds
+      .map(id => parseInt(String(id).trim()))
+      .filter(id => !isNaN(id) && id > 0);
+    parsedIds = Array.from(new Set(parsedIds));
+    if (parsedIds.length === 0) {
+      return res.status(400).json({ error: '作品ID列表为空或无效' });
+    }
+    if (parsedIds.length > 200) {
+      return res.status(400).json({ error: '一次最多指定200个作品ID' });
+    }
+
+    // 验证艺术家是否存在
+    const [artistRows] = await db.query('SELECT id FROM artists WHERE id = ?', [artistId]);
+    if (artistRows.length === 0) {
+      return res.status(404).json({ error: '艺术家不存在' });
+    }
+
+    // 校验所有作品均属于该艺术家
+    const placeholders = parsedIds.map(() => '?').join(',');
+    const [rows] = await db.query(
+      `SELECT id FROM original_artworks WHERE artist_id = ? AND id IN (${placeholders})`,
+      [artistId, ...parsedIds]
+    );
+    const validIdsSet = new Set(rows.map(r => r.id));
+    const invalidIds = parsedIds.filter(id => !validIdsSet.has(id));
+    if (invalidIds.length > 0) {
+      return res.status(400).json({ error: '存在不属于该艺术家的作品ID', invalid_ids: invalidIds });
+    }
+
+    // 使用事务：清空旧数据，写入新顺序
+    await connection.beginTransaction();
+    await connection.query('DELETE FROM artist_featured_artworks WHERE artist_id = ?', [artistId]);
+
+    const values = parsedIds.map((id, idx) => [artistId, id, idx + 1]);
+    await connection.query(
+      'INSERT INTO artist_featured_artworks (artist_id, artwork_id, sort_order) VALUES ?',
+      [values]
+    );
+
+    await connection.commit();
+    res.json({ message: '代表作品已保存', artist_id: artistId, artwork_ids: parsedIds });
+  } catch (error) {
+    await connection.rollback();
+    console.error('设置代表作品失败:', error);
+    res.status(500).json({ error: '设置代表作品失败' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 获取艺术家的代表作品（公开接口）
+router.get('/:id/featured-artworks', async (req, res) => {
+  try {
+    const artistId = parseInt(req.params.id);
+    if (isNaN(artistId) || artistId <= 0) {
+      return res.status(400).json({ error: '无效的艺术家ID' });
+    }
+
+    const [rows] = await db.query(`
+      SELECT 
+        oa.id, oa.title, oa.year, oa.image, oa.price, oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
+      FROM artist_featured_artworks afa
+      INNER JOIN original_artworks oa ON oa.id = afa.artwork_id
+      INNER JOIN artists a ON a.id = oa.artist_id
+      WHERE afa.artist_id = ?
+      ORDER BY afa.sort_order ASC
+    `, [artistId]);
+
+    const data = rows.map(artwork => {
+      const processed = processObjectImages(artwork, ['image', 'avatar']);
+      return {
+        ...processed,
+        artist: {
+          id: artwork.artist_id,
+          name: artwork.artist_name,
+          avatar: processed.artist_avatar || ''
+        }
+      };
+    });
+
+    res.json({ artist_id: artistId, data, total: data.length });
+  } catch (error) {
+    console.error('获取代表作品失败:', error);
+    res.status(500).json({ error: '获取代表作品失败' });
+  }
+});
 
 module.exports = router; 

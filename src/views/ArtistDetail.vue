@@ -302,6 +302,77 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-card class="detail-card" style="margin-top: 16px;">
+      <template #header>
+        <div class="card-header">
+          <span>代表作品管理</span>
+          <div>
+            <el-button type="primary" @click="saveFeatured" :loading="savingFeatured">保存代表作品</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-row :gutter="20">
+        <el-col :span="12">
+          <el-card shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span>该艺术家全部作品</span>
+                <el-input v-model="artworkSearch" placeholder="搜索标题" size="small" style="max-width: 220px;" clearable />
+              </div>
+            </template>
+            <el-scrollbar height="400px">
+              <el-empty v-if="filteredAllArtworks.length === 0" description="暂无作品或未匹配" />
+              <div v-else class="artwork-list">
+                <div v-for="item in filteredAllArtworks" :key="item.id" class="artwork-item">
+                  <img :src="getImageUrl(item.image)" class="artwork-thumb" alt="thumb" />
+                  <div class="artwork-meta">
+                    <div class="artwork-title" :title="item.title">{{ item.title }}</div>
+                    <div class="artwork-sub">#{{ item.id }} · {{ item.year || '-' }}</div>
+                  </div>
+                  <div class="artwork-actions">
+                    <el-button size="small" :disabled="isInFeatured(item.id)" @click="addToFeatured(item)">
+                      {{ isInFeatured(item.id) ? '已添加' : '添加' }}
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </el-scrollbar>
+          </el-card>
+        </el-col>
+
+        <el-col :span="12">
+          <el-card shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span>已选代表作品（可排序）</span>
+                <div>
+                  <el-button size="small" @click="clearFeatured" :disabled="featuredList.length===0">清空</el-button>
+                </div>
+              </div>
+            </template>
+            <el-scrollbar height="400px">
+              <el-empty v-if="featuredList.length === 0" description="未选择" />
+              <div v-else class="artwork-list">
+                <div v-for="(item, index) in featuredList" :key="item.id" class="artwork-item">
+                  <img :src="getImageUrl(item.image)" class="artwork-thumb" alt="thumb" />
+                  <div class="artwork-meta">
+                    <div class="artwork-title" :title="item.title">{{ index + 1 }}. {{ item.title }}</div>
+                    <div class="artwork-sub">#{{ item.id }} · {{ item.year || '-' }}</div>
+                  </div>
+                  <div class="artwork-actions">
+                    <el-button size="small" :disabled="index===0" @click="moveUp(index)">上移</el-button>
+                    <el-button size="small" :disabled="index===featuredList.length-1" @click="moveDown(index)">下移</el-button>
+                    <el-button size="small" type="danger" @click="removeFromFeatured(index)">移除</el-button>
+                  </div>
+                </div>
+              </div>
+            </el-scrollbar>
+          </el-card>
+        </el-col>
+      </el-row>
+    </el-card>
   </div>
 </template>
 
@@ -317,6 +388,10 @@ import { uploadImageToWebpLimit5MB } from '../utils/image'
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
+const savingFeatured = ref(false)
+const artworkSearch = ref('')
+const allArtworks = ref([])
+const featuredList = ref([])
 
 const form = ref({
   name: '',
@@ -724,6 +799,66 @@ const getImageUrl = (url) => {
   return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
+const fetchAllArtworks = async () => {
+  try {
+    const { data } = await axios.get(`/artworks`, { params: { artist_id: route.params.id, pageSize: 1000 } })
+    allArtworks.value = data?.data || []
+  } catch (e) {
+    allArtworks.value = []
+  }
+}
+
+const fetchFeatured = async () => {
+  try {
+    const { data } = await axios.get(`/artists/${route.params.id}/featured-artworks`)
+    featuredList.value = data?.data || []
+  } catch (e) {
+    featuredList.value = []
+  }
+}
+
+const isInFeatured = (id) => featuredList.value.some(i => i.id === id)
+const addToFeatured = (item) => {
+  if (!isInFeatured(item.id)) featuredList.value.push(item)
+}
+const removeFromFeatured = (index) => {
+  featuredList.value.splice(index, 1)
+}
+const moveUp = (index) => {
+  if (index <= 0) return
+  const tmp = featuredList.value[index - 1]
+  featuredList.value[index - 1] = featuredList.value[index]
+  featuredList.value[index] = tmp
+}
+const moveDown = (index) => {
+  if (index >= featuredList.value.length - 1) return
+  const tmp = featuredList.value[index + 1]
+  featuredList.value[index + 1] = featuredList.value[index]
+  featuredList.value[index] = tmp
+}
+const clearFeatured = () => {
+  featuredList.value = []
+}
+
+const filteredAllArtworks = computed(() => {
+  const q = artworkSearch.value.trim().toLowerCase()
+  if (!q) return allArtworks.value
+  return allArtworks.value.filter(a => (a.title || '').toLowerCase().includes(q))
+})
+
+const saveFeatured = async () => {
+  try {
+    savingFeatured.value = true
+    const ids = featuredList.value.map(i => i.id)
+    await axios.put(`/artists/${route.params.id}/featured-artworks`, { artwork_ids: ids })
+    ElMessage.success('已保存代表作品')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '保存失败')
+  } finally {
+    savingFeatured.value = false
+  }
+}
+
 const addAchievement = () => {
   form.value.achievements.push({
     title: '',
@@ -750,6 +885,8 @@ const goBack = () => {
 
 onMounted(() => {
   fetchArtistDetail()
+  fetchAllArtworks()
+  fetchFeatured()
 })
 </script>
 
