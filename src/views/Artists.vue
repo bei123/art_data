@@ -312,6 +312,63 @@
         <el-form-item label="艺术历程">
           <el-input v-model="form.journey" type="textarea" :rows="6" placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等" />
         </el-form-item>
+
+        <el-divider>代表作品</el-divider>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-card shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>该艺术家全部作品（{{ filteredFeaturedAllArtworks.length }}）</span>
+                  <el-input v-model="featuredSearch" placeholder="搜索标题/ID/年份" size="small" style="max-width: 220px;" clearable />
+                </div>
+              </template>
+              <el-scrollbar height="260px">
+                <el-empty v-if="filteredFeaturedAllArtworks.length === 0" description="暂无作品或未匹配" />
+                <div v-else class="artwork-list">
+                  <div v-for="item in filteredFeaturedAllArtworks" :key="item.id" class="artwork-item">
+                    <div class="artwork-meta">
+                      <div class="artwork-title" :title="item.title">{{ item.title }}</div>
+                    </div>
+                    <div class="artwork-actions">
+                      <el-button size="small" :disabled="featuredSelected.some(i=>i.id===item.id)" @click="featuredAdd(item)">
+                        {{ featuredSelected.some(i=>i.id===item.id) ? '已添加' : '添加' }}
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
+              </el-scrollbar>
+            </el-card>
+          </el-col>
+          <el-col :span="12">
+            <el-card shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>已选代表作品（可排序，{{ featuredSelected.length }}）</span>
+                  <div>
+                    <el-button size="small" @click="featuredClear" :disabled="featuredSelected.length===0">清空</el-button>
+                    <el-button type="primary" size="small" @click="featuredSave" :loading="featuredSaving" :disabled="!isEdit">保存</el-button>
+                  </div>
+                </div>
+              </template>
+              <el-scrollbar height="260px">
+                <el-empty v-if="featuredSelected.length === 0" description="未选择" />
+                <div v-else class="artwork-list">
+                  <div v-for="(item, index) in featuredSelected" :key="item.id" class="artwork-item">
+                    <div class="artwork-meta">
+                      <div class="artwork-title" :title="item.title">{{ item.title }}</div>
+                    </div>
+                    <div class="artwork-actions">
+                      <el-button size="small" :disabled="index===0" @click="featuredMoveUp(index)">上移</el-button>
+                      <el-button size="small" :disabled="index===featuredSelected.length-1" @click="featuredMoveDown(index)">下移</el-button>
+                      <el-button size="small" type="danger" @click="featuredRemove(index)">移除</el-button>
+                    </div>
+                  </div>
+                </div>
+              </el-scrollbar>
+            </el-card>
+          </el-col>
+        </el-row>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -324,7 +381,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
@@ -339,6 +396,10 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const selectedInstitutionId = ref(null)
 const filteredArtists = ref([])
+const featuredAllArtworks = ref([])
+const featuredSelected = ref([])
+const featuredSearch = ref('')
+const featuredSaving = ref(false)
 
 // 头像上传相关状态
 const avatarInput = ref(null)
@@ -468,6 +529,12 @@ const handleEdit = (row) => {
     institution_id: row.institution ? row.institution.id : null
   }
   dialogVisible.value = true
+  // 重置代表作品区域状态（不清空右侧，避免保存后再次打开瞬间为空；实际数据以接口覆盖）
+  featuredSearch.value = ''
+  featuredAllArtworks.value = []
+  // 拉取该艺术家的作品与代表作品
+  fetchFeaturedAll(row.id)
+  fetchFeaturedSelected(row.id)
 }
 
 const handleDelete = (row) => {
@@ -835,6 +902,80 @@ const formatFileSize = (bytes) => {
 const getImageUrl = (url) => {
   if (!url) return '';
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+}
+
+// 代表作品：拉取全部作品
+const fetchFeaturedAll = async (artistId) => {
+  try {
+    const resp = await axios.get(`/original-artworks`, { params: { artist_id: artistId, pageSize: 1000 } })
+    // 兼容 axios 包装器返回值（可能是 resp.data 或直接是数据对象）
+    const list = Array.isArray(resp)
+      ? resp
+      : (Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp?.data?.data) ? resp.data.data : []))
+    featuredAllArtworks.value = list
+    console.log('代表作品-全部作品数量:', list.length)
+  } catch {
+    featuredAllArtworks.value = []
+  }
+}
+// 代表作品：拉取已选
+const fetchFeaturedSelected = async (artistId) => {
+  try {
+    const resp = await axios.get(`/artists/${artistId}/featured-artworks`)
+    const list = Array.isArray(resp)
+      ? resp
+      : (Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp?.data?.data) ? resp.data.data : []))
+    featuredSelected.value = list
+    console.log('代表作品-已选数量:', list.length)
+  } catch {
+    featuredSelected.value = []
+  }
+}
+
+const filteredFeaturedAllArtworks = computed(() => {
+  const raw = (featuredSearch.value || '').toString().trim().toLowerCase()
+  if (!raw) return featuredAllArtworks.value
+  return featuredAllArtworks.value.filter(a => {
+    const title = (a.title || '').toString().toLowerCase()
+    const idStr = (a.id != null ? String(a.id) : '')
+    const yearStr = (a.year != null ? String(a.year) : '')
+    return title.includes(raw) || idStr.includes(raw) || yearStr.includes(raw)
+  })
+})
+
+const featuredAdd = (item) => {
+  if (!featuredSelected.value.some(i => i.id === item.id)) featuredSelected.value.push(item)
+}
+const featuredRemove = (index) => {
+  featuredSelected.value.splice(index, 1)
+}
+const featuredMoveUp = (index) => {
+  if (index <= 0) return
+  const tmp = featuredSelected.value[index - 1]
+  featuredSelected.value[index - 1] = featuredSelected.value[index]
+  featuredSelected.value[index] = tmp
+}
+const featuredMoveDown = (index) => {
+  if (index >= featuredSelected.value.length - 1) return
+  const tmp = featuredSelected.value[index + 1]
+  featuredSelected.value[index + 1] = featuredSelected.value[index]
+  featuredSelected.value[index] = tmp
+}
+const featuredClear = () => {
+  featuredSelected.value = []
+}
+const featuredSave = async () => {
+  try {
+    featuredSaving.value = true
+    const ids = featuredSelected.value.map(i => i.id)
+    await axios.put(`/artists/${form.value.id}`, {}) // 保持编辑上下文
+    await axios.put(`/artists/${form.value.id}/featured-artworks`, { artwork_ids: ids })
+    ElMessage.success('已保存代表作品')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '保存代表作品失败')
+  } finally {
+    featuredSaving.value = false
+  }
 }
 
 const handleSubmit = async () => {

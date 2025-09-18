@@ -6,7 +6,10 @@
       <template #header>
         <div class="card-header">
           <span>艺术家详情</span>
-          <el-button type="primary" @click="handleEdit">编辑</el-button>
+          <div style="display:flex; gap:8px;">
+            <el-button @click="goToFeaturedManager">管理代表作品</el-button>
+            <el-button type="primary" @click="handleEdit">编辑</el-button>
+          </div>
         </div>
       </template>
 
@@ -306,6 +309,26 @@
     <el-card class="detail-card" style="margin-top: 16px;">
       <template #header>
         <div class="card-header">
+          <span>代表作品</span>
+        </div>
+      </template>
+      <el-row :gutter="16">
+        <el-col v-for="item in featuredList" :key="item.id" :span="6">
+          <el-card shadow="hover">
+            <img :src="getImageUrl(item.image)" class="artwork-thumb" alt="thumb" />
+            <div class="artwork-meta" style="margin-top:8px;">
+              <div class="artwork-title" :title="item.title">{{ item.title }}</div>
+              <div class="artwork-sub">#{{ item.id }} · {{ item.year || '-' }}</div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-empty v-if="featuredList.length === 0" description="暂无代表作品" />
+      </el-row>
+    </el-card>
+
+    <el-card class="detail-card" style="margin-top: 16px;" ref="featuredManagerRef" v-if="showFeaturedManager">
+      <template #header>
+        <div class="card-header">
           <span>代表作品管理</span>
           <div>
             <el-button type="primary" @click="saveFeatured" :loading="savingFeatured">保存代表作品</el-button>
@@ -377,7 +400,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
@@ -392,6 +415,8 @@ const savingFeatured = ref(false)
 const artworkSearch = ref('')
 const allArtworks = ref([])
 const featuredList = ref([])
+const showFeaturedManager = ref(true)
+const featuredManagerRef = ref(null)
 
 const form = ref({
   name: '',
@@ -801,7 +826,7 @@ const getImageUrl = (url) => {
 
 const fetchAllArtworks = async () => {
   try {
-    const { data } = await axios.get(`/artworks`, { params: { artist_id: route.params.id, pageSize: 1000 } })
+    const { data } = await axios.get(`/original-artworks`, { params: { artist_id: route.params.id, pageSize: 1000 } })
     allArtworks.value = data?.data || []
   } catch (e) {
     allArtworks.value = []
@@ -841,9 +866,14 @@ const clearFeatured = () => {
 }
 
 const filteredAllArtworks = computed(() => {
-  const q = artworkSearch.value.trim().toLowerCase()
-  if (!q) return allArtworks.value
-  return allArtworks.value.filter(a => (a.title || '').toLowerCase().includes(q))
+  const raw = (artworkSearch.value || '').toString().trim().toLowerCase()
+  if (!raw) return allArtworks.value
+  return allArtworks.value.filter(a => {
+    const title = (a.title || '').toString().toLowerCase()
+    const idStr = (a.id != null ? String(a.id) : '')
+    const yearStr = (a.year != null ? String(a.year) : '')
+    return title.includes(raw) || idStr.includes(raw) || yearStr.includes(raw)
+  })
 })
 
 const saveFeatured = async () => {
@@ -856,6 +886,15 @@ const saveFeatured = async () => {
     ElMessage.error(e?.response?.data?.error || '保存失败')
   } finally {
     savingFeatured.value = false
+  }
+}
+
+const goToFeaturedManager = async () => {
+  showFeaturedManager.value = true
+  await nextTick()
+  const el = featuredManagerRef.value && (featuredManagerRef.value.$el || featuredManagerRef.value)
+  if (el && el.scrollIntoView) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 

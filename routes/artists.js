@@ -391,6 +391,12 @@ router.put('/:id/featured-artworks', authenticateToken, async (req, res) => {
 
     await connection.commit();
     res.json({ message: '代表作品已保存', artist_id: artistId, artwork_ids: parsedIds });
+    // 轻量延迟清除详情缓存，确保下一次读取到最新代表作品（如后续做了缓存）
+    try {
+      await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + artistId);
+    } catch (e) {
+      // ignore
+    }
   } catch (error) {
     await connection.rollback();
     console.error('设置代表作品失败:', error);
