@@ -48,10 +48,18 @@ router.get('/', authenticateToken, async (req, res) => {
     let rightsMap = {};
     if (rightIds.length > 0) {
       const [rights] = await db.query(
-        `SELECT r.id, r.title, r.price, r.original_price, r.status, r.remaining_count, r.category_id, c.title as category_title
-         FROM rights r,discount_price dp
+        `SELECT r.id,
+                r.title,
+                r.price,
+                r.discount_price,
+                r.original_price,
+                r.status,
+                r.remaining_count,
+                r.category_id,
+                c.title AS category_title
+         FROM rights r
          LEFT JOIN physical_categories c ON r.category_id = c.id
-         WHERE r.id IN (?) AND r.status = 'onsale' AND r.id = dp.right_id`,
+         WHERE r.id IN (?) AND r.status = 'onsale'`,
         [rightIds]
       );
       rights.forEach(r => { rightsMap[r.id] = r; });
