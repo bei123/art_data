@@ -882,6 +882,8 @@ const saveFeatured = async () => {
     const ids = featuredList.value.map(i => i.id)
     await axios.put(`/artists/${route.params.id}/featured-artworks`, { artwork_ids: ids })
     ElMessage.success('已保存代表作品')
+    // 重新获取艺术家详情，确保数据同步
+    await fetchArtistDetail()
   } catch (e) {
     ElMessage.error(e?.response?.data?.error || '保存失败')
   } finally {

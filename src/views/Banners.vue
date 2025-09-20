@@ -164,6 +164,50 @@
         <el-form-item label="链接">
           <el-input v-model="form.link_url" placeholder="请输入点击轮播图后跳转的链接" />
         </el-form-item>
+        <el-form-item label="链接快捷选择">
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; width: 100%">
+            <el-select v-model="form.link_type" placeholder="选择类型" style="width: 160px" @change="handleLinkTypeChange">
+              <el-option v-for="opt in linkTypeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+            <el-select
+              v-if="form.link_type === 'original'"
+              v-model="form.original_artist_id"
+              placeholder="选择艺术家"
+              filterable
+              :loading="artistOptionsLoading"
+              style="min-width: 200px"
+              @visible-change="onArtistSelectVisibleChange"
+              @change="handleOriginalArtistChange"
+            >
+              <el-option
+                v-for="a in artistOptions"
+                :key="a.value"
+                :label="a.label"
+                :value="a.value"
+              />
+            </el-select>
+            <el-select
+              v-model="form.link_id"
+              placeholder="选择具体项"
+              filterable
+              :disabled="!form.link_type || (form.link_type === 'original' && !form.original_artist_id)"
+              :loading="linkOptionsLoading"
+              style="min-width: 260px; flex: 1"
+              @visible-change="onLinkSelectVisibleChange"
+              @change="applyComposedLink"
+            >
+              <el-option
+                v-for="item in linkOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+            <span v-if="form.link_type && form.link_id" style="color:#909399; font-size: 12px;">
+              将生成：{{ composedLinkPreview }}
+            </span>
+          </div>
+        </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.sort_order" :min="0" />
         </el-form-item>
@@ -185,7 +229,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
@@ -218,7 +262,37 @@ const form = ref({
   image_url: '',
   link_url: '',
   sort_order: 0,
-  status: 'active'
+  status: 'active',
+  // 链接快捷选择
+  link_type: '',
+  link_id: null,
+  original_artist_id: null
+})
+
+// 链接类型与快捷选择
+const linkTypeOptions = [
+  { label: '数字艺术品', value: 'digital' },
+  { label: '权益', value: 'rights' },
+  { label: '原作', value: 'original' },
+  { label: '艺术家', value: 'artist' }
+]
+const linkOptionsLoading = ref(false)
+const linkOptions = ref([])
+const artistOptionsLoading = ref(false)
+const artistOptions = ref([])
+// 原作分页聚合配置
+const ORIGINAL_PAGE_SIZE = 50
+const ORIGINAL_MAX_PAGES = 5
+const linkPathMap = {
+  digital: '/pages/digital/detail',
+  rights: '/pages/rights/detail',
+  original: '/pages/artwork/detail',
+  artist: '/pages/artist/detail'
+}
+const composedLinkPreview = computed(() => {
+  if (!form.value.link_type || !form.value.link_id) return ''
+  const base = linkPathMap[form.value.link_type]
+  return `${base}?id=${form.value.link_id}`
 })
 
 const fetchBanners = async () => {
@@ -247,7 +321,9 @@ const handleAdd = () => {
     image_url: '',
     link_url: '',
     sort_order: 0,
-    status: 'active'
+    status: 'active',
+    link_type: '',
+    link_id: null
   }
   dialogVisible.value = true
 }
@@ -255,6 +331,8 @@ const handleAdd = () => {
 const handleEdit = (row) => {
   isEdit.value = true
   form.value = { ...row }
+  // 解析已有链接以回填快捷选择
+  tryParseExistingLink(row.link_url)
   dialogVisible.value = true
 }
 
@@ -492,6 +570,121 @@ const handleSubmit = async () => {
 onMounted(() => {
   fetchBanners()
 })
+
+// ============ 链接快捷选择逻辑 ============
+function handleLinkTypeChange() {
+  form.value.link_id = null
+  form.value.original_artist_id = null
+  linkOptions.value = []
+  artistOptions.value = []
+  if (form.value.link_type) {
+    if (form.value.link_type === 'original') {
+      loadArtistOptions()
+    } else {
+      loadLinkOptions()
+    }
+  }
+}
+
+async function onLinkSelectVisibleChange(visible) {
+  if (!visible) return
+  if (!form.value.link_type) return
+  if (form.value.link_type === 'original') {
+    if (!form.value.original_artist_id) return
+    if (linkOptions.value.length === 0) await loadLinkOptions()
+  } else if (linkOptions.value.length === 0) {
+    await loadLinkOptions()
+  }
+}
+
+async function loadLinkOptions() {
+  if (!form.value.link_type) return
+  linkOptionsLoading.value = true
+  try {
+    let items = []
+    if (form.value.link_type === 'digital') {
+      const res = await axios.get('/digital-artworks/admin', { params: { page: 1, pageSize: 50 } })
+      items = Array.isArray(res) ? res : []
+      linkOptions.value = items.map(it => ({ value: it.id, label: it.title }))
+    } else if (form.value.link_type === 'rights') {
+      const res = await axios.get('/rights', { params: { page: 1, limit: 50 } })
+      // axios 实例已返回 data，rights 列表结构为 { data: [...], pagination: {...} }
+      items = (res && Array.isArray(res.data)) ? res.data : (res && Array.isArray(res.data?.data)) ? res.data.data : (Array.isArray(res?.data) ? res.data : [])
+      linkOptions.value = (items || []).map(it => ({ value: it.id, label: it.title }))
+    } else if (form.value.link_type === 'original') {
+      // 聚合分页，最多抓取 ORIGINAL_MAX_PAGES 页
+      const aggregated = []
+      for (let page = 1; page <= ORIGINAL_MAX_PAGES; page++) {
+        const params = { page, pageSize: ORIGINAL_PAGE_SIZE }
+        if (form.value.original_artist_id) params.artist_id = form.value.original_artist_id
+        const res = await axios.get('/original-artworks', { params })
+        const pageItems = res && Array.isArray(res.data) ? res.data : (res && Array.isArray(res.data?.data)) ? res.data.data : []
+        if (pageItems.length === 0) break
+        aggregated.push(...pageItems)
+        // 如果这一页不足 pageSize，说明已到底
+        if (pageItems.length < ORIGINAL_PAGE_SIZE) break
+      }
+      items = aggregated
+      linkOptions.value = aggregated.map(it => ({ value: it.id, label: it.title }))
+    } else if (form.value.link_type === 'artist') {
+      const res = await axios.get('/artists')
+      items = Array.isArray(res) ? res : (res && res.data && Array.isArray(res.data) ? res.data : [])
+      linkOptions.value = items.map(it => ({ value: it.id, label: it.name }))
+    }
+  } catch (err) {
+    console.error('加载链接选项失败:', err)
+    ElMessage.error('加载链接选项失败')
+  } finally {
+    linkOptionsLoading.value = false
+  }
+}
+
+async function loadArtistOptions() {
+  artistOptionsLoading.value = true
+  try {
+    const res = await axios.get('/artists')
+    const arr = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : [])
+    artistOptions.value = arr.map(a => ({ value: a.id, label: a.name }))
+  } catch (e) {
+    console.error('加载艺术家失败:', e)
+    ElMessage.error('加载艺术家失败')
+  } finally {
+    artistOptionsLoading.value = false
+  }
+}
+
+async function handleOriginalArtistChange() {
+  form.value.link_id = null
+  linkOptions.value = []
+  if (form.value.original_artist_id) {
+    await loadLinkOptions()
+  }
+}
+
+function applyComposedLink() {
+  if (form.value.link_type && form.value.link_id) {
+    const base = linkPathMap[form.value.link_type]
+    form.value.link_url = `${base}?id=${form.value.link_id}`
+  }
+}
+
+function tryParseExistingLink(url) {
+  if (!url || typeof url !== 'string') return
+  // 接受 original 的别名 artwork
+  const match = url.match(/^\/pages\/(digital|rights|original|artist|artwork)\/detail\?id=(\d+)$/)
+  if (match) {
+    let type = match[1]
+    if (type === 'artwork') type = 'original'
+    const id = parseInt(match[2])
+    form.value.link_type = type
+    form.value.link_id = id
+    // 预加载下拉选项，方便展示
+    loadLinkOptions()
+  } else {
+    form.value.link_type = ''
+    form.value.link_id = null
+  }
+}
 </script>
 
 <style scoped>

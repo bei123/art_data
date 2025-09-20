@@ -43,6 +43,7 @@ router.get('/', async (req, res) => {
         const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
         return {
           ...processedArtist,
+          achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
           institution: artist.institution_id ? {
             id: artist.institution_id,
             name: artist.institution_name,
@@ -86,6 +87,7 @@ router.get('/', async (req, res) => {
       const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
       return {
         ...processedArtist,
+        achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
         institution: artist.institution_id ? {
           id: artist.institution_id,
           name: artist.institution_name,
@@ -138,6 +140,7 @@ router.get('/:id', async (req, res) => {
     const artist = processObjectImages(rows[0], ['avatar', 'banner']);
     const artistWithInstitution = {
       ...artist,
+      achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
       institution: artist.institution_id ? {
         id: artist.institution_id,
         name: artist.institution_name,
@@ -213,7 +216,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // 更新艺术家（需要认证）
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { name, era, avatar, banner, description, biography, journey, institution_id } = req.body;
+    const { name, era, avatar, banner, description, biography, journey, institution_id, achievements } = req.body;
     
     // 验证图片URL
     if (avatar && !validateImageUrl(avatar)) {
@@ -237,10 +240,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
       }
     }
 
+    // 处理achievements字段
+    const achievementsJson = achievements ? JSON.stringify(achievements) : null;
+    
     // 更新艺术家信息
     await db.query(
-      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ?, journey = ?, institution_id = ? WHERE id = ?',
-      [name, era, avatar, banner, description, biography, journey, institution_id || null, req.params.id]
+      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ?, journey = ?, institution_id = ?, achievements = ? WHERE id = ?',
+      [name, era, avatar, banner, description, biography, journey, institution_id || null, achievementsJson, req.params.id]
     );
     // 清理缓存
     await redisClient.del(REDIS_ARTISTS_LIST_KEY);
@@ -269,6 +275,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       ...artist,
       avatar: artist.avatar || '',
       banner: artist.banner || '',
+      achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
       institution: artist.institution_id ? {
         id: artist.institution_id,
         name: artist.institution_name,
