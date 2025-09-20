@@ -218,6 +218,18 @@ router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { name, era, avatar, banner, description, biography, journey, institution_id, achievements } = req.body;
     
+    // 过滤掉 undefined 和 null 值，避免清空数据库字段
+    const updateData = {};
+    if (name !== undefined && name !== null) updateData.name = name;
+    if (era !== undefined && era !== null) updateData.era = era;
+    if (avatar !== undefined && avatar !== null) updateData.avatar = avatar;
+    if (banner !== undefined && banner !== null) updateData.banner = banner;
+    if (description !== undefined && description !== null) updateData.description = description;
+    if (biography !== undefined && biography !== null) updateData.biography = biography;
+    if (journey !== undefined && journey !== null) updateData.journey = journey;
+    if (institution_id !== undefined && institution_id !== null) updateData.institution_id = institution_id;
+    if (achievements !== undefined && achievements !== null) updateData.achievements = achievements;
+    
     // 验证图片URL
     if (avatar && !validateImageUrl(avatar)) {
       return res.status(400).json({ error: '无效的头像URL' });
@@ -240,14 +252,55 @@ router.put('/:id', authenticateToken, async (req, res) => {
       }
     }
 
-    // 处理achievements字段
-    const achievementsJson = achievements ? JSON.stringify(achievements) : null;
+    // 构建动态更新SQL
+    const updateFields = [];
+    const updateValues = [];
     
-    // 更新艺术家信息
-    await db.query(
-      'UPDATE artists SET name = ?, era = ?, avatar = ?, banner = ?, description = ?, biography = ?, journey = ?, institution_id = ?, achievements = ? WHERE id = ?',
-      [name, era, avatar, banner, description, biography, journey, institution_id || null, achievementsJson, req.params.id]
-    );
+    if (updateData.name !== undefined) {
+      updateFields.push('name = ?');
+      updateValues.push(updateData.name);
+    }
+    if (updateData.era !== undefined) {
+      updateFields.push('era = ?');
+      updateValues.push(updateData.era);
+    }
+    if (updateData.avatar !== undefined) {
+      updateFields.push('avatar = ?');
+      updateValues.push(updateData.avatar);
+    }
+    if (updateData.banner !== undefined) {
+      updateFields.push('banner = ?');
+      updateValues.push(updateData.banner);
+    }
+    if (updateData.description !== undefined) {
+      updateFields.push('description = ?');
+      updateValues.push(updateData.description);
+    }
+    if (updateData.biography !== undefined) {
+      updateFields.push('biography = ?');
+      updateValues.push(updateData.biography);
+    }
+    if (updateData.journey !== undefined) {
+      updateFields.push('journey = ?');
+      updateValues.push(updateData.journey);
+    }
+    if (updateData.institution_id !== undefined) {
+      updateFields.push('institution_id = ?');
+      updateValues.push(updateData.institution_id);
+    }
+    if (updateData.achievements !== undefined) {
+      updateFields.push('achievements = ?');
+      updateValues.push(updateData.achievements ? JSON.stringify(updateData.achievements) : null);
+    }
+    
+    // 只有当有字段需要更新时才执行更新
+    if (updateFields.length > 0) {
+      updateValues.push(req.params.id);
+      await db.query(
+        `UPDATE artists SET ${updateFields.join(', ')} WHERE id = ?`,
+        updateValues
+      );
+    }
     // 清理缓存
     await redisClient.del(REDIS_ARTISTS_LIST_KEY);
     await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + req.params.id);
