@@ -403,6 +403,190 @@ router.post('/user/login', async (req, res) => {
 });
 
 /**
+ * 用户注册
+ * POST /api/external/user/register
+ * 转发到外部接口：POST https://node.wespace.cn/userApi/user/register
+ */
+router.post('/user/register', async (req, res) => {
+  try {
+    const { mobile, channel, isRegister, password, captcha, inviteCode, type, passCard } = req.body;
+    
+    // 参数验证
+    if (!mobile || typeof mobile !== 'string' || mobile.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '手机号参数不能为空'
+      });
+    }
+
+    // 验证手机号格式
+    const mobileRegex = /^1[3-9]\d{9}$/;
+    if (!mobileRegex.test(mobile.trim())) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '手机号格式不正确'
+      });
+    }
+
+    if (!password || typeof password !== 'string' || password.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '密码参数不能为空'
+      });
+    }
+
+    if (!captcha || typeof captcha !== 'string' || captcha.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '验证码参数不能为空'
+      });
+    }
+
+    // 注册接口需要使用 Basic 认证
+    let authorization = req.headers['x-external-authorization'] || 
+                       req.headers['X-External-Authorization'];
+    
+    if (!authorization && req.headers.authorization && req.headers.authorization.startsWith('Basic ')) {
+      authorization = req.headers.authorization;
+    }
+    
+    if (!authorization) {
+      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+    }
+
+    // 构建 form-urlencoded 格式的请求体
+    // 处理可选参数和URL编码
+    const params = {
+      mobile: mobile.trim(),
+      channel: channel || '千年时间_h5',
+      isRegister: isRegister !== undefined ? isRegister : '1',
+      password: password.trim(),
+      captcha: captcha.trim(),
+      inviteCode: inviteCode || '',
+      type: type !== undefined ? type.toString() : '1',
+      passCard: passCard || JSON.stringify({
+        From_IP: '',
+        From_Device: 'H5',
+        From_MAC: '',
+        From_OS: 'uniapp',
+        From_ID: mobile.trim(),
+        Hash_Subject: '',
+        Invite_code: inviteCode || '',
+        Timestamp: Date.now()
+      })
+    };
+
+    // 构建查询字符串
+    const formDataParts = [];
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null) {
+        // 对于passCard这种JSON字符串，需要先URL编码
+        const encodedValue = key === 'passCard' ? encodeURIComponent(value) : value;
+        formDataParts.push(`${key}=${encodedValue}`);
+      }
+    }
+    const formData = formDataParts.join('&');
+
+    // 调用外部API注册
+    const registerUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/register`;
+    console.log('调用外部注册接口:', registerUrl);
+    console.log('请求参数:', { mobile: mobile.trim(), captcha: '***', type: params.type });
+    console.log('请求体数据长度:', formData.length);
+    
+    const response = await axios.post(
+      registerUrl,
+      formData,
+      {
+        headers: {
+          'authorization': authorization,
+          'apptype': '16',
+          'tenantid': 'wespace',
+          'origin': 'https://m.wespace.cn',
+          'x-requested-with': 'cn.org.pfp',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://m.wespace.cn/',
+          'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+          'content-type': 'application/x-www-form-urlencoded'
+        },
+        transformRequest: [(data) => {
+          return typeof data === 'string' ? data : data;
+        }],
+        timeout: 10000
+      }
+    );
+    
+    console.log('外部API响应状态:', response.status);
+    console.log('外部API响应数据:', JSON.stringify(response.data));
+
+    // 检查响应数据，判断是否为业务错误
+    // 失败示例：
+    //   {"code": 201, "status": false, "message": "该账号已存在!"}
+    //   {"code": 204, "status": false, "message": "验证码验证失败，剩余尝试次数：4"}
+    //   {"code": 500, "status": false, "message": "服务异常"}
+    // 成功示例：{"code": 200, "status": true, "message": "success", "data": {...}}
+    if (response.data && typeof response.data === 'object') {
+      const isSuccess = response.data.code === 200 && response.data.status === true;
+      
+      if (!isSuccess) {
+        // 业务错误：code不是200或status为false
+        // 如果业务错误码>=400（如500），使用该码作为HTTP状态码，否则使用400
+        const httpStatus = (response.data.code && response.data.code >= 400) ? response.data.code : 400;
+        console.log('检测到业务错误，返回HTTP状态码:', httpStatus, '业务错误码:', response.data.code, '错误信息:', response.data.message);
+        return res.status(httpStatus).json(response.data);
+      }
+    }
+
+    // 返回外部API的响应（成功情况）
+    res.json(response.data);
+
+  } catch (error) {
+    console.error('用户注册失败:', error);
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null,
+      request: error.request ? {
+        method: error.config?.method,
+        url: error.config?.url,
+        data: error.config?.data
+      } : null
+    });
+    
+    if (error.response) {
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '注册失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
+  }
+});
+
+/**
  * 调用外部API保存资产类型
  * POST /api/external/asset-types/save
  * 转发到外部接口：POST /assetsApi/pr/basic/pt/type/save
