@@ -48,7 +48,9 @@ const EXTERNAL_API_CONFIG = {
   },
   ASSETS: {
     LIST_COUNT: '/assetsApi/pr/assets/list/count'
-  }
+  },
+  // 验证码服务配置（使用不同的基础URL）
+  VERIFICATION_CODE_BASE_URL: 'https://node.wespace.cn'
 };
 
 /**
@@ -150,6 +152,212 @@ router.post('/user/get-token', async (req, res) => {
       // 其他错误
       res.status(500).json({
         error: '服务器内部错误'
+      });
+    }
+  }
+});
+
+/**
+ * 获取手机验证码
+ * GET /api/external/user/get-mobile-verification-code
+ * 转发到外部接口：GET https://node.wespace.cn/userApi/user/getMobileVerificationCode
+ */
+router.get('/user/get-mobile-verification-code', async (req, res) => {
+  try {
+    const { mobile } = req.query;
+    
+    // 参数验证
+    if (!mobile || typeof mobile !== 'string' || mobile.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '手机号参数不能为空'
+      });
+    }
+
+    // 获取 authorization，优先从请求头获取，如果没有则从环境变量获取
+    const authorization = req.headers.authorization || 
+                         req.headers.Authorization || 
+                         process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
+
+    // 调用外部API获取验证码
+    const response = await axios.get(
+      `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/getMobileVerificationCode`,
+      {
+        params: {
+          mobile: mobile.trim()
+        },
+        headers: {
+          'authorization': authorization,
+          'apptype': '6',
+          'tenantid': 'wespace',
+          'content-type': 'application/x-www-form-urlencoded',
+          'origin': 'https://m.wespace.cn',
+          'x-requested-with': 'cn.org.pfp',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://m.wespace.cn/',
+          'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
+        timeout: 10000 // 10秒超时
+      }
+    );
+
+    // 检查响应数据，判断是否为业务错误
+    // 外部API可能返回200 HTTP状态码，但业务逻辑失败（如code: 209, status: false）
+    if (response.data && typeof response.data === 'object') {
+      // 成功响应：code: 200 且 status: true
+      const isSuccess = response.data.code === 200 && response.data.status === true;
+      
+      if (!isSuccess) {
+        // 业务错误：code不是200或status为false
+        // 例如：{"code": 209, "status": false, "message": "手机号格式异常！"}
+        const httpStatus = (response.data.code && response.data.code >= 400) ? response.data.code : 400;
+        return res.status(httpStatus).json(response.data);
+      }
+    }
+
+    // 返回外部API的响应（成功情况：code: 200, status: true）
+    res.json(response.data);
+
+  } catch (error) {
+    console.error('获取手机验证码失败:', error);
+    
+    // 处理不同类型的错误
+    if (error.response) {
+      // 外部API返回了HTTP错误响应
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '获取验证码失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      // 请求发送失败
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      // 其他错误
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
+  }
+});
+
+/**
+ * 用户登录
+ * POST /api/external/user/login
+ * 转发到外部接口：POST https://node.wespace.cn/userApi/user/login
+ */
+router.post('/user/login', async (req, res) => {
+  try {
+    const { account, captcha } = req.body;
+    
+    // 参数验证
+    if (!account || typeof account !== 'string' || account.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '账号参数不能为空'
+      });
+    }
+
+    if (!captcha || typeof captcha !== 'string' || captcha.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '验证码参数不能为空'
+      });
+    }
+
+    // 获取 authorization，优先从请求头获取，如果没有则从环境变量获取
+    const authorization = req.headers.authorization || 
+                         req.headers.Authorization || 
+                         process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
+
+    // 构建 form-urlencoded 格式的请求体
+    const formData = new URLSearchParams({
+      account: account.trim(),
+      captcha: captcha.trim()
+    }).toString();
+
+    // 调用外部API登录
+    const response = await axios.post(
+      `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/login`,
+      formData,
+      {
+        headers: {
+          'authorization': authorization,
+          'apptype': '6',
+          'tenantid': 'wespace',
+          'content-type': 'application/x-www-form-urlencoded',
+          'origin': 'https://m.wespace.cn',
+          'x-requested-with': 'cn.org.pfp',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://m.wespace.cn/',
+          'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
+        timeout: 10000 // 10秒超时
+      }
+    );
+
+    // 检查响应数据，判断是否为业务错误
+    // 外部API可能返回200 HTTP状态码，但业务逻辑失败
+    // 失败示例：{"code": 204, "status": false, "message": "验证码验证失败，剩余尝试次数：4"}
+    // 成功示例：{"code": 200, "status": true, "message": "success", "data": {...}}
+    if (response.data && typeof response.data === 'object') {
+      // 成功响应：code: 200 且 status: true
+      const isSuccess = response.data.code === 200 && response.data.status === true;
+      
+      if (!isSuccess) {
+        // 业务错误：code不是200或status为false
+        // 如果业务错误码>=400，使用该码作为HTTP状态码，否则使用400
+        const httpStatus = (response.data.code && response.data.code >= 400) ? response.data.code : 400;
+        return res.status(httpStatus).json(response.data);
+      }
+    }
+
+    // 返回外部API的响应（成功情况：code: 200, status: true）
+    res.json(response.data);
+
+  } catch (error) {
+    console.error('用户登录失败:', error);
+    
+    // 处理不同类型的错误
+    if (error.response) {
+      // 外部API返回了HTTP错误响应
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '登录失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      // 请求发送失败
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      // 其他错误
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
       });
     }
   }
