@@ -279,11 +279,22 @@ router.post('/user/login', async (req, res) => {
       });
     }
 
-    // 获取 authorization，优先从请求头获取，如果没有则从环境变量获取
-    const authorization = req.headers.authorization || 
-                         req.headers.Authorization || 
-                         process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
+    // 登录接口需要使用 Basic 认证，不是 Bearer token
+    // 支持从专门的请求头 'x-external-authorization' 获取，或者从环境变量获取
+    // 如果请求头是 Basic 开头的，也可以使用
+    let authorization = req.headers['x-external-authorization'] || 
+                       req.headers['X-External-Authorization'];
+    
+    // 如果请求头传入的是 Basic 认证，也可以使用
+    if (!authorization && req.headers.authorization && req.headers.authorization.startsWith('Basic ')) {
+      authorization = req.headers.authorization;
+    }
+    
+    // 如果还是没有，使用环境变量或默认值
+    if (!authorization) {
+      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+    }
 
     // 构建 form-urlencoded 格式的请求体（直接拼接，参考成功请求格式）
     // 成功格式：account=13611329007&captcha=5857
@@ -294,7 +305,7 @@ router.post('/user/login', async (req, res) => {
     console.log('调用外部登录接口:', loginUrl);
     console.log('请求参数:', { account: account.trim(), captcha: '***' });
     console.log('请求体数据:', formData);
-    console.log('Authorization:', authorization ? authorization.substring(0, 20) + '...' : '未设置');
+    console.log('Authorization:', authorization ? (authorization.startsWith('Basic ') ? authorization.substring(0, 20) + '...' : 'Basic ...') : '未设置');
     
     const response = await axios.post(
       loginUrl,
