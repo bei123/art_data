@@ -285,15 +285,18 @@ router.post('/user/login', async (req, res) => {
                          process.env.VERIFICATION_CODE_AUTHORIZATION || 
                          'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
 
-    // 构建 form-urlencoded 格式的请求体
-    const formData = new URLSearchParams({
-      account: account.trim(),
-      captcha: captcha.trim()
-    }).toString();
+    // 构建 form-urlencoded 格式的请求体（使用字符串格式）
+    const accountEncoded = encodeURIComponent(account.trim());
+    const captchaEncoded = encodeURIComponent(captcha.trim());
+    const formData = `account=${accountEncoded}&captcha=${captchaEncoded}`;
 
     // 调用外部API登录
+    const loginUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/login`;
+    console.log('调用外部登录接口:', loginUrl);
+    console.log('请求参数:', { account: account.trim(), captcha: '***' });
+    
     const response = await axios.post(
-      `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/login`,
+      loginUrl,
       formData,
       {
         headers: {
@@ -312,10 +315,15 @@ router.post('/user/login', async (req, res) => {
         timeout: 10000 // 10秒超时
       }
     );
+    
+    console.log('外部API响应状态:', response.status);
+    console.log('外部API响应数据:', JSON.stringify(response.data));
 
     // 检查响应数据，判断是否为业务错误
     // 外部API可能返回200 HTTP状态码，但业务逻辑失败
-    // 失败示例：{"code": 204, "status": false, "message": "验证码验证失败，剩余尝试次数：4"}
+    // 失败示例：
+    //   {"code": 204, "status": false, "message": "验证码验证失败，剩余尝试次数：4"}
+    //   {"code": 500, "status": false, "message": "服务异常"}
     // 成功示例：{"code": 200, "status": true, "message": "success", "data": {...}}
     if (response.data && typeof response.data === 'object') {
       // 成功响应：code: 200 且 status: true
@@ -323,8 +331,9 @@ router.post('/user/login', async (req, res) => {
       
       if (!isSuccess) {
         // 业务错误：code不是200或status为false
-        // 如果业务错误码>=400，使用该码作为HTTP状态码，否则使用400
+        // 如果业务错误码>=400（如500），使用该码作为HTTP状态码，否则使用400
         const httpStatus = (response.data.code && response.data.code >= 400) ? response.data.code : 400;
+        console.log('检测到业务错误，返回HTTP状态码:', httpStatus, '业务错误码:', response.data.code);
         return res.status(httpStatus).json(response.data);
       }
     }
@@ -334,6 +343,19 @@ router.post('/user/login', async (req, res) => {
 
   } catch (error) {
     console.error('用户登录失败:', error);
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null,
+      request: error.request ? {
+        method: error.config?.method,
+        url: error.config?.url,
+        data: error.config?.data
+      } : null
+    });
     
     // 处理不同类型的错误
     if (error.response) {
