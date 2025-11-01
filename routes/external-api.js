@@ -1,6 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const crypto = require('crypto');
+
+/**
+ * MD5加密函数
+ * @param {string} str - 需要加密的字符串
+ * @returns {string} MD5加密后的字符串
+ */
+function md5(str) {
+  return crypto.createHash('md5').update(str).digest('hex');
+}
 
 /**
  * 生成appInfo的Base64编码
@@ -459,13 +469,16 @@ router.post('/user/register', async (req, res) => {
                      'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
     }
 
+    // 对密码进行MD5加密
+    const passwordMd5 = md5(password.trim());
+
     // 构建 form-urlencoded 格式的请求体
     // 处理可选参数和URL编码
     const params = {
       mobile: mobile.trim(),
       channel: channel || '千年时间_h5',
       isRegister: isRegister !== undefined ? isRegister : '1',
-      password: password.trim(),
+      password: passwordMd5, // 使用MD5加密后的密码
       captcha: captcha.trim(),
       inviteCode: inviteCode || '',
       type: type !== undefined ? type.toString() : '1',
