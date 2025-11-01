@@ -285,15 +285,16 @@ router.post('/user/login', async (req, res) => {
                          process.env.VERIFICATION_CODE_AUTHORIZATION || 
                          'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
 
-    // 构建 form-urlencoded 格式的请求体（使用字符串格式）
-    const accountEncoded = encodeURIComponent(account.trim());
-    const captchaEncoded = encodeURIComponent(captcha.trim());
-    const formData = `account=${accountEncoded}&captcha=${captchaEncoded}`;
+    // 构建 form-urlencoded 格式的请求体（直接拼接，参考成功请求格式）
+    // 成功格式：account=13611329007&captcha=5857
+    const formData = `account=${account.trim()}&captcha=${captcha.trim()}`;
 
     // 调用外部API登录
     const loginUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/login`;
     console.log('调用外部登录接口:', loginUrl);
     console.log('请求参数:', { account: account.trim(), captcha: '***' });
+    console.log('请求体数据:', formData);
+    console.log('Authorization:', authorization ? authorization.substring(0, 20) + '...' : '未设置');
     
     const response = await axios.post(
       loginUrl,
@@ -303,15 +304,20 @@ router.post('/user/login', async (req, res) => {
           'authorization': authorization,
           'apptype': '6',
           'tenantid': 'wespace',
-          'content-type': 'application/x-www-form-urlencoded',
           'origin': 'https://m.wespace.cn',
           'x-requested-with': 'cn.org.pfp',
           'sec-fetch-site': 'same-site',
           'sec-fetch-mode': 'cors',
           'sec-fetch-dest': 'empty',
           'referer': 'https://m.wespace.cn/',
-          'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+          'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+          'content-type': 'application/x-www-form-urlencoded'
         },
+        // 确保axios不会自动转换数据
+        transformRequest: [(data) => {
+          // 如果数据是字符串，直接返回（不进行JSON序列化）
+          return typeof data === 'string' ? data : data;
+        }],
         timeout: 10000 // 10秒超时
       }
     );
