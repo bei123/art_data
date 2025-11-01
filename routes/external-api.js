@@ -302,7 +302,7 @@ router.post('/user/login', async (req, res) => {
       {
         headers: {
           'authorization': authorization,
-          'apptype': '6',
+          'apptype': '16', // 成功请求中使用的是 16，不是 6
           'tenantid': 'wespace',
           'origin': 'https://m.wespace.cn',
           'x-requested-with': 'cn.org.pfp',
