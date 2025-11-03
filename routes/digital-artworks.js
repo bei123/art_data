@@ -315,7 +315,7 @@ router.get('/:id', async (req, res) => {
       return res.status(400).json({ error: '无效的作品ID' });
     }
 
-    const { goodsVerId, fuse = 'true' } = req.query;
+    const { goodsVerId, usn, fuse = 'true' } = req.query;
     const shouldFuse = fuse === 'true' || fuse === true;
 
     // 如果不需要融合且没有 goodsVerId，直接使用缓存
@@ -360,6 +360,55 @@ router.get('/:id', async (req, res) => {
       artist: artist,
       externalData: null
     };
+
+    // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id
+    if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0) {
+      try {
+        const authorization = getAuthorization(req);
+        
+        const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
+        const response = await axios.get(productListUrl, {
+          params: {
+            usn: usn.trim(),
+            newsPageSize: 5,
+            publicityPageSize: 5,
+            activityPageSize: 6
+          },
+          headers: {
+            'pragma': 'no-cache',
+            'cache-control': 'no-cache',
+            'authorization': authorization,
+            'apptype': '16',
+            'tenantid': 'wespace',
+            'content-type': 'application/x-www-form-urlencoded',
+            'origin': 'https://m.wespace.cn',
+            'sec-fetch-site': 'same-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': 'https://m.wespace.cn/',
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'priority': 'u=1, i'
+          },
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+          const externalList = response.data.data.qgList || [];
+          
+          // 通过 title 匹配 name 获取 goods_id
+          if (result.title) {
+            const titleKey = result.title.trim();
+            const matched = externalList.find(item => item.name && item.name.trim() === titleKey);
+            if (matched && matched.goods_id) {
+              result.goods_id = matched.goods_id;
+            }
+          }
+        }
+      } catch (externalError) {
+        console.error('获取外部产品列表失败（用于获取goods_id）:', externalError);
+        // 继续执行，不中断请求
+      }
+    }
 
     // 如果提供了 goodsVerId，尝试获取外部详情数据
     // 注意：goods_ver_id 不在数据库中，只能通过查询参数传入
