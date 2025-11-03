@@ -56,19 +56,22 @@ function validateImageUrl(url) {
  * 获取授权信息的辅助函数
  */
 function getAuthorization(req) {
-  // 优先使用请求头中的 authorization（可能是 Bearer token）
-  let authorization = req.headers.authorization || req.headers.Authorization;
+  // 外部接口统一使用 Basic 认证
+  // 优先使用环境变量，如果没有则使用默认的 Basic 认证
+  let authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
   
-  // 如果没有提供，尝试从专门的请求头获取
-  if (!authorization) {
-    authorization = req.headers['x-external-authorization'] || 
-                   req.headers['X-External-Authorization'];
+  // 如果请求头中提供了 Basic 认证，优先使用（允许覆盖）
+  const headerAuth = req.headers.authorization || req.headers.Authorization;
+  if (headerAuth && headerAuth.startsWith('Basic ')) {
+    authorization = headerAuth;
   }
   
-  // 如果还是没有，使用环境变量或默认值（Basic 认证）
-  if (!authorization) {
-    authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                   'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+  // 也可以从专门的请求头获取 Basic 认证
+  const externalAuth = req.headers['x-external-authorization'] || 
+                      req.headers['X-External-Authorization'];
+  if (externalAuth && externalAuth.startsWith('Basic ')) {
+    authorization = externalAuth;
   }
   
   return authorization;
@@ -822,21 +825,8 @@ router.get('/order/product-list', async (req, res) => {
       });
     }
 
-    // 获取 authorization，产品列表接口可以使用 Bearer token 或 Basic 认证
-    // 优先使用请求头中的 authorization（可能是 Bearer token）
-    let authorization = req.headers.authorization || req.headers.Authorization;
-    
-    // 如果没有提供，尝试从专门的请求头获取 Basic 认证
-    if (!authorization) {
-      authorization = req.headers['x-external-authorization'] || 
-                     req.headers['X-External-Authorization'];
-    }
-    
-    // 如果还是没有，使用环境变量或默认值（Basic 认证）
-    if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
-    }
+    // 获取 authorization，外部接口统一使用 Basic 认证
+    const authorization = getAuthorization(req);
 
     // 构建请求参数
     const params = {
@@ -970,20 +960,8 @@ router.post('/goods/ver/list/v3', async (req, res) => {
       });
     }
 
-    // 获取 authorization，优先使用请求头中的 authorization（Bearer token）
-    let authorization = req.headers.authorization || req.headers.Authorization;
-    
-    // 如果没有提供，尝试从专门的请求头获取
-    if (!authorization) {
-      authorization = req.headers['x-external-authorization'] || 
-                     req.headers['X-External-Authorization'];
-    }
-    
-    // 如果还是没有，使用环境变量或默认值（Basic 认证）
-    if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
-    }
+    // 获取 authorization，外部接口统一使用 Basic 认证
+    const authorization = getAuthorization(req);
 
     // 构建请求参数 - goods 参数需要作为查询参数传递（URL编码的JSON字符串）
     const params = {
@@ -1096,20 +1074,8 @@ router.post('/goods/ver/details', async (req, res) => {
       goodsData = goods;
     }
 
-    // 获取 authorization，优先使用请求头中的 authorization（Bearer token）
-    let authorization = req.headers.authorization || req.headers.Authorization;
-    
-    // 如果没有提供，尝试从专门的请求头获取
-    if (!authorization) {
-      authorization = req.headers['x-external-authorization'] || 
-                     req.headers['X-External-Authorization'];
-    }
-    
-    // 如果还是没有，使用环境变量或默认值（Basic 认证）
-    if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
-    }
+    // 获取 authorization，外部接口统一使用 Basic 认证
+    const authorization = getAuthorization(req);
 
     // 调用外部API获取商品详情
     const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
