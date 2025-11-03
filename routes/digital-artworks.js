@@ -1054,6 +1054,211 @@ router.post('/goods/ver/list/v3', async (req, res) => {
 });
 
 /**
+ * 统一购买流程接口
+ * POST /api/digital-artworks/order/purchase
+ * 整合三个外部API：价格查询 -> 统一下单 -> 支付价格查询
+ * 前端需要提供：usn, authorization (Bearer token)
+ */
+router.post('/order/purchase', async (req, res) => {
+  try {
+    // 从请求头获取前端提供的 authorization 和 usn
+    const authorization = req.headers.authorization || req.headers.Authorization;
+    const { usn, goodsVerId, goodsId, goodsNumber = 1, orderType = '4', addressId = '', payType = '1', ...otherOrderParams } = req.body;
+
+    // 参数验证
+    if (!authorization) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'authorization参数不能为空，请提供Bearer token'
+      });
+    }
+
+    if (!usn) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'usn参数不能为空'
+      });
+    }
+
+    if (!goodsVerId) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'goodsVerId参数不能为空'
+      });
+    }
+
+    const baseUrl = EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL;
+    const commonHeaders = {
+      'authorization': authorization,
+      'tenantid': 'wespace',
+      'apptype': '16',
+      'origin': 'https://m.wespace.cn',
+      'referer': 'https://m.wespace.cn/',
+      'sec-fetch-site': 'same-site',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8'
+    };
+
+    // 步骤1: 查询订单/价格
+    console.log('步骤1: 查询订单价格, goodsVerId:', goodsVerId);
+    const discountPriceUrl = `${baseUrl}/orderApi/order/user/goods/discountPrice`;
+    const discountPriceResponse = await axios.get(discountPriceUrl, {
+      params: { goodsVerId },
+      headers: {
+        ...commonHeaders,
+        'pragma': 'no-cache',
+        'cache-control': 'no-cache'
+      },
+      timeout: 10000
+    });
+
+    if (!discountPriceResponse.data || discountPriceResponse.data.code !== 200) {
+      return res.status(discountPriceResponse.data?.code || 500).json({
+        code: discountPriceResponse.data?.code || 500,
+        status: false,
+        message: '查询价格失败',
+        data: discountPriceResponse.data
+      });
+    }
+
+    const priceData = discountPriceResponse.data.data || {};
+    const payPrice = priceData.payPrice || priceData.price || '0';
+    const discountSumPrice = priceData.discountSumPrice || '0';
+    const totalPrice = parseFloat(payPrice) - parseFloat(discountSumPrice);
+
+    // 步骤2: 统一下单
+    console.log('步骤2: 统一下单');
+    // 构建订单对象
+    const orderData = {
+      orderType: orderType,
+      addressId: addressId,
+      buyerUsn: usn,
+      payType: payType,
+      payPrice: String(payPrice),
+      discountSumPrice: String(discountSumPrice),
+      totalPrice: totalPrice,
+      goodsList: [{
+        goodsId: goodsId || '',
+        goodsVerId: String(goodsVerId),
+        goodsNumber: parseInt(goodsNumber)
+      }],
+      ...otherOrderParams // 允许前端传入其他订单参数
+    };
+
+    // 将订单对象转换为URL编码的JSON字符串
+    const orderParam = new URLSearchParams();
+    orderParam.append('order', JSON.stringify(orderData));
+
+    const unifiedOrderUrl = `${baseUrl}/orderApi/order/unifiedOrder`;
+    const unifiedOrderResponse = await axios.post(unifiedOrderUrl, orderParam.toString(), {
+      headers: {
+        ...commonHeaders,
+        'content-type': 'application/x-www-form-urlencoded',
+        'pragma': 'no-cache',
+        'cache-control': 'no-cache'
+      },
+      timeout: 10000
+    });
+
+    if (!unifiedOrderResponse.data || unifiedOrderResponse.data.code !== 200) {
+      return res.status(unifiedOrderResponse.data?.code || 500).json({
+        code: unifiedOrderResponse.data?.code || 500,
+        status: false,
+        message: '统一下单失败',
+        data: unifiedOrderResponse.data
+      });
+    }
+
+    const orderResult = unifiedOrderResponse.data.data || {};
+    const orderId = orderResult.orderId || orderResult.id;
+
+    if (!orderId) {
+      return res.status(500).json({
+        code: 500,
+        status: false,
+        message: '统一下单成功但未返回订单ID'
+      });
+    }
+
+    // 步骤3: 查询支付订单价格
+    console.log('步骤3: 查询支付订单价格, orderId:', orderId);
+    const queryOrderPriceUrl = `${baseUrl}/payApi/wechat/pay/queryOrderPrice`;
+    const orderIdParam = new URLSearchParams();
+    orderIdParam.append('orderId', String(orderId));
+
+    const queryOrderPriceResponse = await axios.post(queryOrderPriceUrl, orderIdParam.toString(), {
+      headers: {
+        ...commonHeaders,
+        'content-type': 'application/x-www-form-urlencoded',
+        'pragma': 'no-cache',
+        'cache-control': 'no-cache'
+      },
+      timeout: 10000
+    });
+
+    // 拼接收银台URL
+    const cashierUrl = `https://m.wespace.cn/CCN1008/#/pages/public/order/cashierView?orderId=${orderId}`;
+
+    // 返回完整的购买流程结果
+    res.json({
+      code: 200,
+      status: true,
+      message: '购买流程完成',
+      data: {
+        orderId: orderId,
+        cashierUrl: cashierUrl,
+        priceInfo: discountPriceResponse.data.data,
+        orderInfo: orderResult,
+        paymentPriceInfo: queryOrderPriceResponse.data?.data || queryOrderPriceResponse.data
+      }
+    });
+
+  } catch (error) {
+    console.error('购买流程失败:', error);
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null,
+      request: error.request ? {
+        method: error.config?.method,
+        url: error.config?.url,
+        data: error.config?.data
+      } : null
+    });
+
+    // 处理不同类型的错误
+    if (error.response) {
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '购买流程失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
+  }
+});
+
+/**
  * 获取商品详情（项目详情）
  * POST /api/digital-artworks/goods/ver/details
  * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/details
