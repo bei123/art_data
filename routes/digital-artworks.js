@@ -160,6 +160,7 @@ router.get('/', async (req, res) => {
     let query = `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at,
+        da.product_name, da.issue_batch, da.batch_quantity,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM digital_artworks da
       LEFT JOIN artists a ON da.artist_id = a.id
@@ -230,49 +231,63 @@ router.get('/', async (req, res) => {
         if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
           const externalList = response.data.data.qgList || [];
           
-          // 通过 goods_id 匹配外部数据
-          const externalMap = new Map();
+          // 创建两个 Map：一个按 goods_id 索引，一个按名称索引
+          const externalMapById = new Map();
+          const externalMapByName = new Map();
+          
           externalList.forEach(item => {
             if (item.goods_id) {
-              externalMap.set(item.goods_id, item);
+              externalMapById.set(item.goods_id, item);
+            }
+            // 按名称建立索引（用于匹配本地数据）
+            if (item.name) {
+              const nameKey = item.name.trim();
+              // 如果同一个名称有多个产品，保留第一个
+              if (!externalMapByName.has(nameKey)) {
+                externalMapByName.set(nameKey, item);
+              }
             }
           });
           
           // 融合外部数据到本地数据
           artworksWithProcessedImages = artworksWithProcessedImages.map(artwork => {
-            // 优先通过 goods_id 匹配（从外部数据中获取）
             let matched = null;
-            // 如果 artwork 有 goods_id（从外部数据中获取的），直接匹配
-            const artworkGoodsId = artwork.goods_id || (artwork.externalData && artwork.externalData.goods_id);
-            if (artworkGoodsId) {
-              matched = externalMap.get(artworkGoodsId);
+            
+            // 首先检查 artwork 是否已经有 goods_id（从之前的请求中获取的）
+            const existingGoodsId = artwork.goods_id || (artwork.externalData && artwork.externalData.goods_id);
+            if (existingGoodsId) {
+              matched = externalMapById.get(existingGoodsId);
             }
             
-            // 如果 goods_id 匹配失败，尝试通过名称匹配
-            if (!matched) {
-              for (const [goodsId, extItem] of externalMap.entries()) {
-                if (extItem.name === artwork.title || extItem.name === artwork.product_name) {
-                  matched = extItem;
-                  break;
-                }
-              }
+            // 如果 goods_id 匹配失败，通过 title 匹配 name 获取 goods_id
+            if (!matched && artwork.title) {
+              const titleKey = artwork.title.trim();
+              matched = externalMapByName.get(titleKey);
             }
             
-            if (matched) {
+            // 如果找到匹配的外部数据，进行融合
+            if (matched && matched.goods_id) {
               return {
                 ...artwork,
                 externalData: matched,
-                goods_id: matched.goods_id,
+                goods_id: matched.goods_id, // 从外部数据获取 goods_id
                 // 优先使用外部数据的图片和价格（如果本地没有）
-                image_url: artwork.image_url || matched.cover || artwork.image_url,
+                image_url: artwork.image_url || matched.cover || matched.home_image || matched.banner || artwork.image_url,
                 price: artwork.price || parseFloat(matched.price) || artwork.price,
                 // 补充外部数据字段
                 total_num: matched.total_num || artwork.batch_quantity,
+                goods_num: matched.goods_num || null,
                 cover: matched.cover,
                 banner: matched.banner,
-                home_image: matched.home_image
+                home_image: matched.home_image,
+                batch: matched.batch || artwork.issue_batch,
+                issue_status: matched.issue_status,
+                goods_version: matched.goods_version,
+                create_time: matched.create_time
               };
             }
+            
+            // 如果没有匹配到，返回原始数据（不包含 goods_id）
             return artwork;
           });
         }
