@@ -357,10 +357,11 @@ router.get('/:id', async (req, res) => {
 
     let result = {
       ...artworkData,
-      artist: artist,
-      externalData: null
+      artist: artist
     };
 
+    let obtainedGoodsId = null;
+    
     // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id
     if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0) {
       try {
@@ -400,7 +401,8 @@ router.get('/:id', async (req, res) => {
             const titleKey = result.title.trim();
             const matched = externalList.find(item => item.name && item.name.trim() === titleKey);
             if (matched && matched.goods_id) {
-              result.goods_id = matched.goods_id;
+              obtainedGoodsId = matched.goods_id;
+              result.goods_id = obtainedGoodsId;
             }
           }
         }
@@ -410,22 +412,29 @@ router.get('/:id', async (req, res) => {
       }
     }
 
-    // 如果提供了 goodsVerId，尝试获取外部详情数据
-    // 注意：goods_ver_id 不在数据库中，只能通过查询参数传入
-    const targetGoodsVerId = goodsVerId;
-    if (shouldFuse && targetGoodsVerId) {
+    // 如果获取到了 goods_id，使用它调用商品接口获取 goodsVerId
+    let targetGoodsVerId = goodsVerId; // 优先使用手动传入的 goodsVerId
+    if (shouldFuse && !targetGoodsVerId && obtainedGoodsId && usn) {
       try {
         const authorization = getAuthorization(req);
         
-        const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
-        const goodsParam = typeof targetGoodsVerId === 'object' 
-          ? JSON.stringify(targetGoodsVerId)
-          : JSON.stringify({ goodsVerId: String(targetGoodsVerId) });
+        // 构建商品接口的请求参数
+        const goodsParam = JSON.stringify({
+          goodsId: obtainedGoodsId,
+          buyerUsn: usn.trim(),
+          issueBatch: "1",
+          pageSize: "20",
+          currentPage: 1
+        });
         
+        const goodsListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
         const response = await axios.post(
-          goodsDetailUrl,
-          { goods: goodsParam },
+          goodsListUrl,
+          null,
           {
+            params: {
+              goods: goodsParam
+            },
             headers: {
               'pragma': 'no-cache',
               'cache-control': 'no-cache',
@@ -438,76 +447,35 @@ router.get('/:id', async (req, res) => {
               'sec-fetch-dest': 'empty',
               'referer': 'https://m.wespace.cn/',
               'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-              'priority': 'u=1, i',
-              'content-type': 'application/x-www-form-urlencoded'
+              'priority': 'u=1, i'
             },
             timeout: 10000
           }
         );
         
         if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
-          const externalData = response.data.data;
-          result.externalData = externalData;
-          
-          // 融合外部数据到本地数据
-          if (externalData.goodsVer) {
-            const goodsVer = externalData.goodsVer;
-            
-            // 如果本地没有注册证书号，从外部数据中获取
-            if ((!result.registration_certificate || result.registration_certificate.trim() === '') && goodsVer.issueInfo) {
-              const issueInfo = parseIssueInfo(goodsVer.issueInfo);
-              if (issueInfo && issueInfo.register_cer_no) {
-                result.registration_certificate = issueInfo.register_cer_no;
-              }
-            }
-            
-            // 补充更丰富的数据
-            if (goodsVer.goodsVerDes && !result.description) {
-              result.description = goodsVer.goodsVerDes;
-            }
-            
-            if (goodsVer.goodsPrice && !result.price) {
-              result.price = parseFloat(goodsVer.goodsPrice) || result.price;
-            }
-            
-            if (goodsVer.goodsVerCover && !result.image_url) {
-              result.image_url = goodsVer.goodsVerCover;
-            }
-            
-            // 添加外部数据的字段
-            result.goods_ver_id = goodsVer.goodsVerId || result.goods_ver_id;
-            result.goods_id = goodsVer.goodsId || result.goods_id;
-            result.issue_year = goodsVer.issueYear || result.issue_year;
-            result.issue_batch = goodsVer.issueBatch || result.issue_batch;
-            result.batch_quantity = parseInt(goodsVer.totalNum) || result.batch_quantity;
-            result.goods_number = parseInt(goodsVer.goodsNumber) || null;
-          }
-          
-          // 如果有 IssueInfo，补充项目信息
-          if (externalData.IssueInfo) {
-            result.projectInfo = externalData.IssueInfo;
-          }
-          
-          // 如果有 goods 基础信息，补充商品信息
-          if (externalData.goods) {
-            result.goodsInfo = externalData.goods;
-          }
-          
-          // 如果有白皮书，补充白皮书信息
-          if (externalData.goodsWhitePaper) {
-            result.whitePaper = externalData.goodsWhitePaper;
+          const goodsList = response.data.data.list || [];
+          // 获取第一个商品的 goodsVerId
+          if (goodsList.length > 0 && goodsList[0].goodsVerId) {
+            targetGoodsVerId = goodsList[0].goodsVerId;
+            result.goods_ver_id = targetGoodsVerId;
           }
         }
-      } catch (externalError) {
-        console.error('获取外部商品详情失败:', externalError);
-        // 继续返回本地数据，不中断请求
+      } catch (goodsError) {
+        console.error('获取商品列表失败（用于获取goodsVerId）:', goodsError);
+        // 继续执行，不中断请求
       }
+    }
+
+    // 如果手动传入了 goodsVerId，也添加到结果中
+    if (targetGoodsVerId && !result.goods_ver_id) {
+      result.goods_ver_id = targetGoodsVerId;
     }
 
     res.json(result);
     
     // 写入redis缓存（如果融合了外部数据，缓存时间缩短为1小时）
-    const cacheTTL = shouldFuse && targetGoodsVerId ? 3600 : 604800;
+    const cacheTTL = shouldFuse && (targetGoodsVerId || obtainedGoodsId) ? 3600 : 604800;
     await redisClient.setEx(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id, cacheTTL, JSON.stringify(result));
   } catch (error) {
     console.error('获取数字艺术品详情失败:', error);
