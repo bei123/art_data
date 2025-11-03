@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const crypto = require('crypto');
+const db = require('../db');
 
 /**
  * MD5加密函数
@@ -362,6 +363,132 @@ router.post('/user/login', async (req, res) => {
         const httpStatus = (response.data.code && response.data.code >= 400) ? response.data.code : 400;
         console.log('检测到业务错误，返回HTTP状态码:', httpStatus, '业务错误码:', response.data.code);
         return res.status(httpStatus).json(response.data);
+      }
+    }
+
+    // 登录成功，将用户数据写入数据库
+    if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+      try {
+        const userData = response.data.data;
+        const externalUser = userData.user;
+        
+        if (externalUser && externalUser.usn) {
+          // 通过手机号查找 wx_users 表中的用户
+          let wxUserId = null;
+          
+          if (externalUser.mobile) {
+            const [usersByPhone] = await db.query(
+              'SELECT id FROM wx_users WHERE phone = ?',
+              [externalUser.mobile]
+            );
+            if (usersByPhone.length > 0) {
+              wxUserId = usersByPhone[0].id;
+            }
+          }
+
+          if (!wxUserId) {
+            console.warn('未找到对应的wx_users用户, 手机号:', externalUser.mobile, 'usn:', externalUser.usn);
+            // 如果找不到对应的wx_users用户，可以选择创建或跳过
+            // 这里选择跳过，只记录警告日志
+          } else {
+            // 找到了对应的wx_users用户，保存/更新外部用户数据到 external_users 表
+            // 检查 external_users 表中是否已存在该用户的记录
+            const [existingExternalUsers] = await db.query(
+              'SELECT id FROM external_users WHERE wx_user_id = ? OR usn = ?',
+              [wxUserId, externalUser.usn]
+            );
+
+            if (existingExternalUsers.length > 0) {
+              // 已存在，更新数据
+              const externalUserId = existingExternalUsers[0].id;
+              await db.query(
+                `UPDATE external_users SET
+                  external_user_id = ?,
+                  username = ?,
+                  truename = ?,
+                  nickname = ?,
+                  mobile = ?,
+                  avatar = ?,
+                  access_token = ?,
+                  refresh_token = ?,
+                  ws_token = ?,
+                  node_org = ?,
+                  im_token = ?,
+                  identity_authentication = ?,
+                  postcode = ?,
+                  nation = ?,
+                  invite_code = ?,
+                  channel = ?,
+                  chain_status = ?,
+                  status = ?,
+                  id_card_no = ?,
+                  updated_at = NOW()
+                WHERE id = ?`,
+                [
+                  externalUser.id || externalUser.userId,
+                  externalUser.username,
+                  externalUser.truename,
+                  externalUser.nickname,
+                  externalUser.mobile,
+                  externalUser.avatar,
+                  userData.accessToken,
+                  userData.refreshToken,
+                  userData.wsToken,
+                  userData.nodeOrg,
+                  externalUser.imToken,
+                  externalUser.identityAuthentication,
+                  externalUser.postcode,
+                  externalUser.nation,
+                  externalUser.inviteCode,
+                  externalUser.channel,
+                  externalUser.chainStatus,
+                  externalUser.status,
+                  externalUser.idCardNo,
+                  externalUserId
+                ]
+              );
+              console.log('已更新external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn);
+            } else {
+              // 不存在，插入新记录
+              const [result] = await db.query(
+                `INSERT INTO external_users (
+                  wx_user_id, usn, external_user_id, username, truename, nickname, mobile, avatar,
+                  access_token, refresh_token, ws_token, node_org, im_token,
+                  identity_authentication, postcode, nation, invite_code, channel,
+                  chain_status, status, id_card_no, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [
+                  wxUserId,
+                  externalUser.usn,
+                  externalUser.id || externalUser.userId,
+                  externalUser.username,
+                  externalUser.truename,
+                  externalUser.nickname,
+                  externalUser.mobile,
+                  externalUser.avatar,
+                  userData.accessToken,
+                  userData.refreshToken,
+                  userData.wsToken,
+                  userData.nodeOrg,
+                  externalUser.imToken,
+                  externalUser.identityAuthentication,
+                  externalUser.postcode,
+                  externalUser.nation,
+                  externalUser.inviteCode,
+                  externalUser.channel,
+                  externalUser.chainStatus,
+                  externalUser.status,
+                  externalUser.idCardNo
+                ]
+              );
+              console.log('已创建external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn, '外部用户数据ID:', result.insertId);
+            }
+          }
+        }
+      } catch (dbError) {
+        // 数据库操作失败不影响登录流程，只记录错误
+        console.error('保存用户数据到数据库失败:', dbError);
+        // 继续返回登录响应
       }
     }
 
