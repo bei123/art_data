@@ -47,21 +47,39 @@ router.get('/proxy', async (req, res) => {
       });
     }
 
+    // 构建请求头，只使用用户明确提供的 authorization（必须是 Bearer token）
+    const requestHeaders = {
+      'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Referer': decodedTargetUrl,
+      'Cache-Control': 'no-cache',
+    };
+    
+    // 只在明确提供 authorization 且是 Bearer token 时才添加
+    // 不使用 Basic Auth，因为可能导致不必要的重定向
+    if (authorization && authorization.trim()) {
+      // 确保是 Bearer token，而不是 Basic Auth
+      const authValue = authorization.trim();
+      if (authValue.startsWith('Bearer ') || authValue.startsWith('bearer ')) {
+        requestHeaders['Authorization'] = authValue;
+      } else {
+        // 如果不是 Bearer，可能是完整格式，直接使用
+        requestHeaders['Authorization'] = authValue;
+      }
+    }
+
     // 请求目标页面
+    // 注意：不使用 axios 的 auth 配置选项，避免自动添加 Basic Auth
     const response = await axios.get(decodedTargetUrl, {
-      headers: {
-        ...(authorization ? { 'Authorization': authorization } : {}),
-        'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': decodedTargetUrl,
-        'Cache-Control': 'no-cache',
-      },
-      maxRedirects: 5,
+      headers: requestHeaders,
+      maxRedirects: 3, // 允许必要的重定向（如 HTTP->HTTPS），但限制次数避免意外跳转
       timeout: 30000,
       responseType: 'text',
       validateStatus: (status) => status < 500, // 不抛出4xx错误
+      // 明确不使用 auth 配置，避免 axios 自动添加 Basic Auth
+      auth: undefined,
     });
 
     let htmlContent = response.data;
