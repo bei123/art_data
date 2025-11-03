@@ -31,7 +31,7 @@ const EXTERNAL_API_CONFIG = {
 router.post('/create', async (req, res) => {
   try {
     const authToken = req.headers.authorization;
-    
+
     // 验证Authorization头部
     if (!authToken || typeof authToken !== 'string' || authToken.trim().length === 0) {
       return res.status(401).json({
@@ -60,7 +60,7 @@ router.post('/create', async (req, res) => {
 
   } catch (error) {
     console.error('创建发行铸造失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -98,7 +98,7 @@ router.put('/update/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const authToken = req.headers.authorization;
-    
+
     // 参数验证
     if (!id || isNaN(parseInt(id))) {
       return res.status(400).json({
@@ -137,7 +137,7 @@ router.put('/update/:id', async (req, res) => {
 
   } catch (error) {
     console.error('更新发行铸造失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -175,7 +175,7 @@ router.delete('/delete/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const authToken = req.headers.authorization;
-    
+
     // 参数验证
     if (!id || isNaN(parseInt(id))) {
       return res.status(400).json({
@@ -212,7 +212,7 @@ router.delete('/delete/:id', async (req, res) => {
 
   } catch (error) {
     console.error('删除发行铸造失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -250,7 +250,7 @@ router.get('/list', async (req, res) => {
   try {
     const { currentPage, pageSize, status, type } = req.query;
     const authToken = req.headers.authorization;
-    
+
     // 参数验证
     if (!currentPage || isNaN(parseInt(currentPage)) || parseInt(currentPage) < 1) {
       return res.status(400).json({
@@ -312,7 +312,7 @@ router.get('/list', async (req, res) => {
 
   } catch (error) {
     console.error('获取发行铸造列表失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -375,9 +375,9 @@ router.post('/product/insert', async (req, res) => {
 
     // 必需参数验证
     const requiredFields = [
-      'prBasicId', 'prIssueId', 'prIssueName', 'prIssueCover', 
-      'prPrice', 'prNum', 'prLockNum', 'prIssueFile', 
-      'registerCerNo', 'issueRightsType', 'issueRightsDesc', 
+      'prBasicId', 'prIssueId', 'prIssueName', 'prIssueCover',
+      'prPrice', 'prNum', 'prLockNum', 'prIssueFile',
+      'registerCerNo', 'issueRightsType', 'issueRightsDesc',
       'holderRightsDesc', 'issueAssetsNum'
     ];
 
@@ -462,10 +462,10 @@ router.post('/product/insert', async (req, res) => {
     const validateRightsDesc = (desc, name) => {
       for (let i = 0; i < desc.length; i++) {
         const item = desc[i];
-        if (!item.num || !item.value || 
-            typeof item.num !== 'number' || 
-            typeof item.value !== 'string' || 
-            item.value.trim().length === 0) {
+        if (!item.num || !item.value ||
+          typeof item.num !== 'number' ||
+          typeof item.value !== 'string' ||
+          item.value.trim().length === 0) {
           return res.status(400).json({
             code: 400,
             status: false,
@@ -551,7 +551,7 @@ router.post('/product/insert', async (req, res) => {
 
   } catch (error) {
     console.error('产品信息录入失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -589,7 +589,7 @@ router.post('/product/insert', async (req, res) => {
 router.post('/assets/list', async (req, res) => {
   try {
     const { currentPage, pageSize, prIssueId } = req.body;
-    
+
     // 必需参数验证
     if (!prIssueId || typeof prIssueId !== 'string' || prIssueId.trim().length === 0) {
       return res.status(400).json({
@@ -651,7 +651,7 @@ router.post('/assets/list', async (req, res) => {
 
   } catch (error) {
     console.error('获取已铸造资产列表失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -689,7 +689,7 @@ router.post('/assets/list', async (req, res) => {
 router.post('/product/details', async (req, res) => {
   try {
     const { prIssueId } = req.query;
-    
+
     // 必需参数验证
     if (!prIssueId || typeof prIssueId !== 'string' || prIssueId.trim().length === 0) {
       return res.status(400).json({
@@ -720,7 +720,7 @@ router.post('/product/details', async (req, res) => {
 
   } catch (error) {
     console.error('获取产品铸造详情失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -758,7 +758,7 @@ router.get('/detail/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const authToken = req.headers.authorization;
-    
+
     // 参数验证
     if (!id || isNaN(parseInt(id))) {
       return res.status(400).json({
@@ -795,7 +795,7 @@ router.get('/detail/:id', async (req, res) => {
 
   } catch (error) {
     console.error('获取发行铸造详情失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应

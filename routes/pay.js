@@ -33,12 +33,12 @@ async function clearPhysicalCategoriesCache() {
 const WX_PAY_CONFIG = {
     appId: process.env.WX_APPID, // 小程序appid
     mchId: process.env.WX_PAY_MCH_ID, // 商户号
-      key: process.env.WX_PAY_KEY, // API密钥
-  serialNo: process.env.WX_PAY_SERIAL_NO, // 商户证书序列号
-  publicKeyId: process.env.WX_PUB_ID, // 微信支付公钥ID
-  privateKey: fs.readFileSync(path.join(__dirname, '../ssl/apiclient_key.pem')), // 商户私钥
+    key: process.env.WX_PAY_KEY, // API密钥
+    serialNo: process.env.WX_PAY_SERIAL_NO, // 商户证书序列号
+    publicKeyId: process.env.WX_PUB_ID, // 微信支付公钥ID
+    privateKey: fs.readFileSync(path.join(__dirname, '../ssl/apiclient_key.pem')), // 商户私钥
     notifyUrl: 'https://api.wx.2000gallery.art:2000/api/wx/pay/notify', // 支付回调地址
-    notify_url:'https://api.wx.2000gallery.art:2000/api/wx/pay/refund/notify', // 退款回调地址
+    notify_url: 'https://api.wx.2000gallery.art:2000/api/wx/pay/refund/notify', // 退款回调地址
 
     spbillCreateIp: '127.0.0.1' // 终端IP
 };
@@ -70,13 +70,13 @@ function generateSignV3(method, url, timestamp, nonceStr, body) {
 
 // 替换验签函数
 function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body }) {
-  const publicKey = getWechatpayPublicKey(serial);
-  if (!publicKey) return false;
-  const message = `${timestamp}\n${nonce}\n${body}\n`;
-  const verify = crypto.createVerify('RSA-SHA256');
-  verify.update(message);
-  verify.end();
-  return verify.verify(publicKey, signature, 'base64');
+    const publicKey = getWechatpayPublicKey(serial);
+    if (!publicKey) return false;
+    const message = `${timestamp}\n${nonce}\n${body}\n`;
+    const verify = crypto.createVerify('RSA-SHA256');
+    verify.update(message);
+    verify.end();
+    return verify.verify(publicKey, signature, 'base64');
 }
 console.log('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key.length);
 // 解密回调数据
@@ -120,40 +120,40 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
         if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的openid' });
         }
-        
+
         if (!total_fee || isNaN(parseFloat(total_fee)) || parseFloat(total_fee) <= 0) {
             return res.status(400).json({ error: '缺少有效的支付金额' });
         }
-        
+
         if (!body || typeof body !== 'string' || body.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的商品描述' });
         }
-        
+
         if (body.length > 128) {
             return res.status(400).json({ error: '商品描述长度不能超过128个字符' });
         }
-        
+
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的订单号' });
         }
-        
+
         if (out_trade_no.length > 64) {
             return res.status(400).json({ error: '订单号长度不能超过64个字符' });
         }
-        
+
         if (!cart_items || !Array.isArray(cart_items) || cart_items.length === 0) {
             return res.status(400).json({ error: '缺少有效的购物车商品' });
         }
-        
+
         if (cart_items.length > 20) {
             return res.status(400).json({ error: '购物车商品数量不能超过20个' });
         }
-        
+
         // 验证地址ID（可选，但建议提供）
         if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
             return res.status(400).json({ error: '地址ID格式无效' });
         }
-        
+
         // 清理输入
         const cleanOpenid = openid.trim();
         const cleanTotalFee = parseFloat(total_fee);
@@ -186,25 +186,25 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
 
             if (existingOrders.length > 0) {
                 const existingOrder = existingOrders[0];
-                
+
                 // 如果订单已支付成功，不允许重复支付
                 if (existingOrder.trade_state === 'SUCCESS') {
                     await connection.rollback();
                     return res.status(400).json({ error: '订单已支付成功，不能重复支付' });
                 }
-                
+
                 // 如果订单已退款，不允许重复支付
                 if (existingOrder.trade_state === 'REFUND') {
                     await connection.rollback();
                     return res.status(400).json({ error: '订单已退款，不能重复支付' });
                 }
-                
+
                 // 检查是否是同一用户的订单
                 if (existingOrder.user_id !== userId) {
                     await connection.rollback();
                     return res.status(403).json({ error: '只能支付自己的订单' });
                 }
-                
+
                 // 如果是同一用户的未完成订单，允许重复支付，但需要幂等性锁防止并发
                 const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
                 const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
@@ -357,7 +357,7 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
             const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
             let orderId;
-            
+
             // 检查是否已存在订单
             if (existingOrders.length > 0) {
                 // 更新已存在的订单
@@ -366,7 +366,7 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
                     'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, body = ?, updated_at = NOW() WHERE id = ?',
                     [cleanTotalFee, actualTotalFee, availableDiscount, cleanBody, orderId]
                 );
-                
+
                 // 删除旧的订单项
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
@@ -509,7 +509,7 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
         ) {
             return res.status(400).json({ error: '缺少有效的商品ID' });
         }
-        
+
         // 验证地址ID（可选，但建议提供）
         if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
             return res.status(400).json({ error: '地址ID格式无效' });
@@ -547,25 +547,25 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
 
             if (existingOrders.length > 0) {
                 const existingOrder = existingOrders[0];
-                
+
                 // 如果订单已支付成功，不允许重复支付
                 if (existingOrder.trade_state === 'SUCCESS') {
                     await connection.rollback();
                     return res.status(400).json({ error: '订单已支付成功，不能重复支付' });
                 }
-                
+
                 // 如果订单已退款，不允许重复支付
                 if (existingOrder.trade_state === 'REFUND') {
                     await connection.rollback();
                     return res.status(400).json({ error: '订单已退款，不能重复支付' });
                 }
-                
+
                 // 检查是否是同一用户的订单
                 if (existingOrder.user_id !== userId) {
                     await connection.rollback();
                     return res.status(403).json({ error: '只能支付自己的订单' });
                 }
-                
+
                 // 如果是同一用户的未完成订单，允许重复支付，但需要幂等性锁防止并发
                 const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
                 const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
@@ -688,7 +688,7 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
             const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
             let orderId;
-            
+
             // 检查是否已存在订单
             if (existingOrders.length > 0) {
                 // 更新已存在的订单
@@ -697,7 +697,7 @@ router.post('/singleorder', authenticateToken, async (req, res) => {
                     'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, body = ?, updated_at = NOW() WHERE id = ?',
                     [total_fee, actualTotalFee, availableDiscount, cleanBody, orderId]
                 );
-                
+
                 // 删除旧的订单项
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
@@ -870,24 +870,24 @@ router.post('/notify', async (req, res) => {
                 success_time, // 支付完成时间
                 amount // 订单金额
             } = callbackData;
-                         // 开始事务
-             const connection = await db.getConnection();
-             await connection.beginTransaction();
-             try {
-                 // 更新订单状态前先判断是否已退款，同时获取用户ID
-                 const [orders] = await connection.query(
-                     'SELECT trade_state, user_id FROM orders WHERE out_trade_no = ?',
-                     [out_trade_no]
-                 );
-                                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
-                     console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
-                     await connection.commit();
-                     return res.json({ code: 'SUCCESS', message: '订单已退款，不再覆盖' });
-                 }
-                 
-                 const userId = orders[0].user_id;
-                 
-                 // 只有不是REFUND才更新为SUCCESS
+            // 开始事务
+            const connection = await db.getConnection();
+            await connection.beginTransaction();
+            try {
+                // 更新订单状态前先判断是否已退款，同时获取用户ID
+                const [orders] = await connection.query(
+                    'SELECT trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                    [out_trade_no]
+                );
+                if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
+                    console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
+                    await connection.commit();
+                    return res.json({ code: 'SUCCESS', message: '订单已退款，不再覆盖' });
+                }
+
+                const userId = orders[0].user_id;
+
+                // 只有不是REFUND才更新为SUCCESS
                 await connection.query(
                     `UPDATE orders SET 
               transaction_id = ?,
@@ -906,22 +906,22 @@ router.post('/notify', async (req, res) => {
                     WHERE o.out_trade_no = ?
                 `, [out_trade_no]);
                 console.log('订单项:', orderItems);
-                
-                                 // 批量更新商品库存
-                 const rightUpdates = [];
-                 const artworkUpdates = [];
-                 const digitalUpdates = [];
-                 
-                 for (const item of orderItems) {
-                     if (item.type === 'right') {
-                         rightUpdates.push([item.quantity, item.right_id]);
-                     } else if (item.type === 'artwork') {
-                         artworkUpdates.push([item.quantity, item.artwork_id]);
-                     } else if (item.type === 'digital') {
-                         digitalUpdates.push([item.quantity, item.digital_artwork_id]);
-                     }
-                 }
-                
+
+                // 批量更新商品库存
+                const rightUpdates = [];
+                const artworkUpdates = [];
+                const digitalUpdates = [];
+
+                for (const item of orderItems) {
+                    if (item.type === 'right') {
+                        rightUpdates.push([item.quantity, item.right_id]);
+                    } else if (item.type === 'artwork') {
+                        artworkUpdates.push([item.quantity, item.artwork_id]);
+                    } else if (item.type === 'digital') {
+                        digitalUpdates.push([item.quantity, item.digital_artwork_id]);
+                    }
+                }
+
                 // 批量更新rights库存
                 if (rightUpdates.length > 0) {
                     for (const [quantity, rightId] of rightUpdates) {
@@ -932,56 +932,56 @@ router.post('/notify', async (req, res) => {
                     }
                     console.log(`批量扣减right库存: ${rightUpdates.length}条记录`);
                 }
-                
-                                                  // 批量更新artworks库存
-                  if (artworkUpdates.length > 0) {
-                      for (const [quantity, artworkId] of artworkUpdates) {
-                          await connection.query(
-                              'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
-                              [quantity, artworkId]
-                          );
-                      }
-                      console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
-                  }
-                  
-                  // 批量更新digital_artworks库存
-                  if (digitalUpdates.length > 0) {
-                      for (const [quantity, digitalArtworkId] of digitalUpdates) {
-                          await connection.query(
-                              'UPDATE digital_artworks SET batch_quantity = batch_quantity - ? WHERE id = ?',
-                              [quantity, digitalArtworkId]
-                          );
-                      }
-                      console.log(`批量扣减digital_artwork库存: ${digitalUpdates.length}条记录`);
-                  }
-                  
-                  // 处理数字身份购买记录
-                  const digitalPurchaseUpdates = [];
-                  for (const item of orderItems) {
-                      if (item.type === 'digital') {
-                          digitalPurchaseUpdates.push([item.order_id, item.digital_artwork_id, item.quantity, item.price]);
-                      }
-                  }
-                 
-                                   if (digitalPurchaseUpdates.length > 0) {
-                      for (const [orderId, digitalArtworkId, quantity, price] of digitalPurchaseUpdates) {
-                          // 计算抵扣金额（这里可以根据业务逻辑调整）
-                          const discountAmount = 0; // 数字身份购买暂时不设置抵扣
-                          
-                                                     await connection.query(
-                               'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
-                               [userId, digitalArtworkId, discountAmount, orderId]
-                           );
-                      }
-                      console.log(`记录数字身份购买: ${digitalPurchaseUpdates.length}条记录`);
-                  }
-                 
-                 await connection.commit();
-                 console.log('支付回调处理完成，库存已更新，数字身份购买已记录');
-                
+
+                // 批量更新artworks库存
+                if (artworkUpdates.length > 0) {
+                    for (const [quantity, artworkId] of artworkUpdates) {
+                        await connection.query(
+                            'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
+                            [quantity, artworkId]
+                        );
+                    }
+                    console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
+                }
+
+                // 批量更新digital_artworks库存
+                if (digitalUpdates.length > 0) {
+                    for (const [quantity, digitalArtworkId] of digitalUpdates) {
+                        await connection.query(
+                            'UPDATE digital_artworks SET batch_quantity = batch_quantity - ? WHERE id = ?',
+                            [quantity, digitalArtworkId]
+                        );
+                    }
+                    console.log(`批量扣减digital_artwork库存: ${digitalUpdates.length}条记录`);
+                }
+
+                // 处理数字身份购买记录
+                const digitalPurchaseUpdates = [];
+                for (const item of orderItems) {
+                    if (item.type === 'digital') {
+                        digitalPurchaseUpdates.push([item.order_id, item.digital_artwork_id, item.quantity, item.price]);
+                    }
+                }
+
+                if (digitalPurchaseUpdates.length > 0) {
+                    for (const [orderId, digitalArtworkId, quantity, price] of digitalPurchaseUpdates) {
+                        // 计算抵扣金额（这里可以根据业务逻辑调整）
+                        const discountAmount = 0; // 数字身份购买暂时不设置抵扣
+
+                        await connection.query(
+                            'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
+                            [userId, digitalArtworkId, discountAmount, orderId]
+                        );
+                    }
+                    console.log(`记录数字身份购买: ${digitalPurchaseUpdates.length}条记录`);
+                }
+
+                await connection.commit();
+                console.log('支付回调处理完成，库存已更新，数字身份购买已记录');
+
                 // 清理相关缓存
                 await clearPhysicalCategoriesCache();
-                
+
                 res.json({
                     code: 'SUCCESS',
                     message: 'OK'
@@ -1018,11 +1018,11 @@ router.post('/close', authenticateToken, async (req, res) => {
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的商户订单号' });
         }
-        
+
         if (out_trade_no.length > 64) {
             return res.status(400).json({ error: '商户订单号长度不能超过64个字符' });
         }
-        
+
         const cleanOutTradeNo = out_trade_no.trim();
 
         // 构建请求参数
@@ -1090,35 +1090,35 @@ router.post('/refund', authenticateToken, async (req, res) => {
         if (!out_refund_no || typeof out_refund_no !== 'string' || out_refund_no.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的退款单号' });
         }
-        
+
         if (out_refund_no.length > 64) {
             return res.status(400).json({ error: '退款单号长度不能超过64个字符' });
         }
-        
+
         if (!amount || typeof amount !== 'object') {
             return res.status(400).json({ error: '缺少有效的金额信息' });
         }
-        
+
         if (!amount.refund || isNaN(parseFloat(amount.refund)) || parseFloat(amount.refund) <= 0) {
             return res.status(400).json({ error: '缺少有效的退款金额' });
         }
-        
+
         if (!amount.total || isNaN(parseFloat(amount.total)) || parseFloat(amount.total) <= 0) {
             return res.status(400).json({ error: '缺少有效的订单总金额' });
         }
-        
+
         if (!amount.currency || typeof amount.currency !== 'string' || amount.currency !== 'CNY') {
             return res.status(400).json({ error: '缺少有效的货币类型' });
         }
-        
+
         if (parseFloat(amount.refund) > parseFloat(amount.total)) {
             return res.status(400).json({ error: '退款金额不能超过订单总金额' });
         }
-        
+
         if (reason && (typeof reason !== 'string' || reason.length > 80)) {
             return res.status(400).json({ error: '退款原因长度不能超过80个字符' });
         }
-        
+
         // 清理输入
         const cleanOutRefundNo = out_refund_no.trim();
         const cleanReason = reason ? reason.trim() : '';
@@ -1187,19 +1187,19 @@ router.post('/refund/approve', authenticateToken, async (req, res) => {
         if (!refund_id || isNaN(parseInt(refund_id)) || parseInt(refund_id) <= 0) {
             return res.status(400).json({ error: '缺少有效的退款ID' });
         }
-        
+
         if (typeof approve !== 'boolean') {
             return res.status(400).json({ error: '缺少有效的审批结果' });
         }
-        
+
         if (!approve && (!reject_reason || typeof reject_reason !== 'string' || reject_reason.trim().length === 0)) {
             return res.status(400).json({ error: '拒绝退款必须提供原因' });
         }
-        
+
         if (reject_reason && reject_reason.length > 200) {
             return res.status(400).json({ error: '拒绝原因长度不能超过200个字符' });
         }
-        
+
         // 清理输入
         const cleanRefundId = parseInt(refund_id);
         const cleanRejectReason = reject_reason ? reject_reason.trim() : '';
@@ -1347,15 +1347,15 @@ router.get('/refund/requests', authenticateToken, async (req, res) => {
         if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
             return res.status(400).json({ error: '页码必须是正整数' });
         }
-        
+
         if (limit && (isNaN(parseInt(limit)) || parseInt(limit) <= 0 || parseInt(limit) > 100)) {
             return res.status(400).json({ error: '每页数量必须在1-100之间' });
         }
-        
+
         if (status && !['PENDING', 'APPROVED', 'REJECTED', 'PROCESSING', 'SUCCESS', 'FAILED'].includes(status)) {
             return res.status(400).json({ error: '无效的状态值' });
         }
-        
+
         // 清理输入
         const cleanPage = parseInt(page);
         const cleanLimit = parseInt(limit);
@@ -1412,9 +1412,9 @@ router.get('/refund/requests/:id', authenticateToken, async (req, res) => {
         if (!refundId || isNaN(parseInt(refundId)) || parseInt(refundId) <= 0) {
             return res.status(400).json({ error: '无效的退款申请ID' });
         }
-        
+
         const cleanRefundId = parseInt(refundId);
-        
+
         const [refunds] = await db.query(
             'SELECT * FROM refund_requests WHERE id = ?',
             [cleanRefundId]
@@ -1499,7 +1499,7 @@ router.post('/refund/notify', async (req, res) => {
                 console.log('【退款回调】重复回调，已忽略:', callbackData.out_refund_no);
                 return res.json({ code: 'SUCCESS', message: '重复回调，已忽略' });
             }
-            
+
             console.log('【退款回调】退款成功回调数据:', callbackData);
             const {
                 out_refund_no, // 商户退款单号
@@ -1521,22 +1521,22 @@ router.post('/refund/notify', async (req, res) => {
                     JOIN orders o ON oi.order_id = o.id
                     WHERE o.out_trade_no = ?
                 `, [out_trade_no]);
-                
-                                 // 批量更新库存
-                 const rightUpdates = [];
-                 const artworkUpdates = [];
-                 const digitalUpdates = [];
-                 
-                 for (const item of orderItems) {
-                     if (item.type === 'right') {
-                         rightUpdates.push([item.quantity, item.right_id]);
-                     } else if (item.type === 'artwork') {
-                         artworkUpdates.push([item.quantity, item.artwork_id]);
-                     } else if (item.type === 'digital') {
-                         digitalUpdates.push([item.quantity, item.digital_artwork_id]);
-                     }
-                 }
-                
+
+                // 批量更新库存
+                const rightUpdates = [];
+                const artworkUpdates = [];
+                const digitalUpdates = [];
+
+                for (const item of orderItems) {
+                    if (item.type === 'right') {
+                        rightUpdates.push([item.quantity, item.right_id]);
+                    } else if (item.type === 'artwork') {
+                        artworkUpdates.push([item.quantity, item.artwork_id]);
+                    } else if (item.type === 'digital') {
+                        digitalUpdates.push([item.quantity, item.digital_artwork_id]);
+                    }
+                }
+
                 // 批量更新rights库存
                 if (rightUpdates.length > 0) {
                     for (const [quantity, rightId] of rightUpdates) {
@@ -1546,51 +1546,51 @@ router.post('/refund/notify', async (req, res) => {
                         );
                     }
                 }
-                
-                                                  // 批量更新artworks库存
-                  if (artworkUpdates.length > 0) {
-                      for (const [quantity, artworkId] of artworkUpdates) {
-                          await connection.query(
-                              'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
-                              [quantity, artworkId]
-                          );
-                      }
-                  }
-                  
-                  // 批量更新digital_artworks库存
-                  if (digitalUpdates.length > 0) {
-                      for (const [quantity, digitalArtworkId] of digitalUpdates) {
-                          await connection.query(
-                              'UPDATE digital_artworks SET batch_quantity = batch_quantity + ? WHERE id = ?',
-                              [quantity, digitalArtworkId]
-                          );
-                      }
-                      console.log('【退款回调】回补digital_artwork库存:', digitalUpdates.length, '条记录');
-                  }
-                 
-                                   // 处理数字身份购买记录回滚
-                  const orderIds = [];
-                  for (const item of orderItems) {
-                      if (item.type === 'digital') {
-                          orderIds.push(item.order_id);
-                      }
-                  }
-                  
-                  if (orderIds.length > 0) {
-                      // 删除相关的数字身份购买记录（基于订单号）
-                      await connection.query(
-                          'DELETE FROM digital_identity_purchases WHERE order_id IN (?)',
-                          [orderIds]
-                      );
-                      console.log('【退款回调】删除数字身份购买记录:', orderIds.length, '条');
-                  }
-                 
-                 await connection.commit();
-                 console.log('【退款回调】库存回补完成，数字身份购买记录已删除');
-                
+
+                // 批量更新artworks库存
+                if (artworkUpdates.length > 0) {
+                    for (const [quantity, artworkId] of artworkUpdates) {
+                        await connection.query(
+                            'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
+                            [quantity, artworkId]
+                        );
+                    }
+                }
+
+                // 批量更新digital_artworks库存
+                if (digitalUpdates.length > 0) {
+                    for (const [quantity, digitalArtworkId] of digitalUpdates) {
+                        await connection.query(
+                            'UPDATE digital_artworks SET batch_quantity = batch_quantity + ? WHERE id = ?',
+                            [quantity, digitalArtworkId]
+                        );
+                    }
+                    console.log('【退款回调】回补digital_artwork库存:', digitalUpdates.length, '条记录');
+                }
+
+                // 处理数字身份购买记录回滚
+                const orderIds = [];
+                for (const item of orderItems) {
+                    if (item.type === 'digital') {
+                        orderIds.push(item.order_id);
+                    }
+                }
+
+                if (orderIds.length > 0) {
+                    // 删除相关的数字身份购买记录（基于订单号）
+                    await connection.query(
+                        'DELETE FROM digital_identity_purchases WHERE order_id IN (?)',
+                        [orderIds]
+                    );
+                    console.log('【退款回调】删除数字身份购买记录:', orderIds.length, '条');
+                }
+
+                await connection.commit();
+                console.log('【退款回调】库存回补完成，数字身份购买记录已删除');
+
                 // 清理相关缓存
                 await clearPhysicalCategoriesCache();
-                
+
                 // 只更新refund_requests表的处理状态
                 try {
                     await connection.query(
@@ -1651,11 +1651,11 @@ router.post('/sign', authenticateToken, async (req, res) => {
         if (!prepay_id || typeof prepay_id !== 'string' || prepay_id.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的prepay_id' });
         }
-        
+
         if (prepay_id.length > 64) {
             return res.status(400).json({ error: 'prepay_id长度不能超过64个字符' });
         }
-        
+
         const cleanPrepayId = prepay_id.trim();
 
         // 构建签名参数
@@ -1694,11 +1694,11 @@ router.get('/query', authenticateToken, async (req, res) => {
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的商户订单号' });
         }
-        
+
         if (out_trade_no.length > 64) {
             return res.status(400).json({ error: '商户订单号长度不能超过64个字符' });
         }
-        
+
         const cleanOutTradeNo = out_trade_no.trim();
 
         // 生成签名所需的参数
@@ -1798,7 +1798,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
             if (!tradeState) {
                 return 'unknown';
             }
-            
+
             switch (tradeState) {
                 case 'NOTPAY':
                     return 'pending';
@@ -1820,7 +1820,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
             if (!tradeState) {
                 return '未知状态';
             }
-            
+
             switch (tradeState) {
                 case 'NOTPAY':
                     return '未支付';
@@ -1843,22 +1843,22 @@ router.get('/orders', authenticateToken, async (req, res) => {
         if (!user_id || isNaN(parseInt(user_id)) || parseInt(user_id) <= 0) {
             return res.status(400).json({ error: '缺少有效的用户ID' });
         }
-        
+
         if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
             return res.status(400).json({ error: '页码必须是正整数' });
         }
-        
+
         if (limit && (isNaN(parseInt(limit)) || parseInt(limit) <= 0 || parseInt(limit) > 100)) {
             return res.status(400).json({ error: '每页数量必须在1-100之间' });
         }
-        
+
         // 定义有效的订单状态类型
         const validStatusTypes = ['all', 'pending', 'completed', 'cancelled', 'refunded'];
-        
+
         if (status && !validStatusTypes.includes(status)) {
             return res.status(400).json({ error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, refunded' });
         }
-        
+
         // 清理输入
         const cleanUserId = parseInt(user_id);
         const cleanPage = parseInt(page);
@@ -1907,8 +1907,8 @@ router.get('/orders', authenticateToken, async (req, res) => {
 
         // 查询每个订单的订单项
         const ordersWithItems = await Promise.all(orders.map(async (order) => {
-                            // 查询订单项 - 优化查询，避免复杂CASE WHEN
-                const [orderItems] = await db.query(`
+            // 查询订单项 - 优化查询，避免复杂CASE WHEN
+            const [orderItems] = await db.query(`
                     SELECT 
                         oi.id,
                         oi.type,
@@ -2047,7 +2047,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
                 };
             } catch (error) {
                 console.error('查询微信支付状态失败:', error.response?.data || error.message);
-                
+
                 // 如果查询微信支付状态失败，返回错误状态
                 return {
                     ...order,
@@ -2113,10 +2113,10 @@ router.get('/digital-identity/purchases/:user_id', async (req, res) => {
         if (!userId || isNaN(parseInt(userId)) || parseInt(userId) <= 0) {
             return res.status(400).json({ error: '无效的用户ID' });
         }
-        
+
         const cleanUserId = parseInt(userId);
-        
-                 const [purchases] = await db.query(`
+
+        const [purchases] = await db.query(`
              SELECT 
                  dip.id,
                  dip.user_id,
@@ -2150,19 +2150,19 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
             page = 1,
             limit = 20
         } = req.query;
-        
+
         if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
             return res.status(400).json({ error: '页码必须是正整数' });
         }
-        
+
         if (limit && (isNaN(parseInt(limit)) || parseInt(limit) <= 0 || parseInt(limit) > 100)) {
             return res.status(400).json({ error: '每页数量必须在1-100之间' });
         }
-        
+
         if (status && !['SUCCESS', 'REFUND', 'CLOSED', 'REVOKED', 'PAYERROR', 'NOTPAY'].includes(status)) {
             return res.status(400).json({ error: '无效的订单状态' });
         }
-        
+
         // 清理输入
         const cleanPage = parseInt(page);
         const cleanLimit = parseInt(limit);
@@ -2197,8 +2197,8 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
 
         // 查询每个订单的订单项
         const ordersWithItems = await Promise.all(orders.map(async (order) => {
-                         // 查询订单项
-             const [orderItems] = await db.query(`
+            // 查询订单项
+            const [orderItems] = await db.query(`
                  SELECT 
                      oi.id,
                      oi.type,
@@ -2379,15 +2379,15 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的商户订单号' });
         }
-        
+
         if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
             return res.status(400).json({ error: '缺少有效的openid' });
         }
-        
+
         if (out_trade_no.length > 64) {
             return res.status(400).json({ error: '商户订单号长度不能超过64个字符' });
         }
-        
+
         const cleanOutTradeNo = out_trade_no.trim();
         const cleanOpenid = openid.trim();
 
@@ -2400,7 +2400,7 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
         `, [cleanOutTradeNo, cleanOpenid]);
 
         if (orders.length === 0) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: '订单不存在或不属于当前用户',
                 repayable: false,
                 reason: '订单不存在'
@@ -2439,8 +2439,8 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
             });
         }
 
-                 // 查询订单项信息
-         const [orderItems] = await db.query(`
+        // 查询订单项信息
+        const [orderItems] = await db.query(`
              SELECT 
                  oi.*,
                  r.title as right_title,
@@ -2490,20 +2490,20 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
                     stock: item.artwork_stock,
                     required: item.quantity
                 };
-                         } else if (item.type === 'digital') {
-                 return {
-                     type: 'digital',
-                     id: item.digital_artwork_id,
-                     title: item.digital_title,
-                     available: item.digital_batch_quantity >= item.quantity,
-                     stock: item.digital_batch_quantity,
-                     required: item.quantity
-                 };
-             }
+            } else if (item.type === 'digital') {
+                return {
+                    type: 'digital',
+                    id: item.digital_artwork_id,
+                    title: item.digital_title,
+                    available: item.digital_batch_quantity >= item.quantity,
+                    stock: item.digital_batch_quantity,
+                    required: item.quantity
+                };
+            }
         });
 
         const unavailableItems = stockCheck.filter(item => !item.available);
-        
+
         if (unavailableItems.length > 0) {
             return res.json({
                 repayable: false,
@@ -2538,15 +2538,15 @@ router.get('/check-repayable', authenticateToken, async (req, res) => {
                 type: item.type,
                 quantity: item.quantity,
                 price: item.price,
-                title: item.type === 'right' ? item.right_title : 
-                       item.type === 'digital' ? item.digital_title : 
-                       item.artwork_title,
-                description: item.type === 'right' ? item.right_description : 
-                           item.type === 'digital' ? item.digital_description : 
-                           item.artwork_description,
-                image: item.type === 'right' ? item.right_image_url : 
-                      item.type === 'digital' ? item.digital_image_url : 
-                      item.artwork_image
+                title: item.type === 'right' ? item.right_title :
+                    item.type === 'digital' ? item.digital_title :
+                        item.artwork_title,
+                description: item.type === 'right' ? item.right_description :
+                    item.type === 'digital' ? item.digital_description :
+                        item.artwork_description,
+                image: item.type === 'right' ? item.right_image_url :
+                    item.type === 'digital' ? item.digital_image_url :
+                        item.artwork_image
             }))
         });
 

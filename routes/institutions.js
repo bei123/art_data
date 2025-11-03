@@ -15,12 +15,12 @@ router.get('/', async (req, res) => {
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     const [rows] = await db.query('SELECT * FROM institutions ORDER BY created_at DESC');
-    const institutionsWithProcessedImages = rows.map(institution => 
+    const institutionsWithProcessedImages = rows.map(institution =>
       processObjectImages(institution, ['logo'])
     );
-    
+
     // 写入redis缓存，永久有效
     await redisClient.set(REDIS_INSTITUTIONS_LIST_KEY, JSON.stringify(institutionsWithProcessedImages));
     res.json(institutionsWithProcessedImages);
@@ -38,19 +38,19 @@ router.get('/:id', async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的机构ID' });
     }
-    
+
     // 先查redis缓存
     const cache = await redisClient.get(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id);
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     const [rows] = await db.query('SELECT * FROM institutions WHERE id = ?', [id]);
-    
+
     if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '机构不存在' });
     }
-    
+
     const institution = processObjectImages(rows[0], ['logo']);
     // 写入redis缓存，永久有效
     await redisClient.set(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id, JSON.stringify(institution));
@@ -69,13 +69,13 @@ router.get('/:id/artists', async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的机构ID' });
     }
-    
+
     // 检查机构是否存在
     const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [id]);
     if (institutionRows.length === 0) {
       return res.status(404).json({ error: '机构不存在' });
     }
-    
+
     // 获取该机构下的所有艺术家
     const [artists] = await db.query(`
       SELECT 
@@ -89,7 +89,7 @@ router.get('/:id/artists', async (req, res) => {
       WHERE a.institution_id = ?
       ORDER BY a.created_at DESC
     `, [id]);
-    
+
     const artistsWithProcessedImages = artists.map(artist => {
       const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
       return {
@@ -102,7 +102,7 @@ router.get('/:id/artists', async (req, res) => {
         } : null
       };
     });
-    
+
     res.json({
       institution: {
         id: institutionRows[0].id,
@@ -121,35 +121,35 @@ router.get('/:id/artists', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, website } = req.body;
-    
+
     // 输入验证
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: '机构名称不能为空' });
     }
-    
+
     if (name.length > 100) {
       return res.status(400).json({ error: '机构名称长度不能超过100个字符' });
     }
-    
+
     if (description && description.length > 2000) {
       return res.status(400).json({ error: '描述长度不能超过2000个字符' });
     }
-    
+
     // 清理输入
     const cleanName = name.trim();
     const cleanDescription = description ? description.trim() : '';
-    
+
     const [result] = await db.query(
       'INSERT INTO institutions (name, logo, description, address, phone, website) VALUES (?, ?, ?, ?, ?, ?)',
       [cleanName, logo, cleanDescription, address, phone, website]
     );
-    
+
     // 清理缓存
     await redisClient.del(REDIS_INSTITUTIONS_LIST_KEY);
-    res.json({ 
-      id: result.insertId, 
-      name: cleanName, 
-      description: cleanDescription, 
+    res.json({
+      id: result.insertId,
+      name: cleanName,
+      description: cleanDescription,
       logo,
       address,
       phone,
@@ -165,7 +165,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, website } = req.body;
-    
+
     // 验证图片URL
     if (logo && !validateImageUrl(logo)) {
       return res.status(400).json({ error: '无效的Logo URL' });
@@ -176,7 +176,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       'UPDATE institutions SET name = ?, logo = ?, description = ?, address = ?, phone = ?, website = ? WHERE id = ?',
       [name, logo, description, address, phone, website, req.params.id]
     );
-    
+
     // 清理缓存
     await redisClient.del(REDIS_INSTITUTIONS_LIST_KEY);
     await redisClient.del(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + req.params.id);
@@ -212,7 +212,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     if (artists[0].count > 0) {
       return res.status(400).json({ error: '无法删除机构，还有艺术家关联此机构' });
     }
-    
+
     // 删除机构
     await connection.query('DELETE FROM institutions WHERE id = ?', [req.params.id]);
 

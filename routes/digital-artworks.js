@@ -13,7 +13,7 @@ router.get('/health', async (req, res) => {
   try {
     const poolStatus = db.getPoolStatus();
     const healthCheck = await db.checkPoolHealth();
-    
+
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
@@ -53,7 +53,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
     const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
     const offset = (pageNum - 1) * sizeNum;
-    
+
     let query = `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at, da.is_hidden,
@@ -61,24 +61,24 @@ router.get('/admin', authenticateToken, async (req, res) => {
       FROM digital_artworks da
       LEFT JOIN artists a ON da.artist_id = a.id
     `;
-    
+
     const queryParams = [];
-    
+
     // 如果提供了 artist_id 参数，添加筛选条件
     if (artist_id) {
       query += ` WHERE da.artist_id = ?`;
       queryParams.push(artist_id);
     }
-    
+
     query += ` ORDER BY da.created_at DESC LIMIT ? OFFSET ?`;
     queryParams.push(sizeNum, offset);
-    
+
     const [rows] = await db.query(query, queryParams);
-    
+
     if (!rows || !Array.isArray(rows)) {
       return res.json([]);
     }
-    
+
     const artworksWithProcessedImages = rows.map(artwork => {
       const processedArtwork = processObjectImages(artwork, ['image_url', 'avatar']);
       return {
@@ -90,19 +90,19 @@ router.get('/admin', authenticateToken, async (req, res) => {
         }
       };
     });
-    
+
     res.json(artworksWithProcessedImages);
   } catch (error) {
     console.error('获取数字艺术品列表失败:', error);
-    
+
     // 检查是否是连接池问题
     if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: '数据库连接暂时不可用，请稍后重试',
         code: 'DB_POOL_CLOSED'
       });
     }
-    
+
     res.status(500).json({ error: '获取数字艺术品列表失败' });
   }
 });
@@ -114,7 +114,7 @@ router.get('/', async (req, res) => {
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
     const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
     const offset = (pageNum - 1) * sizeNum;
-    
+
     let query = `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at,
@@ -123,24 +123,24 @@ router.get('/', async (req, res) => {
       LEFT JOIN artists a ON da.artist_id = a.id
       WHERE da.is_hidden = 0
     `;
-    
+
     const queryParams = [];
-    
+
     // 如果提供了 artist_id 参数，添加筛选条件
     if (artist_id) {
       query += ` AND da.artist_id = ?`;
       queryParams.push(artist_id);
     }
-    
+
     query += ` ORDER BY da.created_at DESC LIMIT ? OFFSET ?`;
     queryParams.push(sizeNum, offset);
-    
+
     const [rows] = await db.query(query, queryParams);
-    
+
     if (!rows || !Array.isArray(rows)) {
       return res.json([]);
     }
-    
+
     const artworksWithProcessedImages = rows.map(artwork => {
       const processedArtwork = processObjectImages(artwork, ['image_url', 'avatar']);
       return {
@@ -152,7 +152,7 @@ router.get('/', async (req, res) => {
         }
       };
     });
-    
+
     res.json(artworksWithProcessedImages);
     // 写入redis缓存，7天过期
     let cacheKey = REDIS_DIGITAL_ARTWORKS_LIST_KEY + `:page:${pageNum}:size:${sizeNum}`;
@@ -162,15 +162,15 @@ router.get('/', async (req, res) => {
     await redisClient.setEx(cacheKey, 604800, JSON.stringify(artworksWithProcessedImages));
   } catch (error) {
     console.error('获取数字艺术品列表失败:', error);
-    
+
     // 检查是否是连接池问题
     if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: '数据库连接暂时不可用，请稍后重试',
         code: 'DB_POOL_CLOSED'
       });
     }
-    
+
     res.status(500).json({ error: '获取数字艺术品列表失败' });
   }
 });
@@ -188,7 +188,7 @@ router.get('/:id', async (req, res) => {
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     const [rows] = await db.query(`
       SELECT 
         da.id, da.title, da.image_url, da.description, da.registration_certificate,
@@ -214,7 +214,7 @@ router.get('/:id', async (req, res) => {
       avatar: artwork.artist_avatar,
       description: artwork.artist_description
     };
-    
+
     // 移除 artist 相关字段，避免在顶层重复
     const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
 
@@ -227,15 +227,15 @@ router.get('/:id', async (req, res) => {
     await redisClient.setEx(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
   } catch (error) {
     console.error('获取数字艺术品详情失败:', error);
-    
+
     // 检查是否是连接池问题
     if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: '数据库连接暂时不可用，请稍后重试',
         code: 'DB_POOL_CLOSED'
       });
     }
-    
+
     res.status(500).json({ error: '获取数字艺术品详情服务暂时不可用' });
   }
 });
@@ -249,7 +249,7 @@ router.get('/public', async (req, res) => {
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
     const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
     const offset = (pageNum - 1) * sizeNum;
-    
+
     // 验证artist_id参数
     if (artist_id) {
       const artistId = parseInt(artist_id);
@@ -257,19 +257,19 @@ router.get('/public', async (req, res) => {
         return res.status(400).json({ error: '无效的艺术家ID' });
       }
     }
-    
+
     let query = 'SELECT id, title, image_url, description, price, created_at FROM digital_artworks WHERE is_hidden = 0';
     const queryParams = [];
-    
+
     // 如果提供了 artist_id 参数，添加筛选条件
     if (artist_id) {
       query += ' AND artist_id = ?';
       queryParams.push(parseInt(artist_id));
     }
-    
+
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
     queryParams.push(sizeNum, offset);
-    
+
     const [rows] = await db.query(query, queryParams);
     const artworksWithFullUrls = rows.map(artwork => ({
       ...artwork,
@@ -447,7 +447,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 router.patch('/:id/hide', authenticateToken, async (req, res) => {
   try {
     const { is_hidden } = req.body;
-    
+
     // 验证参数
     if (typeof is_hidden !== 'boolean') {
       return res.status(400).json({ error: 'is_hidden 参数必须是布尔值' });
@@ -476,7 +476,7 @@ router.patch('/:id/hide', authenticateToken, async (req, res) => {
     }
     await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
 
-    res.json({ 
+    res.json({
       message: is_hidden ? '作品已隐藏' : '作品已显示',
       is_hidden: is_hidden
     });
@@ -498,10 +498,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // 先删除相关的数字身份购买记录
     await connection.query('DELETE FROM digital_identity_purchases WHERE digital_artwork_id = ?', [req.params.id]);
-    
+
     // 删除购物车中的相关记录
     await connection.query('DELETE FROM cart_items WHERE digital_artwork_id = ? AND type = "digital"', [req.params.id]);
-    
+
     // 删除数字艺术品
     await connection.query('DELETE FROM digital_artworks WHERE id = ?', [req.params.id]);
 

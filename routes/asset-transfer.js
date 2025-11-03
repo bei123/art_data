@@ -36,7 +36,7 @@ router.post('/transfer', async (req, res) => {
 
     // 必需参数验证
     const requiredFields = [
-      'assetsId', 'sellUsn', 'buyUsn', 'price', 
+      'assetsId', 'sellUsn', 'buyUsn', 'price',
       'notifyUrl', 'buyMobile', 'id', 'type', 'currency'
     ];
 
@@ -88,7 +88,7 @@ router.post('/transfer', async (req, res) => {
       'AED', 'MYR', 'SGD', 'THB', 'INR', 'IDR', 'XOF', 'ZAR', 'SAR', 'GHS',
       'ZMW', 'KES', 'NGN'
     ];
-    
+
     if (!validCurrencies.includes(currency)) {
       return res.status(400).json({
         code: 400,
@@ -140,7 +140,7 @@ router.post('/transfer', async (req, res) => {
 
   } catch (error) {
     console.error('资产过户失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -178,7 +178,7 @@ router.post('/transfer', async (req, res) => {
 router.post('/callback', async (req, res) => {
   try {
     const { id, status, msg, time } = req.body;
-    
+
     console.log('收到资产过户回调:', {
       id,
       status,
@@ -200,17 +200,17 @@ router.post('/callback', async (req, res) => {
     if (status === '1') {
       // 过户成功
       console.log(`资产过户成功 - ID: ${id}, 时间: ${time}`);
-      
+
       // 这里可以添加你的业务逻辑
       // 比如更新数据库状态、发送通知等
-      
+
     } else if (status === '2') {
       // 过户失败
       console.log(`资产过户失败 - ID: ${id}, 原因: ${msg}, 时间: ${time}`);
-      
+
       // 这里可以添加失败处理逻辑
       // 比如记录失败日志、发送失败通知等
-      
+
     } else {
       console.log(`未知的过户状态 - ID: ${id}, 状态: ${status}`);
     }
@@ -225,7 +225,7 @@ router.post('/callback', async (req, res) => {
 
   } catch (error) {
     console.error('处理资产过户回调失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -242,7 +242,7 @@ router.post('/callback', async (req, res) => {
 router.get('/status/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // 参数验证
     if (!id || typeof id !== 'string' || id.trim().length === 0) {
       return res.status(400).json({
@@ -255,7 +255,7 @@ router.get('/status/:id', async (req, res) => {
 
     // 这里可以添加查询过户状态的逻辑
     // 比如从数据库查询过户记录的状态
-    
+
     // 示例响应
     res.json({
       code: 200,
@@ -271,7 +271,7 @@ router.get('/status/:id', async (req, res) => {
 
   } catch (error) {
     console.error('查询资产过户状态失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -289,7 +289,7 @@ router.get('/status/:id', async (req, res) => {
 router.post('/details', async (req, res) => {
   try {
     const { id } = req.body;
-    
+
     // 必需参数验证
     if (!id || typeof id !== 'string' || id.trim().length === 0) {
       return res.status(400).json({
@@ -322,7 +322,7 @@ router.post('/details', async (req, res) => {
 
   } catch (error) {
     console.error('获取资产过户详情失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -393,7 +393,7 @@ router.get('/currencies', async (req, res) => {
 
   } catch (error) {
     console.error('获取币种列表失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,

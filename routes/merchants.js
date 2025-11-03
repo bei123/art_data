@@ -30,7 +30,7 @@ const storage = multer.memoryStorage();
 const fileFilter = (req, file, cb) => {
   const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
-  
+
   if (allowedTypes.includes(ext)) {
     cb(null, true);
   } else {
@@ -49,9 +49,9 @@ const upload = multer({
 // 获取商家列表接口
 router.get('/', async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
+    const {
+      page = 1,
+      limit = 10,
       search = '',
       status = 'active',
       sort_by = 'created_at',
@@ -61,37 +61,37 @@ router.get('/', async (req, res) => {
     // 输入验证
     const cleanPage = parseInt(page);
     const cleanLimit = parseInt(limit);
-    
+
     if (isNaN(cleanPage) || cleanPage < 1) {
       return res.status(400).json({ error: '页码必须是大于0的整数' });
     }
-    
+
     if (isNaN(cleanLimit) || cleanLimit < 1 || cleanLimit > 100) {
       return res.status(400).json({ error: '每页数量必须在1-100之间' });
     }
-    
+
     // 验证状态参数
     const validStatuses = ['active', 'inactive', 'pending'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ error: '无效的状态参数' });
     }
-    
+
     // 验证搜索关键词
     if (search && typeof search === 'string' && search.length > 100) {
       return res.status(400).json({ error: '搜索关键词长度不能超过100个字符' });
     }
 
     const offset = (cleanPage - 1) * cleanLimit;
-    
+
     // 构建查询条件
     let whereClause = 'WHERE 1=1';
     const params = [];
-    
+
     if (status) {
       whereClause += ' AND status = ?';
       params.push(status);
     }
-    
+
     if (search) {
       whereClause += ' AND (name LIKE ? OR description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
@@ -139,7 +139,7 @@ router.get('/', async (req, res) => {
     }));
 
     // 处理图片URL，添加WebP转换
-    const merchantsWithProcessedImages = merchantsWithImages.map(merchant => 
+    const merchantsWithProcessedImages = merchantsWithImages.map(merchant =>
       processObjectImages(merchant, ['logo', 'images'])
     );
 
@@ -167,9 +167,9 @@ router.get('/', async (req, res) => {
     }));
   } catch (error) {
     console.error('获取商家列表失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '获取商家列表服务暂时不可用' 
+      error: '获取商家列表服务暂时不可用'
     });
   }
 });
@@ -188,7 +188,7 @@ router.get('/:id', async (req, res) => {
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     // 获取商家基本信息
     const [merchants] = await db.query(
       'SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants WHERE id = ? AND status = "active"',
@@ -196,9 +196,9 @@ router.get('/:id', async (req, res) => {
     );
 
     if (!merchants || merchants.length === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: '商家不存在' 
+        error: '商家不存在'
       });
     }
 
@@ -225,9 +225,9 @@ router.get('/:id', async (req, res) => {
     await redisClient.set(cacheKey, JSON.stringify(result));
   } catch (error) {
     console.error('获取商家详情失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '获取商家详情服务暂时不可用' 
+      error: '获取商家详情服务暂时不可用'
     });
   }
 });
@@ -268,7 +268,7 @@ router.post('/upload-images', upload.array('images', 10), async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
-    
+
     // 验证logo URL
     if (!validateImageUrl(logo)) {
       return res.status(400).json({ error: '无效的Logo URL' });
@@ -328,9 +328,9 @@ router.post('/', authenticateToken, async (req, res) => {
     }
   } catch (error) {
     console.error('创建商家失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '创建商家失败' 
+      error: '创建商家失败'
     });
   }
 });
@@ -339,7 +339,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { name, logo, description, address, phone, images } = req.body;
-    
+
     // 验证logo URL
     if (!validateImageUrl(logo)) {
       return res.status(400).json({ error: '无效的Logo URL' });
@@ -401,9 +401,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
   } catch (error) {
     console.error('更新商家失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '更新商家失败' 
+      error: '更新商家失败'
     });
   }
 });
@@ -418,7 +418,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     try {
       // 删除商家图片
       await connection.query('DELETE FROM merchant_images WHERE merchant_id = ?', [req.params.id]);
-      
+
       // 删除商家
       await connection.query('DELETE FROM merchants WHERE id = ?', [req.params.id]);
 
@@ -448,9 +448,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
   } catch (error) {
     console.error('删除商家失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '删除商家失败' 
+      error: '删除商家失败'
     });
   }
 });
@@ -459,11 +459,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 router.patch('/:id/status', authenticateToken, async (req, res) => {
   try {
     const { status } = req.body;
-    
+
     if (!['active', 'inactive'].includes(status)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        error: '无效的状态值' 
+        error: '无效的状态值'
       });
     }
 
@@ -491,9 +491,9 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
   } catch (error) {
     console.error('更新商家状态失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '更新商家状态失败' 
+      error: '更新商家状态失败'
     });
   }
 });
@@ -502,11 +502,11 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
 router.patch('/:id/sort', authenticateToken, async (req, res) => {
   try {
     const { sort_order } = req.body;
-    
+
     if (typeof sort_order !== 'number') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        error: '无效的排序值' 
+        error: '无效的排序值'
       });
     }
 
@@ -534,9 +534,9 @@ router.patch('/:id/sort', authenticateToken, async (req, res) => {
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + req.params.id);
   } catch (error) {
     console.error('更新商家排序失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: '更新商家排序失败' 
+      error: '更新商家排序失败'
     });
   }
 });

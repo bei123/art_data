@@ -23,7 +23,7 @@ const authenticateToken = (req, res, next) => {
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    
+
     // 1. 查询所有购物车项
     const [cartItems] = await db.query(
       'SELECT id, type, right_id, digital_artwork_id, artwork_id, quantity, price FROM cart_items WHERE user_id = ?',
@@ -63,7 +63,7 @@ router.get('/', authenticateToken, async (req, res) => {
         [rightIds]
       );
       rights.forEach(r => { rightsMap[r.id] = r; });
-      
+
       // 批量查询图片
       const [rightImages] = await db.query(
         'SELECT right_id, image_url FROM right_images WHERE right_id IN (?)',
@@ -175,12 +175,12 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { type = 'right', right_id, digital_artwork_id, artwork_id, quantity = 1 } = req.body;
-    
+
     // 输入验证
     if (!['right', 'digital', 'artwork'].includes(type)) {
       return res.status(400).json({ error: '无效的商品类型' });
     }
-    
+
     const cleanQuantity = parseInt(quantity);
     if (isNaN(cleanQuantity) || cleanQuantity <= 0 || cleanQuantity > 99) {
       return res.status(400).json({ error: '商品数量必须在1-99之间' });
@@ -199,28 +199,28 @@ router.post('/', authenticateToken, async (req, res) => {
       if (right[0].remaining_count <= 0) {
         return res.status(400).json({ error: '库存不足' });
       }
-             // 检查购物车中是否已存在该商品
-       const [existingItem] = await db.query(
-         'SELECT id, quantity FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
-         [userId, right_id]
-       );
-       const cartQuantity = (existingItem && existingItem.length > 0) ? existingItem[0].quantity : 0;
-       if (cartQuantity + cleanQuantity > right[0].remaining_count) {
-         return res.status(400).json({ error: '加入购物车数量超过商品库存' });
-       }
-       if (existingItem && existingItem.length > 0) {
-         // 更新数量
-         await db.query(
-           'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ? AND type = "right"',
-           [cleanQuantity, userId, right_id]
-         );
-       } else {
-         // 新增商品
-         await db.query(
-           'INSERT INTO cart_items (user_id, type, right_id, quantity) VALUES (?, "right", ?, ?)',
-           [userId, right_id, cleanQuantity]
-         );
-       }
+      // 检查购物车中是否已存在该商品
+      const [existingItem] = await db.query(
+        'SELECT id, quantity FROM cart_items WHERE user_id = ? AND right_id = ? AND type = "right"',
+        [userId, right_id]
+      );
+      const cartQuantity = (existingItem && existingItem.length > 0) ? existingItem[0].quantity : 0;
+      if (cartQuantity + cleanQuantity > right[0].remaining_count) {
+        return res.status(400).json({ error: '加入购物车数量超过商品库存' });
+      }
+      if (existingItem && existingItem.length > 0) {
+        // 更新数量
+        await db.query(
+          'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND right_id = ? AND type = "right"',
+          [cleanQuantity, userId, right_id]
+        );
+      } else {
+        // 新增商品
+        await db.query(
+          'INSERT INTO cart_items (user_id, type, right_id, quantity) VALUES (?, "right", ?, ?)',
+          [userId, right_id, cleanQuantity]
+        );
+      }
       res.json({ message: '添加成功' });
     } else if (type === 'digital') {
       if (!digital_artwork_id) {
@@ -285,8 +285,8 @@ router.post('/', authenticateToken, async (req, res) => {
         return res.status(400).json({ error: '加入购物车数量超过库存' });
       }
       // 确定实际价格（如果有优惠价且优惠价小于原价，则使用优惠价）
-      const actualPrice = (artwork[0].discount_price && artwork[0].discount_price > 0 && artwork[0].discount_price < artwork[0].original_price) 
-        ? artwork[0].discount_price 
+      const actualPrice = (artwork[0].discount_price && artwork[0].discount_price > 0 && artwork[0].discount_price < artwork[0].original_price)
+        ? artwork[0].discount_price
         : artwork[0].original_price;
       if (existingItem && existingItem.length > 0) {
         // 更新数量

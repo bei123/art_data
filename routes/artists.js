@@ -11,20 +11,20 @@ const REDIS_ARTIST_DETAIL_KEY_PREFIX = 'artists:detail:';
 router.get('/', async (req, res) => {
   try {
     const { institution_id } = req.query;
-    
+
     // 如果指定了机构ID，直接查询该机构的艺术家
     if (institution_id) {
       const institutionId = parseInt(institution_id);
       if (isNaN(institutionId) || institutionId <= 0) {
         return res.status(400).json({ error: '无效的机构ID' });
       }
-      
+
       // 检查机构是否存在
       const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [institutionId]);
       if (institutionRows.length === 0) {
         return res.status(404).json({ error: '机构不存在' });
       }
-      
+
       // 获取该机构下的所有艺术家
       const [rows] = await db.query(`
         SELECT 
@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
         WHERE a.institution_id = ?
         ORDER BY a.created_at DESC
       `, [institutionId]);
-      
+
       const artistsWithProcessedImages = rows.map(artist => {
         const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
         return {
@@ -52,7 +52,7 @@ router.get('/', async (req, res) => {
           } : null
         };
       });
-      
+
       return res.json({
         institution: {
           id: institutionRows[0].id,
@@ -62,14 +62,14 @@ router.get('/', async (req, res) => {
         total: artistsWithProcessedImages.length
       });
     }
-    
+
     // 否则获取所有艺术家
     // 先查redis缓存
     const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     // 修改查询以包含机构信息
     const [rows] = await db.query(`
       SELECT 
@@ -82,7 +82,7 @@ router.get('/', async (req, res) => {
       LEFT JOIN institutions i ON a.institution_id = i.id
       ORDER BY a.created_at DESC
     `);
-    
+
     const artistsWithProcessedImages = rows.map(artist => {
       const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
       return {
@@ -96,7 +96,7 @@ router.get('/', async (req, res) => {
         } : null
       };
     });
-    
+
     // 写入redis缓存，永久有效
     await redisClient.set(REDIS_ARTISTS_LIST_KEY, JSON.stringify(artistsWithProcessedImages));
     res.json(artistsWithProcessedImages);
@@ -119,7 +119,7 @@ router.get('/:id', async (req, res) => {
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     // 修改查询以包含机构信息
     const [rows] = await db.query(`
       SELECT 
@@ -132,11 +132,11 @@ router.get('/:id', async (req, res) => {
       LEFT JOIN institutions i ON a.institution_id = i.id
       WHERE a.id = ?
     `, [id]);
-    
+
     if (!rows || rows.length === 0) {
       return res.status(404).json({ error: '艺术家不存在' });
     }
-    
+
     const artist = processObjectImages(rows[0], ['avatar', 'banner']);
     const artistWithInstitution = {
       ...artist,
@@ -148,7 +148,7 @@ router.get('/:id', async (req, res) => {
         description: artist.institution_description
       } : null
     };
-    
+
     // 写入redis缓存，永久有效
     await redisClient.set(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, JSON.stringify(artistWithInstitution));
     res.json(artistWithInstitution);
@@ -162,48 +162,48 @@ router.get('/:id', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { avatar, name, description, institution_id } = req.body;
-    
+
     // 输入验证
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({ error: '艺术家名称不能为空' });
     }
-    
+
     if (name.length > 100) {
       return res.status(400).json({ error: '艺术家名称长度不能超过100个字符' });
     }
-    
+
     if (description && description.length > 2000) {
       return res.status(400).json({ error: '描述长度不能超过2000个字符' });
     }
-    
+
     // 验证机构ID（如果提供）
     if (institution_id) {
       const institutionId = parseInt(institution_id);
       if (isNaN(institutionId) || institutionId <= 0) {
         return res.status(400).json({ error: '无效的机构ID' });
       }
-      
+
       // 检查机构是否存在
       const [institutionRows] = await db.query('SELECT id FROM institutions WHERE id = ?', [institutionId]);
       if (institutionRows.length === 0) {
         return res.status(400).json({ error: '指定的机构不存在' });
       }
     }
-    
+
     // 清理输入
     const cleanName = name.trim();
     const cleanDescription = description ? description.trim() : '';
-    
+
     const [result] = await db.query(
       'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
       [avatar, cleanName, cleanDescription, institution_id || null]
     );
     // 清理缓存
     await redisClient.del(REDIS_ARTISTS_LIST_KEY);
-    res.json({ 
-      id: result.insertId, 
-      name: cleanName, 
-      description: cleanDescription, 
+    res.json({
+      id: result.insertId,
+      name: cleanName,
+      description: cleanDescription,
       avatar,
       institution_id: institution_id || null
     });
@@ -217,7 +217,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { name, era, avatar, banner, description, biography, journey, institution_id, achievements } = req.body;
-    
+
     // 过滤掉 undefined 和 null 值，避免清空数据库字段
     const updateData = {};
     if (name !== undefined && name !== null) updateData.name = name;
@@ -229,7 +229,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (journey !== undefined && journey !== null) updateData.journey = journey;
     if (institution_id !== undefined && institution_id !== null) updateData.institution_id = institution_id;
     if (achievements !== undefined && achievements !== null) updateData.achievements = achievements;
-    
+
     // 验证图片URL
     if (avatar && !validateImageUrl(avatar)) {
       return res.status(400).json({ error: '无效的头像URL' });
@@ -244,7 +244,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       if (isNaN(institutionId) || institutionId <= 0) {
         return res.status(400).json({ error: '无效的机构ID' });
       }
-      
+
       // 检查机构是否存在
       const [institutionRows] = await db.query('SELECT id FROM institutions WHERE id = ?', [institutionId]);
       if (institutionRows.length === 0) {
@@ -255,7 +255,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // 构建动态更新SQL
     const updateFields = [];
     const updateValues = [];
-    
+
     if (updateData.name !== undefined) {
       updateFields.push('name = ?');
       updateValues.push(updateData.name);
@@ -292,7 +292,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       updateFields.push('achievements = ?');
       updateValues.push(updateData.achievements ? JSON.stringify(updateData.achievements) : null);
     }
-    
+
     // 只有当有字段需要更新时才执行更新
     if (updateFields.length > 0) {
       updateValues.push(req.params.id);
@@ -317,7 +317,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       LEFT JOIN institutions i ON a.institution_id = i.id
       WHERE a.id = ?
     `, [req.params.id]);
-    
+
     if (artists.length === 0) {
       return res.status(404).json({ error: '艺术家不存在' });
     }
@@ -354,7 +354,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     await connection.query('DELETE FROM original_artworks WHERE artist_id = ?', [req.params.id]);
     // 删除代表作品关联
     await connection.query('DELETE FROM artist_featured_artworks WHERE artist_id = ?', [req.params.id]);
-    
+
     // 然后删除艺术家
     await connection.query('DELETE FROM artists WHERE id = ?', [req.params.id]);
 

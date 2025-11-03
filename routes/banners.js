@@ -31,12 +31,12 @@ router.get('/', async (req, res) => {
     const [banners] = await db.query(
       'SELECT id, title, image_url, link_url, sort_order FROM banners WHERE status = "active" ORDER BY sort_order ASC'
     );
-    
+
     // 处理图片URL，添加WebP转换
-    const bannersWithProcessedImages = banners.map(banner => 
+    const bannersWithProcessedImages = banners.map(banner =>
       processObjectImages(banner, ['image_url'])
     );
-    
+
     res.json(bannersWithProcessedImages);
     // 写入redis缓存，永久有效
     await redisClient.set(REDIS_BANNERS_LIST_KEY, JSON.stringify(bannersWithProcessedImages));
@@ -57,12 +57,12 @@ router.get('/all', authenticateToken, async (req, res) => {
     const [banners] = await db.query(
       'SELECT id, title, image_url, link_url, sort_order, status FROM banners ORDER BY sort_order ASC'
     );
-    
+
     // 处理图片URL，添加WebP转换
-    const bannersWithProcessedImages = banners.map(banner => 
+    const bannersWithProcessedImages = banners.map(banner =>
       processObjectImages(banner, ['image_url'])
     );
-    
+
     res.json(bannersWithProcessedImages);
     // 写入redis缓存，永久有效
     await redisClient.set(REDIS_BANNERS_ALL_KEY, JSON.stringify(bannersWithProcessedImages));
@@ -76,24 +76,24 @@ router.get('/all', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { title, image_url, link_url, sort_order } = req.body;
-    
+
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return res.status(400).json({ error: '标题不能为空' });
     }
-    
+
     if (title.length > 200) {
       return res.status(400).json({ error: '标题长度不能超过200个字符' });
     }
-    
+
     if (!image_url) {
       return res.status(400).json({ error: '图片URL不能为空' });
     }
-    
+
     if (!validateImageUrl(image_url)) {
       return res.status(400).json({ error: '无效的图片URL' });
     }
-    
+
     // 验证排序值
     const cleanSortOrder = parseInt(sort_order) || 0;
     if (cleanSortOrder < 0 || cleanSortOrder > 9999) {
@@ -126,32 +126,32 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的轮播图ID' });
     }
-    
+
     const { title, image_url, link_url, sort_order, status } = req.body;
-    
+
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return res.status(400).json({ error: '标题不能为空' });
     }
-    
+
     if (title.length > 200) {
       return res.status(400).json({ error: '标题长度不能超过200个字符' });
     }
-    
+
     if (!image_url) {
       return res.status(400).json({ error: '图片URL不能为空' });
     }
-    
+
     if (!validateImageUrl(image_url)) {
       return res.status(400).json({ error: '无效的图片URL' });
     }
-    
+
     // 验证排序值
     const cleanSortOrder = parseInt(sort_order) || 0;
     if (cleanSortOrder < 0 || cleanSortOrder > 9999) {
       return res.status(400).json({ error: '排序值必须在0-9999之间' });
     }
-    
+
     // 验证状态
     const validStatuses = ['active', 'inactive'];
     const cleanStatus = validStatuses.includes(status) ? status : 'active';
@@ -182,7 +182,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的轮播图ID' });
     }
-    
+
     await db.query('DELETE FROM banners WHERE id = ?', [id]);
     // 清理缓存
     await redisClient.del(REDIS_BANNERS_LIST_KEY);

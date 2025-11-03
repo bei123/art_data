@@ -21,7 +21,7 @@ const EXTERNAL_API_CONFIG = {
 router.get('/scan', async (req, res) => {
   try {
     const { qrCodeId, info } = req.query;
-    
+
     // 必需参数验证
     if (!qrCodeId || typeof qrCodeId !== 'string' || qrCodeId.trim().length === 0) {
       return res.status(400).json({
@@ -84,7 +84,7 @@ router.get('/scan', async (req, res) => {
 
   } catch (error) {
     console.error('资产查证失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -122,7 +122,7 @@ router.get('/scan', async (req, res) => {
 router.post('/generate-info', async (req, res) => {
   try {
     const { usn } = req.body;
-    
+
     // 参数验证
     if (!usn || typeof usn !== 'string' || usn.trim().length === 0) {
       return res.status(400).json({
@@ -152,7 +152,7 @@ router.post('/generate-info', async (req, res) => {
 
   } catch (error) {
     console.error('生成查证信息失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -170,7 +170,7 @@ router.post('/generate-info', async (req, res) => {
 router.post('/batch-scan', async (req, res) => {
   try {
     const { qrCodeIds, usn } = req.body;
-    
+
     // 参数验证
     if (!qrCodeIds || !Array.isArray(qrCodeIds) || qrCodeIds.length === 0) {
       return res.status(400).json({
@@ -200,7 +200,7 @@ router.post('/batch-scan', async (req, res) => {
 
     for (let i = 0; i < qrCodeIds.length; i++) {
       const qrCodeId = qrCodeIds[i];
-      
+
       try {
         const response = await axios.get(
           `${EXTERNAL_API_CONFIG.BASE_URL}${EXTERNAL_API_CONFIG.ASSET_VERIFY.SCAN_CODE_VERIFY}`,
@@ -243,7 +243,7 @@ router.post('/batch-scan', async (req, res) => {
 
   } catch (error) {
     console.error('批量资产查证失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -260,7 +260,7 @@ router.post('/batch-scan', async (req, res) => {
 router.get('/history', async (req, res) => {
   try {
     const { usn, currentPage, pageSize } = req.query;
-    
+
     // 参数验证
     if (!usn || typeof usn !== 'string' || usn.trim().length === 0) {
       return res.status(400).json({
@@ -291,7 +291,7 @@ router.get('/history', async (req, res) => {
 
     // 这里可以添加查询查证历史记录的逻辑
     // 比如从数据库查询该用户的查证记录
-    
+
     // 示例响应
     res.json({
       code: 200,
@@ -319,7 +319,7 @@ router.get('/history', async (req, res) => {
 
   } catch (error) {
     console.error('获取查证历史记录失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,

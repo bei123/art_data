@@ -19,7 +19,7 @@ const performanceMetrics = {
 router.get('/', async (req, res) => {
   const startTime = Date.now();
   performanceMetrics.totalRequests++;
-  
+
   try {
     const { artist_id, artwork_ids, page = 1, pageSize = 20 } = req.query;
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
@@ -56,7 +56,7 @@ router.get('/', async (req, res) => {
     // 根据 artist 和 指定的作品列表 生成缓存键
     let cacheKey;
     if (artist_id && selectedArtworkIds.length > 0) {
-      const idsKey = selectedArtworkIds.slice().sort((a,b) => a - b).join('-');
+      const idsKey = selectedArtworkIds.slice().sort((a, b) => a - b).join('-');
       cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:${pageNum}:${sizeNum}`;
     } else if (artist_id) {
       cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:${pageNum}:${sizeNum}`;
@@ -109,7 +109,7 @@ router.get('/', async (req, res) => {
     const [rows] = await db.query(sql, params);
     const queryTime = Date.now() - queryStartTime;
     performanceMetrics.queryTimes.push(queryTime);
-    
+
     console.log(`数据库查询耗时: ${queryTime}ms, SQL: ${sql.substring(0, 100)}...`);
 
     if (!rows || !Array.isArray(rows)) {
@@ -127,14 +127,14 @@ router.get('/', async (req, res) => {
     let total;
     let totalCacheKey;
     if (artist_id && selectedArtworkIds.length > 0) {
-      const idsKey = selectedArtworkIds.slice().sort((a,b) => a - b).join('-');
+      const idsKey = selectedArtworkIds.slice().sort((a, b) => a - b).join('-');
       totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:total`;
     } else if (artist_id) {
       totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:total`;
     } else {
       totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY}:total`;
     }
-    
+
     try {
       const totalCache = await redisClient.get(totalCacheKey);
       if (totalCache) {
@@ -161,7 +161,7 @@ router.get('/', async (req, res) => {
         }
         const [countRows] = await db.query(countSql, countParams);
         total = countRows[0].total;
-        
+
         // 缓存总数，5分钟过期
         await redisClient.setEx(totalCacheKey, 300, total.toString());
       }
@@ -240,7 +240,7 @@ router.get('/', async (req, res) => {
 
     const totalTime = Date.now() - startTime;
     console.log(`API响应时间: ${totalTime}ms, 缓存命中率: ${(performanceMetrics.cacheHitRate * 100).toFixed(2)}%`);
-    
+
     res.json(immediateResult);
   } catch (error) {
     console.error('获取艺术品列表失败:', error);
@@ -256,7 +256,7 @@ router.get('/:id', async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的作品ID' });
     }
-    
+
     // 先查redis缓存
     const cache = await redisClient.get(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id);
     if (cache) {
@@ -576,15 +576,15 @@ router.get('/performance/metrics', async (req, res) => {
   try {
     const redisMetrics = redisClient.getMetrics ? redisClient.getMetrics() : {};
     const dbMetrics = db.getPoolStatus ? db.getPoolStatus() : {};
-    
+
     // 计算API性能统计
-    const avgQueryTime = performanceMetrics.queryTimes.length > 0 
-      ? performanceMetrics.queryTimes.reduce((a, b) => a + b, 0) / performanceMetrics.queryTimes.length 
+    const avgQueryTime = performanceMetrics.queryTimes.length > 0
+      ? performanceMetrics.queryTimes.reduce((a, b) => a + b, 0) / performanceMetrics.queryTimes.length
       : 0;
-    
+
     const maxQueryTime = Math.max(...performanceMetrics.queryTimes, 0);
     const slowQueries = performanceMetrics.queryTimes.filter(time => time > 1000).length;
-    
+
     const metrics = {
       api: {
         totalRequests: performanceMetrics.totalRequests,
@@ -592,7 +592,7 @@ router.get('/performance/metrics', async (req, res) => {
         averageQueryTime: avgQueryTime.toFixed(2) + 'ms',
         maxQueryTime: maxQueryTime + 'ms',
         slowQueries: slowQueries,
-        slowQueryRate: performanceMetrics.queryTimes.length > 0 
+        slowQueryRate: performanceMetrics.queryTimes.length > 0
           ? ((slowQueries / performanceMetrics.queryTimes.length) * 100).toFixed(2) + '%'
           : '0%'
       },
@@ -600,7 +600,7 @@ router.get('/performance/metrics', async (req, res) => {
       database: dbMetrics,
       timestamp: new Date().toISOString()
     };
-    
+
     res.json(metrics);
   } catch (error) {
     console.error('获取性能指标失败:', error);
@@ -612,9 +612,9 @@ router.get('/performance/metrics', async (req, res) => {
 router.post('/performance/clear-cache', authenticateToken, async (req, res) => {
   try {
     const { type = 'all' } = req.body;
-    
+
     let clearedKeys = 0;
-    
+
     if (type === 'all' || type === 'list') {
       const listKeys = await redisClient.keys('artworks:list*');
       if (listKeys.length > 0) {
@@ -622,7 +622,7 @@ router.post('/performance/clear-cache', authenticateToken, async (req, res) => {
         clearedKeys += listKeys.length;
       }
     }
-    
+
     if (type === 'all' || type === 'detail') {
       const detailKeys = await redisClient.keys('artworks:detail*');
       if (detailKeys.length > 0) {
@@ -630,11 +630,11 @@ router.post('/performance/clear-cache', authenticateToken, async (req, res) => {
         clearedKeys += detailKeys.length;
       }
     }
-    
-    res.json({ 
-      message: '缓存清理成功', 
+
+    res.json({
+      message: '缓存清理成功',
       clearedKeys: clearedKeys,
-      type: type 
+      type: type
     });
   } catch (error) {
     console.error('清理缓存失败:', error);
@@ -648,7 +648,7 @@ router.post('/performance/reset', authenticateToken, async (req, res) => {
     performanceMetrics.queryTimes = [];
     performanceMetrics.cacheHitRate = 0;
     performanceMetrics.totalRequests = 0;
-    
+
     res.json({ message: '性能统计已重置' });
   } catch (error) {
     console.error('重置性能统计失败:', error);

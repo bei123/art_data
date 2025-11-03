@@ -57,27 +57,27 @@ router.get('/', async (req, res) => {
 router.put('/', authenticateToken, async (req, res) => {
   try {
     const { main_title, sub_title } = req.body;
-    
+
     // 输入验证
     if (!main_title || typeof main_title !== 'string' || main_title.trim().length === 0) {
       return res.status(400).json({ error: '主标题不能为空' });
     }
-    
+
     if (main_title.length > 20) {
       return res.status(400).json({ error: '主标题长度不能超过20个字符' });
     }
-    
+
     if (!sub_title || typeof sub_title !== 'string' || sub_title.trim().length === 0) {
       return res.status(400).json({ error: '副标题不能为空' });
     }
-    
+
     if (sub_title.length > 30) {
       return res.status(400).json({ error: '副标题长度不能超过30个字符' });
     }
 
     // 检查是否已存在配置
     const [existing] = await db.query('SELECT id FROM home_titles WHERE id = 1');
-    
+
     if (existing.length > 0) {
       // 更新现有配置
       await db.query(
@@ -100,7 +100,7 @@ router.put('/', authenticateToken, async (req, res) => {
       // Redis错误不影响API响应
     }
 
-    res.json({ 
+    res.json({
       message: '首页标题更新成功',
       data: {
         main_title: main_title.trim(),

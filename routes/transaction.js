@@ -21,7 +21,7 @@ const EXTERNAL_API_CONFIG = {
 router.post('/records', async (req, res) => {
   try {
     const { currentPage, pageSize, qrCodeId } = req.body;
-    
+
     // 必需参数验证
     if (!qrCodeId || typeof qrCodeId !== 'string' || qrCodeId.trim().length === 0) {
       return res.status(400).json({
@@ -83,7 +83,7 @@ router.post('/records', async (req, res) => {
 
   } catch (error) {
     console.error('获取交易记录失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -120,7 +120,7 @@ router.post('/records', async (req, res) => {
 router.get('/detail/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // 参数验证
     if (!id || typeof id !== 'string' || id.trim().length === 0) {
       return res.status(400).json({
@@ -133,7 +133,7 @@ router.get('/detail/:id', async (req, res) => {
 
     // 这里可以添加查询交易记录详情的逻辑
     // 比如从数据库查询具体的交易记录
-    
+
     // 示例响应
     res.json({
       code: 200,
@@ -156,7 +156,7 @@ router.get('/detail/:id', async (req, res) => {
 
   } catch (error) {
     console.error('获取交易记录详情失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -173,7 +173,7 @@ router.get('/detail/:id', async (req, res) => {
 router.get('/statistics', async (req, res) => {
   try {
     const { qrCodeId, startDate, endDate } = req.query;
-    
+
     // 参数验证
     if (!qrCodeId || typeof qrCodeId !== 'string' || qrCodeId.trim().length === 0) {
       return res.status(400).json({
@@ -186,7 +186,7 @@ router.get('/statistics', async (req, res) => {
 
     // 这里可以添加查询交易统计信息的逻辑
     // 比如统计交易次数、总金额、成功率等
-    
+
     // 示例响应
     res.json({
       code: 200,
@@ -207,7 +207,7 @@ router.get('/statistics', async (req, res) => {
 
   } catch (error) {
     console.error('获取交易统计信息失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -224,7 +224,7 @@ router.get('/statistics', async (req, res) => {
 router.post('/export', async (req, res) => {
   try {
     const { qrCodeId, startDate, endDate, format } = req.body;
-    
+
     // 参数验证
     if (!qrCodeId || typeof qrCodeId !== 'string' || qrCodeId.trim().length === 0) {
       return res.status(400).json({
@@ -248,7 +248,7 @@ router.post('/export', async (req, res) => {
 
     // 这里可以添加导出交易记录的逻辑
     // 比如生成Excel文件、CSV文件或PDF文件
-    
+
     // 示例响应
     res.json({
       code: 200,
@@ -264,7 +264,7 @@ router.post('/export', async (req, res) => {
 
   } catch (error) {
     console.error('导出交易记录失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,
@@ -299,7 +299,7 @@ router.get('/types', async (req, res) => {
 
   } catch (error) {
     console.error('获取交易类型列表失败:', error);
-    
+
     res.status(500).json({
       code: 500,
       status: false,

@@ -71,7 +71,7 @@ const EXTERNAL_API_CONFIG = {
 router.post('/user/generate-app-info', async (req, res) => {
   try {
     const { clientId, clientSecret } = req.body;
-    
+
     // 参数验证
     if (!clientId || typeof clientId !== 'string' || clientId.trim().length === 0) {
       return res.status(400).json({
@@ -110,7 +110,7 @@ router.post('/user/generate-app-info', async (req, res) => {
 router.post('/user/get-token', async (req, res) => {
   try {
     const { appInfo } = req.query;
-    
+
     // 参数验证
     if (!appInfo || typeof appInfo !== 'string' || appInfo.trim().length === 0) {
       return res.status(400).json({
@@ -146,7 +146,7 @@ router.post('/user/get-token', async (req, res) => {
 
   } catch (error) {
     console.error('获取访问令牌失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -175,7 +175,7 @@ router.post('/user/get-token', async (req, res) => {
 router.get('/user/get-mobile-verification-code', async (req, res) => {
   try {
     const { mobile } = req.query;
-    
+
     // 参数验证
     if (!mobile || typeof mobile !== 'string' || mobile.trim().length === 0) {
       return res.status(400).json({
@@ -186,10 +186,10 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
     }
 
     // 获取 authorization，优先从请求头获取，如果没有则从环境变量获取
-    const authorization = req.headers.authorization || 
-                         req.headers.Authorization || 
-                         process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
+    const authorization = req.headers.authorization ||
+      req.headers.Authorization ||
+      process.env.VERIFICATION_CODE_AUTHORIZATION ||
+      'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
 
     // 调用外部API获取验证码
     const response = await axios.get(
@@ -220,7 +220,7 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
     if (response.data && typeof response.data === 'object') {
       // 成功响应：code: 200 且 status: true
       const isSuccess = response.data.code === 200 && response.data.status === true;
-      
+
       if (!isSuccess) {
         // 业务错误：code不是200或status为false
         // 例如：{"code": 209, "status": false, "message": "手机号格式异常！"}
@@ -234,7 +234,7 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
 
   } catch (error) {
     console.error('获取手机验证码失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了HTTP错误响应
@@ -271,7 +271,7 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
 router.post('/user/login', async (req, res) => {
   try {
     const { account, captcha } = req.body;
-    
+
     // 参数验证
     if (!account || typeof account !== 'string' || account.trim().length === 0) {
       return res.status(400).json({
@@ -292,18 +292,18 @@ router.post('/user/login', async (req, res) => {
     // 登录接口需要使用 Basic 认证，不是 Bearer token
     // 支持从专门的请求头 'x-external-authorization' 获取，或者从环境变量获取
     // 如果请求头是 Basic 开头的，也可以使用
-    let authorization = req.headers['x-external-authorization'] || 
-                       req.headers['X-External-Authorization'];
-    
+    let authorization = req.headers['x-external-authorization'] ||
+      req.headers['X-External-Authorization'];
+
     // 如果请求头传入的是 Basic 认证，也可以使用
     if (!authorization && req.headers.authorization && req.headers.authorization.startsWith('Basic ')) {
       authorization = req.headers.authorization;
     }
-    
+
     // 如果还是没有，使用环境变量或默认值
     if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION ||
+        'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
     }
 
     // 构建 form-urlencoded 格式的请求体（直接拼接，参考成功请求格式）
@@ -316,7 +316,7 @@ router.post('/user/login', async (req, res) => {
     console.log('请求参数:', { account: account.trim(), captcha: '***' });
     console.log('请求体数据:', formData);
     console.log('Authorization:', authorization ? (authorization.startsWith('Basic ') ? authorization.substring(0, 20) + '...' : 'Basic ...') : '未设置');
-    
+
     const response = await axios.post(
       loginUrl,
       formData,
@@ -342,7 +342,7 @@ router.post('/user/login', async (req, res) => {
         timeout: 10000 // 10秒超时
       }
     );
-    
+
     console.log('外部API响应状态:', response.status);
     console.log('外部API响应数据:', JSON.stringify(response.data));
 
@@ -355,7 +355,7 @@ router.post('/user/login', async (req, res) => {
     if (response.data && typeof response.data === 'object') {
       // 成功响应：code: 200 且 status: true
       const isSuccess = response.data.code === 200 && response.data.status === true;
-      
+
       if (!isSuccess) {
         // 业务错误：code不是200或status为false
         // 如果业务错误码>=400（如500），使用该码作为HTTP状态码，否则使用400
@@ -383,7 +383,7 @@ router.post('/user/login', async (req, res) => {
         data: error.config?.data
       } : null
     });
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了HTTP错误响应
@@ -420,7 +420,7 @@ router.post('/user/login', async (req, res) => {
 router.post('/user/register', async (req, res) => {
   try {
     const { mobile, channel, isRegister, password, captcha, inviteCode, type, passCard } = req.body;
-    
+
     // 参数验证
     if (!mobile || typeof mobile !== 'string' || mobile.trim().length === 0) {
       return res.status(400).json({
@@ -457,16 +457,16 @@ router.post('/user/register', async (req, res) => {
     }
 
     // 注册接口需要使用 Basic 认证
-    let authorization = req.headers['x-external-authorization'] || 
-                       req.headers['X-External-Authorization'];
-    
+    let authorization = req.headers['x-external-authorization'] ||
+      req.headers['X-External-Authorization'];
+
     if (!authorization && req.headers.authorization && req.headers.authorization.startsWith('Basic ')) {
       authorization = req.headers.authorization;
     }
-    
+
     if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION ||
+        'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
     }
 
     // 对密码进行MD5加密
@@ -510,7 +510,7 @@ router.post('/user/register', async (req, res) => {
     console.log('调用外部注册接口:', registerUrl);
     console.log('请求参数:', { mobile: mobile.trim(), captcha: '***', type: params.type });
     console.log('请求体数据长度:', formData.length);
-    
+
     const response = await axios.post(
       registerUrl,
       formData,
@@ -534,7 +534,7 @@ router.post('/user/register', async (req, res) => {
         timeout: 10000
       }
     );
-    
+
     console.log('外部API响应状态:', response.status);
     console.log('外部API响应数据:', JSON.stringify(response.data));
 
@@ -546,7 +546,7 @@ router.post('/user/register', async (req, res) => {
     // 成功示例：{"code": 200, "status": true, "message": "success", "data": {...}}
     if (response.data && typeof response.data === 'object') {
       const isSuccess = response.data.code === 200 && response.data.status === true;
-      
+
       if (!isSuccess) {
         // 业务错误：code不是200或status为false
         // 如果业务错误码>=400（如500），使用该码作为HTTP状态码，否则使用400
@@ -574,7 +574,7 @@ router.post('/user/register', async (req, res) => {
         data: error.config?.data
       } : null
     });
-    
+
     if (error.response) {
       const statusCode = error.response.status || 500;
       const responseData = error.response.data || {
@@ -607,7 +607,7 @@ router.post('/user/register', async (req, res) => {
 router.post('/asset-types/save', async (req, res) => {
   try {
     const { name, pid } = req.body;
-    
+
     // 参数验证
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({
@@ -641,7 +641,7 @@ router.post('/asset-types/save', async (req, res) => {
 
   } catch (error) {
     console.error('调用外部资产类型保存接口失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -680,7 +680,7 @@ router.get('/assets/list', async (req, res) => {
   try {
     const { usn, rightsType, currentPage, pageSize } = req.query;
     const authToken = req.headers.authorization;
-    
+
     // 参数验证
     if (!usn || typeof usn !== 'string' || usn.trim().length === 0) {
       return res.status(400).json({
@@ -755,7 +755,7 @@ router.get('/assets/list', async (req, res) => {
 
   } catch (error) {
     console.error('获取用户资产列表失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -805,7 +805,7 @@ router.get('/asset-types/list', async (req, res) => {
 
   } catch (error) {
     console.error('获取外部资产类型列表失败:', error);
-    
+
     // 处理不同类型的错误
     if (error.response) {
       // 外部API返回了错误响应
@@ -843,7 +843,7 @@ router.put('/asset-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, pid } = req.body;
-    
+
     // 参数验证
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({
@@ -876,7 +876,7 @@ router.put('/asset-types/:id', async (req, res) => {
 
   } catch (error) {
     console.error('更新外部资产类型失败:', error);
-    
+
     if (error.response) {
       res.status(error.response.status).json({
         code: error.response.status,
@@ -915,7 +915,7 @@ router.delete('/asset-types/:id', async (req, res) => {
 
   } catch (error) {
     console.error('删除外部资产类型失败:', error);
-    
+
     if (error.response) {
       res.status(error.response.status).json({
         code: error.response.status,
@@ -943,10 +943,10 @@ router.all('/proxy/*', async (req, res) => {
     const targetPath = req.params[0]; // 获取通配符匹配的路径
     const method = req.method.toLowerCase();
     const requestData = method === 'get' ? req.query : req.body;
-    
+
     // 构建目标URL
     const targetUrl = `${EXTERNAL_API_CONFIG.BASE_URL}/${targetPath}`;
-    
+
     // 配置请求选项
     const config = {
       method,
@@ -965,13 +965,13 @@ router.all('/proxy/*', async (req, res) => {
 
     // 调用外部API
     const response = await axios(targetUrl, config);
-    
+
     // 返回外部API的响应
     res.json(response.data);
 
   } catch (error) {
     console.error('外部API代理调用失败:', error);
-    
+
     if (error.response) {
       res.status(error.response.status).json({
         code: error.response.status,

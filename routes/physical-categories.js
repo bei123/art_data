@@ -37,28 +37,28 @@ function validateImageUrl(url) {
 router.get('/', async (req, res) => {
   try {
     const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = req.query;
-    
+
     // 输入验证
     const cleanPage = Math.max(1, parseInt(page) || 1);
     const cleanLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
     const cleanSort = ['id', 'title', 'count', 'created_at', 'updated_at'].includes(sort) ? sort : 'created_at';
     const cleanOrder = ['asc', 'desc'].includes(order.toLowerCase()) ? order.toLowerCase() : 'desc';
-    
+
     const offset = (cleanPage - 1) * cleanLimit;
-    
+
     // 先查redis缓存（仅适用于第一页且无排序参数时）
-    const cacheKey = cleanPage === 1 && sort === 'created_at' && order === 'desc' 
-      ? REDIS_PHYSICAL_CATEGORIES_LIST_KEY 
+    const cacheKey = cleanPage === 1 && sort === 'created_at' && order === 'desc'
+      ? REDIS_PHYSICAL_CATEGORIES_LIST_KEY
       : `${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}:${cleanPage}:${cleanLimit}:${cleanSort}:${cleanOrder}`;
-    
+
     const cache = await redisClient.get(cacheKey);
     if (cache) {
       return res.json(JSON.parse(cache));
     }
-    
+
     // 查询总数
     const [[{ total }]] = await db.query('SELECT COUNT(*) as total FROM physical_categories');
-    
+
     // 查询分类数据，统计每个分类下的作品数量
     const [rows] = await db.query(`
       SELECT 
@@ -75,9 +75,9 @@ router.get('/', async (req, res) => {
       ORDER BY ${cleanSort} ${cleanOrder.toUpperCase()}
       LIMIT ? OFFSET ?
     `, [cleanLimit, offset]);
-    
+
     console.log('Physical categories query result:', rows);
-    
+
     if (!rows || !Array.isArray(rows)) {
       console.log('Invalid physical categories data:', rows);
       return res.json({
@@ -90,12 +90,12 @@ router.get('/', async (req, res) => {
         }
       });
     }
-    
+
     // 处理图片URL，添加WebP转换
-    const categoriesWithProcessedImages = rows.map(category => 
+    const categoriesWithProcessedImages = rows.map(category =>
       processObjectImages(category, ['image'])
     );
-    
+
     const result = {
       data: categoriesWithProcessedImages,
       pagination: {
@@ -105,9 +105,9 @@ router.get('/', async (req, res) => {
         totalPages: Math.ceil(parseInt(total) / cleanLimit)
       }
     };
-    
+
     res.json(result);
-    
+
     // 写入redis缓存，7天过期（仅缓存第一页默认排序）
     if (cleanPage === 1 && sort === 'created_at' && order === 'desc') {
       await redisClient.setEx(REDIS_PHYSICAL_CATEGORIES_LIST_KEY, 604800, JSON.stringify(result));
@@ -122,38 +122,38 @@ router.get('/', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { title, image, description } = req.body;
-    
+
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return res.status(400).json({ error: '分类名称不能为空' });
     }
-    
+
     if (title.length > 100) {
       return res.status(400).json({ error: '分类名称长度不能超过100个字符' });
     }
-    
+
     if (description && description.length > 1000) {
       return res.status(400).json({ error: '描述长度不能超过1000个字符' });
     }
-    
+
     const cleanTitle = title.trim();
     const cleanDescription = description ? description.trim() : '';
-    
+
     // 检查是否存在重复的分类名称
     const [existing] = await db.query(
       'SELECT id FROM physical_categories WHERE title = ?',
       [cleanTitle]
     );
-    
+
     if (existing && existing.length > 0) {
       return res.status(400).json({ error: '分类名称已存在' });
     }
-    
+
     const [result] = await db.query(
       'INSERT INTO physical_categories (title, image, description) VALUES (?, ?, ?)',
       [cleanTitle, image, cleanDescription]
     );
-    
+
     // 查询新创建的记录，统计作品数量
     const [newCategory] = await db.query(`
       SELECT 
@@ -169,14 +169,14 @@ router.post('/', authenticateToken, async (req, res) => {
       WHERE pc.id = ?
       GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
     `, [result.insertId]);
-    
+
     if (!newCategory || newCategory.length === 0) {
       return res.status(500).json({ error: '创建分类失败' });
     }
-    
+
     // 处理返回的图片URL，添加WebP转换
     const processedCategory = processObjectImages(newCategory[0], ['image']);
-    
+
     // 清理缓存
     await clearPhysicalCategoriesCache();
     res.json(processedCategory);
@@ -194,50 +194,50 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的分类ID' });
     }
-    
+
     const { title, image, description } = req.body;
-    
+
     // 输入验证
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return res.status(400).json({ error: '分类名称不能为空' });
     }
-    
+
     if (title.length > 100) {
       return res.status(400).json({ error: '分类名称长度不能超过100个字符' });
     }
-    
+
     if (description && description.length > 1000) {
       return res.status(400).json({ error: '描述长度不能超过1000个字符' });
     }
-    
+
     const cleanTitle = title.trim();
     const cleanDescription = description ? description.trim() : '';
-    
+
     // 检查分类是否存在
     const [existing] = await db.query(
       'SELECT id, title FROM physical_categories WHERE id = ?',
       [id]
     );
-    
+
     if (!existing || existing.length === 0) {
       return res.status(404).json({ error: '分类不存在' });
     }
-    
+
     // 检查是否存在重复的分类名称（排除当前记录）
     const [duplicate] = await db.query(
       'SELECT id FROM physical_categories WHERE title = ? AND id != ?',
       [cleanTitle, id]
     );
-    
+
     if (duplicate && duplicate.length > 0) {
       return res.status(400).json({ error: '分类名称已存在' });
     }
-    
+
     await db.query(
       'UPDATE physical_categories SET title = ?, image = ?, description = ?, updated_at = NOW() WHERE id = ?',
       [cleanTitle, image, cleanDescription, id]
     );
-    
+
     // 查询更新后的记录，统计作品数量
     const [updatedCategory] = await db.query(`
       SELECT 
@@ -253,14 +253,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
       WHERE pc.id = ?
       GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
     `, [id]);
-    
+
     if (!updatedCategory || updatedCategory.length === 0) {
       return res.status(500).json({ error: '更新分类失败' });
     }
-    
+
     // 处理返回的图片URL，添加WebP转换
     const processedCategory = processObjectImages(updatedCategory[0], ['image']);
-    
+
     // 清理缓存
     await clearPhysicalCategoriesCache();
     res.json(processedCategory);
@@ -278,23 +278,23 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的分类ID' });
     }
-    
+
     // 检查分类是否存在
     const [existing] = await db.query(
       'SELECT id, title FROM physical_categories WHERE id = ?',
       [id]
     );
-    
+
     if (!existing || existing.length === 0) {
       return res.status(404).json({ error: '分类不存在' });
     }
-    
+
     await db.query('DELETE FROM physical_categories WHERE id = ?', [id]);
-    
+
     // 清理所有相关缓存
     await clearPhysicalCategoriesCache();
-    
-    res.json({ 
+
+    res.json({
       message: '删除成功',
       deletedCategory: {
         id: existing[0].id,
@@ -315,7 +315,7 @@ router.get('/:id', async (req, res) => {
     if (isNaN(id) || id <= 0) {
       return res.status(400).json({ error: '无效的分类ID' });
     }
-    
+
     // 查询分类详情，统计作品数量
     const [categories] = await db.query(`
       SELECT 
@@ -331,14 +331,14 @@ router.get('/:id', async (req, res) => {
       WHERE pc.id = ?
       GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
     `, [id]);
-    
+
     if (!categories || categories.length === 0) {
       return res.status(404).json({ error: '分类不存在' });
     }
-    
+
     // 处理图片URL，添加WebP转换
     const processedCategory = processObjectImages(categories[0], ['image']);
-    
+
     res.json(processedCategory);
   } catch (error) {
     console.error('Error fetching physical category:', error);

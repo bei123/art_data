@@ -38,11 +38,11 @@ function createDytnsClient() {
     // 检查必要的环境变量
     const accessKeyId = process.env.ALIBABA_CLOUD_ACCESS_KEY_ID || process.env.OSS_ACCESS_KEY_ID;
     const accessKeySecret = process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET || process.env.OSS_ACCESS_KEY_SECRET;
-    
+
     if (!accessKeyId || !accessKeySecret) {
         throw new Error('缺少阿里云访问密钥配置。请设置 ALIBABA_CLOUD_ACCESS_KEY_ID 和 ALIBABA_CLOUD_ACCESS_KEY_SECRET 环境变量');
     }
-    
+
     // 使用环境变量创建凭证
     let credential = new Credential.default({
         type: 'access_key',
@@ -90,7 +90,7 @@ router.post('/getPhoneNumber', async (req, res) => {
     // 从环境变量获取微信小程序配置
     const appid = process.env.WX_APPID;
     const secret = process.env.WX_SECRET;
-    
+
     // 检查必要的环境变量
     if (!appid || !secret) {
         console.error('错误: 缺少必要的微信小程序环境变量 WX_APPID 或 WX_SECRET');
@@ -115,20 +115,20 @@ router.post('/getPhoneNumber', async (req, res) => {
 // 小程序登录注册接口
 router.post('/login', async (req, res) => {
     const { code } = req.body;
-    
+
     // 输入验证
     if (!code || typeof code !== 'string' || code.trim().length === 0) {
         return res.status(400).json({ error: '缺少有效的 code' });
     }
-    
+
     if (code.length > 100) {
         return res.status(400).json({ error: 'code 长度不能超过100个字符' });
     }
-    
+
     const cleanCode = code.trim();
     const appid = process.env.WX_APPID;
     const secret = process.env.WX_SECRET;
-    
+
     // 检查必要的环境变量
     if (!appid || !secret) {
         console.error('错误: 缺少必要的微信小程序环境变量 WX_APPID 或 WX_SECRET');
@@ -148,13 +148,13 @@ router.post('/login', async (req, res) => {
         // 2. 在你自己的数据库查找或注册用户（表名改为 wx_users）
         let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?', [openid]);
         let user;
-        
+
         if (users.length === 0) {
             // 没有则注册，只插入必要字段
             const [result] = await db.query('INSERT INTO wx_users (openid, session_key) VALUES (?, ?)', [openid, session_key]);
-            user = { 
-                id: result.insertId, 
-                openid, 
+            user = {
+                id: result.insertId,
+                openid,
                 nickname: null,
                 avatar: null,
                 phone: null,
@@ -205,32 +205,32 @@ router.post('/bindUserInfo', async (req, res) => {
     }
 
     const { phone, nickname, avatar } = req.body;
-    
+
     // 输入验证
     if (!phone && !nickname && !avatar) {
         return res.status(400).json({ error: '缺少参数' });
     }
-    
+
     if (phone && (typeof phone !== 'string' || phone.trim().length === 0)) {
         return res.status(400).json({ error: '手机号格式不正确' });
     }
-    
+
     if (phone && phone.length > 20) {
         return res.status(400).json({ error: '手机号长度不能超过20个字符' });
     }
-    
+
     if (nickname && (typeof nickname !== 'string' || nickname.trim().length === 0)) {
         return res.status(400).json({ error: '昵称不能为空' });
     }
-    
+
     if (nickname && nickname.length > 50) {
         return res.status(400).json({ error: '昵称长度不能超过50个字符' });
     }
-    
+
     if (avatar && (typeof avatar !== 'string' || avatar.trim().length === 0)) {
         return res.status(400).json({ error: '头像URL不能为空' });
     }
-    
+
     if (avatar && avatar.length > 500) {
         return res.status(400).json({ error: '头像URL长度不能超过500个字符' });
     }
@@ -308,11 +308,11 @@ router.get('/userInfo', async (req, res) => {
                     FROM wx_users
                         WHERE id = ?
         `, [payload.userId]);
-        
+
         if (!users || users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
-        
+
         const user = users[0];
         // 对敏感信息进行脱敏处理
         res.json({
@@ -347,16 +347,16 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
     if (!nickname && !avatarFile) {
         return res.status(400).json({ error: '昵称和头像至少需要提供一个' });
     }
-    
+
     // 输入验证
     if (nickname && (typeof nickname !== 'string' || nickname.trim().length === 0)) {
         return res.status(400).json({ error: '昵称不能为空' });
     }
-    
+
     if (nickname && nickname.length > 50) {
         return res.status(400).json({ error: '昵称长度不能超过50个字符' });
     }
-    
+
     if (avatarFile && avatarFile.size > 5 * 1024 * 1024) {
         return res.status(400).json({ error: '头像文件大小不能超过5MB' });
     }
@@ -409,7 +409,7 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
             FROM wx_users 
             WHERE id = ?
         `, [payload.userId]);
-        
+
         if (users.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
@@ -428,19 +428,19 @@ router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
 // 获取外部token接口
 router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), async (req, res) => {
     const { appInfo } = req.body;
-    
+
     // 输入验证
     if (!appInfo || typeof appInfo !== 'string') {
         return res.status(400).json({ error: '缺少有效的 appInfo 参数' });
     }
-    
+
     if (appInfo.length > 1000) {
         return res.status(400).json({ error: 'appInfo 参数长度不能超过1000个字符' });
     }
 
     try {
         // 调用外部API获取token
-        const response = await axios.post('https://yapi.licenseinfo.cn/mock/600/userApi/user/getToken', 
+        const response = await axios.post('https://yapi.licenseinfo.cn/mock/600/userApi/user/getToken',
             `appInfo=${appInfo}`,
             {
                 headers: {
@@ -453,9 +453,9 @@ router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), a
         res.json(response.data);
     } catch (err) {
         console.error('获取token失败:', err);
-        res.status(500).json({ 
+        res.status(500).json({
             error: '获取外部token服务暂时不可用',
-            detail: err.message 
+            detail: err.message
         });
     }
 });
@@ -465,10 +465,10 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
     // 从请求头获取token
     const authHeader = req.headers.authorization;
     if (!authHeader) {
-        return res.status(401).json({ 
+        return res.status(401).json({
             code: 401,
             status: false,
-            message: '缺少token' 
+            message: '缺少token'
         });
     }
 
@@ -488,7 +488,7 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
             message: '请求体格式错误'
         });
     }
-    
+
     // 验证请求体大小
     const bodySize = JSON.stringify(req.body).length;
     if (bodySize > 10000) {
@@ -498,7 +498,7 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
             message: '请求体过大'
         });
     }
-    
+
     try {
         // 1. 先将实名信息写入数据库
         const {
@@ -534,11 +534,11 @@ router.post('/userApi/external/user/real_name_registration/simplify/v3', async (
         res.json(response.data);
     } catch (err) {
         console.error('实名注册失败:', err);
-        res.status(500).json({ 
+        res.status(500).json({
             code: 500,
             status: false,
             message: '实名注册服务暂时不可用',
-            detail: err.message 
+            detail: err.message
         });
     }
 });
@@ -564,12 +564,12 @@ router.get('/userPhone', async (req, res) => {
             `SELECT phone FROM wx_users WHERE id = ?`,
             [payload.userId]
         );
-        
+
         if (rows.length === 0) {
             return res.status(404).json({ error: '用户不存在' });
         }
-        
-        res.json({ 
+
+        res.json({
             phone: rows[0].phone,
             message: '获取手机号成功'
         });
@@ -608,17 +608,17 @@ router.get('/userVerificationStatus', async (req, res) => {
             LIMIT 1`,
             [payload.userId]
         );
-        
+
         if (rows.length === 0) {
             // 没有实名记录
-            res.json({ 
+            res.json({
                 isVerified: false,
                 hasRecord: false,
                 message: '用户未进行实名认证'
             });
         } else {
             const record = rows[0];
-            res.json({ 
+            res.json({
                 isVerified: record.is_verified === 1,
                 hasRecord: true,
                 name: record.name ? record.name.substring(0, 1) + '***' : null,
@@ -640,7 +640,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
     { name: 'businessLicense', maxCount: 1 }
 ]), async (req, res) => {
     const { userId } = req.body;
-    
+
     // 输入验证
     if (!userId) {
         return res.status(400).json({
@@ -649,7 +649,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             message: '缺少用户ID'
         });
     }
-    
+
     const cleanUserId = parseInt(userId);
     if (isNaN(cleanUserId) || cleanUserId <= 0) {
         return res.status(400).json({
@@ -678,12 +678,12 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
             const frontFile = files.idCardFront[0];
             const frontResult = await uploadToOSS(frontFile, folderPrefix);
             result.idCardFrontUrl = frontResult.url;
-            
+
             // 进行身份证识别
             try {
                 const ocrResult = await OcrClient.recognizeIdCard(frontFile.buffer);
                 console.log('OCR原始结果:', JSON.stringify(ocrResult, null, 2));
-                
+
                 // 解析嵌套的JSON字符串
                 let parsedData;
                 if (ocrResult && ocrResult.data) {
@@ -693,7 +693,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                         parsedData = ocrResult.data;
                     }
                 }
-                
+
                 // 修正所有 value 字段乱码
                 if (parsedData && parsedData.data && parsedData.data.face && Array.isArray(parsedData.data.face.prism_keyValueInfo)) {
                     parsedData.data.face.prism_keyValueInfo.forEach(item => {
@@ -718,7 +718,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                         }
                     });
                 }
-                
+
                 result.idCardInfo = {
                     ...ocrResult,
                     data: parsedData
@@ -726,20 +726,20 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
 
                 // 自动进行二要素核验
                 let certName = '', certNo = '';
-                
+
                 // 从prism_keyValueInfo中提取姓名和身份证号
                 if (parsedData && parsedData.data && parsedData.data.face && Array.isArray(parsedData.data.face.prism_keyValueInfo)) {
                     const keyValueInfo = parsedData.data.face.prism_keyValueInfo;
                     console.log('解析后的keyValueInfo:', JSON.stringify(keyValueInfo, null, 2));
-                    
+
                     const nameItem = keyValueInfo.find(item => item.key === 'name');
                     const idNumberItem = keyValueInfo.find(item => item.key === 'idNumber');
-                    
+
                     if (nameItem) {
                         certName = nameItem.value;
                         console.log('找到姓名:', certName);
                     }
-                    
+
                     if (idNumberItem) {
                         certNo = idNumberItem.value;
                         console.log('找到身份证号:', certNo);
@@ -756,7 +756,7 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                             authCode: process.env.ALIYUN_IDCARD_AUTHCODE // 添加AuthCode
                         });
                         const runtime = new Util.RuntimeOptions({});
-                        
+
                         console.log('发送二要素核验请求...');
                         const verifyRes = await client.certNoTwoElementVerificationWithOptions(request, runtime);
                         console.log('二要素核验响应:', verifyRes);
@@ -768,16 +768,16 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
                             recommend: verifyErr.data?.Recommend,
                             stack: verifyErr.stack
                         });
-                        result.idCardVerify = { 
-                            code: 500, 
-                            message: '二要素核验失败', 
+                        result.idCardVerify = {
+                            code: 500,
+                            message: '二要素核验失败',
                             detail: verifyErr.message,
-                            recommend: verifyErr.data?.Recommend 
+                            recommend: verifyErr.data?.Recommend
                         };
                     }
                 } else {
-                    console.log('无法获取姓名或身份证号:', { 
-                        certName, 
+                    console.log('无法获取姓名或身份证号:', {
+                        certName,
                         certNo,
                         parsedData: JSON.stringify(parsedData, null, 2)
                     });
@@ -862,27 +862,27 @@ router.get('/getIp', (req, res) => {
 // 身份证二要素核验接口
 router.post('/userApi/external/user/idcard-verify', async (req, res) => {
     const { certName, certNo } = req.body;
-    
+
     // 输入验证
     if (!certName || typeof certName !== 'string' || certName.trim().length === 0) {
         return res.status(400).json({ code: 400, message: '缺少有效的姓名' });
     }
-    
+
     if (!certNo || typeof certNo !== 'string' || certNo.trim().length === 0) {
         return res.status(400).json({ code: 400, message: '缺少有效的身份证号' });
     }
-    
+
     // 验证姓名长度
     if (certName.length > 50) {
         return res.status(400).json({ code: 400, message: '姓名长度不能超过50个字符' });
     }
-    
+
     // 验证身份证号格式
     const idCardRegex = /^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(1[0-2]))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$/;
     if (!idCardRegex.test(certNo)) {
         return res.status(400).json({ code: 400, message: '身份证号格式不正确' });
     }
-    
+
     // 清理输入
     const cleanCertName = certName.trim();
     const cleanCertNo = certNo.trim();
@@ -894,16 +894,16 @@ router.post('/userApi/external/user/idcard-verify', async (req, res) => {
             certNo: cleanCertNo
         });
         const runtime = new Util.RuntimeOptions({});
-        
+
         const response = await client.certNoTwoElementVerificationWithOptions(request, runtime);
         res.json(response.body);
     } catch (err) {
         console.error('二要素核验失败:', err);
-        res.status(500).json({ 
-            code: 500, 
-            message: '身份证核验服务暂时不可用', 
+        res.status(500).json({
+            code: 500,
+            message: '身份证核验服务暂时不可用',
             detail: err.message,
-            recommend: err.data?.Recommend 
+            recommend: err.data?.Recommend
         });
     }
 });
@@ -932,20 +932,20 @@ router.post('/setPassword', async (req, res) => {
     }
 
     const { password } = req.body;
-    
+
     // 输入验证
     if (!password || typeof password !== 'string') {
         return res.status(400).json({ error: '缺少密码参数' });
     }
-    
+
     if (password.length < 6) {
         return res.status(400).json({ error: '密码长度至少6位' });
     }
-    
+
     if (password.length > 50) {
         return res.status(400).json({ error: '密码长度不能超过50位' });
     }
-    
+
     // 验证密码复杂度
     const passwordRegex = /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d@#$%^&+=]{6,}$/;
     if (!passwordRegex.test(password)) {
@@ -999,30 +999,30 @@ router.post('/changePassword', async (req, res) => {
     }
 
     const { oldPassword, newPassword } = req.body;
-    
+
     // 输入验证
     if (!oldPassword || typeof oldPassword !== 'string') {
         return res.status(400).json({ error: '缺少旧密码参数' });
     }
-    
+
     if (!newPassword || typeof newPassword !== 'string') {
         return res.status(400).json({ error: '缺少新密码参数' });
     }
-    
+
     if (newPassword.length < 6) {
         return res.status(400).json({ error: '新密码长度至少6位' });
     }
-    
+
     if (newPassword.length > 50) {
         return res.status(400).json({ error: '新密码长度不能超过50位' });
     }
-    
+
     // 验证新密码复杂度
     const passwordRegex = /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d@#$%^&+=]{6,}$/;
     if (!passwordRegex.test(newPassword)) {
         return res.status(400).json({ error: '新密码必须包含字母和数字' });
     }
-    
+
     // 验证新旧密码不能相同
     if (oldPassword === newPassword) {
         return res.status(400).json({ error: '新密码不能与旧密码相同' });
@@ -1036,7 +1036,7 @@ router.post('/changePassword', async (req, res) => {
         }
 
         const user = users[0];
-        
+
         // 检查是否已经设置过密码
         if (!user.password_hash) {
             return res.status(400).json({ error: '用户尚未设置密码，请先设置密码' });
@@ -1082,16 +1082,16 @@ router.post('/verifyPassword', async (req, res) => {
     }
 
     const { password } = req.body;
-    
+
     // 输入验证
     if (!password || typeof password !== 'string') {
         return res.status(400).json({ error: '缺少密码参数' });
     }
-    
+
     if (password.length < 6) {
         return res.status(400).json({ error: '密码长度至少6位' });
     }
-    
+
     if (password.length > 50) {
         return res.status(400).json({ error: '密码长度不能超过50位' });
     }
@@ -1104,7 +1104,7 @@ router.post('/verifyPassword', async (req, res) => {
         }
 
         const user = users[0];
-        
+
         // 检查是否已经设置过密码
         if (!user.password_hash) {
             return res.status(400).json({ error: '用户尚未设置密码' });
@@ -1112,7 +1112,7 @@ router.post('/verifyPassword', async (req, res) => {
 
         // 验证密码（多次MD5+盐）
         const isValidPassword = (md5WithSalt(password, user.salt, 3) === user.password_hash);
-        
+
         res.json({
             success: true,
             isValid: isValidPassword,
@@ -1160,7 +1160,7 @@ router.get('/addresses', async (req, res) => {
             WHERE user_id = ? 
             ORDER BY is_default DESC, created_at DESC
         `, [payload.userId]);
-        
+
         res.json({
             success: true,
             data: addresses,
@@ -1210,11 +1210,11 @@ router.get('/addresses/:id', async (req, res) => {
             FROM wx_user_addresses 
             WHERE id = ? AND user_id = ?
         `, [addressId, payload.userId]);
-        
+
         if (addresses.length === 0) {
             return res.status(404).json({ error: '地址不存在' });
         }
-        
+
         res.json({
             success: true,
             data: addresses[0],
@@ -1241,51 +1241,51 @@ router.post('/addresses', async (req, res) => {
         return res.status(401).json({ error: 'token无效' });
     }
 
-    const { 
-        receiver_name, 
-        receiver_phone, 
-        province, 
-        city, 
-        district, 
-        detail_address, 
-        is_default = false 
+    const {
+        receiver_name,
+        receiver_phone,
+        province,
+        city,
+        district,
+        detail_address,
+        is_default = false
     } = req.body;
-    
+
     // 输入验证
     if (!receiver_name || typeof receiver_name !== 'string' || receiver_name.trim().length === 0) {
         return res.status(400).json({ error: '收货人姓名不能为空' });
     }
-    
+
     if (receiver_name.length > 50) {
         return res.status(400).json({ error: '收货人姓名长度不能超过50个字符' });
     }
-    
+
     if (!receiver_phone || typeof receiver_phone !== 'string' || receiver_phone.trim().length === 0) {
         return res.status(400).json({ error: '收货人手机号不能为空' });
     }
-    
+
     // 验证手机号格式
     const phoneRegex = /^1[3-9]\d{9}$/;
     if (!phoneRegex.test(receiver_phone.trim())) {
         return res.status(400).json({ error: '手机号格式不正确' });
     }
-    
+
     if (!province || typeof province !== 'string' || province.trim().length === 0) {
         return res.status(400).json({ error: '省份不能为空' });
     }
-    
+
     if (!city || typeof city !== 'string' || city.trim().length === 0) {
         return res.status(400).json({ error: '城市不能为空' });
     }
-    
+
     if (!district || typeof district !== 'string' || district.trim().length === 0) {
         return res.status(400).json({ error: '区县不能为空' });
     }
-    
+
     if (!detail_address || typeof detail_address !== 'string' || detail_address.trim().length === 0) {
         return res.status(400).json({ error: '详细地址不能为空' });
     }
-    
+
     if (detail_address.length > 200) {
         return res.status(400).json({ error: '详细地址长度不能超过200个字符' });
     }
@@ -1361,51 +1361,51 @@ router.put('/addresses/:id', async (req, res) => {
         return res.status(400).json({ error: '无效的地址ID' });
     }
 
-    const { 
-        receiver_name, 
-        receiver_phone, 
-        province, 
-        city, 
-        district, 
-        detail_address, 
-        is_default 
+    const {
+        receiver_name,
+        receiver_phone,
+        province,
+        city,
+        district,
+        detail_address,
+        is_default
     } = req.body;
-    
+
     // 输入验证
     if (!receiver_name || typeof receiver_name !== 'string' || receiver_name.trim().length === 0) {
         return res.status(400).json({ error: '收货人姓名不能为空' });
     }
-    
+
     if (receiver_name.length > 50) {
         return res.status(400).json({ error: '收货人姓名长度不能超过50个字符' });
     }
-    
+
     if (!receiver_phone || typeof receiver_phone !== 'string' || receiver_phone.trim().length === 0) {
         return res.status(400).json({ error: '收货人手机号不能为空' });
     }
-    
+
     // 验证手机号格式
     const phoneRegex = /^1[3-9]\d{9}$/;
     if (!phoneRegex.test(receiver_phone.trim())) {
         return res.status(400).json({ error: '手机号格式不正确' });
     }
-    
+
     if (!province || typeof province !== 'string' || province.trim().length === 0) {
         return res.status(400).json({ error: '省份不能为空' });
     }
-    
+
     if (!city || typeof city !== 'string' || city.trim().length === 0) {
         return res.status(400).json({ error: '城市不能为空' });
     }
-    
+
     if (!district || typeof district !== 'string' || district.trim().length === 0) {
         return res.status(400).json({ error: '区县不能为空' });
     }
-    
+
     if (!detail_address || typeof detail_address !== 'string' || detail_address.trim().length === 0) {
         return res.status(400).json({ error: '详细地址不能为空' });
     }
-    
+
     if (detail_address.length > 200) {
         return res.status(400).json({ error: '详细地址长度不能超过200个字符' });
     }
@@ -1416,7 +1416,7 @@ router.put('/addresses/:id', async (req, res) => {
             SELECT id, is_default FROM wx_user_addresses 
             WHERE id = ? AND user_id = ?
         `, [addressId, payload.userId]);
-        
+
         if (existingAddresses.length === 0) {
             return res.status(404).json({ error: '地址不存在' });
         }
@@ -1499,7 +1499,7 @@ router.delete('/addresses/:id', async (req, res) => {
             SELECT id, is_default FROM wx_user_addresses 
             WHERE id = ? AND user_id = ?
         `, [addressId, payload.userId]);
-        
+
         if (existingAddresses.length === 0) {
             return res.status(404).json({ error: '地址不存在' });
         }
@@ -1518,7 +1518,7 @@ router.delete('/addresses/:id', async (req, res) => {
                 ORDER BY created_at DESC 
                 LIMIT 1
             `, [payload.userId]);
-            
+
             if (remainingAddresses.length > 0) {
                 await db.query('UPDATE wx_user_addresses SET is_default = 1 WHERE id = ?', [remainingAddresses[0].id]);
             }
@@ -1560,7 +1560,7 @@ router.put('/addresses/:id/default', async (req, res) => {
             SELECT id FROM wx_user_addresses 
             WHERE id = ? AND user_id = ?
         `, [addressId, payload.userId]);
-        
+
         if (existingAddresses.length === 0) {
             return res.status(404).json({ error: '地址不存在' });
         }
@@ -1615,7 +1615,7 @@ router.get('/addresses/default', async (req, res) => {
             WHERE user_id = ? AND is_default = 1
             LIMIT 1
         `, [payload.userId]);
-        
+
         if (addresses.length === 0) {
             return res.json({
                 success: true,
@@ -1623,7 +1623,7 @@ router.get('/addresses/default', async (req, res) => {
                 message: '用户暂无默认地址'
             });
         }
-        
+
         res.json({
             success: true,
             data: addresses[0],

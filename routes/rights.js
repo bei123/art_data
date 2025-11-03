@@ -78,7 +78,7 @@ async function ensureDiscountSchema(connection) {
 router.get('/', async (req, res) => {
     try {
         const { page = 1, limit = 20, status, category_id, sort = 'created_at', order = 'desc' } = req.query;
-        
+
         // 输入验证
         const cleanPage = Math.max(1, parseInt(page) || 1);
         const cleanLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
@@ -86,41 +86,41 @@ router.get('/', async (req, res) => {
         const cleanOrder = ['asc', 'desc'].includes(order.toLowerCase()) ? order.toLowerCase() : 'desc';
         const cleanStatus = status && ['onsale', 'sold', 'draft'].includes(status) ? status : null;
         const cleanCategoryId = category_id && !isNaN(parseInt(category_id)) ? parseInt(category_id) : null;
-        
+
         const offset = (cleanPage - 1) * cleanLimit;
-        
+
         // 构建缓存key
         const cacheKey = cleanPage === 1 && !cleanStatus && !cleanCategoryId && sort === 'created_at' && order === 'desc'
             ? REDIS_RIGHTS_LIST_KEY
             : `${REDIS_RIGHTS_LIST_KEY}:${cleanPage}:${cleanLimit}:${cleanStatus || 'all'}:${cleanCategoryId || 'all'}:${cleanSort}:${cleanOrder}`;
-        
+
         // 先查redis缓存
         const cache = await redisClient.get(cacheKey);
         if (cache) {
             return res.json(JSON.parse(cache));
         }
-        
+
         // 构建查询条件
         let whereClause = 'WHERE 1=1';
         let params = [];
-        
+
         if (cleanStatus) {
             whereClause += ' AND r.status = ?';
             params.push(cleanStatus);
         }
-        
+
         if (cleanCategoryId) {
             whereClause += ' AND r.category_id = ?';
             params.push(cleanCategoryId);
         }
-        
+
         // 查询总数
         const [[{ total }]] = await db.query(`
             SELECT COUNT(*) as total 
             FROM rights r 
             ${whereClause}
         `, params);
-        
+
         // 查询版权实物基本信息，只查询必要字段
         const [rows] = await db.query(`
             SELECT 
@@ -171,7 +171,7 @@ router.get('/', async (req, res) => {
             WHERE right_id IN (?)
             ORDER BY right_id, id
         `, [rightIds]);
-        
+
         // 将图片按right_id分组
         const imagesMap = new Map();
         allImages.forEach(img => {
@@ -203,7 +203,7 @@ router.get('/', async (req, res) => {
         };
 
         res.json(result);
-        
+
         // 写入redis缓存，7天过期（仅缓存第一页默认查询）
         if (cleanPage === 1 && !cleanStatus && !cleanCategoryId && sort === 'created_at' && order === 'desc') {
             await redisClient.setEx(REDIS_RIGHTS_LIST_KEY, 604800, JSON.stringify(result));
@@ -218,47 +218,47 @@ router.get('/', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
     try {
         const { title, status, price, discount_price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text, eligible_digital_artwork_ids } = req.body;
-        
+
         // 输入验证
         if (!title || typeof title !== 'string' || title.trim().length === 0) {
             return res.status(400).json({ error: '标题不能为空' });
         }
-        
+
         if (title.length > 200) {
             return res.status(400).json({ error: '标题长度不能超过200个字符' });
         }
-        
+
         if (!status || !['onsale', 'sold', 'draft'].includes(status)) {
             return res.status(400).json({ error: '状态必须是 onsale、sold 或 draft' });
         }
-        
+
         if (!price || isNaN(parseFloat(price)) || parseFloat(price) < 0) {
             return res.status(400).json({ error: '价格必须是有效的正数' });
         }
-        
+
         if (originalPrice && (isNaN(parseFloat(originalPrice)) || parseFloat(originalPrice) < 0)) {
             return res.status(400).json({ error: '原价必须是有效的正数' });
         }
         if (discount_price && (isNaN(parseFloat(discount_price)) || parseFloat(discount_price) < 0)) {
             return res.status(400).json({ error: '优惠价必须是有效的正数' });
         }
-        
+
         if (totalCount && (isNaN(parseInt(totalCount)) || parseInt(totalCount) < 0)) {
             return res.status(400).json({ error: '总数量必须是有效的正整数' });
         }
-        
+
         if (remainingCount && (isNaN(parseInt(remainingCount)) || parseInt(remainingCount) < 0)) {
             return res.status(400).json({ error: '剩余数量必须是有效的正整数' });
         }
-        
+
         if (description && description.length > 2000) {
             return res.status(400).json({ error: '描述长度不能超过2000个字符' });
         }
-        
+
         if (images && !Array.isArray(images)) {
             return res.status(400).json({ error: '图片必须是数组格式' });
         }
-        
+
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -297,7 +297,7 @@ router.post('/', authenticateToken, async (req, res) => {
             }
 
             await connection.commit();
-            
+
             // 查询新创建的版权实物信息，只查询必要字段
             const [newRight] = await db.query(`
                 SELECT 
@@ -354,7 +354,7 @@ router.post('/', authenticateToken, async (req, res) => {
             };
 
             res.json(result);
-            
+
             // 清理缓存
             await redisClient.del(REDIS_RIGHTS_LIST_KEY);
             await clearPhysicalCategoriesCache();
@@ -374,53 +374,53 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
         const { title, status, price, discount_price, originalPrice, period, totalCount, remainingCount, description, images, category_id, artist_id, rich_text, eligible_digital_artwork_ids } = req.body;
-        
+
         // 验证ID参数
         const id = parseInt(req.params.id);
         if (isNaN(id) || id <= 0) {
             return res.status(400).json({ error: '无效的版权实物ID' });
         }
-        
+
         // 输入验证
         if (!title || typeof title !== 'string' || title.trim().length === 0) {
             return res.status(400).json({ error: '标题不能为空' });
         }
-        
+
         if (title.length > 200) {
             return res.status(400).json({ error: '标题长度不能超过200个字符' });
         }
-        
+
         if (!status || !['onsale', 'soldout', 'upcoming', 'sold', 'draft'].includes(status)) {
             return res.status(400).json({ error: '状态必须是 onsale、soldout、upcoming、sold 或 draft' });
         }
-        
+
         if (!price || isNaN(parseFloat(price)) || parseFloat(price) < 0) {
             return res.status(400).json({ error: '价格必须是有效的正数' });
         }
         if (discount_price && (isNaN(parseFloat(discount_price)) || parseFloat(discount_price) < 0)) {
             return res.status(400).json({ error: '优惠价必须是有效的正数' });
         }
-        
+
         if (originalPrice && (isNaN(parseFloat(originalPrice)) || parseFloat(originalPrice) < 0)) {
             return res.status(400).json({ error: '原价必须是有效的正数' });
         }
-        
+
         if (totalCount && (isNaN(parseInt(totalCount)) || parseInt(totalCount) < 0)) {
             return res.status(400).json({ error: '总数量必须是有效的正整数' });
         }
-        
+
         if (remainingCount && (isNaN(parseInt(remainingCount)) || parseInt(remainingCount) < 0)) {
             return res.status(400).json({ error: '剩余数量必须是有效的正整数' });
         }
-        
+
         if (description && description.length > 2000) {
             return res.status(400).json({ error: '描述长度不能超过2000个字符' });
         }
-        
+
         if (images && !Array.isArray(images)) {
             return res.status(400).json({ error: '图片必须是数组格式' });
         }
-        
+
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -432,12 +432,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 'SELECT id FROM rights WHERE id = ?',
                 [id]
             );
-            
+
             if (!existing || existing.length === 0) {
                 await connection.rollback();
                 return res.status(404).json({ error: '版权实物不存在' });
             }
-            
+
             // 更新版权实物基本信息
             await connection.query(
                 'UPDATE rights SET title = ?, status = ?, price = ?, discount_price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, artist_id = ?, rich_text = ?, updated_at = NOW() WHERE id = ?',
@@ -471,7 +471,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             }
 
             await connection.commit();
-            
+
             // 查询更新后的版权实物信息，只查询必要字段
             const [updatedRight] = await db.query(`
                 SELECT 
@@ -527,7 +527,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
             };
 
             res.json(result);
-            
+
             // 清理缓存
             await clearRightsCache();
             await redisClient.del(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
@@ -552,7 +552,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         if (isNaN(id) || id <= 0) {
             return res.status(400).json({ error: '无效的版权实物ID' });
         }
-        
+
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -563,15 +563,15 @@ router.delete('/:id', authenticateToken, async (req, res) => {
                 'SELECT id, title FROM rights WHERE id = ?',
                 [id]
             );
-            
+
             if (!existing || existing.length === 0) {
                 await connection.rollback();
                 return res.status(404).json({ error: '版权实物不存在' });
             }
-            
+
             // 先删除购物车中的相关项目
             await connection.query('DELETE FROM cart_items WHERE right_id = ?', [id]);
-            
+
             // 先删除相关的订单项
             await connection.query('DELETE FROM order_items WHERE right_id = ?', [id]);
 
@@ -582,15 +582,15 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             await connection.query('DELETE FROM rights WHERE id = ?', [id]);
 
             await connection.commit();
-            
-            res.json({ 
+
+            res.json({
                 message: '删除成功',
                 deletedRight: {
                     id: existing[0].id,
                     title: existing[0].title
                 }
             });
-            
+
             // 清理缓存
             await clearRightsCache();
             await redisClient.del(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
@@ -615,13 +615,13 @@ router.get('/:id', async (req, res) => {
         if (isNaN(id) || id <= 0) {
             return res.status(400).json({ error: '无效的版权实物ID' });
         }
-        
+
         // 先查redis缓存
         const cache = await redisClient.get(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
         if (cache) {
             return res.json(JSON.parse(cache));
         }
-        
+
         // 查询版权实物详情，只查询必要字段
         const [rows] = await db.query(`
             SELECT 
@@ -655,7 +655,7 @@ router.get('/:id', async (req, res) => {
         }
 
         const right = processObjectImages(rows[0], ['image']);
-        
+
         // 获取版权实物的图片
         const [images] = await db.query(
             'SELECT image_url FROM right_images WHERE right_id = ? ORDER BY id',
@@ -683,9 +683,9 @@ router.get('/:id', async (req, res) => {
                 avatar: right.artist_avatar
             } : null
         };
-        
+
         res.json(result);
-        
+
         // 写入redis缓存，7天过期
         await redisClient.setEx(REDIS_RIGHT_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
     } catch (error) {
