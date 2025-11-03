@@ -1117,8 +1117,11 @@ router.post('/order/purchase', async (req, res) => {
     });
 
     if (!discountPriceResponse.data || discountPriceResponse.data.code !== 200) {
-      return res.status(discountPriceResponse.data?.code || 500).json({
-        code: discountPriceResponse.data?.code || 500,
+      // HTTP状态码必须在100-599范围内，如果外部API返回的code不在范围内，使用默认值
+      const externalCode = discountPriceResponse.data?.code;
+      const httpStatusCode = (externalCode >= 100 && externalCode <= 599) ? externalCode : 400;
+      return res.status(httpStatusCode).json({
+        code: externalCode || 500,
         status: false,
         message: '查询价格失败',
         data: discountPriceResponse.data
@@ -1165,8 +1168,11 @@ router.post('/order/purchase', async (req, res) => {
     });
 
     if (!unifiedOrderResponse.data || unifiedOrderResponse.data.code !== 200) {
-      return res.status(unifiedOrderResponse.data?.code || 500).json({
-        code: unifiedOrderResponse.data?.code || 500,
+      // HTTP状态码必须在100-599范围内，如果外部API返回的code不在范围内，使用默认值
+      const externalCode = unifiedOrderResponse.data?.code;
+      const httpStatusCode = (externalCode >= 100 && externalCode <= 599) ? externalCode : 400;
+      return res.status(httpStatusCode).json({
+        code: externalCode || 500,
         status: false,
         message: '统一下单失败',
         data: unifiedOrderResponse.data
@@ -1241,7 +1247,9 @@ router.post('/order/purchase', async (req, res) => {
         status: false,
         message: '购买流程失败'
       };
-      res.status(statusCode).json(responseData);
+      // 确保HTTP状态码在有效范围内（100-599）
+      const httpStatusCode = (statusCode >= 100 && statusCode <= 599) ? statusCode : 500;
+      res.status(httpStatusCode).json(responseData);
     } else if (error.request) {
       res.status(500).json({
         code: 500,
