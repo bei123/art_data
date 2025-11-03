@@ -57,17 +57,31 @@ router.get('/proxy', async (req, res) => {
       'Cache-Control': 'no-cache',
     };
     
-    // 只在明确提供 authorization 且是 Bearer token 时才添加
+    // 只在明确提供有效 authorization 且是 Bearer token 时才添加
+    // 过滤掉 "Bearer null" 或其他无效值
     // 不使用 Basic Auth，因为可能导致不必要的重定向
     if (authorization && authorization.trim()) {
-      // 确保是 Bearer token，而不是 Basic Auth
       const authValue = authorization.trim();
-      if (authValue.startsWith('Bearer ') || authValue.startsWith('bearer ')) {
-        requestHeaders['Authorization'] = authValue;
-      } else {
-        // 如果不是 Bearer，可能是完整格式，直接使用
-        requestHeaders['Authorization'] = authValue;
+      
+      // 检查是否是无效值（如 "Bearer null", "null", "undefined" 等）
+      const lowerAuth = authValue.toLowerCase();
+      const isInvalid = lowerAuth === 'null' || 
+                       lowerAuth === 'undefined' || 
+                       lowerAuth.startsWith('bearer null') || 
+                       lowerAuth.startsWith('bearer undefined') ||
+                       lowerAuth === '' ||
+                       lowerAuth === 'bearer';
+      
+      if (!isInvalid) {
+        // 确保是 Bearer token 格式
+        if (authValue.startsWith('Bearer ') || authValue.startsWith('bearer ')) {
+          requestHeaders['Authorization'] = authValue;
+        } else {
+          // 如果没有 Bearer 前缀，自动添加
+          requestHeaders['Authorization'] = `Bearer ${authValue}`;
+        }
       }
+      // 如果是无效值，不添加 Authorization 头
     }
 
     // 请求目标页面
