@@ -56,23 +56,19 @@ function validateImageUrl(url) {
  * 获取授权信息的辅助函数
  */
 function getAuthorization(req) {
-  // 外部接口统一使用 Basic 认证
-  // 优先使用环境变量，如果没有则使用默认的 Basic 认证
-  // 默认值：Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==
-  let authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+  // 优先使用请求头中的 authorization（可能是 Bearer token 或 Basic 认证）
+  let authorization = req.headers.authorization || req.headers.Authorization;
   
-  // 如果请求头中提供了 Basic 认证，优先使用（允许覆盖）
-  const headerAuth = req.headers.authorization || req.headers.Authorization;
-  if (headerAuth && headerAuth.startsWith('Basic ')) {
-    authorization = headerAuth;
+  // 如果没有提供，尝试从专门的请求头获取
+  if (!authorization) {
+    authorization = req.headers['x-external-authorization'] || 
+                   req.headers['X-External-Authorization'];
   }
   
-  // 也可以从专门的请求头获取 Basic 认证
-  const externalAuth = req.headers['x-external-authorization'] || 
-                      req.headers['X-External-Authorization'];
-  if (externalAuth && externalAuth.startsWith('Basic ')) {
-    authorization = externalAuth;
+  // 如果还是没有，使用环境变量或默认值（Basic 认证）
+  if (!authorization) {
+    authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                   'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
   }
   
   return authorization;
@@ -422,7 +418,7 @@ router.get('/:id', async (req, res) => {
       try {
         const authorization = getAuthorization(req);
         
-        // 构建商品接口的请求参数 - goods 需要作为查询参数传递（JSON字符串）
+        // 构建商品接口的请求参数 - goods 作为表单数据传递（application/x-www-form-urlencoded）
         const goodsParam = JSON.stringify({
           goodsId: obtainedGoodsId,
           buyerUsn: usn.trim(),
@@ -435,19 +431,21 @@ router.get('/:id', async (req, res) => {
         console.log('调用商品接口获取 goodsVerId，请求参数:', goodsParam);
         console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
         
+        // 使用 URLSearchParams 构建表单数据
+        const formData = new URLSearchParams();
+        formData.append('goods', goodsParam);
+        
         const response = await axios.post(
           goodsListUrl,
-          null, // POST 请求体为空，参数通过查询字符串传递
+          formData.toString(), // 作为表单数据传递
           {
-            params: {
-              goods: goodsParam
-            },
             headers: {
               'pragma': 'no-cache',
               'cache-control': 'no-cache',
               'authorization': authorization,
               'apptype': '16',
               'tenantid': 'wespace',
+              'content-type': 'application/x-www-form-urlencoded',
               'origin': 'https://m.wespace.cn',
               'sec-fetch-site': 'same-site',
               'sec-fetch-mode': 'cors',
