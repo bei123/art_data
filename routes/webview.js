@@ -79,6 +79,12 @@ router.get('/proxy', async (req, res) => {
         // 如果 pathname 不以斜杠结尾，添加斜杠
         baseHref += '/';
       }
+      
+      // 提取 hash 和 search，用于在页面加载后设置正确的路由
+      const targetHash = targetBaseUrl.hash || '';
+      const targetSearch = targetBaseUrl.search || '';
+      // 组合 hash 和 search（如果有 query 参数在 hash 中）
+      const targetRoute = targetHash + (targetHash.includes('?') ? '' : targetSearch);
 
       // 1. 注入 CSP meta 标签和修复脚本，必须在 head 的最前面，在所有其他脚本之前执行
       // 使用宽松的 CSP 策略以支持代理页面
@@ -124,6 +130,30 @@ router.get('/proxy', async (req, res) => {
             const originalReplaceState = history.replaceState;
             const originalPushState = history.pushState;
             const currentOrigin = window.location.origin;
+            
+            // 设置正确的路由 hash（如果目标 URL 包含 hash）
+            // 必须在 Vue Router 初始化之前执行，所以立即设置
+            ${targetRoute ? `
+            try {
+              // 立即设置 hash，不等待 DOM 加载
+              // 使用 replace 避免在历史记录中添加额外的条目
+              if (window.location.hash !== '${targetRoute.replace(/'/g, "\\'")}') {
+                // 如果当前 hash 为空或者是默认的，直接设置
+                if (!window.location.hash || window.location.hash === '#' || window.location.hash === '#/') {
+                  window.location.replace(window.location.href.split('#')[0] + '${targetRoute.replace(/'/g, "\\'")}');
+                } else {
+                  // 如果已有 hash，延迟设置以确保不干扰其他初始化
+                  setTimeout(function() {
+                    if (window.location.hash !== '${targetRoute.replace(/'/g, "\\'")}') {
+                      window.location.hash = '${targetRoute.replace(/'/g, "\\'")}';
+                    }
+                  }, 50);
+                }
+              }
+            } catch(e) {
+              console.warn('设置路由 hash 失败:', e);
+            }
+            ` : ''}
             
             // 修复 History API 跨域问题
             // 确保所有 state 操作都使用当前页面的 origin
