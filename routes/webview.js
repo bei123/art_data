@@ -213,55 +213,78 @@ router.get('/proxy', async (req, res) => {
             const currentOrigin = window.location.origin;
             
             // 设置正确的路由 hash（如果目标 URL 包含 hash）
-            // 必须在 Vue Router 初始化之前执行
+            // 小程序 webview 环境优化：必须在 Vue Router 初始化之前执行
             ${targetRoute ? `
-            try {
-              // 目标路由值
-              const targetRoute = '${targetRoute.replace(/'/g, "\\'")}';
-              
-              // 从代理 URL 的查询参数中提取 targetUrl（如果存在）
-              // 这样可以确保使用的是正确的 hash，而不是代理 URL 本身的 hash
-              function getTargetHashFromUrl() {
-                try {
-                  const urlParams = new URLSearchParams(window.location.search);
-                  const targetUrlParam = urlParams.get('targetUrl');
-                  if (targetUrlParam) {
-                    const decodedUrl = decodeURIComponent(targetUrlParam);
-                    const urlObj = new URL(decodedUrl);
-                    return urlObj.hash || '';
-                  }
-                } catch(e) {
-                  console.warn('从 URL 参数提取 hash 失败:', e);
-                }
-                return null;
-              }
-              
-              // 优先从 URL 参数中获取，如果没有则使用目标路由
-              let finalHash = getTargetHashFromUrl();
-              if (!finalHash) {
-                finalHash = targetRoute;
-              }
-              
-              // 立即设置 hash，不等待 DOM 加载
-              if (finalHash && window.location.hash !== finalHash) {
-                // 如果当前 hash 为空或者是默认的，直接设置
-                if (!window.location.hash || window.location.hash === '#' || window.location.hash === '#/') {
-                  // 构建新 URL，移除代理 URL 中的 hash，使用目标 hash
-                  const baseUrl = window.location.href.split('#')[0].split('?')[0];
-                  const queryString = window.location.search;
-                  window.location.replace(baseUrl + queryString + finalHash);
-                } else {
-                  // 如果已有 hash，延迟设置以确保不干扰其他初始化
-                  setTimeout(function() {
-                    if (window.location.hash !== finalHash) {
-                      window.location.hash = finalHash;
+            (function() {
+              try {
+                // 目标路由值
+                const targetRoute = '${targetRoute.replace(/'/g, "\\'")}';
+                
+                // 从代理 URL 的查询参数中提取 targetUrl（如果存在）
+                // 这样可以确保使用的是正确的 hash，而不是代理 URL 本身的 hash
+                function getTargetHashFromUrl() {
+                  try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const targetUrlParam = urlParams.get('targetUrl');
+                    if (targetUrlParam) {
+                      const decodedUrl = decodeURIComponent(targetUrlParam);
+                      const urlObj = new URL(decodedUrl);
+                      return urlObj.hash || '';
                     }
-                  }, 50);
+                  } catch(e) {
+                    console.warn('从 URL 参数提取 hash 失败:', e);
+                  }
+                  return null;
                 }
+                
+                // 优先从 URL 参数中获取，如果没有则使用目标路由
+                let finalHash = getTargetHashFromUrl();
+                if (!finalHash) {
+                  finalHash = targetRoute;
+                }
+                
+                // 小程序 webview 环境：立即设置 hash，使用多种方式确保成功
+                function setHash() {
+                  if (!finalHash) return;
+                  
+                  try {
+                    // 方式1：直接设置 hash（最简单，兼容性最好）
+                    if (window.location.hash !== finalHash) {
+                      // 如果当前 hash 为空或者是默认的，直接设置
+                      if (!window.location.hash || window.location.hash === '#' || window.location.hash === '#/') {
+                        window.location.hash = finalHash;
+                      } else {
+                        // 如果已有 hash，使用 replace 方式
+                        const currentUrl = window.location.href.split('#')[0];
+                        window.location.replace(currentUrl + finalHash);
+                      }
+                    }
+                  } catch(e) {
+                    console.warn('设置 hash 失败:', e);
+                  }
+                }
+                
+                // 立即执行一次
+                setHash();
+                
+                // 小程序 webview 可能有时序问题，多次尝试设置
+                // DOMContentLoaded 时再设置一次
+                if (document.readyState === 'loading') {
+                  document.addEventListener('DOMContentLoaded', function() {
+                    setTimeout(setHash, 100);
+                  });
+                } else {
+                  // 文档已加载，延迟设置确保 Vue Router 能正确识别
+                  setTimeout(setHash, 100);
+                }
+                
+                // 额外延迟设置，确保在所有脚本加载后也能正确设置
+                setTimeout(setHash, 300);
+                
+              } catch(e) {
+                console.warn('初始化路由 hash 失败:', e);
               }
-            } catch(e) {
-              console.warn('设置路由 hash 失败:', e);
-            }
+            })();
             ` : ''}
             
             // 修复 History API 跨域问题
