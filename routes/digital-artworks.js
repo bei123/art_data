@@ -917,4 +917,307 @@ router.post('/goods/ver/details', async (req, res) => {
   }
 });
 
+/**
+ * 获取融合的数字艺术品列表（结合本地数据和外部API）
+ * GET /api/digital-artworks/fused
+ * 可选参数：artist_id, page, pageSize, usn (用于获取外部数据)
+ */
+router.get('/fused', async (req, res) => {
+  try {
+    const { artist_id, page = 1, pageSize = 20, usn } = req.query;
+    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
+    
+    // 获取本地数据库的数字艺术品列表
+    const offset = (pageNum - 1) * sizeNum;
+    let query = `
+      SELECT 
+        da.id, da.title, da.image_url, da.description, da.price, da.created_at,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
+      FROM digital_artworks da
+      LEFT JOIN artists a ON da.artist_id = a.id
+      WHERE da.is_hidden = 0
+    `;
+    const queryParams = [];
+    
+    if (artist_id) {
+      query += ` AND da.artist_id = ?`;
+      queryParams.push(artist_id);
+    }
+    
+    query += ` ORDER BY da.created_at DESC LIMIT ? OFFSET ?`;
+    queryParams.push(sizeNum, offset);
+    
+    const [rows] = await db.query(query, queryParams);
+    
+    let artworksWithProcessedImages = [];
+    if (rows && Array.isArray(rows)) {
+      artworksWithProcessedImages = rows.map(artwork => {
+        const processedArtwork = processObjectImages(artwork, ['image_url', 'avatar']);
+        return {
+          ...processedArtwork,
+          artist: {
+            id: artwork.artist_id,
+            name: artwork.artist_name,
+            avatar: processedArtwork.artist_avatar || ''
+          },
+          externalData: null // 外部数据占位符
+        };
+      });
+    }
+    
+    // 如果提供了 usn，尝试获取外部API的产品列表并融合
+    if (usn && typeof usn === 'string' && usn.trim().length > 0) {
+      try {
+        let authorization = req.headers.authorization || req.headers.Authorization;
+        if (!authorization) {
+          authorization = req.headers['x-external-authorization'] || 
+                         req.headers['X-External-Authorization'];
+        }
+        if (!authorization) {
+          authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+        }
+        
+        const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
+        const response = await axios.get(productListUrl, {
+          params: {
+            usn: usn.trim(),
+            newsPageSize: 5,
+            publicityPageSize: 5,
+            activityPageSize: 6
+          },
+          headers: {
+            'pragma': 'no-cache',
+            'cache-control': 'no-cache',
+            'authorization': authorization,
+            'apptype': '16',
+            'tenantid': 'wespace',
+            'content-type': 'application/x-www-form-urlencoded',
+            'origin': 'https://m.wespace.cn',
+            'sec-fetch-site': 'same-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': 'https://m.wespace.cn/',
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'priority': 'u=1, i'
+          },
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+          const externalList = response.data.data.qgList || [];
+          // 通过 goods_id 匹配并融合数据
+          const externalMap = new Map();
+          externalList.forEach(item => {
+            externalMap.set(item.goods_id, item);
+          });
+          
+          // 尝试通过名称或标题匹配外部数据
+          artworksWithProcessedImages = artworksWithProcessedImages.map(artwork => {
+            // 优先通过 goods_id 匹配（如果数据库中有该字段）
+            let matched = null;
+            if (artwork.goods_id) {
+              matched = externalMap.get(artwork.goods_id);
+            }
+            // 如果 goods_id 匹配失败，尝试通过名称匹配
+            if (!matched) {
+              for (const [goodsId, extItem] of externalMap.entries()) {
+                if (extItem.name === artwork.title || extItem.name === artwork.product_name) {
+                  matched = extItem;
+                  break;
+                }
+              }
+            }
+            
+            if (matched) {
+              return {
+                ...artwork,
+                externalData: matched,
+                goods_id: matched.goods_id, // 保存外部 goods_id 用于后续关联
+                // 如果外部数据有更丰富的字段，可以优先使用
+                price: artwork.price || matched.price || artwork.price,
+                image_url: artwork.image_url || matched.cover || artwork.image_url,
+                name: matched.name || artwork.title
+              };
+            }
+            return artwork;
+          });
+        }
+      } catch (externalError) {
+        console.error('获取外部产品列表失败:', externalError);
+        // 继续返回本地数据，不中断请求
+      }
+    }
+    
+    res.json({
+      code: 200,
+      status: true,
+      data: {
+        list: artworksWithProcessedImages,
+        page: pageNum,
+        pageSize: sizeNum,
+        total: artworksWithProcessedImages.length
+      }
+    });
+  } catch (error) {
+    console.error('获取融合数字艺术品列表失败:', error);
+    if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
+      return res.status(503).json({
+        code: 503,
+        status: false,
+        error: '数据库连接暂时不可用，请稍后重试'
+      });
+    }
+    res.status(500).json({
+      code: 500,
+      status: false,
+      error: '获取数字艺术品列表失败'
+    });
+  }
+});
+
+/**
+ * 获取融合的数字艺术品详情（结合本地数据和外部API）
+ * GET /api/digital-artworks/fused/:id
+ * 可选参数：goodsVerId (用于获取外部详情数据)
+ */
+router.get('/fused/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        error: '无效的作品ID'
+      });
+    }
+    
+    // 获取本地数据库的数字艺术品详情
+    const [rows] = await db.query(`
+      SELECT 
+        da.id, da.title, da.image_url, da.description, da.registration_certificate,
+        da.license_rights, da.license_period, da.owner_rights, da.license_items,
+        da.project_name, da.product_name, da.project_owner, da.issuer, da.issue_batch,
+        da.issue_year, da.batch_quantity, da.price, da.created_at, da.updated_at,
+        a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar,
+        a.description as artist_description
+      FROM digital_artworks da
+      LEFT JOIN artists a ON da.artist_id = a.id
+      WHERE da.id = ?
+    `, [id]);
+    
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({
+        code: 404,
+        status: false,
+        error: '作品不存在'
+      });
+    }
+    
+    const artwork = processObjectImages(rows[0], ['image_url', 'artist_avatar']);
+    const artist = {
+      id: artwork.artist_id,
+      name: artwork.artist_name,
+      avatar: artwork.artist_avatar,
+      description: artwork.artist_description
+    };
+    
+    const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
+    
+    let result = {
+      ...artworkData,
+      artist: artist,
+      externalData: null
+    };
+    
+    // 尝试获取外部API的详情数据
+    const goodsVerId = req.query.goodsVerId || result.goods_ver_id;
+    if (goodsVerId) {
+      try {
+        let authorization = req.headers.authorization || req.headers.Authorization;
+        if (!authorization) {
+          authorization = req.headers['x-external-authorization'] || 
+                         req.headers['X-External-Authorization'];
+        }
+        if (!authorization) {
+          authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+        }
+        
+        const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
+        const goodsParam = typeof goodsVerId === 'object' 
+          ? JSON.stringify(goodsVerId)
+          : JSON.stringify({ goodsVerId: String(goodsVerId) });
+        
+        const response = await axios.post(
+          goodsDetailUrl,
+          { goods: goodsParam },
+          {
+            headers: {
+              'pragma': 'no-cache',
+              'cache-control': 'no-cache',
+              'authorization': authorization,
+              'apptype': '16',
+              'tenantid': 'wespace',
+              'origin': 'https://m.wespace.cn',
+              'sec-fetch-site': 'same-site',
+              'sec-fetch-mode': 'cors',
+              'sec-fetch-dest': 'empty',
+              'referer': 'https://m.wespace.cn/',
+              'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+              'priority': 'u=1, i',
+              'content-type': 'application/x-www-form-urlencoded'
+            },
+            timeout: 10000
+          }
+        );
+        
+        if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+          result.externalData = response.data.data;
+          // 可以在这里合并外部数据到本地数据中
+          if (response.data.data.goodsVer) {
+            const external = response.data.data.goodsVer;
+            // 如果外部数据有更丰富的描述，可以补充
+            if (external.goodsVerDes && !result.description) {
+              result.description = external.goodsVerDes;
+            }
+            // 如果外部数据有价格，可以更新
+            if (external.goodsPrice) {
+              result.price = parseFloat(external.goodsPrice) || result.price;
+            }
+            // 如果外部数据有封面，可以更新
+            if (external.goodsVerCover && !result.image_url) {
+              result.image_url = external.goodsVerCover;
+            }
+          }
+        }
+      } catch (externalError) {
+        console.error('获取外部商品详情失败:', externalError);
+        // 继续返回本地数据，不中断请求
+      }
+    }
+    
+    res.json({
+      code: 200,
+      status: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('获取融合数字艺术品详情失败:', error);
+    if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
+      return res.status(503).json({
+        code: 503,
+        status: false,
+        error: '数据库连接暂时不可用，请稍后重试'
+      });
+    }
+    res.status(500).json({
+      code: 500,
+      status: false,
+      error: '获取数字艺术品详情失败'
+    });
+  }
+});
+
 module.exports = router; 
