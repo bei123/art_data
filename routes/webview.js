@@ -153,10 +153,19 @@ router.get('/proxy', async (req, res) => {
       }
       
       // 提取 hash 和 search，用于在页面加载后设置正确的路由
+      // 注意：从目标 URL 中提取，而不是从当前代理 URL 中提取
       const targetHash = targetBaseUrl.hash || '';
       const targetSearch = targetBaseUrl.search || '';
-      // 组合 hash 和 search（如果有 query 参数在 hash 中）
-      const targetRoute = targetHash + (targetHash.includes('?') ? '' : targetSearch);
+      // 组合 hash 和 search（hash 中可能已包含 query 参数）
+      // 如果 hash 中包含 ?，则 search 已经在 hash 中了
+      let targetRoute = targetHash;
+      if (targetHash && !targetHash.includes('?') && targetSearch) {
+        // 如果 hash 中没有 query 参数，但 search 有，则合并
+        targetRoute = targetHash + targetSearch;
+      } else if (!targetHash && targetSearch) {
+        // 如果没有 hash 但有 search，使用 search
+        targetRoute = targetSearch;
+      }
 
       // 1. 注入 CSP meta 标签和修复脚本，必须在 head 的最前面，在所有其他脚本之前执行
       // 使用宽松的 CSP 策略以支持代理页面
@@ -204,20 +213,48 @@ router.get('/proxy', async (req, res) => {
             const currentOrigin = window.location.origin;
             
             // 设置正确的路由 hash（如果目标 URL 包含 hash）
-            // 必须在 Vue Router 初始化之前执行，所以立即设置
+            // 必须在 Vue Router 初始化之前执行
             ${targetRoute ? `
             try {
+              // 目标路由值
+              const targetRoute = '${targetRoute.replace(/'/g, "\\'")}';
+              
+              // 从代理 URL 的查询参数中提取 targetUrl（如果存在）
+              // 这样可以确保使用的是正确的 hash，而不是代理 URL 本身的 hash
+              function getTargetHashFromUrl() {
+                try {
+                  const urlParams = new URLSearchParams(window.location.search);
+                  const targetUrlParam = urlParams.get('targetUrl');
+                  if (targetUrlParam) {
+                    const decodedUrl = decodeURIComponent(targetUrlParam);
+                    const urlObj = new URL(decodedUrl);
+                    return urlObj.hash || '';
+                  }
+                } catch(e) {
+                  console.warn('从 URL 参数提取 hash 失败:', e);
+                }
+                return null;
+              }
+              
+              // 优先从 URL 参数中获取，如果没有则使用目标路由
+              let finalHash = getTargetHashFromUrl();
+              if (!finalHash) {
+                finalHash = targetRoute;
+              }
+              
               // 立即设置 hash，不等待 DOM 加载
-              // 使用 replace 避免在历史记录中添加额外的条目
-              if (window.location.hash !== '${targetRoute.replace(/'/g, "\\'")}') {
+              if (finalHash && window.location.hash !== finalHash) {
                 // 如果当前 hash 为空或者是默认的，直接设置
                 if (!window.location.hash || window.location.hash === '#' || window.location.hash === '#/') {
-                  window.location.replace(window.location.href.split('#')[0] + '${targetRoute.replace(/'/g, "\\'")}');
+                  // 构建新 URL，移除代理 URL 中的 hash，使用目标 hash
+                  const baseUrl = window.location.href.split('#')[0].split('?')[0];
+                  const queryString = window.location.search;
+                  window.location.replace(baseUrl + queryString + finalHash);
                 } else {
                   // 如果已有 hash，延迟设置以确保不干扰其他初始化
                   setTimeout(function() {
-                    if (window.location.hash !== '${targetRoute.replace(/'/g, "\\'")}') {
-                      window.location.hash = '${targetRoute.replace(/'/g, "\\'")}';
+                    if (window.location.hash !== finalHash) {
+                      window.location.hash = finalHash;
                     }
                   }, 50);
                 }
