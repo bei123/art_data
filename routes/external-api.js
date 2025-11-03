@@ -450,36 +450,40 @@ router.post('/user/login', async (req, res) => {
               console.log('已更新external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn);
             } else {
               // 不存在，插入新记录
+              // 准备插入的数据
+              const insertData = [
+                wxUserId,                              // wx_user_id
+                externalUser.usn,                       // usn
+                externalUser.id || externalUser.userId, // external_user_id
+                externalUser.username,                  // username
+                externalUser.truename,                  // truename
+                externalUser.nickname,                  // nickname
+                externalUser.mobile,                    // mobile
+                externalUser.avatar,                     // avatar
+                userData.accessToken,                    // access_token
+                userData.refreshToken,                   // refresh_token
+                userData.wsToken,                       // ws_token
+                userData.nodeOrg,                       // node_org
+                externalUser.imToken,                   // im_token
+                externalUser.identityAuthentication,     // identity_authentication
+                externalUser.postcode,                   // postcode
+                externalUser.nation,                     // nation
+                externalUser.inviteCode,                // invite_code
+                externalUser.channel,                   // channel
+                externalUser.chainStatus,                // chain_status
+                externalUser.status,                     // status
+                externalUser.idCardNo                    // id_card_no
+              ];
+              
+              // 确保参数数量正确：21个参数 + 2个NOW() = 23个列
               const [result] = await db.query(
                 `INSERT INTO external_users (
                   wx_user_id, usn, external_user_id, username, truename, nickname, mobile, avatar,
                   access_token, refresh_token, ws_token, node_org, im_token,
                   identity_authentication, postcode, nation, invite_code, channel,
                   chain_status, status, id_card_no, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-                [
-                  wxUserId,
-                  externalUser.usn,
-                  externalUser.id || externalUser.userId,
-                  externalUser.username,
-                  externalUser.truename,
-                  externalUser.nickname,
-                  externalUser.mobile,
-                  externalUser.avatar,
-                  userData.accessToken,
-                  userData.refreshToken,
-                  userData.wsToken,
-                  userData.nodeOrg,
-                  externalUser.imToken,
-                  externalUser.identityAuthentication,
-                  externalUser.postcode,
-                  externalUser.nation,
-                  externalUser.inviteCode,
-                  externalUser.channel,
-                  externalUser.chainStatus,
-                  externalUser.status,
-                  externalUser.idCardNo
-                ]
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                insertData
               );
               console.log('已创建external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn, '外部用户数据ID:', result.insertId);
             }
