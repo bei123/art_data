@@ -53,7 +53,17 @@ function validateImageUrl(url) {
 }
 
 /**
- * 获取授权信息的辅助函数
+ * 获取外部API授权信息（统一使用测试token）
+ */
+function getExternalAuthorization() {
+  // 外部API统一使用测试token
+  const testToken = process.env.EXTERNAL_BEARER_TOKEN || 
+                   'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c24iOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwiYWNjb3VudF90eXBlIjoiYWRtaW4iLCJ1c2VyX25hbWUiOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwic2NvcGUiOlsiYWxsIl0sImlkIjoxODE0NTAsImV4cCI6MTc2NDc2MDU3NiwianRpIjoiYjEzNzI4NTUtNmU0Zi00ZWViLThiYTctMmE5YTkwOGYzMWNmIiwiY2xpZW50X2lkIjoid2VzcGFjZSJ9.ombbQ9GWbtJT-S1qm_FEG1GgkBccvsS8Vk1T26VoIHQo-XDm61jWA3bhdf29nqSOX-cFD_pVKTw8jUhJw8YlrsR0mTw-rpnBYAIlRDI2NVK7M7q6pdBbiBhZYETOhouDUOYCyPIv4CVw68VWULVWbdosktnQtFDi8KK54dnEX3Q';
+  return `Bearer ${testToken}`;
+}
+
+/**
+ * 获取授权信息的辅助函数（用于内部API）
  */
 function getAuthorization(req) {
   // 优先使用请求头中的 authorization（可能是 Bearer token 或 Basic 认证）
@@ -199,7 +209,7 @@ router.get('/', async (req, res) => {
     // 如果提供了 usn 且需要融合，尝试从外部API获取产品列表并融合
     if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0) {
       try {
-        const authorization = getAuthorization(req);
+        const authorization = getExternalAuthorization();
         
         const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
         const response = await axios.get(productListUrl, {
@@ -365,7 +375,7 @@ router.get('/:id', async (req, res) => {
     // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id
     if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0) {
       try {
-        const authorization = getAuthorization(req);
+        const authorization = getExternalAuthorization();
         
         const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
         const response = await axios.get(productListUrl, {
@@ -416,28 +426,8 @@ router.get('/:id', async (req, res) => {
     let targetGoodsVerId = goodsVerId; // 优先使用手动传入的 goodsVerId
     if (shouldFuse && !targetGoodsVerId && obtainedGoodsId && usn) {
       try {
-        // 商品接口需要 Bearer token，优先从请求头获取
-        let authorization = req.headers.authorization || req.headers.Authorization;
-        
-        // 如果没有 Bearer token，尝试其他方式
-        if (!authorization || !authorization.startsWith('Bearer ')) {
-          authorization = req.headers['x-external-authorization'] || 
-                         req.headers['X-External-Authorization'];
-        }
-        
-        // 如果还是没有 Bearer token，尝试从环境变量或使用测试 token
-        if (!authorization || !authorization.startsWith('Bearer ')) {
-          // 尝试从环境变量获取 Bearer token（用于测试）
-          const testToken = process.env.EXTERNAL_BEARER_TOKEN;
-          if (testToken) {
-            authorization = `Bearer ${testToken}`;
-            console.log('使用环境变量中的 Bearer token');
-          } else {
-            // 临时测试：使用提供的测试 token
-            authorization = 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c24iOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwiYWNjb3VudF90eXBlIjoiYWRtaW4iLCJ1c2VyX25hbWUiOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwic2NvcGUiOlsiYWxsIl0sImlkIjoxODE0NTAsImV4cCI6MTc2NDc2MDU3NiwianRpIjoiYjEzNzI4NTUtNmU0Zi00ZWViLThiYTctMmE5YTkwOGYzMWNmIiwiY2xpZW50X2lkIjoid2VzcGFjZSJ9.ombbQ9GWbtJT-S1qm_FEG1GgkBccvsS8Vk1T26VoIHQo-XDm61jWA3bhdf29nqSOX-cFD_pVKTw8jUhJw8YlrsR0mTw-rpnBYAIlRDI2NVK7M7q6pdBbiBhZYETOhouDUOYCyPIv4CVw68VWULVWbdosktnQtFDi8KK54dnEX3Q';
-            console.warn('警告：未从请求头获取到 Bearer token，使用测试 token（仅用于测试）');
-          }
-        }
+        // 外部API统一使用测试token
+        const authorization = getExternalAuthorization();
         
         // 构建商品接口的请求参数 - goods 作为表单数据传递（application/x-www-form-urlencoded）
         const goodsParam = JSON.stringify({
@@ -847,7 +837,7 @@ router.get('/order/product-list', async (req, res) => {
     }
 
     // 获取 authorization，外部接口统一使用 Basic 认证
-    const authorization = getAuthorization(req);
+    const authorization = getExternalAuthorization();
 
     // 构建请求参数
     const params = {
@@ -982,7 +972,7 @@ router.post('/goods/ver/list/v3', async (req, res) => {
     }
 
     // 获取 authorization，外部接口统一使用 Basic 认证
-    const authorization = getAuthorization(req);
+    const authorization = getExternalAuthorization();
 
     // 构建请求参数 - goods 参数需要作为查询参数传递（URL编码的JSON字符串）
     const params = {
@@ -1096,7 +1086,7 @@ router.post('/goods/ver/details', async (req, res) => {
     }
 
     // 获取 authorization，外部接口统一使用 Basic 认证
-    const authorization = getAuthorization(req);
+    const authorization = getExternalAuthorization();
 
     // 调用外部API获取商品详情
     const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
