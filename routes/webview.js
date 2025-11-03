@@ -354,36 +354,148 @@ router.get('/proxy', async (req, res) => {
               }
             };
             
-            // 拦截fetch请求，添加Authorization头
+            // 拦截fetch请求，添加必要的请求头
             if (originalFetch) {
               window.fetch = function(...args) {
                 const url = args[0];
                 const options = args[1] || {};
                 options.headers = options.headers || {};
-                ${authorization ? `options.headers['Authorization'] = '${authorization.replace(/'/g, "\\'")}';` : ''}
+                
+                // 获取原始服务器的 origin（用于设置 origin 和 referer）
+                const originalOrigin = '${baseOrigin}';
+                
+                // 添加 Authorization 头（如果有）
+                ${authorization && !authorization.toLowerCase().includes('null') ? `options.headers['Authorization'] = '${authorization.replace(/'/g, "\\'")}';` : ''}
+                
+                // 对于向原始服务器或 node.wespace.cn 的请求，添加必要的请求头
+                try {
+                  const requestUrl = typeof url === 'string' ? url : url.url || url.toString();
+                  const urlObj = new URL(requestUrl, window.location.href);
+                  const isWespaceApi = urlObj.hostname === 'node.wespace.cn' || 
+                                       urlObj.hostname === 'm.wespace.cn' ||
+                                       urlObj.origin === originalOrigin;
+                  
+                  if (isWespaceApi) {
+                    // 添加必要的请求头
+                    if (!options.headers['apptype']) {
+                      options.headers['apptype'] = '16';
+                    }
+                    if (!options.headers['tenantid']) {
+                      options.headers['tenantid'] = 'wespace';
+                    }
+                    if (!options.headers['origin']) {
+                      options.headers['origin'] = originalOrigin;
+                    }
+                    if (!options.headers['referer']) {
+                      options.headers['referer'] = originalOrigin + '/';
+                    }
+                    if (!options.headers['sec-fetch-site']) {
+                      options.headers['sec-fetch-site'] = 'same-site';
+                    }
+                    if (!options.headers['sec-fetch-mode']) {
+                      options.headers['sec-fetch-mode'] = 'cors';
+                    }
+                    if (!options.headers['sec-fetch-dest']) {
+                      options.headers['sec-fetch-dest'] = 'empty';
+                    }
+                  }
+                } catch(e) {
+                  // URL 解析失败，不添加额外请求头
+                }
+                
                 return originalFetch.apply(this, [url, options]);
               };
             }
             
-            // 拦截XMLHttpRequest，添加Authorization头
+            // 拦截XMLHttpRequest，添加必要的请求头
             if (originalXHR) {
+              const originalOrigin = '${baseOrigin}';
               const XHRConstructor = function() {
                 const xhr = new originalXHR();
                 const originalOpen = xhr.open;
                 const originalSend = xhr.send;
                 const originalSetRequestHeader = xhr.setRequestHeader;
                 
+                // 跟踪已设置的请求头
+                const setHeaders = new Set();
+                
                 xhr.open = function(method, url, ...rest) {
                   this._url = url;
+                  this._method = method;
+                  setHeaders.clear(); // 重置请求头跟踪
                   return originalOpen.apply(this, [method, url, ...rest]);
                 };
                 
                 xhr.setRequestHeader = function(header, value) {
+                  const headerLower = header.toLowerCase();
+                  setHeaders.add(headerLower);
                   originalSetRequestHeader.call(this, header, value);
                 };
                 
                 xhr.send = function(data) {
-                  ${authorization ? `try { this.setRequestHeader('Authorization', '${authorization.replace(/'/g, "\\'")}'); } catch(e) {}` : ''}
+                  // 添加 Authorization 头（如果有）
+                  ${authorization && !authorization.toLowerCase().includes('null') ? `try { 
+                    if (!setHeaders.has('authorization')) {
+                      this.setRequestHeader('Authorization', '${authorization.replace(/'/g, "\\'")}');
+                    }
+                  } catch(e) {}` : ''}
+                  
+                  // 对于向原始服务器或 node.wespace.cn 的请求，添加必要的请求头
+                  try {
+                    const requestUrl = this._url || '';
+                    const urlObj = new URL(requestUrl, window.location.href);
+                    const isWespaceApi = urlObj.hostname === 'node.wespace.cn' || 
+                                         urlObj.hostname === 'm.wespace.cn' ||
+                                         urlObj.origin === originalOrigin;
+                    
+                    if (isWespaceApi) {
+                      // 添加必要的请求头（如果还没有设置）
+                      try {
+                        if (!setHeaders.has('apptype')) {
+                          this.setRequestHeader('apptype', '16');
+                        }
+                      } catch(e) {}
+                      
+                      try {
+                        if (!setHeaders.has('tenantid')) {
+                          this.setRequestHeader('tenantid', 'wespace');
+                        }
+                      } catch(e) {}
+                      
+                      try {
+                        if (!setHeaders.has('origin')) {
+                          this.setRequestHeader('origin', originalOrigin);
+                        }
+                      } catch(e) {}
+                      
+                      try {
+                        if (!setHeaders.has('referer')) {
+                          this.setRequestHeader('referer', originalOrigin + '/');
+                        }
+                      } catch(e) {}
+                      
+                      try {
+                        if (!setHeaders.has('sec-fetch-site')) {
+                          this.setRequestHeader('sec-fetch-site', 'same-site');
+                        }
+                      } catch(e) {}
+                      
+                      try {
+                        if (!setHeaders.has('sec-fetch-mode')) {
+                          this.setRequestHeader('sec-fetch-mode', 'cors');
+                        }
+                      } catch(e) {}
+                      
+                      try {
+                        if (!setHeaders.has('sec-fetch-dest')) {
+                          this.setRequestHeader('sec-fetch-dest', 'empty');
+                        }
+                      } catch(e) {}
+                    }
+                  } catch(e) {
+                    // URL 解析失败，不添加额外请求头
+                  }
+                  
                   return originalSend.apply(this, [data]);
                 };
                 
