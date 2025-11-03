@@ -3,6 +3,12 @@ const router = express.Router();
 const axios = require('axios');
 const crypto = require('crypto');
 const db = require('../db');
+const redisClient = require('../utils/redisClient');
+
+// Redis缓存键前缀
+const REDIS_EXTERNAL_USER_KEY_PREFIX = 'external_user:';
+const REDIS_EXTERNAL_USER_BY_WX_ID_KEY_PREFIX = 'external_user:wx_id:';
+const REDIS_EXTERNAL_USER_CACHE_TTL = 86400; // 24小时过期
 
 /**
  * MD5加密函数
@@ -399,55 +405,139 @@ router.post('/user/login', async (req, res) => {
             );
 
             if (existingExternalUsers.length > 0) {
-              // 已存在，更新数据
+              // 已存在，检查数据是否有变化
               const externalUserId = existingExternalUsers[0].id;
-              await db.query(
-                `UPDATE external_users SET
-                  external_user_id = ?,
-                  username = ?,
-                  truename = ?,
-                  nickname = ?,
-                  mobile = ?,
-                  avatar = ?,
-                  access_token = ?,
-                  refresh_token = ?,
-                  ws_token = ?,
-                  node_org = ?,
-                  im_token = ?,
-                  identity_authentication = ?,
-                  postcode = ?,
-                  nation = ?,
-                  invite_code = ?,
-                  channel = ?,
-                  chain_status = ?,
-                  status = ?,
-                  id_card_no = ?,
-                  updated_at = NOW()
-                WHERE id = ?`,
-                [
-                  externalUser.id || externalUser.userId,
-                  externalUser.username,
-                  externalUser.truename,
-                  externalUser.nickname,
-                  externalUser.mobile,
-                  externalUser.avatar,
-                  userData.accessToken,
-                  userData.refreshToken,
-                  userData.wsToken,
-                  userData.nodeOrg,
-                  externalUser.imToken,
-                  externalUser.identityAuthentication,
-                  externalUser.postcode,
-                  externalUser.nation,
-                  externalUser.inviteCode,
-                  externalUser.channel,
-                  externalUser.chainStatus,
-                  externalUser.status,
-                  externalUser.idCardNo,
-                  externalUserId
-                ]
+              
+              // 查询当前数据
+              const [currentData] = await db.query(
+                'SELECT * FROM external_users WHERE id = ?',
+                [externalUserId]
               );
-              console.log('已更新external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn);
+              
+              if (currentData.length > 0) {
+                const current = currentData[0];
+                
+                // 比较数据是否有变化（处理null和undefined）
+                const normalizeValue = (val) => val === null || val === undefined ? null : String(val);
+                
+                const hasChanges = 
+                  (normalizeValue(current.external_user_id) !== normalizeValue(externalUser.id || externalUser.userId)) ||
+                  (normalizeValue(current.username) !== normalizeValue(externalUser.username)) ||
+                  (normalizeValue(current.truename) !== normalizeValue(externalUser.truename)) ||
+                  (normalizeValue(current.nickname) !== normalizeValue(externalUser.nickname)) ||
+                  (normalizeValue(current.mobile) !== normalizeValue(externalUser.mobile)) ||
+                  (normalizeValue(current.avatar) !== normalizeValue(externalUser.avatar)) ||
+                  (normalizeValue(current.access_token) !== normalizeValue(userData.accessToken)) ||
+                  (normalizeValue(current.refresh_token) !== normalizeValue(userData.refreshToken)) ||
+                  (normalizeValue(current.ws_token) !== normalizeValue(userData.wsToken)) ||
+                  (normalizeValue(current.node_org) !== normalizeValue(userData.nodeOrg)) ||
+                  (normalizeValue(current.im_token) !== normalizeValue(externalUser.imToken)) ||
+                  (normalizeValue(current.identity_authentication) !== normalizeValue(externalUser.identityAuthentication)) ||
+                  (normalizeValue(current.postcode) !== normalizeValue(externalUser.postcode)) ||
+                  (normalizeValue(current.nation) !== normalizeValue(externalUser.nation)) ||
+                  (normalizeValue(current.invite_code) !== normalizeValue(externalUser.inviteCode)) ||
+                  (normalizeValue(current.channel) !== normalizeValue(externalUser.channel)) ||
+                  (normalizeValue(current.chain_status) !== normalizeValue(externalUser.chainStatus)) ||
+                  (normalizeValue(current.status) !== normalizeValue(externalUser.status)) ||
+                  (normalizeValue(current.id_card_no) !== normalizeValue(externalUser.idCardNo));
+                
+                // 只有数据有变化时才更新
+                if (hasChanges) {
+                  await db.query(
+                    `UPDATE external_users SET
+                      external_user_id = ?,
+                      username = ?,
+                      truename = ?,
+                      nickname = ?,
+                      mobile = ?,
+                      avatar = ?,
+                      access_token = ?,
+                      refresh_token = ?,
+                      ws_token = ?,
+                      node_org = ?,
+                      im_token = ?,
+                      identity_authentication = ?,
+                      postcode = ?,
+                      nation = ?,
+                      invite_code = ?,
+                      channel = ?,
+                      chain_status = ?,
+                      status = ?,
+                      id_card_no = ?,
+                      updated_at = NOW()
+                    WHERE id = ?`,
+                    [
+                      externalUser.id || externalUser.userId,
+                      externalUser.username,
+                      externalUser.truename,
+                      externalUser.nickname,
+                      externalUser.mobile,
+                      externalUser.avatar,
+                      userData.accessToken,
+                      userData.refreshToken,
+                      userData.wsToken,
+                      userData.nodeOrg,
+                      externalUser.imToken,
+                      externalUser.identityAuthentication,
+                      externalUser.postcode,
+                      externalUser.nation,
+                      externalUser.inviteCode,
+                      externalUser.channel,
+                      externalUser.chainStatus,
+                      externalUser.status,
+                      externalUser.idCardNo,
+                      externalUserId
+                    ]
+                  );
+                  console.log('已更新external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn);
+                  
+                  // 更新Redis缓存
+                  try {
+                    const cacheData = {
+                      id: externalUserId,
+                      wx_user_id: wxUserId,
+                      usn: externalUser.usn,
+                      external_user_id: externalUser.id || externalUser.userId,
+                      username: externalUser.username,
+                      truename: externalUser.truename,
+                      nickname: externalUser.nickname,
+                      mobile: externalUser.mobile,
+                      avatar: externalUser.avatar,
+                      access_token: userData.accessToken,
+                      refresh_token: userData.refreshToken,
+                      ws_token: userData.wsToken,
+                      node_org: userData.nodeOrg,
+                      im_token: externalUser.imToken,
+                      identity_authentication: externalUser.identityAuthentication,
+                      postcode: externalUser.postcode,
+                      nation: externalUser.nation,
+                      invite_code: externalUser.inviteCode,
+                      channel: externalUser.channel,
+                      chain_status: externalUser.chainStatus,
+                      status: externalUser.status,
+                      id_card_no: externalUser.idCardNo
+                    };
+                    
+                    // 使用usn和wx_user_id作为缓存键
+                    await redisClient.setEx(
+                      `${REDIS_EXTERNAL_USER_KEY_PREFIX}${externalUser.usn}`,
+                      REDIS_EXTERNAL_USER_CACHE_TTL,
+                      JSON.stringify(cacheData)
+                    );
+                    await redisClient.setEx(
+                      `${REDIS_EXTERNAL_USER_BY_WX_ID_KEY_PREFIX}${wxUserId}`,
+                      REDIS_EXTERNAL_USER_CACHE_TTL,
+                      JSON.stringify(cacheData)
+                    );
+                    console.log('已更新Redis缓存, usn:', externalUser.usn, 'wx_user_id:', wxUserId);
+                  } catch (redisError) {
+                    console.error('Redis缓存更新失败:', redisError);
+                    // Redis错误不影响主要流程
+                  }
+                } else {
+                  console.log('external_users数据无变化，跳过更新, wx_user_id:', wxUserId, 'usn:', externalUser.usn);
+                }
+              }
             } else {
               // 不存在，插入新记录
               // 准备插入的数据
@@ -486,6 +576,50 @@ router.post('/user/login', async (req, res) => {
                 insertData
               );
               console.log('已创建external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn, '外部用户数据ID:', result.insertId);
+              
+              // 写入Redis缓存
+              try {
+                const cacheData = {
+                  id: result.insertId,
+                  wx_user_id: wxUserId,
+                  usn: externalUser.usn,
+                  external_user_id: externalUser.id || externalUser.userId,
+                  username: externalUser.username,
+                  truename: externalUser.truename,
+                  nickname: externalUser.nickname,
+                  mobile: externalUser.mobile,
+                  avatar: externalUser.avatar,
+                  access_token: userData.accessToken,
+                  refresh_token: userData.refreshToken,
+                  ws_token: userData.wsToken,
+                  node_org: userData.nodeOrg,
+                  im_token: externalUser.imToken,
+                  identity_authentication: externalUser.identityAuthentication,
+                  postcode: externalUser.postcode,
+                  nation: externalUser.nation,
+                  invite_code: externalUser.inviteCode,
+                  channel: externalUser.channel,
+                  chain_status: externalUser.chainStatus,
+                  status: externalUser.status,
+                  id_card_no: externalUser.idCardNo
+                };
+                
+                // 使用usn和wx_user_id作为缓存键
+                await redisClient.setEx(
+                  `${REDIS_EXTERNAL_USER_KEY_PREFIX}${externalUser.usn}`,
+                  REDIS_EXTERNAL_USER_CACHE_TTL,
+                  JSON.stringify(cacheData)
+                );
+                await redisClient.setEx(
+                  `${REDIS_EXTERNAL_USER_BY_WX_ID_KEY_PREFIX}${wxUserId}`,
+                  REDIS_EXTERNAL_USER_CACHE_TTL,
+                  JSON.stringify(cacheData)
+                );
+                console.log('已写入Redis缓存, usn:', externalUser.usn, 'wx_user_id:', wxUserId);
+              } catch (redisError) {
+                console.error('Redis缓存写入失败:', redisError);
+                // Redis错误不影响主要流程
+              }
             }
           }
         }
