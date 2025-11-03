@@ -58,27 +58,67 @@ router.get('/proxy', async (req, res) => {
     };
     
     // 只在明确提供有效 authorization 且是 Bearer token 时才添加
-    // 过滤掉 "Bearer null" 或其他无效值
+    // 过滤掉 "Bearer null" 或其他无效值，并处理包含多个值的情况
     // 不使用 Basic Auth，因为可能导致不必要的重定向
     if (authorization && authorization.trim()) {
-      const authValue = authorization.trim();
+      let authValue = authorization.trim();
+      
+      // 处理包含逗号分隔的多个值的情况（如 "Bearer null, Bearer token"）
+      // 提取最后一个有效的 Bearer token
+      if (authValue.includes(',')) {
+        const parts = authValue.split(',').map(p => p.trim()).filter(p => p);
+        // 从后往前查找，找到第一个有效的 Bearer token
+        for (let i = parts.length - 1; i >= 0; i--) {
+          const part = parts[i];
+          const lowerPart = part.toLowerCase();
+          // 跳过无效值
+          if (lowerPart !== 'null' && 
+              lowerPart !== 'undefined' && 
+              !lowerPart.startsWith('bearer null') && 
+              !lowerPart.startsWith('bearer undefined') &&
+              lowerPart !== '' &&
+              lowerPart !== 'bearer' &&
+              part.length > 10) { // 确保 token 长度合理
+            authValue = part;
+            break;
+          }
+        }
+      }
+      
+      // 处理 "Bearer null, Bearer token" 这种格式（提取逗号后的部分）
+      if (authValue.toLowerCase().includes('bearer null,')) {
+        const afterComma = authValue.split(/bearer null\s*,/i)[1];
+        if (afterComma && afterComma.trim()) {
+          authValue = afterComma.trim();
+        }
+      }
       
       // 检查是否是无效值（如 "Bearer null", "null", "undefined" 等）
       const lowerAuth = authValue.toLowerCase();
       const isInvalid = lowerAuth === 'null' || 
                        lowerAuth === 'undefined' || 
-                       lowerAuth.startsWith('bearer null') || 
-                       lowerAuth.startsWith('bearer undefined') ||
+                       lowerAuth === 'bearer null' || 
+                       lowerAuth === 'bearer undefined' ||
                        lowerAuth === '' ||
-                       lowerAuth === 'bearer';
+                       lowerAuth === 'bearer' ||
+                       (lowerAuth.startsWith('bearer null') && !lowerAuth.includes(',')) ||
+                       (lowerAuth.startsWith('bearer undefined') && !lowerAuth.includes(','));
       
-      if (!isInvalid) {
+      if (!isInvalid && authValue.length > 10) {
         // 确保是 Bearer token 格式
         if (authValue.startsWith('Bearer ') || authValue.startsWith('bearer ')) {
-          requestHeaders['Authorization'] = authValue;
+          // 再次检查 token 部分是否有效（不是 "null" 或 "undefined"）
+          const tokenPart = authValue.substring(7).trim();
+          if (tokenPart && 
+              tokenPart.toLowerCase() !== 'null' && 
+              tokenPart.toLowerCase() !== 'undefined') {
+            requestHeaders['Authorization'] = authValue;
+          }
         } else {
           // 如果没有 Bearer 前缀，自动添加
-          requestHeaders['Authorization'] = `Bearer ${authValue}`;
+          if (authValue.toLowerCase() !== 'null' && authValue.toLowerCase() !== 'undefined') {
+            requestHeaders['Authorization'] = `Bearer ${authValue}`;
+          }
         }
       }
       // 如果是无效值，不添加 Authorization 头
