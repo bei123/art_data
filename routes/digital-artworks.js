@@ -1,9 +1,15 @@
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
+
+// 外部API配置
+const EXTERNAL_API_CONFIG = {
+  VERIFICATION_CODE_BASE_URL: 'https://node.wespace.cn'
+};
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY = 'digital_artworks:list';
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX = 'digital_artworks:list:artist:';
 const REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX = 'digital_artworks:detail:';
@@ -519,6 +525,153 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: '删除失败' });
   } finally {
     connection.release();
+  }
+});
+
+/**
+ * 获取产品列表
+ * GET /api/digital-artworks/order/product-list
+ * 转发到外部接口：GET https://node.wespace.cn/orderApi/wespace/index/list/V2
+ */
+router.get('/order/product-list', async (req, res) => {
+  try {
+    const { newsPageSize, publicityPageSize, activityPageSize, usn } = req.query;
+    
+    // 参数验证
+    if (!usn || typeof usn !== 'string' || usn.trim().length === 0) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'usn参数不能为空'
+      });
+    }
+
+    // 获取 authorization，产品列表接口可以使用 Bearer token 或 Basic 认证
+    // 优先使用请求头中的 authorization（可能是 Bearer token）
+    let authorization = req.headers.authorization || req.headers.Authorization;
+    
+    // 如果没有提供，尝试从专门的请求头获取 Basic 认证
+    if (!authorization) {
+      authorization = req.headers['x-external-authorization'] || 
+                     req.headers['X-External-Authorization'];
+    }
+    
+    // 如果还是没有，使用环境变量或默认值（Basic 认证）
+    if (!authorization) {
+      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+    }
+
+    // 构建请求参数
+    const params = {
+      usn: usn.trim()
+    };
+
+    // 添加可选参数，设置默认值
+    if (newsPageSize !== undefined && newsPageSize !== null) {
+      params.newsPageSize = parseInt(newsPageSize) || 5;
+    } else {
+      params.newsPageSize = 5;
+    }
+
+    if (publicityPageSize !== undefined && publicityPageSize !== null) {
+      params.publicityPageSize = parseInt(publicityPageSize) || 5;
+    } else {
+      params.publicityPageSize = 5;
+    }
+
+    if (activityPageSize !== undefined && activityPageSize !== null) {
+      params.activityPageSize = parseInt(activityPageSize) || 6;
+    } else {
+      params.activityPageSize = 6;
+    }
+
+    // 调用外部API获取产品列表
+    const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
+    console.log('调用外部产品列表接口:', productListUrl);
+    console.log('请求参数:', params);
+    console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
+    
+    const response = await axios.get(
+      productListUrl,
+      {
+        params,
+        headers: {
+          'pragma': 'no-cache',
+          'cache-control': 'no-cache',
+          'authorization': authorization,
+          'apptype': '16',
+          'tenantid': 'wespace',
+          'content-type': 'application/x-www-form-urlencoded',
+          'origin': 'https://m.wespace.cn',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://m.wespace.cn/',
+          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'priority': 'u=1, i'
+        },
+        timeout: 10000
+      }
+    );
+    
+    console.log('外部API响应状态:', response.status);
+
+    // 处理并返回外部API的响应 - 只返回 qgList 中的产品数据
+    if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+      const originalData = response.data.data;
+      const filteredData = {
+        code: response.data.code,
+        status: response.data.status,
+        data: {
+          // 只返回 qgList（产品列表）
+          qgList: originalData.qgList || []
+        }
+      };
+      console.log('过滤后的产品列表数量:', filteredData.data.qgList.length);
+      res.json(filteredData);
+    } else {
+      // 如果不是成功响应，直接返回原始响应
+      res.json(response.data);
+    }
+
+  } catch (error) {
+    console.error('获取产品列表失败:', error);
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null,
+      request: error.request ? {
+        method: error.config?.method,
+        url: error.config?.url,
+        params: error.config?.params
+      } : null
+    });
+    
+    if (error.response) {
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '获取产品列表失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
   }
 });
 
