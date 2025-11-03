@@ -1103,7 +1103,7 @@ router.post('/order/purchase', async (req, res) => {
       'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8'
     };
 
-    // 步骤1: 查询订单/价格
+    // 步骤1: 查询订单/价格（这个接口返回的是折扣价格，需要结合商品详情获取原价）
     console.log('步骤1: 查询订单价格, goodsVerId:', goodsVerId);
     const discountPriceUrl = `${baseUrl}/orderApi/order/user/goods/discountPrice`;
     const discountPriceResponse = await axios.get(discountPriceUrl, {
@@ -1128,19 +1128,58 @@ router.post('/order/purchase', async (req, res) => {
       });
     }
 
+    // 步骤1.5: 获取商品详情以获取原价
+    console.log('步骤1.5: 获取商品详情以获取价格信息');
+    const goodsDetailUrl = `${baseUrl}/orderApi/goods/ver/details`;
+    const goodsDetailParam = new URLSearchParams();
+    goodsDetailParam.append('goods', JSON.stringify({ goodsVerId: String(goodsVerId) }));
+    
+    let goodsDetailResponse;
+    try {
+      goodsDetailResponse = await axios.post(goodsDetailUrl, goodsDetailParam.toString(), {
+        headers: {
+          ...commonHeaders,
+          'content-type': 'application/x-www-form-urlencoded',
+          'pragma': 'no-cache',
+          'cache-control': 'no-cache'
+        },
+        timeout: 10000
+      });
+    } catch (error) {
+      console.error('获取商品详情失败:', error.response?.data || error.message);
+      // 如果获取商品详情失败，尝试继续使用价格查询的数据
+    }
+
     const priceData = discountPriceResponse.data.data || {};
-    // 优先使用价格查询接口返回的字段，如果不存在则使用默认值
-    const payPrice = priceData.payPrice || priceData.price || priceData.pay_price || '0';
-    const discountSumPrice = priceData.discountSumPrice || priceData.discount_sum_price || '0';
-    // totalPrice 应该使用接口返回的，如果没有则计算
-    const totalPrice = priceData.totalPrice || priceData.total_price || (parseFloat(payPrice) - parseFloat(discountSumPrice));
+    const goodsDetailData = goodsDetailResponse?.data?.data?.goodsVer || {};
+    
+    // 从商品详情获取原价（优先级：goodsPrice > price > goodsVerPrice）
+    const originalPrice = goodsDetailData.goodsPrice || 
+                          goodsDetailData.price || 
+                          goodsDetailData.goodsVerPrice || 
+                          '0';
+    
+    // 从价格查询接口获取折扣价格
+    const discountPrice = priceData.discountPrice || '0';
+    
+    // 计算实际支付价格 = 原价 - 折扣价
+    const originalPriceNum = parseFloat(originalPrice);
+    const discountPriceNum = parseFloat(discountPrice);
+    const payPriceNum = Math.max(0, originalPriceNum - discountPriceNum); // 确保不为负数
+    
+    const payPrice = String(payPriceNum);
+    const discountSumPrice = discountPrice;
+    const totalPrice = payPriceNum;
 
     // 日志输出价格信息用于调试
-    console.log('价格查询结果:', {
-      priceData: priceData,
+    console.log('价格信息:', {
+      originalPrice: originalPrice,
+      discountPrice: discountPrice,
       payPrice: payPrice,
       discountSumPrice: discountSumPrice,
-      totalPrice: totalPrice
+      totalPrice: totalPrice,
+      priceData: priceData,
+      goodsDetailPrice: originalPrice
     });
 
     // 步骤2: 统一下单
