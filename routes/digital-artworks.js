@@ -192,8 +192,7 @@ router.get('/', async (req, res) => {
           id: artwork.artist_id,
           name: artwork.artist_name,
           avatar: processedArtwork.artist_avatar || ''
-        },
-        externalData: null // 外部数据占位符
+        }
       };
     });
 
@@ -265,25 +264,11 @@ router.get('/', async (req, res) => {
               matched = externalMapByName.get(titleKey);
             }
             
-            // 如果找到匹配的外部数据，进行融合
+            // 如果找到匹配的外部数据，只保留 goods_id
             if (matched && matched.goods_id) {
               return {
                 ...artwork,
-                externalData: matched,
-                goods_id: matched.goods_id, // 从外部数据获取 goods_id
-                // 优先使用外部数据的图片和价格（如果本地没有）
-                image_url: artwork.image_url || matched.cover || matched.home_image || matched.banner || artwork.image_url,
-                price: artwork.price || parseFloat(matched.price) || artwork.price,
-                // 补充外部数据字段
-                total_num: matched.total_num || artwork.batch_quantity,
-                goods_num: matched.goods_num || null,
-                cover: matched.cover,
-                banner: matched.banner,
-                home_image: matched.home_image,
-                batch: matched.batch || artwork.issue_batch,
-                issue_status: matched.issue_status,
-                goods_version: matched.goods_version,
-                create_time: matched.create_time
+                goods_id: matched.goods_id // 从外部数据获取 goods_id
               };
             }
             
