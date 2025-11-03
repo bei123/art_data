@@ -100,18 +100,28 @@ app.use(cors({
       'https://wx.ht.2000gallery.art',
       'http://wx.ht.2000gallery.art',
       'https://www.wx.ht.2000gallery.art',
-      'http://www.wx.ht.2000gallery.art'
+      'http://www.wx.ht.2000gallery.art',
+      'https://m.wespace.cn',
+      'http://m.wespace.cn'
     ];
 
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // 如果没有 origin（例如同源请求、Postman 等），允许通过
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // 检查是否在允许列表中
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, origin);
     } else {
+      // 记录被拒绝的 origin 以便调试
+      console.warn('CORS rejected origin:', origin);
       callback(new Error('CORS not allowed'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-External-Authorization', 'x-external-authorization'],
   exposedHeaders: ['Authorization']
 }));
 
@@ -323,6 +333,14 @@ app.use((err, req, res, next) => {
   
   if (err.message && err.message.includes('文件')) {
     return res.status(400).json({ error: err.message });
+  }
+  
+  // 处理 CORS 错误
+  if (err.message === 'CORS not allowed') {
+    return res.status(403).json({ 
+      error: 'CORS策略不允许此来源',
+      message: 'Access denied by CORS policy'
+    });
   }
   
   // 默认错误响应
