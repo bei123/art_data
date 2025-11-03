@@ -788,4 +788,133 @@ router.post('/goods/ver/list/v3', async (req, res) => {
   }
 });
 
+/**
+ * 获取商品详情（项目详情）
+ * POST /api/digital-artworks/goods/ver/details
+ * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/details
+ */
+router.post('/goods/ver/details', async (req, res) => {
+  try {
+    // POST 请求可以从查询参数或请求体中获取 goods 参数
+    const goods = req.query?.goods || req.body?.goods;
+    
+    // 参数验证
+    if (!goods) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'goods参数不能为空'
+      });
+    }
+
+    // 如果 goods 是字符串，尝试解析为 JSON
+    let goodsData;
+    if (typeof goods === 'string') {
+      try {
+        goodsData = JSON.parse(goods);
+      } catch (e) {
+        // 如果不是有效的 JSON，直接使用字符串
+        goodsData = goods;
+      }
+    } else {
+      goodsData = goods;
+    }
+
+    // 获取 authorization，优先使用请求头中的 authorization（Bearer token）
+    let authorization = req.headers.authorization || req.headers.Authorization;
+    
+    // 如果没有提供，尝试从专门的请求头获取
+    if (!authorization) {
+      authorization = req.headers['x-external-authorization'] || 
+                     req.headers['X-External-Authorization'];
+    }
+    
+    // 如果还是没有，使用环境变量或默认值（Basic 认证）
+    if (!authorization) {
+      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                     'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+    }
+
+    // 调用外部API获取商品详情
+    const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
+    console.log('调用外部商品详情接口:', goodsDetailUrl);
+    console.log('请求参数:', goodsData);
+    console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
+    
+    // 根据 goods 的数据类型构建请求数据
+    // 如果 goods 是对象，转换为 JSON 字符串作为表单字段发送
+    // 如果 goods 是字符串，直接作为表单字段发送
+    const requestData = typeof goodsData === 'object' 
+      ? { goods: JSON.stringify(goodsData) }
+      : { goods: goodsData };
+    
+    const response = await axios.post(
+      goodsDetailUrl,
+      requestData,
+      {
+        headers: {
+          'pragma': 'no-cache',
+          'cache-control': 'no-cache',
+          'authorization': authorization,
+          'apptype': '16',
+          'tenantid': 'wespace',
+          'origin': 'https://m.wespace.cn',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://m.wespace.cn/',
+          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'priority': 'u=1, i',
+          'content-type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 10000
+      }
+    );
+    
+    console.log('外部API响应状态:', response.status);
+
+    // 直接返回外部API的响应
+    res.json(response.data);
+
+  } catch (error) {
+    console.error('获取商品详情失败:', error);
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null,
+      request: error.request ? {
+        method: error.config?.method,
+        url: error.config?.url,
+        params: error.config?.params,
+        data: error.config?.data
+      } : null
+    });
+    
+    if (error.response) {
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '获取商品详情失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
+  }
+});
+
 module.exports = router; 
