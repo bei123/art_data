@@ -419,6 +419,13 @@ router.post('/user/login', async (req, res) => {
                 
                 // 比较数据是否有变化（处理null和undefined）
                 const normalizeValue = (val) => val === null || val === undefined ? null : String(val);
+                const normalizeJsonValue = (val) => {
+                  if (val === null || val === undefined) return null;
+                  if (Array.isArray(val) || typeof val === 'object') {
+                    return JSON.stringify(val);
+                  }
+                  return String(val);
+                };
                 
                 const hasChanges = 
                   (normalizeValue(current.external_user_id) !== normalizeValue(externalUser.id || externalUser.userId)) ||
@@ -429,7 +436,13 @@ router.post('/user/login', async (req, res) => {
                   (normalizeValue(current.avatar) !== normalizeValue(externalUser.avatar)) ||
                   (normalizeValue(current.access_token) !== normalizeValue(userData.accessToken)) ||
                   (normalizeValue(current.refresh_token) !== normalizeValue(userData.refreshToken)) ||
+                  (normalizeValue(current.token) !== normalizeValue(externalUser.token)) ||
+                  (normalizeValue(current.expire) !== normalizeValue(userData.expire)) ||
+                  (normalizeValue(current.app_type) !== normalizeValue(userData.appType)) ||
+                  (normalizeValue(current.app_type_name) !== normalizeValue(userData.appTypeName)) ||
+                  (normalizeValue(current.set_password) !== normalizeValue(userData.setPassword ? '1' : '0')) ||
                   (normalizeValue(current.ws_token) !== normalizeValue(userData.wsToken)) ||
+                  (normalizeValue(current.ws_stoken) !== normalizeValue(externalUser.wsStoken)) ||
                   (normalizeValue(current.node_org) !== normalizeValue(userData.nodeOrg)) ||
                   (normalizeValue(current.im_token) !== normalizeValue(externalUser.imToken)) ||
                   (normalizeValue(current.identity_authentication) !== normalizeValue(externalUser.identityAuthentication)) ||
@@ -437,6 +450,8 @@ router.post('/user/login', async (req, res) => {
                   (normalizeValue(current.nation) !== normalizeValue(externalUser.nation)) ||
                   (normalizeValue(current.invite_code) !== normalizeValue(externalUser.inviteCode)) ||
                   (normalizeValue(current.channel) !== normalizeValue(externalUser.channel)) ||
+                  (normalizeValue(current.client_id) !== normalizeValue(externalUser.clientId)) ||
+                  (normalizeJsonValue(current.privileges) !== normalizeJsonValue(externalUser.privileges)) ||
                   (normalizeValue(current.chain_status) !== normalizeValue(externalUser.chainStatus)) ||
                   (normalizeValue(current.status) !== normalizeValue(externalUser.status)) ||
                   (normalizeValue(current.id_card_no) !== normalizeValue(externalUser.idCardNo));
@@ -453,7 +468,13 @@ router.post('/user/login', async (req, res) => {
                       avatar = ?,
                       access_token = ?,
                       refresh_token = ?,
+                      token = ?,
+                      expire = ?,
+                      app_type = ?,
+                      app_type_name = ?,
+                      set_password = ?,
                       ws_token = ?,
+                      ws_stoken = ?,
                       node_org = ?,
                       im_token = ?,
                       identity_authentication = ?,
@@ -461,6 +482,8 @@ router.post('/user/login', async (req, res) => {
                       nation = ?,
                       invite_code = ?,
                       channel = ?,
+                      client_id = ?,
+                      privileges = ?,
                       chain_status = ?,
                       status = ?,
                       id_card_no = ?,
@@ -475,7 +498,13 @@ router.post('/user/login', async (req, res) => {
                       externalUser.avatar,
                       userData.accessToken,
                       userData.refreshToken,
+                      externalUser.token,
+                      userData.expire,
+                      userData.appType,
+                      userData.appTypeName,
+                      userData.setPassword ? 1 : 0,
                       userData.wsToken,
+                      externalUser.wsStoken,
                       userData.nodeOrg,
                       externalUser.imToken,
                       externalUser.identityAuthentication,
@@ -483,6 +512,8 @@ router.post('/user/login', async (req, res) => {
                       externalUser.nation,
                       externalUser.inviteCode,
                       externalUser.channel,
+                      externalUser.clientId,
+                      externalUser.privileges ? JSON.stringify(externalUser.privileges) : null,
                       externalUser.chainStatus,
                       externalUser.status,
                       externalUser.idCardNo,
@@ -505,7 +536,13 @@ router.post('/user/login', async (req, res) => {
                       avatar: externalUser.avatar,
                       access_token: userData.accessToken,
                       refresh_token: userData.refreshToken,
+                      token: externalUser.token,
+                      expire: userData.expire,
+                      app_type: userData.appType,
+                      app_type_name: userData.appTypeName,
+                      set_password: userData.setPassword,
                       ws_token: userData.wsToken,
+                      ws_stoken: externalUser.wsStoken,
                       node_org: userData.nodeOrg,
                       im_token: externalUser.imToken,
                       identity_authentication: externalUser.identityAuthentication,
@@ -513,6 +550,8 @@ router.post('/user/login', async (req, res) => {
                       nation: externalUser.nation,
                       invite_code: externalUser.inviteCode,
                       channel: externalUser.channel,
+                      client_id: externalUser.clientId,
+                      privileges: externalUser.privileges,
                       chain_status: externalUser.chainStatus,
                       status: externalUser.status,
                       id_card_no: externalUser.idCardNo
@@ -552,7 +591,13 @@ router.post('/user/login', async (req, res) => {
                 externalUser.avatar,                     // avatar
                 userData.accessToken,                    // access_token
                 userData.refreshToken,                   // refresh_token
+                externalUser.token,                      // token
+                userData.expire,                        // expire
+                userData.appType,                       // app_type
+                userData.appTypeName,                    // app_type_name
+                userData.setPassword ? 1 : 0,           // set_password
                 userData.wsToken,                       // ws_token
+                externalUser.wsStoken,                  // ws_stoken
                 userData.nodeOrg,                       // node_org
                 externalUser.imToken,                   // im_token
                 externalUser.identityAuthentication,     // identity_authentication
@@ -560,19 +605,22 @@ router.post('/user/login', async (req, res) => {
                 externalUser.nation,                     // nation
                 externalUser.inviteCode,                // invite_code
                 externalUser.channel,                   // channel
+                externalUser.clientId,                  // client_id
+                externalUser.privileges ? JSON.stringify(externalUser.privileges) : null, // privileges
                 externalUser.chainStatus,                // chain_status
                 externalUser.status,                     // status
                 externalUser.idCardNo                    // id_card_no
               ];
               
-              // 确保参数数量正确：21个参数 + 2个NOW() = 23个列
+              // 确保参数数量正确：29个参数 + 2个NOW() = 31个列
               const [result] = await db.query(
                 `INSERT INTO external_users (
                   wx_user_id, usn, external_user_id, username, truename, nickname, mobile, avatar,
-                  access_token, refresh_token, ws_token, node_org, im_token,
-                  identity_authentication, postcode, nation, invite_code, channel,
+                  access_token, refresh_token, token, expire, app_type, app_type_name, set_password,
+                  ws_token, ws_stoken, node_org, im_token,
+                  identity_authentication, postcode, nation, invite_code, channel, client_id, privileges,
                   chain_status, status, id_card_no, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 insertData
               );
               console.log('已创建external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn, '外部用户数据ID:', result.insertId);
@@ -591,7 +639,13 @@ router.post('/user/login', async (req, res) => {
                   avatar: externalUser.avatar,
                   access_token: userData.accessToken,
                   refresh_token: userData.refreshToken,
+                  token: externalUser.token,
+                  expire: userData.expire,
+                  app_type: userData.appType,
+                  app_type_name: userData.appTypeName,
+                  set_password: userData.setPassword,
                   ws_token: userData.wsToken,
+                  ws_stoken: externalUser.wsStoken,
                   node_org: userData.nodeOrg,
                   im_token: externalUser.imToken,
                   identity_authentication: externalUser.identityAuthentication,
@@ -599,6 +653,8 @@ router.post('/user/login', async (req, res) => {
                   nation: externalUser.nation,
                   invite_code: externalUser.inviteCode,
                   channel: externalUser.channel,
+                  client_id: externalUser.clientId,
+                  privileges: externalUser.privileges,
                   chain_status: externalUser.chainStatus,
                   status: externalUser.status,
                   id_card_no: externalUser.idCardNo
