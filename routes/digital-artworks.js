@@ -677,12 +677,13 @@ router.get('/order/product-list', async (req, res) => {
 
 /**
  * 获取商品详情
- * GET /api/digital-artworks/goods/ver/list/v3
- * 转发到外部接口：GET https://node.wespace.cn/orderApi/goods/ver/list/v3
+ * POST /api/digital-artworks/goods/ver/list/v3
+ * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/list/v3
  */
-router.get('/goods/ver/list/v3', async (req, res) => {
+router.post('/goods/ver/list/v3', async (req, res) => {
   try {
-    const { goods } = req.query;
+    // POST 请求可以从查询参数或请求体中获取 goods 参数
+    const goods = req.query?.goods || req.body?.goods;
     
     // 参数验证
     if (!goods || typeof goods !== 'string' || goods.trim().length === 0) {
@@ -719,8 +720,9 @@ router.get('/goods/ver/list/v3', async (req, res) => {
     console.log('请求参数:', params);
     console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
     
-    const response = await axios.get(
+    const response = await axios.post(
       goodsDetailUrl,
+      null, // POST 请求体为空，参数通过查询字符串传递
       {
         params,
         headers: {
