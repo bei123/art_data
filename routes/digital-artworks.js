@@ -428,6 +428,8 @@ router.get('/:id', async (req, res) => {
         });
         
         const goodsListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
+        console.log('调用商品接口获取 goodsVerId，goods_id:', obtainedGoodsId, 'usn:', usn.trim());
+        
         const response = await axios.post(
           goodsListUrl,
           null,
@@ -453,19 +455,35 @@ router.get('/:id', async (req, res) => {
           }
         );
         
+        console.log('商品接口响应状态:', response.status);
+        console.log('商品接口响应数据:', JSON.stringify(response.data).substring(0, 500)); // 只打印前500字符
+        
         if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
           const goodsList = response.data.data.list || [];
+          console.log('商品列表长度:', goodsList.length);
+          
           // 获取第一个商品的 goodsVerId
-          if (goodsList.length > 0 && goodsList[0].goodsVerId) {
-            targetGoodsVerId = goodsList[0].goodsVerId;
-            result.goodsVerId = targetGoodsVerId;
-            console.log('成功获取 goodsVerId:', targetGoodsVerId, '来自 goods_id:', obtainedGoodsId);
+          if (goodsList.length > 0) {
+            console.log('第一个商品数据:', JSON.stringify(goodsList[0]).substring(0, 300));
+            if (goodsList[0].goodsVerId) {
+              targetGoodsVerId = goodsList[0].goodsVerId;
+              result.goodsVerId = targetGoodsVerId;
+              console.log('成功获取 goodsVerId:', targetGoodsVerId, '来自 goods_id:', obtainedGoodsId);
+            } else {
+              console.log('第一个商品没有 goodsVerId 字段，可用字段:', Object.keys(goodsList[0]));
+            }
           } else {
-            console.log('商品列表为空或没有 goodsVerId，goodsList长度:', goodsList.length);
+            console.log('商品列表为空');
           }
+        } else {
+          console.log('商品接口返回非成功状态，code:', response.data?.code, 'status:', response.data?.status);
         }
       } catch (goodsError) {
-        console.error('获取商品列表失败（用于获取goodsVerId）:', goodsError);
+        console.error('获取商品列表失败（用于获取goodsVerId）:', goodsError.message);
+        if (goodsError.response) {
+          console.error('响应状态:', goodsError.response.status);
+          console.error('响应数据:', goodsError.response.data);
+        }
         // 继续执行，不中断请求
       }
     }
