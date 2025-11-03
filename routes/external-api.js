@@ -953,8 +953,23 @@ router.get('/order/product-list', async (req, res) => {
     
     console.log('外部API响应状态:', response.status);
 
-    // 返回外部API的响应
-    res.json(response.data);
+    // 处理并返回外部API的响应 - 只返回 qgList 中的产品数据
+    if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+      const originalData = response.data.data;
+      const filteredData = {
+        code: response.data.code,
+        status: response.data.status,
+        data: {
+          // 只返回 qgList（产品列表）
+          qgList: originalData.qgList || []
+        }
+      };
+      console.log('过滤后的产品列表数量:', filteredData.data.qgList.length);
+      res.json(filteredData);
+    } else {
+      // 如果不是成功响应，直接返回原始响应
+      res.json(response.data);
+    }
 
   } catch (error) {
     console.error('获取产品列表失败:', error);
