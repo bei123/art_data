@@ -418,22 +418,26 @@ router.get('/:id', async (req, res) => {
       try {
         const authorization = getAuthorization(req);
         
-        // 构建商品接口的请求参数（作为请求体传递）
-        const goodsParam = {
+        // 构建商品接口的请求参数 - goods 需要作为查询参数传递（JSON字符串）
+        const goodsParam = JSON.stringify({
           goodsId: obtainedGoodsId,
           buyerUsn: usn.trim(),
           issueBatch: "1",
           pageSize: "20",
           currentPage: 1
-        };
+        });
         
         const goodsListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
-        console.log('调用商品接口获取 goodsVerId，请求参数:', JSON.stringify(goodsParam));
+        console.log('调用商品接口获取 goodsVerId，请求参数:', goodsParam);
+        console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
         
         const response = await axios.post(
           goodsListUrl,
-          goodsParam,
+          null, // POST 请求体为空，参数通过查询字符串传递
           {
+            params: {
+              goods: goodsParam
+            },
             headers: {
               'pragma': 'no-cache',
               'cache-control': 'no-cache',
@@ -446,8 +450,7 @@ router.get('/:id', async (req, res) => {
               'sec-fetch-dest': 'empty',
               'referer': 'https://m.wespace.cn/',
               'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-              'priority': 'u=1, i',
-              'content-type': 'application/json'
+              'priority': 'u=1, i'
             },
             timeout: 10000
           }
