@@ -160,7 +160,6 @@ router.get('/', async (req, res) => {
     let query = `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at,
-        da.goods_id, da.goods_ver_id,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM digital_artworks da
       LEFT JOIN artists a ON da.artist_id = a.id
@@ -241,10 +240,12 @@ router.get('/', async (req, res) => {
           
           // 融合外部数据到本地数据
           artworksWithProcessedImages = artworksWithProcessedImages.map(artwork => {
-            // 优先通过 goods_id 匹配
+            // 优先通过 goods_id 匹配（从外部数据中获取）
             let matched = null;
-            if (artwork.goods_id) {
-              matched = externalMap.get(artwork.goods_id);
+            // 如果 artwork 有 goods_id（从外部数据中获取的），直接匹配
+            const artworkGoodsId = artwork.goods_id || (artwork.externalData && artwork.externalData.goods_id);
+            if (artworkGoodsId) {
+              matched = externalMap.get(artworkGoodsId);
             }
             
             // 如果 goods_id 匹配失败，尝试通过名称匹配
@@ -261,7 +262,7 @@ router.get('/', async (req, res) => {
               return {
                 ...artwork,
                 externalData: matched,
-                goods_id: artwork.goods_id || matched.goods_id,
+                goods_id: matched.goods_id,
                 // 优先使用外部数据的图片和价格（如果本地没有）
                 image_url: artwork.image_url || matched.cover || artwork.image_url,
                 price: artwork.price || parseFloat(matched.price) || artwork.price,
@@ -331,7 +332,6 @@ router.get('/:id', async (req, res) => {
         da.license_rights, da.license_period, da.owner_rights, da.license_items,
         da.project_name, da.product_name, da.project_owner, da.issuer, da.issue_batch,
         da.issue_year, da.batch_quantity, da.price, da.created_at, da.updated_at,
-        da.goods_id, da.goods_ver_id,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar,
         a.description as artist_description
       FROM digital_artworks da
@@ -361,8 +361,9 @@ router.get('/:id', async (req, res) => {
       externalData: null
     };
 
-    // 如果提供了 goodsVerId 或本地有 goods_ver_id，尝试获取外部详情数据
-    const targetGoodsVerId = goodsVerId || artworkData.goods_ver_id;
+    // 如果提供了 goodsVerId，尝试获取外部详情数据
+    // 注意：goods_ver_id 不在数据库中，只能通过查询参数传入
+    const targetGoodsVerId = goodsVerId;
     if (shouldFuse && targetGoodsVerId) {
       try {
         const authorization = getAuthorization(req);
