@@ -224,10 +224,85 @@ router.get('/:id', async (req, res) => {
     // 移除 artist 相关字段，避免在顶层重复
     const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
 
-    const result = {
+    let result = {
       ...artworkData,
       artist: artist
     };
+
+    // 尝试从外部API获取详情数据，并自动填充 registration_certificate
+    const goodsVerId = req.query.goodsVerId;
+    if (goodsVerId && (!result.registration_certificate || result.registration_certificate.trim() === '')) {
+      try {
+        let authorization = req.headers.authorization || req.headers.Authorization;
+        if (!authorization) {
+          authorization = req.headers['x-external-authorization'] || 
+                         req.headers['X-External-Authorization'];
+        }
+        if (!authorization) {
+          authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
+                         'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+        }
+        
+        const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
+        const goodsParam = typeof goodsVerId === 'object' 
+          ? JSON.stringify(goodsVerId)
+          : JSON.stringify({ goodsVerId: String(goodsVerId) });
+        
+        const response = await axios.post(
+          goodsDetailUrl,
+          { goods: goodsParam },
+          {
+            headers: {
+              'pragma': 'no-cache',
+              'cache-control': 'no-cache',
+              'authorization': authorization,
+              'apptype': '16',
+              'tenantid': 'wespace',
+              'origin': 'https://m.wespace.cn',
+              'sec-fetch-site': 'same-site',
+              'sec-fetch-mode': 'cors',
+              'sec-fetch-dest': 'empty',
+              'referer': 'https://m.wespace.cn/',
+              'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+              'priority': 'u=1, i',
+              'content-type': 'application/x-www-form-urlencoded'
+            },
+            timeout: 10000
+          }
+        );
+        
+        if (response.data && response.data.code === 200 && response.data.status === true && response.data.data) {
+          const externalData = response.data.data;
+          
+          // 从 issueInfo 中提取 register_cer_no
+          let registerCerNo = null;
+          if (externalData.goodsVer && externalData.goodsVer.issueInfo) {
+            try {
+              // issueInfo 可能是 JSON 字符串或对象
+              const issueInfo = typeof externalData.goodsVer.issueInfo === 'string' 
+                ? JSON.parse(externalData.goodsVer.issueInfo)
+                : externalData.goodsVer.issueInfo;
+              
+              if (issueInfo && issueInfo.register_cer_no) {
+                registerCerNo = issueInfo.register_cer_no;
+              }
+            } catch (parseError) {
+              console.error('解析 issueInfo 失败:', parseError);
+            }
+          }
+          
+          // 如果从外部API获取到了注册证书号，且本地没有，则自动填充
+          if (registerCerNo && (!result.registration_certificate || result.registration_certificate.trim() === '')) {
+            result.registration_certificate = registerCerNo;
+            console.log(`自动填充 registration_certificate: ${registerCerNo} (来自商品ID: ${goodsVerId})`);
+          }
+        }
+      } catch (externalError) {
+        console.error('获取外部商品详情失败（用于填充registration_certificate）:', externalError);
+        // 不中断请求，继续返回本地数据
+      }
+    }
+
     res.json(result);
     // 写入redis缓存，7天过期
     await redisClient.setEx(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
