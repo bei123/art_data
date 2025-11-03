@@ -72,43 +72,47 @@ router.get('/proxy', async (req, res) => {
       
       const targetBaseUrl = new URL(decodedTargetUrl);
       const baseOrigin = `${targetBaseUrl.protocol}//${targetBaseUrl.host}`;
-      const baseHref = decodedTargetUrl;
+      // 使用 origin + pathname，避免包含 hash 和 query，因为 hash 不应该在 base href 中
+      // 确保 pathname 以斜杠结尾，这样相对路径才能正确解析
+      let baseHref = `${targetBaseUrl.origin}${targetBaseUrl.pathname}`;
+      if (!baseHref.endsWith('/')) {
+        // 如果 pathname 不以斜杠结尾，添加斜杠
+        baseHref += '/';
+      }
 
-      // 1. 添加base标签确保资源路径正确
+      // 1. 注入 CSP meta 标签，允许更宽松的策略（在 head 的最前面）
+      // 使用宽松的 CSP 策略以支持代理页面
+      const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; base-uri *; frame-src *;">`;
+
+      // 2. 添加base标签确保资源路径正确（使用原始服务器路径）
       if (!htmlContent.includes('<base') && !htmlContent.includes('<BASE')) {
         // 查找head标签，如果找不到就在开头添加
         if (htmlContent.includes('<head>') || htmlContent.includes('<HEAD>')) {
           htmlContent = htmlContent.replace(
             /<head>/i,
-            `<head><base href="${baseHref}" />`
+            `<head>${cspMeta}<base href="${baseHref}" />`
           );
         } else if (htmlContent.includes('<html>') || htmlContent.includes('<HTML>')) {
           htmlContent = htmlContent.replace(
             /<html[^>]*>/i,
-            `$&<head><base href="${baseHref}" /></head>`
+            `$&<head>${cspMeta}<base href="${baseHref}" /></head>`
           );
         } else {
           // 如果没有head标签，在开头添加
-          htmlContent = `<head><base href="${baseHref}" /></head>${htmlContent}`;
+          htmlContent = `<head>${cspMeta}<base href="${baseHref}" /></head>${htmlContent}`;
+        }
+      } else {
+        // 如果已经有 base 标签，只添加 CSP meta
+        if (htmlContent.includes('<head>') || htmlContent.includes('<HEAD>')) {
+          htmlContent = htmlContent.replace(
+            /<head>/i,
+            `<head>${cspMeta}`
+          );
         }
       }
 
-      // 2. 将相对路径转换为绝对路径（处理src、href、action属性）
-      // 处理以/开头的绝对路径
-      htmlContent = htmlContent.replace(
-        /(src|href|action)=["'](\/[^"']+)/gi,
-        `$1="${baseOrigin}$2"`
-      );
-
-      // 处理相对路径（不以http://、https://、/、#、javascript:、data:开头）
-      htmlContent = htmlContent.replace(
-        /(src|href|action)=["'](?!https?:\/\/|#|javascript:|data:|\/)([^"']+)/gi,
-        (match, attr, path) => {
-          // 处理相对路径
-          const fullPath = new URL(path, baseHref).href;
-          return `${attr}="${fullPath}"`;
-        }
-      );
+      // 注意：不要修改 HTML 中的路径，让浏览器通过 base 标签自动处理
+      // 这样可以确保所有静态资源都从原始服务器加载，而不是代理服务器
 
       // 3. 注入脚本，用于处理后续的API请求（如果需要）
       const injectScript = `
@@ -196,6 +200,21 @@ router.get('/proxy', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    // 移除或覆盖严格的 CSP 头（让页面使用我们注入的 meta CSP）
+    // 必须在发送响应前移除
+    res.removeHeader('Content-Security-Policy');
+    res.removeHeader('content-security-policy');
+    
+    // 拦截响应发送，确保 CSP 头被移除
+    const originalSend = res.send;
+    res.send = function(data) {
+      // 再次确保移除 CSP 头
+      this.removeHeader('Content-Security-Policy');
+      this.removeHeader('content-security-policy');
+      // 调用原始的 send 方法
+      return originalSend.call(this, data);
+    };
     
     // 返回内容
     res.status(response.status).send(htmlContent);

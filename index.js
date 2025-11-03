@@ -45,6 +45,7 @@ app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/pay/refund/notify', express.raw({ type: 'application/json' }));
 
 // 安全中间件配置
+// 注意：webview 代理路由需要更宽松的 CSP，所以在该路由上会单独处理
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -57,6 +58,7 @@ app.use(helmet({
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"],
+      baseUri: ["'self'"], // 默认只允许 self
     },
   },
   hsts: {
@@ -92,6 +94,9 @@ const loginLimiter = rateLimit({
 });
 
 app.use('/api/auth/login', loginLimiter);
+
+// 为 webview 代理路由禁用 CSP（使用更宽松的 meta CSP）
+// 在路由处理中会移除 CSP 头，让页面使用注入的 meta CSP
 
 // CORS 配置
 app.use(cors({
