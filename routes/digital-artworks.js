@@ -1129,9 +1129,19 @@ router.post('/order/purchase', async (req, res) => {
     }
 
     const priceData = discountPriceResponse.data.data || {};
-    const payPrice = priceData.payPrice || priceData.price || '0';
-    const discountSumPrice = priceData.discountSumPrice || '0';
-    const totalPrice = parseFloat(payPrice) - parseFloat(discountSumPrice);
+    // 优先使用价格查询接口返回的字段，如果不存在则使用默认值
+    const payPrice = priceData.payPrice || priceData.price || priceData.pay_price || '0';
+    const discountSumPrice = priceData.discountSumPrice || priceData.discount_sum_price || '0';
+    // totalPrice 应该使用接口返回的，如果没有则计算
+    const totalPrice = priceData.totalPrice || priceData.total_price || (parseFloat(payPrice) - parseFloat(discountSumPrice));
+
+    // 日志输出价格信息用于调试
+    console.log('价格查询结果:', {
+      priceData: priceData,
+      payPrice: payPrice,
+      discountSumPrice: discountSumPrice,
+      totalPrice: totalPrice
+    });
 
     // 步骤2: 统一下单
     console.log('步骤2: 统一下单');
@@ -1143,7 +1153,7 @@ router.post('/order/purchase', async (req, res) => {
       payType: payType,
       payPrice: String(payPrice),
       discountSumPrice: String(discountSumPrice),
-      totalPrice: totalPrice,
+      totalPrice: totalPrice, // 保持数字类型
       goodsList: [{
         goodsId: goodsId || '',
         goodsVerId: String(goodsVerId),
@@ -1152,11 +1162,16 @@ router.post('/order/purchase', async (req, res) => {
       ...otherOrderParams // 允许前端传入其他订单参数
     };
 
+    console.log('统一下单请求数据:', JSON.stringify(orderData, null, 2));
+
     // 将订单对象转换为URL编码的JSON字符串
     const orderParam = new URLSearchParams();
     orderParam.append('order', JSON.stringify(orderData));
 
     const unifiedOrderUrl = `${baseUrl}/orderApi/order/unifiedOrder`;
+    console.log('统一下单请求URL:', unifiedOrderUrl);
+    console.log('统一下单请求体:', orderParam.toString());
+    
     const unifiedOrderResponse = await axios.post(unifiedOrderUrl, orderParam.toString(), {
       headers: {
         ...commonHeaders,
@@ -1166,6 +1181,8 @@ router.post('/order/purchase', async (req, res) => {
       },
       timeout: 10000
     });
+
+    console.log('统一下单响应:', JSON.stringify(unifiedOrderResponse.data, null, 2));
 
     if (!unifiedOrderResponse.data || unifiedOrderResponse.data.code !== 200) {
       // HTTP状态码必须在100-599范围内，如果外部API返回的code不在范围内，使用默认值
