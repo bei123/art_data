@@ -80,7 +80,7 @@ router.get('/proxy', async (req, res) => {
         baseHref += '/';
       }
 
-      // 1. 注入 CSP meta 标签，允许更宽松的策略（在 head 的最前面）
+      // 1. 注入 CSP meta 标签和修复脚本，必须在 head 的最前面，在所有其他脚本之前执行
       // 使用宽松的 CSP 策略以支持代理页面
       const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src *; base-uri *; frame-src *;">`;
 
@@ -114,13 +114,83 @@ router.get('/proxy', async (req, res) => {
       // 注意：不要修改 HTML 中的路径，让浏览器通过 base 标签自动处理
       // 这样可以确保所有静态资源都从原始服务器加载，而不是代理服务器
 
-      // 3. 注入脚本，用于处理后续的API请求（如果需要）
+      // 3. 注入脚本，用于处理后续的API请求和路由问题
       const injectScript = `
         <script>
           (function() {
-            // 保存原始fetch和XMLHttpRequest
+            // 保存原始API
             const originalFetch = window.fetch;
             const originalXHR = window.XMLHttpRequest;
+            const originalReplaceState = history.replaceState;
+            const originalPushState = history.pushState;
+            const currentOrigin = window.location.origin;
+            
+            // 修复 History API 跨域问题
+            // 确保所有 state 操作都使用当前页面的 origin
+            function normalizeUrl(url) {
+              if (!url) return url;
+              try {
+                // 如果是绝对 URL，检查是否是跨域的
+                if (url.startsWith('http://') || url.startsWith('https://')) {
+                  const urlObj = new URL(url);
+                  // 如果是跨域，只保留 pathname + search + hash，使用当前 origin
+                  if (urlObj.origin !== currentOrigin) {
+                    return currentOrigin + urlObj.pathname + urlObj.search + urlObj.hash;
+                  }
+                } else {
+                  // 相对路径，确保以 / 开头
+                  return url.startsWith('/') ? url : '/' + url;
+                }
+              } catch (e) {
+                // URL 解析失败，返回相对路径
+                return url.startsWith('/') ? url : '/' + url;
+              }
+              return url;
+            }
+            
+            // 拦截 replaceState
+            history.replaceState = function(state, title, url) {
+              try {
+                const normalizedUrl = normalizeUrl(url);
+                return originalReplaceState.call(this, state, title, normalizedUrl);
+              } catch (e) {
+                // 如果失败，尝试只使用 pathname
+                try {
+                  if (url) {
+                    const urlObj = url.startsWith('http') ? new URL(url) : new URL(url, currentOrigin);
+                    const pathOnly = urlObj.pathname + urlObj.search + urlObj.hash;
+                    return originalReplaceState.call(this, state, title, pathOnly);
+                  } else {
+                    return originalReplaceState.call(this, state, title, url);
+                  }
+                } catch (e2) {
+                  // 如果还是失败，不传 URL
+                  return originalReplaceState.call(this, state, title);
+                }
+              }
+            };
+            
+            // 拦截 pushState
+            history.pushState = function(state, title, url) {
+              try {
+                const normalizedUrl = normalizeUrl(url);
+                return originalPushState.call(this, state, title, normalizedUrl);
+              } catch (e) {
+                // 如果失败，尝试只使用 pathname
+                try {
+                  if (url) {
+                    const urlObj = url.startsWith('http') ? new URL(url) : new URL(url, currentOrigin);
+                    const pathOnly = urlObj.pathname + urlObj.search + urlObj.hash;
+                    return originalPushState.call(this, state, title, pathOnly);
+                  } else {
+                    return originalPushState.call(this, state, title, url);
+                  }
+                } catch (e2) {
+                  // 如果还是失败，不传 URL
+                  return originalPushState.call(this, state, title);
+                }
+              }
+            };
             
             // 拦截fetch请求，添加Authorization头
             if (originalFetch) {
@@ -180,8 +250,22 @@ router.get('/proxy', async (req, res) => {
         </script>
       `;
       
-      // 将脚本注入到head标签的末尾
-      if (htmlContent.includes('</head>') || htmlContent.includes('</HEAD>')) {
+      // 将脚本注入到head标签的开头（在base标签之后），确保在其他脚本之前执行
+      // 这样可以拦截 Vue Router 的初始化
+      if (htmlContent.includes('<base') || htmlContent.includes('<BASE')) {
+        // 在 base 标签之后插入
+        htmlContent = htmlContent.replace(
+          /(<base[^>]*>)/i,
+          `$1${injectScript}`
+        );
+      } else if (htmlContent.includes('<head>') || htmlContent.includes('<HEAD>')) {
+        // 如果没有 base 标签，在 head 开头插入（在 CSP meta 之后）
+        htmlContent = htmlContent.replace(
+          /(<head[^>]*>)/i,
+          `$1${injectScript}`
+        );
+      } else if (htmlContent.includes('</head>') || htmlContent.includes('</HEAD>')) {
+        // 如果找不到 head 开始标签，插入到 head 结束之前
         htmlContent = htmlContent.replace(/<\/head>/i, injectScript + '</head>');
       } else if (htmlContent.includes('</body>') || htmlContent.includes('</BODY>')) {
         // 如果没有head标签，添加到body之前
