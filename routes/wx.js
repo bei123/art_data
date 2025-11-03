@@ -294,19 +294,22 @@ router.get('/userInfo', async (req, res) => {
     }
 
     try {
-        // 只查询必要字段，不包含敏感信息
+        // 查询用户信息，关联查询external_users表获取usn和token
         const [users] = await db.query(`
             SELECT 
-                id,
-                openid,
-                nickname,
-                avatar,
-                phone,
-                password_hash,
-                                        created_at,
-                        updated_at
-                    FROM wx_users
-                        WHERE id = ?
+                wu.id,
+                wu.openid,
+                wu.nickname,
+                wu.avatar,
+                wu.phone,
+                wu.password_hash,
+                wu.created_at,
+                wu.updated_at,
+                eu.usn,
+                eu.token
+            FROM wx_users wu
+            LEFT JOIN external_users eu ON eu.wx_user_id = wu.id
+            WHERE wu.id = ?
         `, [payload.userId]);
 
         if (!users || users.length === 0) {
@@ -316,8 +319,16 @@ router.get('/userInfo', async (req, res) => {
         const user = users[0];
         // 对敏感信息进行脱敏处理
         res.json({
-            ...user,
-            phone: user.phone ? user.phone.substring(0, 3) + '****' + user.phone.substring(user.phone.length - 4) : null
+            id: user.id,
+            openid: user.openid,
+            nickname: user.nickname,
+            avatar: user.avatar,
+            phone: user.phone ? user.phone.substring(0, 3) + '****' + user.phone.substring(user.phone.length - 4) : null,
+            password_hash: user.password_hash,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+            usn: user.usn || null,
+            token: user.token || null
         });
     } catch (err) {
         console.error('获取用户信息失败:', err);
