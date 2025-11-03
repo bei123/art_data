@@ -58,6 +58,7 @@ function validateImageUrl(url) {
 function getAuthorization(req) {
   // 外部接口统一使用 Basic 认证
   // 优先使用环境变量，如果没有则使用默认的 Basic 认证
+  // 默认值：Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==
   let authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
                      'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
   
