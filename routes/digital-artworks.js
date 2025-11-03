@@ -425,11 +425,18 @@ router.get('/:id', async (req, res) => {
                          req.headers['X-External-Authorization'];
         }
         
-        // 如果还是没有 Bearer token，记录警告
+        // 如果还是没有 Bearer token，尝试从环境变量或使用测试 token
         if (!authorization || !authorization.startsWith('Bearer ')) {
-          console.warn('警告：商品接口需要 Bearer token，但未从请求头获取到。请求头中的 authorization:', req.headers.authorization || req.headers.Authorization || '未设置');
-          console.warn('将尝试使用 Basic 认证，但可能会失败');
-          authorization = getAuthorization(req);
+          // 尝试从环境变量获取 Bearer token（用于测试）
+          const testToken = process.env.EXTERNAL_BEARER_TOKEN;
+          if (testToken) {
+            authorization = `Bearer ${testToken}`;
+            console.log('使用环境变量中的 Bearer token');
+          } else {
+            // 临时测试：使用提供的测试 token
+            authorization = 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c24iOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwiYWNjb3VudF90eXBlIjoiYWRtaW4iLCJ1c2VyX25hbWUiOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwic2NvcGUiOlsiYWxsIl0sImlkIjoxODE0NTAsImV4cCI6MTc2NDc2MDU3NiwianRpIjoiYjEzNzI4NTUtNmU0Zi00ZWViLThiYTctMmE5YTkwOGYzMWNmIiwiY2xpZW50X2lkIjoid2VzcGFjZSJ9.ombbQ9GWbtJT-S1qm_FEG1GgkBccvsS8Vk1T26VoIHQo-XDm61jWA3bhdf29nqSOX-cFD_pVKTw8jUhJw8YlrsR0mTw-rpnBYAIlRDI2NVK7M7q6pdBbiBhZYETOhouDUOYCyPIv4CVw68VWULVWbdosktnQtFDi8KK54dnEX3Q';
+            console.warn('警告：未从请求头获取到 Bearer token，使用测试 token（仅用于测试）');
+          }
         }
         
         // 构建商品接口的请求参数 - goods 作为表单数据传递（application/x-www-form-urlencoded）
