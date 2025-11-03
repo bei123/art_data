@@ -458,7 +458,10 @@ router.get('/:id', async (req, res) => {
           // 获取第一个商品的 goodsVerId
           if (goodsList.length > 0 && goodsList[0].goodsVerId) {
             targetGoodsVerId = goodsList[0].goodsVerId;
-            result.goods_ver_id = targetGoodsVerId;
+            result.goodsVerId = targetGoodsVerId;
+            console.log('成功获取 goodsVerId:', targetGoodsVerId, '来自 goods_id:', obtainedGoodsId);
+          } else {
+            console.log('商品列表为空或没有 goodsVerId，goodsList长度:', goodsList.length);
           }
         }
       } catch (goodsError) {
@@ -468,8 +471,16 @@ router.get('/:id', async (req, res) => {
     }
 
     // 如果手动传入了 goodsVerId，也添加到结果中
-    if (targetGoodsVerId && !result.goods_ver_id) {
-      result.goods_ver_id = targetGoodsVerId;
+    if (targetGoodsVerId && !result.goodsVerId) {
+      result.goodsVerId = targetGoodsVerId;
+      console.log('使用手动传入的 goodsVerId:', targetGoodsVerId);
+    }
+
+    // 调试日志
+    if (result.goodsVerId) {
+      console.log('返回数据包含 goodsVerId:', result.goodsVerId);
+    } else {
+      console.log('警告：返回数据中未找到 goodsVerId，targetGoodsVerId:', targetGoodsVerId, 'obtainedGoodsId:', obtainedGoodsId);
     }
 
     res.json(result);
