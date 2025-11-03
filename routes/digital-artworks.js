@@ -416,7 +416,21 @@ router.get('/:id', async (req, res) => {
     let targetGoodsVerId = goodsVerId; // 优先使用手动传入的 goodsVerId
     if (shouldFuse && !targetGoodsVerId && obtainedGoodsId && usn) {
       try {
-        const authorization = getAuthorization(req);
+        // 商品接口需要 Bearer token，优先从请求头获取
+        let authorization = req.headers.authorization || req.headers.Authorization;
+        
+        // 如果没有 Bearer token，尝试其他方式
+        if (!authorization || !authorization.startsWith('Bearer ')) {
+          authorization = req.headers['x-external-authorization'] || 
+                         req.headers['X-External-Authorization'];
+        }
+        
+        // 如果还是没有 Bearer token，记录警告
+        if (!authorization || !authorization.startsWith('Bearer ')) {
+          console.warn('警告：商品接口需要 Bearer token，但未从请求头获取到。请求头中的 authorization:', req.headers.authorization || req.headers.Authorization || '未设置');
+          console.warn('将尝试使用 Basic 认证，但可能会失败');
+          authorization = getAuthorization(req);
+        }
         
         // 构建商品接口的请求参数 - goods 作为表单数据传递（application/x-www-form-urlencoded）
         const goodsParam = JSON.stringify({
@@ -429,6 +443,7 @@ router.get('/:id', async (req, res) => {
         
         const goodsListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
         console.log('调用商品接口获取 goodsVerId，请求参数:', goodsParam);
+        console.log('Authorization 类型:', authorization?.startsWith('Bearer ') ? 'Bearer Token' : authorization?.startsWith('Basic ') ? 'Basic Auth' : '未知');
         console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
         
         // 使用 URLSearchParams 构建表单数据
