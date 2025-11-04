@@ -1313,551 +1313,168 @@ router.all('/proxy/*', async (req, res) => {
 });
 
 /**
- * 将数据库的 trade_state 映射到前端的 orderStatus
- * @param {string} tradeState - 数据库的 trade_state 值
- * @returns {string} 前端的 orderStatus 值
- * 映射关系：
- * "0" -> "待付款"
- * "1" -> "已完成"
- * "2" -> "已取消"
- * "3" -> "已删除"
- * "4" -> "已退款"
- * "5" -> "待发货"
- * "6" -> "待收货"
- * "7" -> "待评价"
- * "9" -> "待确认"
- */
-function mapTradeStateToOrderStatus(tradeState) {
-  if (!tradeState) {
-    return '';
-  }
-  
-  switch (tradeState) {
-    case 'NOTPAY':
-      return '0'; // 待付款
-    case 'SUCCESS':
-      // SUCCESS 状态可能需要根据发货、收货等信息进一步判断
-      // 暂时返回 "1" (已完成)，如果需要更细粒度的状态，需要结合其他字段判断
-      return '1'; // 已完成
-    case 'REFUND':
-      return '4'; // 已退款
-    case 'CLOSED':
-    case 'REVOKED':
-      return '2'; // 已取消
-    case 'PAYERROR':
-      return '2'; // 已取消（支付失败视为取消）
-    default:
-      return '';
-  }
-}
-
-/**
  * 获取订单列表
  * POST /api/external/order/list
- * 转发到外部接口：POST /orderApi/order/list
+ * 转发到外部接口：POST https://node.wespace.cn/orderApi/order/list
  */
 router.post('/order/list', async (req, res) => {
   try {
-    // 从请求头获取 authorization
+    // 从请求头获取 authorization 和 tenantid
     const authorization = req.headers.authorization || req.headers.Authorization;
-    
-    if (!authorization) {
-      return res.status(401).json({
-        code: 401,
-        status: false,
-        message: 'authorization参数不能为空，请提供Bearer token'
-      });
-    }
+    const tenantid = req.headers.tenantid || req.headers.Tenantid || 'wespace';
 
-    // 解析请求体参数（支持 application/x-www-form-urlencoded 格式）
-    let orderParams = {};
-    
-    // Express 的 urlencoded 中间件已经解析了请求体，req.body 应该是一个对象
-    // 例如: { order: '{"orderType":"",...}' } 或直接是 { orderType: '', ... }
-    if (req.body && typeof req.body === 'object') {
-      // 如果请求体中包含 order 字段（字符串格式的JSON）
-      if (req.body.order && typeof req.body.order === 'string') {
-        try {
-          // 尝试解析JSON字符串（可能是URL编码的）
-          try {
-            orderParams = JSON.parse(decodeURIComponent(req.body.order));
-          } catch (e1) {
-            // 如果不是URL编码，直接解析
-            orderParams = JSON.parse(req.body.order);
-          }
-        } catch (e2) {
-          return res.status(400).json({
-            code: 400,
-            status: false,
-            message: 'order参数格式不正确，应为JSON字符串'
-          });
+    // 构建请求体（保持原始格式）
+    let requestBody;
+    if (typeof req.body === 'string') {
+      // 如果请求体是字符串，直接使用
+      requestBody = req.body;
+    } else if (req.body && typeof req.body === 'object') {
+      // 如果是对象，转换为 form-urlencoded 格式
+      const formDataParts = [];
+      for (const [key, value] of Object.entries(req.body)) {
+        if (value !== undefined && value !== null) {
+          formDataParts.push(`${key}=${encodeURIComponent(String(value))}`);
         }
-      } else if (req.body.buyerUsn || req.body.orderType !== undefined) {
-        // 如果请求体直接包含了订单参数，直接使用
-        orderParams = req.body;
       }
-    } else if (typeof req.body === 'string') {
-      // 如果请求体还是字符串（可能中间件没有解析），手动解析
-      try {
-        const parsed = querystring.parse(req.body);
-        if (parsed.order) {
-          orderParams = JSON.parse(decodeURIComponent(parsed.order));
-        }
-      } catch (e) {
-        return res.status(400).json({
-          code: 400,
-          status: false,
-          message: '请求体格式不正确'
-        });
-      }
+      requestBody = formDataParts.join('&');
+    } else {
+      requestBody = '';
     }
 
-    // 参数验证
-    const { orderType = '', pageSize = '20', currentPage = 1, isBuyer = '1', status = '', buyerUsn } = orderParams;
-
-    if (!buyerUsn) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'buyerUsn参数不能为空'
-      });
-    }
-
-    // 根据 usn 查找对应的 wx_user_id
-    const [externalUsers] = await db.query(
-      'SELECT wx_user_id FROM external_users WHERE usn = ?',
-      [buyerUsn]
+    // 调用外部API
+    const response = await axios.post(
+      `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/order/list`,
+      requestBody,
+      {
+        headers: {
+          'authorization': authorization,
+          'tenantid': tenantid,
+          'content-type': 'application/x-www-form-urlencoded',
+          'origin': req.headers.origin || 'https://m.wespace.cn',
+          'referer': req.headers.referer || 'https://m.wespace.cn/',
+          'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
+          'accept': req.headers.accept || '*/*'
+        },
+        transformRequest: [(data) => {
+          return typeof data === 'string' ? data : data;
+        }],
+        timeout: 10000
+      }
     );
 
-    if (externalUsers.length === 0) {
-      return res.status(404).json({
-        code: 404,
-        status: false,
-        message: '未找到对应的用户'
-      });
-    }
-
-    const wxUserId = externalUsers[0].wx_user_id;
-
-    // 构建查询条件
-    const cleanPage = parseInt(currentPage) || 1;
-    const cleanPageSize = parseInt(pageSize) || 20;
-    const offset = (cleanPage - 1) * cleanPageSize;
-
-    let query = 'SELECT * FROM orders WHERE user_id = ?';
-    let countQuery = 'SELECT COUNT(*) as total FROM orders WHERE user_id = ?';
-    let params = [wxUserId];
-    let countParams = [wxUserId];
-
-    // 状态筛选：支持 orderType 和 status 两种参数
-    // orderType 映射关系：
-    // "1" (待付款) -> "NOTPAY"
-    // "2" (待发货) -> "SUCCESS" (已支付但未发货，需要结合其他字段判断)
-    // "3" (待收货) -> "SUCCESS" (已发货待收货)
-    // "4" (已完成) -> "SUCCESS" (已完成)
-    // "6" (已取消) -> "CLOSED" 或 "REVOKED"
-    // "9" (待确认) -> "SUCCESS" (待确认)
-    let tradeStateFilter = null;
-    
-    // 优先使用 orderType，如果没有则使用 status
-    const statusValue = orderType || status;
-    
-    if (statusValue && statusValue.trim() !== '') {
-      const statusStr = String(statusValue).trim();
-      
-      // 将前端状态值映射到数据库 trade_state
-      switch (statusStr) {
-        case '1': // 待付款
-          tradeStateFilter = 'NOTPAY';
-          break;
-        case '2': // 待发货 - 已支付但可能未发货
-        case '3': // 待收货 - 已发货
-        case '4': // 已完成
-        case '9': // 待确认
-          // 这些状态都对应 SUCCESS，但可能需要额外的物流状态判断
-          // 暂时都查询 SUCCESS 状态的订单
-          tradeStateFilter = 'SUCCESS';
-          break;
-        case '6': // 已取消
-          // 已取消可能是 CLOSED 或 REVOKED，需要查询多个状态
-          // 使用 IN 查询
-          query += ' AND trade_state IN (?, ?)';
-          countQuery += ' AND trade_state IN (?, ?)';
-          params.push('CLOSED', 'REVOKED');
-          countParams.push('CLOSED', 'REVOKED');
-          break;
-        default:
-          // 如果传入的是数据库的 trade_state 值（如 "SUCCESS", "NOTPAY" 等），直接使用
-          if (['NOTPAY', 'SUCCESS', 'REFUND', 'CLOSED', 'REVOKED', 'PAYERROR'].includes(statusStr)) {
-            tradeStateFilter = statusStr;
-          }
-          break;
-      }
-      
-      // 如果确定了单一状态值，添加到查询条件（状态6已在上面的IN查询中处理）
-      if (tradeStateFilter && statusStr !== '6') {
-        query += ' AND trade_state = ?';
-        countQuery += ' AND trade_state = ?';
-        params.push(tradeStateFilter);
-        countParams.push(tradeStateFilter);
-      }
-    }
-
-    // 添加排序和分页
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(cleanPageSize, offset);
-
-    // 执行查询
-    const [orders] = await db.query(query, params);
-    const [[{ total }]] = await db.query(countQuery, countParams);
-
-    // 查询每个订单的订单项
-    const ordersWithItems = await Promise.all(orders.map(async (order) => {
-      const [orderItems] = await db.query(`
-        SELECT 
-          oi.id,
-          oi.type,
-          oi.right_id,
-          oi.digital_artwork_id,
-          oi.artwork_id,
-          oi.quantity,
-          oi.price,
-          oi.address_id,
-          r.title as right_title,
-          r.price as right_price,
-          r.original_price as right_original_price,
-          r.description as right_description,
-          r.status as right_status,
-          r.remaining_count as right_remaining_count,
-          ri.image_url as right_image_url,
-          da.title as digital_title,
-          da.price as digital_price,
-          da.description as digital_description,
-          da.image_url as digital_image_url,
-          da.batch_quantity as digital_batch_quantity,
-          oa.title as artwork_title,
-          oa.original_price as artwork_original_price,
-          oa.discount_price as artwork_discount_price,
-          oa.description as artwork_description,
-          oa.image as artwork_image,
-          wa.receiver_name,
-          wa.receiver_phone,
-          wa.province,
-          wa.city,
-          wa.district,
-          wa.detail_address,
-          wa.is_default
-        FROM order_items oi
-        LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-        LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-        LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
-        LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
-        LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
-        WHERE oi.order_id = ?
-      `, [order.id]);
-
-      // 处理订单项数据，整理图片和地址信息
-      const orderItemsWithImages = orderItems.map(item => {
-        const result = {
-          id: item.id,
-          type: item.type,
-          quantity: item.quantity,
-          price: item.price,
-          address_id: item.address_id
-        };
-
-        // 根据类型设置商品信息
-        if (item.type === 'right') {
-          result.right_id = item.right_id;
-          result.title = item.right_title;
-          result.original_price = item.right_original_price;
-          result.description = item.right_description;
-          result.status = item.right_status;
-          result.remaining_count = item.right_remaining_count;
-          result.images = item.right_image_url ? [item.right_image_url] : [];
-        } else if (item.type === 'digital') {
-          result.digital_artwork_id = item.digital_artwork_id;
-          result.title = item.digital_title;
-          result.description = item.digital_description;
-          result.image_url = item.digital_image_url;
-          result.batch_quantity = item.digital_batch_quantity;
-          result.images = item.digital_image_url ? [item.digital_image_url] : [];
-        } else if (item.type === 'artwork') {
-          result.artwork_id = item.artwork_id;
-          result.title = item.artwork_title;
-          result.original_price = item.artwork_original_price;
-          result.discount_price = item.artwork_discount_price;
-          result.description = item.artwork_description;
-          result.images = item.artwork_image ? [item.artwork_image] : [];
-        }
-
-        // 地址信息
-        if (item.receiver_name) {
-          result.address = {
-            receiver_name: item.receiver_name,
-            receiver_phone: item.receiver_phone,
-            province: item.province,
-            city: item.city,
-            district: item.district,
-            detail_address: item.detail_address,
-            is_default: item.is_default,
-            full_address: `${item.province || ''}${item.city || ''}${item.district || ''}${item.detail_address || ''}`.trim()
-          };
-        }
-
-        return result;
-      });
-
-      // 如果需要，查询right类型的更多图片
-      const itemsWithAllImages = await Promise.all(orderItemsWithImages.map(async (item) => {
-        if (item.type === 'right' && item.right_id) {
-          const [images] = await db.query(
-            'SELECT image_url FROM right_images WHERE right_id = ?',
-            [item.right_id]
-          );
-          item.images = images.map(img => img.image_url || '').filter(url => url);
-        }
-        return item;
-      }));
-
-      return {
-        ...order,
-        orderStatus: mapTradeStateToOrderStatus(order.trade_state),
-        items: itemsWithAllImages
-      };
-    }));
-
-    // 返回结果
-    res.json({
-      code: 200,
-      status: true,
-      message: 'success',
-      data: {
-        list: ordersWithItems,
-        total: parseInt(total),
-        pageSize: cleanPageSize,
-        currentPage: cleanPage
-      }
-    });
+    // 直接返回外部API的响应
+    res.status(response.status).json(response.data);
 
   } catch (error) {
     console.error('获取订单列表失败:', error);
-    res.status(500).json({
-      code: 500,
-      status: false,
-      message: '获取订单列表失败',
-      detail: error.message
-    });
+
+    if (error.response) {
+      // 外部API返回了错误响应
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '获取订单列表失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      // 请求发送失败
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      // 其他错误
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
   }
 });
 
 /**
  * 获取订单详情
  * POST /api/external/order/detail
- * 转发到外部接口：POST /orderApi/order/detail
+ * 转发到外部接口：POST https://node.wespace.cn/orderApi/order/detail
  */
 router.post('/order/detail', async (req, res) => {
   try {
-    // 从请求头获取 authorization
+    // 从请求头获取 authorization 和 tenantid
     const authorization = req.headers.authorization || req.headers.Authorization;
-    
-    if (!authorization) {
-      return res.status(401).json({
-        code: 401,
-        status: false,
-        message: 'authorization参数不能为空，请提供Bearer token'
-      });
-    }
+    const tenantid = req.headers.tenantid || req.headers.Tenantid || 'wespace';
 
-    // 解析请求体参数（支持 application/x-www-form-urlencoded 格式）
-    let orderId = '';
-    
-    // Express 的 urlencoded 中间件已经解析了请求体
-    if (req.body && typeof req.body === 'object') {
-      orderId = req.body.orderId || '';
-    } else if (typeof req.body === 'string') {
-      // 如果请求体还是字符串（可能中间件没有解析），手动解析
-      try {
-        const parsed = querystring.parse(req.body);
-        orderId = parsed.orderId || '';
-      } catch (e) {
-        return res.status(400).json({
-          code: 400,
-          status: false,
-          message: '请求体格式不正确'
-        });
+    // 构建请求体（保持原始格式）
+    let requestBody;
+    if (typeof req.body === 'string') {
+      // 如果请求体是字符串，直接使用
+      requestBody = req.body;
+    } else if (req.body && typeof req.body === 'object') {
+      // 如果是对象，转换为 form-urlencoded 格式
+      const formDataParts = [];
+      for (const [key, value] of Object.entries(req.body)) {
+        if (value !== undefined && value !== null) {
+          formDataParts.push(`${key}=${encodeURIComponent(String(value))}`);
+        }
       }
+      requestBody = formDataParts.join('&');
+    } else {
+      requestBody = '';
     }
 
-    if (!orderId) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'orderId参数不能为空'
-      });
-    }
-
-    // 查询订单信息（orderId可能是out_trade_no或数据库id）
-    let order = null;
-    
-    // 先尝试作为out_trade_no查询
-    const [ordersByTradeNo] = await db.query(
-      'SELECT * FROM orders WHERE out_trade_no = ?',
-      [orderId]
+    // 调用外部API
+    const response = await axios.post(
+      `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/order/detail`,
+      requestBody,
+      {
+        headers: {
+          'authorization': authorization,
+          'tenantid': tenantid,
+          'content-type': 'application/x-www-form-urlencoded',
+          'origin': req.headers.origin || 'https://m.wespace.cn',
+          'referer': req.headers.referer || 'https://m.wespace.cn/',
+          'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
+          'accept': req.headers.accept || '*/*'
+        },
+        transformRequest: [(data) => {
+          return typeof data === 'string' ? data : data;
+        }],
+        timeout: 10000
+      }
     );
 
-    if (ordersByTradeNo.length > 0) {
-      order = ordersByTradeNo[0];
-    } else {
-      // 尝试作为数据库ID查询
-      const [ordersById] = await db.query(
-        'SELECT * FROM orders WHERE id = ?',
-        [orderId]
-      );
-      
-      if (ordersById.length > 0) {
-        order = ordersById[0];
-      }
-    }
-
-    if (!order) {
-      return res.status(404).json({
-        code: 404,
-        status: false,
-        message: '订单不存在'
-      });
-    }
-
-    // 查询订单项
-    const [orderItems] = await db.query(`
-      SELECT 
-        oi.id,
-        oi.type,
-        oi.right_id,
-        oi.digital_artwork_id,
-        oi.artwork_id,
-        oi.quantity,
-        oi.price,
-        oi.address_id,
-        r.title as right_title,
-        r.price as right_price,
-        r.original_price as right_original_price,
-        r.description as right_description,
-        r.status as right_status,
-        r.remaining_count as right_remaining_count,
-        ri.image_url as right_image_url,
-        da.title as digital_title,
-        da.price as digital_price,
-        da.description as digital_description,
-        da.image_url as digital_image_url,
-        da.batch_quantity as digital_batch_quantity,
-        oa.title as artwork_title,
-        oa.original_price as artwork_original_price,
-        oa.discount_price as artwork_discount_price,
-        oa.description as artwork_description,
-        oa.image as artwork_image,
-        wa.receiver_name,
-        wa.receiver_phone,
-        wa.province,
-        wa.city,
-        wa.district,
-        wa.detail_address,
-        wa.is_default
-      FROM order_items oi
-      LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-      LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-      LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
-      LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
-      LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
-      WHERE oi.order_id = ?
-    `, [order.id]);
-
-    // 处理订单项数据
-    const orderItemsWithImages = orderItems.map(item => {
-      const result = {
-        id: item.id,
-        type: item.type,
-        quantity: item.quantity,
-        price: item.price,
-        address_id: item.address_id
-      };
-
-      // 根据类型设置商品信息
-      if (item.type === 'right') {
-        result.right_id = item.right_id;
-        result.title = item.right_title;
-        result.price = item.right_price;
-        result.original_price = item.right_original_price;
-        result.description = item.right_description;
-        result.status = item.right_status;
-        result.remaining_count = item.right_remaining_count;
-        result.images = item.right_image_url ? [item.right_image_url] : [];
-      } else if (item.type === 'digital') {
-        result.digital_artwork_id = item.digital_artwork_id;
-        result.title = item.digital_title;
-        result.price = item.digital_price;
-        result.description = item.digital_description;
-        result.image_url = item.digital_image_url;
-        result.batch_quantity = item.digital_batch_quantity;
-        result.images = item.digital_image_url ? [item.digital_image_url] : [];
-      } else if (item.type === 'artwork') {
-        result.artwork_id = item.artwork_id;
-        result.title = item.artwork_title;
-        result.original_price = item.artwork_original_price;
-        result.discount_price = item.artwork_discount_price;
-        result.description = item.artwork_description;
-        result.images = item.artwork_image ? [item.artwork_image] : [];
-      }
-
-      // 地址信息
-      if (item.receiver_name) {
-        result.address = {
-          receiver_name: item.receiver_name,
-          receiver_phone: item.receiver_phone,
-          province: item.province,
-          city: item.city,
-          district: item.district,
-          detail_address: item.detail_address,
-          is_default: item.is_default,
-          full_address: `${item.province || ''}${item.city || ''}${item.district || ''}${item.detail_address || ''}`.trim()
-        };
-      }
-
-      return result;
-    });
-
-    // 如果需要，查询right类型的更多图片
-    const itemsWithAllImages = await Promise.all(orderItemsWithImages.map(async (item) => {
-      if (item.type === 'right' && item.right_id) {
-        const [images] = await db.query(
-          'SELECT image_url FROM right_images WHERE right_id = ?',
-          [item.right_id]
-        );
-        item.images = images.map(img => img.image_url || '').filter(url => url);
-      }
-      return item;
-    }));
-
-    // 返回结果
-    res.json({
-      code: 200,
-      status: true,
-      message: 'success',
-      data: {
-        ...order,
-        orderStatus: mapTradeStateToOrderStatus(order.trade_state),
-        items: itemsWithAllImages
-      }
-    });
+    // 直接返回外部API的响应
+    res.status(response.status).json(response.data);
 
   } catch (error) {
     console.error('获取订单详情失败:', error);
-    res.status(500).json({
-      code: 500,
-      status: false,
-      message: '获取订单详情失败',
-      detail: error.message
-    });
+
+    if (error.response) {
+      // 外部API返回了错误响应
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '获取订单详情失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      // 请求发送失败
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      // 其他错误
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
   }
 });
 
