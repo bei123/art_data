@@ -1498,4 +1498,97 @@ router.post('/order/detail', async (req, res) => {
   }
 });
 
+/**
+ * 取消订单
+ * POST /api/external/order/cancel
+ * 转发到外部接口：POST https://node.wespace.cn/orderApi/order/cancel
+ */
+router.post('/order/cancel', async (req, res) => {
+  try {
+    // 从请求头获取 authorization 和 tenantid
+    const authorization = req.headers.authorization || req.headers.Authorization;
+    const tenantid = req.headers.tenantid || req.headers.Tenantid || 'wespace';
+
+    // 构建请求体（保持原始格式）
+    let requestBody;
+    if (typeof req.body === 'string') {
+      // 如果请求体是字符串，直接使用
+      requestBody = req.body;
+    } else if (req.body && typeof req.body === 'object') {
+      // 如果是对象，转换为 form-urlencoded 格式
+      const formDataParts = [];
+      for (const [key, value] of Object.entries(req.body)) {
+        if (value !== undefined && value !== null) {
+          formDataParts.push(`${key}=${encodeURIComponent(String(value))}`);
+        }
+      }
+      requestBody = formDataParts.join('&');
+    } else {
+      requestBody = '';
+    }
+
+    // 调用外部API
+    const response = await axios.post(
+      `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/order/cancel`,
+      requestBody,
+      {
+        headers: {
+          'authorization': authorization,
+          'tenantid': tenantid,
+          'apptype': req.headers.apptype || '16',
+          'content-type': 'application/x-www-form-urlencoded',
+          'content-length': req.headers['content-length'] || String(Buffer.byteLength(requestBody, 'utf8')),
+          'pragma': req.headers.pragma || 'no-cache',
+          'cache-control': req.headers['cache-control'] || 'no-cache',
+          'origin': req.headers.origin || 'https://m.wespace.cn',
+          'referer': req.headers.referer || 'https://m.wespace.cn/',
+          'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
+          'accept': req.headers.accept || '*/*',
+          'accept-encoding': req.headers['accept-encoding'] || 'gzip, deflate, br, zstd',
+          'accept-language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-fetch-site': req.headers['sec-fetch-site'] || 'same-site',
+          'sec-fetch-mode': req.headers['sec-fetch-mode'] || 'cors',
+          'sec-fetch-dest': req.headers['sec-fetch-dest'] || 'empty',
+          'priority': req.headers.priority || 'u=1, i'
+        },
+        transformRequest: [(data) => {
+          return typeof data === 'string' ? data : data;
+        }],
+        timeout: 10000
+      }
+    );
+
+    // 直接返回外部API的响应
+    res.status(response.status).json(response.data);
+
+  } catch (error) {
+    console.error('取消订单失败:', error);
+
+    if (error.response) {
+      // 外部API返回了错误响应
+      const statusCode = error.response.status || 500;
+      const responseData = error.response.data || {
+        code: statusCode,
+        status: false,
+        message: '取消订单失败'
+      };
+      res.status(statusCode).json(responseData);
+    } else if (error.request) {
+      // 请求发送失败
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '外部接口连接失败'
+      });
+    } else {
+      // 其他错误
+      res.status(500).json({
+        code: 500,
+        status: false,
+        message: '服务器内部错误'
+      });
+    }
+  }
+});
+
 module.exports = router; 
