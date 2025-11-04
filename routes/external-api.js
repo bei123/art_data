@@ -1349,11 +1349,21 @@ router.post('/order/list', async (req, res) => {
         headers: {
           'authorization': authorization,
           'tenantid': tenantid,
+          'apptype': req.headers.apptype || '16',
           'content-type': 'application/x-www-form-urlencoded',
+          'content-length': req.headers['content-length'] || String(Buffer.byteLength(requestBody, 'utf8')),
+          'pragma': req.headers.pragma || 'no-cache',
+          'cache-control': req.headers['cache-control'] || 'no-cache',
           'origin': req.headers.origin || 'https://m.wespace.cn',
           'referer': req.headers.referer || 'https://m.wespace.cn/',
           'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
-          'accept': req.headers.accept || '*/*'
+          'accept': req.headers.accept || '*/*',
+          'accept-encoding': req.headers['accept-encoding'] || 'gzip, deflate, br, zstd',
+          'accept-language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-fetch-site': req.headers['sec-fetch-site'] || 'same-site',
+          'sec-fetch-mode': req.headers['sec-fetch-mode'] || 'cors',
+          'sec-fetch-dest': req.headers['sec-fetch-dest'] || 'empty',
+          'priority': req.headers.priority || 'u=1, i'
         },
         transformRequest: [(data) => {
           return typeof data === 'string' ? data : data;
@@ -1432,11 +1442,21 @@ router.post('/order/detail', async (req, res) => {
         headers: {
           'authorization': authorization,
           'tenantid': tenantid,
+          'apptype': req.headers.apptype || '16',
           'content-type': 'application/x-www-form-urlencoded',
+          'content-length': req.headers['content-length'] || String(Buffer.byteLength(requestBody, 'utf8')),
+          'pragma': req.headers.pragma || 'no-cache',
+          'cache-control': req.headers['cache-control'] || 'no-cache',
           'origin': req.headers.origin || 'https://m.wespace.cn',
           'referer': req.headers.referer || 'https://m.wespace.cn/',
           'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
-          'accept': req.headers.accept || '*/*'
+          'accept': req.headers.accept || '*/*',
+          'accept-encoding': req.headers['accept-encoding'] || 'gzip, deflate, br, zstd',
+          'accept-language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-fetch-site': req.headers['sec-fetch-site'] || 'same-site',
+          'sec-fetch-mode': req.headers['sec-fetch-mode'] || 'cors',
+          'sec-fetch-dest': req.headers['sec-fetch-dest'] || 'empty',
+          'priority': req.headers.priority || 'u=1, i'
         },
         transformRequest: [(data) => {
           return typeof data === 'string' ? data : data;
