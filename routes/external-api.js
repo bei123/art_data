@@ -1316,30 +1316,82 @@ router.all('/proxy/*', async (req, res) => {
  * 获取订单列表
  * POST /api/external/order/list
  * 转发到外部接口：POST https://node.wespace.cn/orderApi/order/list
+ * 
+ * 支持的请求格式：
+ * 1. form-urlencoded格式：order={"orderType":"","pageSize":"20","currentPage":1,"isBuyer":"1","status":"","buyerUsn":"..."}
+ * 2. JSON格式：{"order": {"orderType":"","pageSize":"20","currentPage":1,"isBuyer":"1","status":"","buyerUsn":"..."}}
  */
 router.post('/order/list', async (req, res) => {
   try {
     // 从请求头获取 authorization 和 tenantid
     const authorization = req.headers.authorization || req.headers.Authorization;
     const tenantid = req.headers.tenantid || req.headers.Tenantid || 'wespace';
+    const apptype = req.headers.apptype || req.headers.Apptype || '16';
 
-    // 构建请求体（保持原始格式）
+    // 构建请求体（兼容多种输入格式）
     let requestBody;
+    
+    // 如果请求体是字符串，可能是已经编码的 form-urlencoded 格式
     if (typeof req.body === 'string') {
-      // 如果请求体是字符串，直接使用
-      requestBody = req.body;
-    } else if (req.body && typeof req.body === 'object') {
-      // 如果是对象，转换为 form-urlencoded 格式
-      const formDataParts = [];
-      for (const [key, value] of Object.entries(req.body)) {
-        if (value !== undefined && value !== null) {
-          formDataParts.push(`${key}=${encodeURIComponent(String(value))}`);
+      // 检查是否已经是 form-urlencoded 格式（包含 order=）
+      if (req.body.includes('order=')) {
+        requestBody = req.body;
+      } else {
+        // 如果不是，尝试解析为 JSON 并转换为 form-urlencoded
+        try {
+          const parsedBody = JSON.parse(req.body);
+          if (parsedBody.order) {
+            // 如果解析后是对象，且包含 order 字段
+            const orderJson = typeof parsedBody.order === 'string' 
+              ? parsedBody.order 
+              : JSON.stringify(parsedBody.order);
+            requestBody = `order=${encodeURIComponent(orderJson)}`;
+          } else {
+            // 如果整个 body 就是订单参数对象
+            requestBody = `order=${encodeURIComponent(JSON.stringify(parsedBody))}`;
+          }
+        } catch (e) {
+          // 解析失败，直接使用原始字符串
+          requestBody = req.body;
         }
       }
-      requestBody = formDataParts.join('&');
+    } else if (req.body && typeof req.body === 'object') {
+      // 如果是对象，检查是否有 order 字段
+      if (req.body.order) {
+        // 如果 order 已经是字符串（JSON字符串），直接使用
+        if (typeof req.body.order === 'string') {
+          requestBody = `order=${encodeURIComponent(req.body.order)}`;
+        } else {
+          // 如果 order 是对象，转换为 JSON 字符串
+          requestBody = `order=${encodeURIComponent(JSON.stringify(req.body.order))}`;
+        }
+      } else {
+        // 如果没有 order 字段，将整个对象作为 order 参数
+        // 检查是否包含订单相关字段（orderType, pageSize, currentPage 等）
+        const hasOrderFields = ['orderType', 'pageSize', 'currentPage', 'isBuyer', 'status', 'buyerUsn', 'sellerUsn'].some(
+          field => req.body.hasOwnProperty(field)
+        );
+        
+        if (hasOrderFields) {
+          // 包含订单字段，作为 order 参数
+          requestBody = `order=${encodeURIComponent(JSON.stringify(req.body))}`;
+        } else {
+          // 不包含订单字段，按原来的方式处理（兼容其他格式）
+          const formDataParts = [];
+          for (const [key, value] of Object.entries(req.body)) {
+            if (value !== undefined && value !== null) {
+              formDataParts.push(`${key}=${encodeURIComponent(String(value))}`);
+            }
+          }
+          requestBody = formDataParts.join('&');
+        }
+      }
     } else {
       requestBody = '';
     }
+
+    console.log('订单列表请求 - 原始请求体:', typeof req.body === 'string' ? req.body.substring(0, 200) : JSON.stringify(req.body).substring(0, 200));
+    console.log('订单列表请求 - 转换后请求体:', requestBody.substring(0, 200));
 
     // 调用外部API
     const response = await axios.post(
@@ -1349,21 +1401,21 @@ router.post('/order/list', async (req, res) => {
         headers: {
           'authorization': authorization,
           'tenantid': tenantid,
-          'apptype': req.headers.apptype || '16',
+          'apptype': apptype,
           'content-type': 'application/x-www-form-urlencoded',
-          'content-length': req.headers['content-length'] || String(Buffer.byteLength(requestBody, 'utf8')),
-          'pragma': req.headers.pragma || 'no-cache',
-          'cache-control': req.headers['cache-control'] || 'no-cache',
-          'origin': req.headers.origin || 'https://m.wespace.cn',
-          'referer': req.headers.referer || 'https://m.wespace.cn/',
-          'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
-          'accept': req.headers.accept || '*/*',
-          'accept-encoding': req.headers['accept-encoding'] || 'gzip, deflate, br, zstd',
-          'accept-language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
-          'sec-fetch-site': req.headers['sec-fetch-site'] || 'same-site',
-          'sec-fetch-mode': req.headers['sec-fetch-mode'] || 'cors',
-          'sec-fetch-dest': req.headers['sec-fetch-dest'] || 'empty',
-          'priority': req.headers.priority || 'u=1, i'
+          'content-length': String(Buffer.byteLength(requestBody, 'utf8')),
+          'pragma': req.headers.pragma || req.headers.Pragma || 'no-cache',
+          'cache-control': req.headers['cache-control'] || req.headers['Cache-Control'] || 'no-cache',
+          'origin': req.headers.origin || req.headers.Origin || 'https://m.wespace.cn',
+          'referer': req.headers.referer || req.headers.Referer || 'https://m.wespace.cn/',
+          'user-agent': req.headers['user-agent'] || req.headers['User-Agent'] || 'Mozilla/5.0',
+          'accept': req.headers.accept || req.headers.Accept || '*/*',
+          'accept-encoding': req.headers['accept-encoding'] || req.headers['Accept-Encoding'] || 'gzip, deflate, br, zstd',
+          'accept-language': req.headers['accept-language'] || req.headers['Accept-Language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-fetch-site': req.headers['sec-fetch-site'] || req.headers['Sec-Fetch-Site'] || 'same-site',
+          'sec-fetch-mode': req.headers['sec-fetch-mode'] || req.headers['Sec-Fetch-Mode'] || 'cors',
+          'sec-fetch-dest': req.headers['sec-fetch-dest'] || req.headers['Sec-Fetch-Dest'] || 'empty',
+          'priority': req.headers.priority || req.headers.Priority || 'u=1, i'
         },
         transformRequest: [(data) => {
           return typeof data === 'string' ? data : data;
@@ -1372,11 +1424,36 @@ router.post('/order/list', async (req, res) => {
       }
     );
 
-    // 直接返回外部API的响应
+    // 检查响应数据，判断是否为业务错误
+    if (response.data && typeof response.data === 'object') {
+      const isSuccess = response.data.code === 200 && response.data.status === true;
+
+      if (!isSuccess) {
+        // 业务错误：code不是200或status为false
+        const httpStatus = (response.data.code && response.data.code >= 400) ? response.data.code : 400;
+        console.log('订单列表接口业务错误，返回HTTP状态码:', httpStatus, '业务错误码:', response.data.code);
+        return res.status(httpStatus).json(response.data);
+      }
+    }
+
+    // 直接返回外部API的响应（成功情况）
     res.status(response.status).json(response.data);
 
   } catch (error) {
     console.error('获取订单列表失败:', error);
+    console.error('错误详情:', {
+      message: error.message,
+      response: error.response ? {
+        status: error.response.status,
+        data: error.response.data,
+        headers: error.response.headers
+      } : null,
+      request: error.request ? {
+        method: error.config?.method,
+        url: error.config?.url,
+        data: error.config?.data
+      } : null
+    });
 
     if (error.response) {
       // 外部API返回了错误响应
