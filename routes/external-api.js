@@ -621,7 +621,7 @@ router.post('/user/login', async (req, res) => {
                   ws_token, ws_stoken, node_org, im_token,
                   identity_authentication, postcode, nation, invite_code, channel, client_id, privileges,
                   chain_status, status, id_card_no, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 insertData
               );
               console.log('已创建external_users数据, wx_user_id:', wxUserId, 'usn:', externalUser.usn, '外部用户数据ID:', result.insertId);
