@@ -118,9 +118,57 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
 
   if (response?.data?.code === 200 && response?.data?.status === true && response?.data?.data?.list) {
     const list = response.data.data.list || [];
-    return list.length > 0 ? list[0] : null;
+    if (list.length === 0) return null;
+    // 不能盲取 list[0]：同一 goodsId 可能有多条版本，需优先「在售/上架」且时间较新的一条
+    const preferred = list.filter((row) => {
+      const shelfOk = row?.shelfStatus === '1' || row?.shelfStatus === 1 || row?.shelfStatus === undefined;
+      const verOk = row?.goodsVerStatus === '1' || row?.goodsVerStatus === 1 || row?.goodsVerStatus === undefined;
+      return shelfOk && verOk;
+    });
+    const pool = preferred.length > 0 ? preferred : list;
+    pool.sort((a, b) => {
+      const ta = new Date((a?.createTime || a?.create_time || '').replace(' ', 'T')).getTime();
+      const tb = new Date((b?.createTime || b?.create_time || '').replace(' ', 'T')).getTime();
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    });
+    return pool[0];
   }
 
+  return null;
+}
+
+/**
+ * 用 goodsVerId 拉详情（与线上一致，比 list 单条更准）
+ */
+async function fetchGoodsVerDetails(goodsVerId) {
+  if (!goodsVerId) return null;
+  const authorization = getExternalAuthorization();
+  const url = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
+  const form = new URLSearchParams();
+  form.append('goods', JSON.stringify({ goodsVerId: String(goodsVerId) }));
+
+  const response = await axios.post(url, form.toString(), {
+    headers: {
+      'pragma': 'no-cache',
+      'cache-control': 'no-cache',
+      'authorization': authorization,
+      'apptype': '16',
+      'tenantid': 'wespace',
+      'content-type': 'application/x-www-form-urlencoded',
+      'origin': 'https://m.wespace.cn',
+      'sec-fetch-site': 'same-site',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+      'referer': 'https://m.wespace.cn/',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'priority': 'u=1, i'
+    },
+    timeout: 15000
+  });
+
+  if (response?.data?.code === 200 && response?.data?.status === true && response?.data?.data?.goodsVer) {
+    return response.data.data.goodsVer;
+  }
   return null;
 }
 
@@ -154,8 +202,10 @@ async function syncDigitalArtworksOnce() {
   if (!Array.isArray(externalList) || externalList.length === 0) return { synced: 0 };
 
   // 为了避免一次同步拉太多 goodsId，做一个上限（可用 env 调大）
-  const maxItems = parseInt(process.env.DIGITAL_ARTWORKS_SYNC_MAX_ITEMS || '30', 10);
-  const buyerUsn = extractUsnFromBearerAuthorization(authorization);
+  const maxItems = parseInt(process.env.DIGITAL_ARTWORKS_SYNC_MAX_ITEMS || '200', 10);
+  const buyerUsn =
+    process.env.DIGITAL_ARTWORKS_SYNC_BUYER_USN ||
+    extractUsnFromBearerAuthorization(authorization);
   const items = externalList.slice(0, maxItems);
 
   const fetchedAt = new Date();
@@ -172,8 +222,12 @@ async function syncDigitalArtworksOnce() {
     const createdAtFromBanner = toMysqlDate(item?.createTime || item?.create_time || item?.created_at);
 
     const isShowRaw = item?.isShow ?? item?.is_show;
-    // 你确认：0 = 展示；因此 isShow=0 时 is_hidden=0（可见）
-    const is_hidden = (isShowRaw === '0' || isShowRaw === 0) ? 0 : 1;
+    // 你确认：0 = 展示。缺省字段时不要当成「隐藏」，否则公开列表会漏数据或只剩错误条数
+    let is_hidden = 0;
+    if (isShowRaw !== undefined && isShowRaw !== null && String(isShowRaw) !== '') {
+      if (isShowRaw === '0' || isShowRaw === 0) is_hidden = 0;
+      else is_hidden = 1;
+    }
 
     // 先用 banners 兜底，再用 goods/ver/list/v3 补齐标题/价格/描述/封面
     let title = item?.coverName || '';
@@ -194,6 +248,20 @@ async function syncDigitalArtworksOnce() {
         price = Number.isFinite(parsedPrice) ? parsedPrice : 0;
 
         createdAt = toMysqlDate(firstGoodsVer?.createTime || firstGoodsVer?.created_at) || createdAt;
+
+        const gvId = firstGoodsVer?.goodsVerId;
+        if (gvId) {
+          const detail = await fetchGoodsVerDetails(gvId);
+          if (detail) {
+            title = detail.goodsVerName || detail.worksName || title;
+            imageUrl = detail.goodsVerCover || imageUrl;
+            description = detail.goodsVerDes || description;
+            const pr = detail.goodsPrice ?? detail.originalPrice ?? detail.price;
+            const p2 = typeof pr === 'number' ? pr : Number(pr);
+            if (Number.isFinite(p2)) price = p2;
+            createdAt = toMysqlDate(detail.createTime || detail.created_at) || createdAt;
+          }
+        }
       }
     } catch (e) {
       // 不中断整个同步：当前 goodsId 用 banners 兜底写入
