@@ -17,6 +17,17 @@ const REDIS_DIGITAL_ARTWORKS_LIST_KEY = 'digital_artworks:list';
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX = 'digital_artworks:list:artist:';
 const REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX = 'digital_artworks:detail:';
 
+/** Wespace H5 二级市场购买页，query 中 id 为 goodsId */
+const WESPACE_ASSETS_BUY_SECOND_LIST_BASE =
+  'https://m.wespace.cn/CCN1008/#/pages/trade/assets/list/second/assetsBuySecondList';
+
+function buildWespacePurchaseUrl(goodsId) {
+  if (goodsId == null || goodsId === '') return null;
+  const id = String(goodsId).trim();
+  if (!id) return null;
+  return `${WESPACE_ASSETS_BUY_SECOND_LIST_BASE}?type=1&id=${encodeURIComponent(id)}`;
+}
+
 // 数据库健康检查端点
 router.get('/health', async (req, res) => {
   try {
@@ -359,7 +370,9 @@ router.get('/:id', async (req, res) => {
     if (!shouldFuse && !goodsVerId) {
       const cache = await redisClient.get(detailCacheKey);
       if (cache) {
-        return res.json(JSON.parse(cache));
+        const cached = JSON.parse(cache);
+        cached.purchase_url = buildWespacePurchaseUrl(cached.goods_id);
+        return res.json(cached);
       }
     }
 
@@ -626,6 +639,8 @@ router.get('/:id', async (req, res) => {
     } else {
       console.log('警告：返回数据中未找到 goodsVerId，targetGoodsVerId:', targetGoodsVerId, 'obtainedGoodsId:', obtainedGoodsId);
     }
+
+    result.purchase_url = buildWespacePurchaseUrl(result.goods_id);
 
     res.json(result);
     
