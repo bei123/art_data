@@ -7,6 +7,7 @@ const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
 const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
+const { ensureShowPurchaseLinkColumnReady } = require('../utils/digitalArtworksSync');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -26,6 +27,12 @@ function buildWespacePurchaseUrl(goodsId) {
   const id = String(goodsId).trim();
   if (!id) return null;
   return `${WESPACE_ASSETS_BUY_SECOND_LIST_BASE}?type=1&id=${encodeURIComponent(id)}`;
+}
+
+/** 未配置或缺省时默认展示购买链接（与列 DEFAULT 1 一致） */
+function normalizeShowPurchaseLink(v) {
+  if (v === undefined || v === null) return true;
+  return !(v === 0 || v === false || v === '0');
 }
 
 // 数据库健康检查端点
@@ -152,6 +159,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
     let query = `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at, da.is_hidden,
+        da.show_purchase_link,
         da.artist_id,
         COALESCE(a.name, da.artist_name) AS artist_display_name,
         a.avatar AS artist_avatar
@@ -371,7 +379,20 @@ router.get('/:id', async (req, res) => {
       const cache = await redisClient.get(detailCacheKey);
       if (cache) {
         const cached = JSON.parse(cache);
-        cached.purchase_url = buildWespacePurchaseUrl(cached.goods_id);
+        const [flagRows] = await db.query(
+          `SELECT show_purchase_link FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ? LIMIT 1`,
+          [rawId]
+        );
+        let showLink = true;
+        if (flagRows.length) {
+          const v = flagRows[0].show_purchase_link;
+          showLink = !(v === 0 || v === false);
+        } else if (cached.show_purchase_link !== undefined && cached.show_purchase_link !== null) {
+          const v = cached.show_purchase_link;
+          showLink = !(v === 0 || v === false);
+        }
+        cached.show_purchase_link = showLink;
+        cached.purchase_url = showLink ? buildWespacePurchaseUrl(cached.goods_id) : null;
         return res.json(cached);
       }
     }
@@ -433,6 +454,7 @@ router.get('/:id', async (req, res) => {
         goods_id: artwork.id,
         is_hidden: rawExt.is_hidden === 1 || rawExt.is_hidden === true,
         fetched_at: rawExt.fetched_at || null,
+        show_purchase_link: normalizeShowPurchaseLink(rawExt.show_purchase_link),
         artist: {
           id: artwork.artist_id,
           name: artwork.artist_display_name,
@@ -490,7 +512,8 @@ router.get('/:id', async (req, res) => {
       result = {
         ...artworkData,
         artist: artist,
-        wespace: null
+        wespace: null,
+        show_purchase_link: true
       };
     }
 
@@ -640,7 +663,9 @@ router.get('/:id', async (req, res) => {
       console.log('警告：返回数据中未找到 goodsVerId，targetGoodsVerId:', targetGoodsVerId, 'obtainedGoodsId:', obtainedGoodsId);
     }
 
-    result.purchase_url = buildWespacePurchaseUrl(result.goods_id);
+    result.purchase_url = result.show_purchase_link
+      ? buildWespacePurchaseUrl(result.goods_id)
+      : null;
 
     res.json(result);
     
@@ -870,6 +895,56 @@ router.patch('/:id/hide', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating artwork visibility:', error);
+    res.status(500).json({ error: '更新失败' });
+  }
+});
+
+/**
+ * 是否向公开接口返回购买链接（按作品，仅 digital_artworks_external）
+ * PATCH /api/digital-artworks/:id/purchase-link
+ * Body: { show_purchase_link: boolean }
+ */
+router.patch('/:id/purchase-link', authenticateToken, async (req, res) => {
+  try {
+    const { show_purchase_link: showPurchase } = req.body;
+    if (typeof showPurchase !== 'boolean') {
+      return res.status(400).json({ error: 'show_purchase_link 参数必须是布尔值' });
+    }
+
+    const id = req.params.id;
+    if (id === undefined || id === null || String(id).trim() === '') {
+      return res.status(400).json({ error: '无效的作品ID' });
+    }
+    const sid = String(id).trim();
+
+    await ensureShowPurchaseLinkColumnReady();
+
+    const [artworkRows] = await db.query(
+      `SELECT artist_id FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ?`,
+      [sid]
+    );
+    if (artworkRows.length === 0) {
+      return res.status(404).json({ error: '作品不存在' });
+    }
+    const artistId = artworkRows[0].artist_id;
+
+    await db.query(
+      `UPDATE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} SET show_purchase_link = ? WHERE id = ?`,
+      [showPurchase ? 1 : 0, sid]
+    );
+
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+    if (artistId) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artistId);
+    }
+    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + sid);
+
+    res.json({
+      message: showPurchase ? '已开启购买链接' : '已关闭购买链接',
+      show_purchase_link: showPurchase
+    });
+  } catch (error) {
+    console.error('Error updating show_purchase_link:', error);
     res.status(500).json({ error: '更新失败' });
   }
 });

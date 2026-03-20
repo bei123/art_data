@@ -45,6 +45,16 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="购买链接" width="100" align="center">
+        <template #default="{ row }">
+          <el-tooltip content="关闭后公开接口不再返回 purchase_url" placement="top">
+            <el-switch
+              :model-value="row.show_purchase_link !== false && row.show_purchase_link !== 0"
+              @change="(val) => handlePurchaseLinkToggle(row, val)"
+            />
+          </el-tooltip>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="360">
         <template #default="{ row }">
           <el-button type="primary" size="small" link @click="openAssociateArtist(row)">
@@ -341,7 +351,9 @@ const fetchArtworks = async () => {
       artworks.value = data.map(artwork => ({
         ...artwork,
         image_url: getImageUrl(artwork.image_url),
-        is_hidden: artwork.is_hidden || false
+        is_hidden: artwork.is_hidden || false,
+        show_purchase_link:
+          artwork.show_purchase_link === 0 || artwork.show_purchase_link === false ? false : true
       }))
       console.log('设置后的数字艺术品数据：', artworks.value)
     } else {
@@ -467,6 +479,20 @@ const saveAssociateArtist = async () => {
     console.error('关联艺术家失败:', error)
     const msg = error.response?.data?.error || '保存失败'
     ElMessage.error(msg)
+  }
+}
+
+const handlePurchaseLinkToggle = async (row, val) => {
+  try {
+    await axios.patch(`/digital-artworks/${row.id}/purchase-link`, {
+      show_purchase_link: val
+    })
+    row.show_purchase_link = val ? 1 : 0
+    ElMessage.success(val ? '已开启购买链接' : '已关闭购买链接')
+  } catch (error) {
+    console.error('更新购买链接开关失败:', error)
+    ElMessage.error(error.response?.data?.error || '更新失败')
+    fetchArtworks()
   }
 }
 

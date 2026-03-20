@@ -93,6 +93,7 @@ async function ensureTable() {
       artist_id BIGINT NULL,
       artist_name VARCHAR(255) NULL,
       is_hidden TINYINT(1) NOT NULL DEFAULT 0,
+      show_purchase_link TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否在公开接口返回购买链接',
 ${detailsFragment},
 ${listV3Fragment},
       fetched_at DATETIME NULL,
@@ -180,6 +181,25 @@ async function ensureLegacyDetailsJsonColumn(existingCols) {
       return;
     }
     console.warn('[digitalArtworksSync] wespace_details_json:', e.message);
+  }
+}
+
+/** 后台按作品控制是否返回购买链接 */
+async function ensureShowPurchaseLinkColumn(existingCols) {
+  const name = 'show_purchase_link';
+  const key = name.toLowerCase();
+  if (existingCols.has(key)) return;
+  try {
+    await db.query(
+      `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN ${name} TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否在公开接口返回购买链接'`
+    );
+    existingCols.add(key);
+  } catch (e) {
+    if (isDuplicateColumnError(e)) {
+      existingCols.add(key);
+      return;
+    }
+    console.warn('[digitalArtworksSync] show_purchase_link:', e.message);
   }
 }
 
@@ -328,6 +348,7 @@ async function syncDigitalArtworksOnce() {
   await ensureDetailsFieldColumns(existingCols);
   await ensureListV3FieldColumns(existingCols);
   await ensureLegacyDetailsJsonColumn(existingCols);
+  await ensureShowPurchaseLinkColumn(existingCols);
 
   const authorization = getExternalAuthorization();
   // 数字艺术品 goods_id：来自 GET orderApi/wespace/index/list/V2 的 data.qgList[].goods_id（与 curl 一致需传 usn）
@@ -509,8 +530,15 @@ function startDigitalArtworksSync() {
   }, intervalMs);
 }
 
+/** 供路由在更新前确保列存在（不跑完整同步） */
+async function ensureShowPurchaseLinkColumnReady() {
+  const existingCols = await fetchExistingColumnNamesSet();
+  await ensureShowPurchaseLinkColumn(existingCols);
+}
+
 module.exports = {
   startDigitalArtworksSync,
-  syncDigitalArtworksOnce
+  syncDigitalArtworksOnce,
+  ensureShowPurchaseLinkColumnReady
 };
 
