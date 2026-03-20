@@ -103,46 +103,83 @@ ${listV3Fragment},
   await db.query(sql, []);
 }
 
+/**
+ * 当前库中表已有列名（小写），用于避免对已存在的列重复 ALTER（否则会触发 ER_DUP_FIELDNAME，
+ * 且 db.query 会先打 error 日志刷屏）。
+ */
+async function fetchExistingColumnNamesSet() {
+  const [rows] = await db.query(
+    `
+    SELECT COLUMN_NAME AS cn
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+    `,
+    [DIGITAL_ARTWORKS_EXTERNAL_TABLE]
+  );
+  return new Set(rows.map((r) => String(r.cn).toLowerCase()));
+}
+
+function isDuplicateColumnError(e) {
+  return e && (e.code === 'ER_DUP_FIELDNAME' || e.errno === 1060);
+}
+
 /** 已有库补列：details 拆分的各字段 */
-async function ensureDetailsFieldColumns() {
+async function ensureDetailsFieldColumns(existingCols) {
   for (const { name, ddl } of DETAILS_SCHEMA) {
+    const key = name.toLowerCase();
+    if (existingCols.has(key)) continue;
     try {
       await db.query(
         `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN ${name} ${ddl}`
       );
+      existingCols.add(key);
     } catch (e) {
-      if (e.code !== 'ER_DUP_FIELDNAME') {
-        console.warn(`[digitalArtworksSync] add column ${name}:`, e.message);
+      if (isDuplicateColumnError(e)) {
+        existingCols.add(key);
+        continue;
       }
+      console.warn(`[digitalArtworksSync] add column ${name}:`, e.message);
     }
   }
 }
 
 /** 已有库补列：goods/ver/list/v3 拆分的各字段 */
-async function ensureListV3FieldColumns() {
+async function ensureListV3FieldColumns(existingCols) {
   for (const { name, ddl } of LIST_V3_SCHEMA) {
+    const key = name.toLowerCase();
+    if (existingCols.has(key)) continue;
     try {
       await db.query(
         `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN ${name} ${ddl}`
       );
+      existingCols.add(key);
     } catch (e) {
-      if (e.code !== 'ER_DUP_FIELDNAME') {
-        console.warn(`[digitalArtworksSync] add list/v3 column ${name}:`, e.message);
+      if (isDuplicateColumnError(e)) {
+        existingCols.add(key);
+        continue;
       }
+      console.warn(`[digitalArtworksSync] add list/v3 column ${name}:`, e.message);
     }
   }
 }
 
 /** 兼容旧库：整包 JSON 列（不再写入） */
-async function ensureLegacyDetailsJsonColumn() {
+async function ensureLegacyDetailsJsonColumn(existingCols) {
+  const name = 'wespace_details_json';
+  const key = name.toLowerCase();
+  if (existingCols.has(key)) return;
   try {
     await db.query(
-      `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN wespace_details_json LONGTEXT NULL COMMENT '已废弃'`
+      `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN ${name} LONGTEXT NULL COMMENT '已废弃'`
     );
+    existingCols.add(key);
   } catch (e) {
-    if (e.code !== 'ER_DUP_FIELDNAME') {
-      console.warn('[digitalArtworksSync] wespace_details_json:', e.message);
+    if (isDuplicateColumnError(e)) {
+      existingCols.add(key);
+      return;
     }
+    console.warn('[digitalArtworksSync] wespace_details_json:', e.message);
   }
 }
 
@@ -287,9 +324,10 @@ async function fetchGoodsVerDetails(goodsVerId) {
 
 async function syncDigitalArtworksOnce() {
   await ensureTable();
-  await ensureDetailsFieldColumns();
-  await ensureListV3FieldColumns();
-  await ensureLegacyDetailsJsonColumn();
+  const existingCols = await fetchExistingColumnNamesSet();
+  await ensureDetailsFieldColumns(existingCols);
+  await ensureListV3FieldColumns(existingCols);
+  await ensureLegacyDetailsJsonColumn(existingCols);
 
   const authorization = getExternalAuthorization();
   // 数字艺术品 goods_id：来自 GET orderApi/wespace/index/list/V2 的 data.qgList[].goods_id（与 curl 一致需传 usn）
