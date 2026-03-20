@@ -349,8 +349,6 @@ async function syncDigitalArtworksOnce() {
       description = VALUES(description),
       price = VALUES(price),
       created_at = VALUES(created_at),
-      artist_id = VALUES(artist_id),
-      artist_name = VALUES(artist_name),
       fetched_at = VALUES(fetched_at)
   `;
 

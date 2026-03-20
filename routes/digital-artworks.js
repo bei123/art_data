@@ -714,6 +714,80 @@ router.patch('/:id/hide', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * 手动关联/取消关联艺术家（仅 digital_artworks_external，同步任务不会覆盖）
+ * PATCH /api/digital-artworks/:id/artist
+ * Body: { artist_id: number | null } — null 表示取消关联
+ */
+router.patch('/:id/artist', authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (id === undefined || id === null || String(id).trim() === '') {
+      return res.status(400).json({ error: '无效的作品ID' });
+    }
+
+    let { artist_id: artistIdBody } = req.body;
+    if (artistIdBody === '' || artistIdBody === undefined) {
+      artistIdBody = null;
+    }
+
+    let newArtistId = null;
+    if (artistIdBody !== null && artistIdBody !== undefined) {
+      const aid = parseInt(artistIdBody, 10);
+      if (isNaN(aid) || aid <= 0) {
+        return res.status(400).json({ error: '无效的艺术家ID' });
+      }
+      newArtistId = aid;
+    }
+
+    const [oldRows] = await db.query(
+      `SELECT artist_id FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ?`,
+      [id]
+    );
+    if (!oldRows.length) {
+      return res.status(404).json({ error: '作品不存在' });
+    }
+    const oldArtistId = oldRows[0].artist_id;
+
+    let artistName = null;
+    if (newArtistId === null) {
+      await db.query(
+        `UPDATE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} SET artist_id = NULL, artist_name = NULL WHERE id = ?`,
+        [id]
+      );
+    } else {
+      const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [newArtistId]);
+      if (!artistRows.length) {
+        return res.status(404).json({ error: '艺术家不存在' });
+      }
+      artistName = artistRows[0].name;
+      await db.query(
+        `UPDATE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} SET artist_id = ?, artist_name = ? WHERE id = ?`,
+        [newArtistId, artistName, id]
+      );
+    }
+
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+    if (oldArtistId) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + oldArtistId);
+    }
+    if (newArtistId) {
+      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + newArtistId);
+    }
+    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
+
+    res.json({
+      message: '艺术家关联已更新',
+      id,
+      artist_id: newArtistId,
+      artist_name: artistName
+    });
+  } catch (error) {
+    console.error('Error updating digital artwork artist:', error);
+    res.status(500).json({ error: '更新失败' });
+  }
+});
+
 // 删除数字艺术品（需要认证）
 router.delete('/:id', authenticateToken, async (req, res) => {
   // 后台已切换为只允许展示/隐藏，不再允许删除

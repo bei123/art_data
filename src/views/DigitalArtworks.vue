@@ -25,6 +25,11 @@
       <el-table-column prop="batch_quantity" label="本批发行数量" />
       <el-table-column prop="price" label="价格" />
       <el-table-column prop="created_at" label="创建时间" />
+      <el-table-column label="艺术家" width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.artist?.name || row.artist_name || '—' }}
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.is_hidden ? 'danger' : 'success'">
@@ -32,8 +37,11 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="280">
+      <el-table-column label="操作" width="360">
         <template #default="{ row }">
+          <el-button type="primary" size="small" link @click="openAssociateArtist(row)">
+            关联艺术家
+          </el-button>
           <el-button 
             :type="row.is_hidden ? 'success' : 'warning'" 
             size="small" 
@@ -233,6 +241,33 @@
         </span>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="associateArtistVisible"
+      title="关联艺术家"
+      width="420px"
+      destroy-on-close
+    >
+      <p class="associate-hint">从列表同步的数字艺术品可在此手动绑定本站艺术家；清空选择可取消关联。</p>
+      <el-select
+        v-model="associateArtistId"
+        filterable
+        clearable
+        placeholder="请选择艺术家"
+        style="width: 100%"
+      >
+        <el-option
+          v-for="artist in artistOptions"
+          :key="artist.id"
+          :label="artist.name"
+          :value="artist.id"
+        />
+      </el-select>
+      <template #footer>
+        <el-button @click="associateArtistVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveAssociateArtist">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -248,6 +283,10 @@ const artworks = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const artistOptions = ref([])
+
+const associateArtistVisible = ref(false)
+const associateRow = ref(null)
+const associateArtistId = ref(null)
 
 // 图片上传相关状态
 const imageInput = ref(null)
@@ -388,6 +427,38 @@ const handleEdit = async (row) => {
   } catch (error) {
     console.error('获取详细信息失败:', error)
     ElMessage.error('获取详细信息失败，无法编辑')
+  }
+}
+
+const openAssociateArtist = (row) => {
+  associateRow.value = row
+  const aid = row.artist?.id ?? row.artist_id
+  associateArtistId.value = aid !== undefined && aid !== null && aid !== '' ? Number(aid) : null
+  associateArtistVisible.value = true
+}
+
+const saveAssociateArtist = async () => {
+  if (!associateRow.value) return
+  try {
+    let payloadArtistId = null
+    if (associateArtistId.value !== null && associateArtistId.value !== undefined && associateArtistId.value !== '') {
+      const n = Number(associateArtistId.value)
+      if (!Number.isFinite(n) || n <= 0) {
+        ElMessage.error('请选择有效艺术家或清空以取消关联')
+        return
+      }
+      payloadArtistId = n
+    }
+    await axios.patch(`/digital-artworks/${associateRow.value.id}/artist`, {
+      artist_id: payloadArtistId
+    })
+    ElMessage.success('艺术家关联已保存')
+    associateArtistVisible.value = false
+    fetchArtworks()
+  } catch (error) {
+    console.error('关联艺术家失败:', error)
+    const msg = error.response?.data?.error || '保存失败'
+    ElMessage.error(msg)
   }
 }
 
@@ -806,6 +877,13 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.associate-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.5;
 }
 
 /* 图片上传容器 */
