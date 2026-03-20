@@ -139,6 +139,7 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
 
 /**
  * 用 goodsVerId 拉详情（与线上一致，比 list 单条更准）
+ * 返回 { goodsVer, goods }：部分商品 goodsVerDes 为空，但 data.goods.goodsDes 有简介
  */
 async function fetchGoodsVerDetails(goodsVerId) {
   if (!goodsVerId) return null;
@@ -167,7 +168,11 @@ async function fetchGoodsVerDetails(goodsVerId) {
   });
 
   if (response?.data?.code === 200 && response?.data?.status === true && response?.data?.data?.goodsVer) {
-    return response.data.data.goodsVer;
+    const data = response.data.data;
+    return {
+      goodsVer: data.goodsVer,
+      goods: data.goods || null
+    };
   }
   return null;
 }
@@ -251,15 +256,33 @@ async function syncDigitalArtworksOnce() {
 
         const gvId = firstGoodsVer?.goodsVerId;
         if (gvId) {
-          const detail = await fetchGoodsVerDetails(gvId);
-          if (detail) {
-            title = detail.goodsVerName || detail.worksName || title;
-            imageUrl = detail.goodsVerCover || imageUrl;
-            description = detail.goodsVerDes || description;
-            const pr = detail.goodsPrice ?? detail.originalPrice ?? detail.price;
+          const detailPack = await fetchGoodsVerDetails(gvId);
+          if (detailPack?.goodsVer) {
+            const detail = detailPack.goodsVer;
+            const g = detailPack.goods;
+            title =
+              detail.goodsVerName ||
+              g?.goodsName ||
+              detail.worksName ||
+              title;
+            imageUrl = detail.goodsVerCover || g?.goodsCover || imageUrl;
+            description =
+              detail.goodsVerDes ||
+              g?.goodsDes ||
+              g?.goods_des ||
+              description;
+            const pr =
+              detail.goodsPrice ??
+              g?.discountPrice ??
+              g?.goodsPrice ??
+              detail.originalPrice ??
+              detail.price;
             const p2 = typeof pr === 'number' ? pr : Number(pr);
             if (Number.isFinite(p2)) price = p2;
-            createdAt = toMysqlDate(detail.createTime || detail.created_at) || createdAt;
+            createdAt =
+              toMysqlDate(detail.createTime || detail.created_at) ||
+              toMysqlDate(g?.createTime) ||
+              createdAt;
           }
         }
       }
