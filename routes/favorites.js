@@ -3,6 +3,8 @@ const router = express.Router();
 const db = require('../db');
 const jwt = require('jsonwebtoken');
 
+const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
+
 // Token验证中间件
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -26,32 +28,107 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+/**
+ * 将 favorites.item_id 从 INT 等升级为 VARCHAR(64)，以支持外部同步的 goods_id（长整型字符串）。
+ */
+let favoritesSchemaReady = false;
+async function ensureFavoritesSchema() {
+  if (favoritesSchemaReady) return;
+  try {
+    const [rows] = await db.query(
+      `
+      SELECT DATA_TYPE
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'favorites'
+        AND COLUMN_NAME = 'item_id'
+      `
+    );
+    if (!rows.length) {
+      favoritesSchemaReady = true;
+      return;
+    }
+    const t = String(rows[0].DATA_TYPE || '').toLowerCase();
+    if (t === 'int' || t === 'integer' || t === 'bigint' || t === 'mediumint' || t === 'smallint') {
+      await db.query(
+        'ALTER TABLE favorites MODIFY item_id VARCHAR(64) NOT NULL'
+      );
+      console.log('[favorites] item_id 已升级为 VARCHAR(64)，以支持外部数字艺术品 goods_id');
+    }
+    favoritesSchemaReady = true;
+  } catch (err) {
+    console.warn('[favorites] ensureFavoritesSchema:', err.message);
+    favoritesSchemaReady = true;
+  }
+}
+
+router.use(async (req, res, next) => {
+  try {
+    await ensureFavoritesSchema();
+    next();
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** 解析数字艺术品收藏用的 item_id：仅数字字符串，与 digital_artworks / digital_artworks_external 的 id 一致 */
+function parseDigitalArtItemId(raw) {
+  if (raw === undefined || raw === null) return { error: '无效的物品ID' };
+  let s;
+  if (typeof raw === 'string') {
+    s = raw.trim();
+  } else if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (raw > Number.MAX_SAFE_INTEGER || raw < Number.MIN_SAFE_INTEGER) {
+      return {
+        error: '数字艺术品ID请使用字符串传递，避免大整数精度丢失'
+      };
+    }
+    s = String(Math.trunc(raw));
+  } else {
+    return { error: '无效的物品ID' };
+  }
+  if (!/^\d+$/.test(s) || s.length < 1 || s.length > 64) {
+    return { error: '无效的物品ID' };
+  }
+  return { id: s };
+}
+
 // 验证物品是否存在
 const validateItemExists = async (itemId, itemType, connection = null) => {
   try {
-    let sql = '';
+    const q = connection ? connection.query.bind(connection) : db.query;
     switch (itemType) {
-      case 'artwork':
-        sql = 'SELECT id FROM original_artworks WHERE id = ?';
-        break;
-      case 'digital_art':
-        sql = 'SELECT id FROM digital_artworks WHERE id = ?';
-        break;
-      case 'copyright_item':
-        sql = 'SELECT id FROM rights WHERE id = ?';
-        break;
+      case 'artwork': {
+        const id = parseInt(itemId, 10);
+        if (isNaN(id) || id <= 0) return false;
+        const [result] = await q('SELECT id FROM original_artworks WHERE id = ?', [id]);
+        return result && result.length > 0;
+      }
+      case 'digital_art': {
+        const sid = String(itemId).trim();
+        if (!sid) return false;
+        const [legacy] = await q('SELECT id FROM digital_artworks WHERE id = ?', [sid]);
+        if (legacy && legacy.length > 0) return true;
+        const [ext] = await q(
+          `SELECT id FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ?`,
+          [sid]
+        );
+        return ext && ext.length > 0;
+      }
+      case 'copyright_item': {
+        const id = parseInt(itemId, 10);
+        if (isNaN(id) || id <= 0) return false;
+        const [result] = await q('SELECT id FROM rights WHERE id = ?', [id]);
+        return result && result.length > 0;
+      }
       default:
         return false;
     }
-    const [result] = connection ? await connection.query(sql, [itemId]) : await db.query(sql, [itemId]);
-    return result && result.length > 0;
   } catch (err) {
     console.error('验证物品存在性失败:', err);
     return false;
   }
 };
-
-
 
 // 添加收藏
 router.post('/', authenticateToken, async (req, res) => {
@@ -62,16 +139,25 @@ router.post('/', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: '缺少必要参数' });
   }
 
-  // 验证itemId
-  const cleanItemId = parseInt(itemId);
-  if (isNaN(cleanItemId) || cleanItemId <= 0) {
-    return res.status(400).json({ error: '无效的物品ID' });
-  }
-
   // 验证收藏类型
   const validTypes = ['artwork', 'digital_art', 'copyright_item'];
   if (!validTypes.includes(itemType)) {
     return res.status(400).json({ error: '无效的收藏类型' });
+  }
+
+  let cleanItemId;
+  if (itemType === 'digital_art') {
+    const parsed = parseDigitalArtItemId(itemId);
+    if (parsed.error) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    cleanItemId = parsed.id;
+  } else {
+    const n = parseInt(itemId, 10);
+    if (isNaN(n) || n <= 0) {
+      return res.status(400).json({ error: '无效的物品ID' });
+    }
+    cleanItemId = n;
   }
 
   try {
@@ -125,18 +211,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // 取消收藏
 router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
-  const { itemType, itemId } = req.params; // 修复参数顺序
+  const { itemType, itemId } = req.params;
   const userId = req.user.userId;
 
   // 验证用户ID
   if (!userId || isNaN(parseInt(userId)) || parseInt(userId) <= 0) {
     return res.status(400).json({ error: '无效的用户ID' });
-  }
-
-  // 输入验证
-  const cleanItemId = parseInt(itemId);
-  if (isNaN(cleanItemId) || cleanItemId <= 0) {
-    return res.status(400).json({ error: '无效的物品ID' });
   }
 
   // 验证收藏类型
@@ -145,8 +225,22 @@ router.delete('/:itemType/:itemId', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: '无效的收藏类型' });
   }
 
+  let cleanItemId;
+  if (itemType === 'digital_art') {
+    const parsed = parseDigitalArtItemId(decodeURIComponent(itemId));
+    if (parsed.error) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    cleanItemId = parsed.id;
+  } else {
+    const n = parseInt(itemId, 10);
+    if (isNaN(n) || n <= 0) {
+      return res.status(400).json({ error: '无效的物品ID' });
+    }
+    cleanItemId = n;
+  }
+
   try {
-    // 使用事务确保数据一致性
     const connection = await db.getConnection();
     await connection.beginTransaction();
 
@@ -217,51 +311,65 @@ router.get('/', authenticateToken, async (req, res) => {
     const digitalIds = [];
     const rightIds = [];
 
-    favorites.forEach(fav => {
+    favorites.forEach((fav) => {
       if (fav.item_type === 'artwork') artworkIds.push(fav.item_id);
-      if (fav.item_type === 'digital_art') digitalIds.push(fav.item_id);
+      if (fav.item_type === 'digital_art') digitalIds.push(String(fav.item_id));
       if (fav.item_type === 'copyright_item') rightIds.push(fav.item_id);
     });
 
     // 3. 批量查询商品信息
-    let artworksMap = {};
+    const artworksMap = {};
     if (artworkIds.length > 0) {
       const [artworks] = await db.query(
         'SELECT id, title, image FROM original_artworks WHERE id IN (?)',
         [artworkIds]
       );
-      artworks.forEach(art => { artworksMap[art.id] = art; });
+      artworks.forEach((art) => {
+        artworksMap[art.id] = art;
+      });
     }
 
-    let digitalsMap = {};
+    const digitalsMap = {};
     if (digitalIds.length > 0) {
       const [digitals] = await db.query(
         'SELECT id, title, image_url FROM digital_artworks WHERE id IN (?)',
         [digitalIds]
       );
-      digitals.forEach(dig => { digitalsMap[dig.id] = dig; });
+      digitals.forEach((dig) => {
+        digitalsMap[String(dig.id)] = dig;
+      });
+      const [digitalsExt] = await db.query(
+        `SELECT id, title, image_url FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id IN (?)`,
+        [digitalIds]
+      );
+      digitalsExt.forEach((dig) => {
+        digitalsMap[String(dig.id)] = dig;
+      });
     }
 
-    let rightsMap = {};
+    const rightsMap = {};
     if (rightIds.length > 0) {
       const [rights] = await db.query(
         'SELECT r.id, r.title, ri.image_url FROM rights r LEFT JOIN right_images ri ON r.id = ri.right_id WHERE r.id IN (?)',
         [rightIds]
       );
-      rights.forEach(right => { rightsMap[right.id] = right; });
+      rights.forEach((right) => {
+        rightsMap[right.id] = right;
+      });
     }
 
     // 4. 组装返回数据
-    const resultData = favorites.map(fav => {
+    const resultData = favorites.map((fav) => {
       let title = '';
       let image_url = '';
 
       if (fav.item_type === 'artwork' && artworksMap[fav.item_id]) {
         title = artworksMap[fav.item_id].title;
         image_url = artworksMap[fav.item_id].image || '';
-      } else if (fav.item_type === 'digital_art' && digitalsMap[fav.item_id]) {
-        title = digitalsMap[fav.item_id].title;
-        image_url = digitalsMap[fav.item_id].image_url || '';
+      } else if (fav.item_type === 'digital_art' && digitalsMap[String(fav.item_id)]) {
+        const dig = digitalsMap[String(fav.item_id)];
+        title = dig.title;
+        image_url = dig.image_url || '';
       } else if (fav.item_type === 'copyright_item' && rightsMap[fav.item_id]) {
         title = rightsMap[fav.item_id].title;
         image_url = rightsMap[fav.item_id].image_url || '';
@@ -269,7 +377,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
       return {
         id: fav.id,
-        item_id: fav.item_id,
+        item_id: fav.item_type === 'digital_art' ? String(fav.item_id) : fav.item_id,
         item_type: fav.item_type,
         title: title,
         image_url: image_url,
@@ -303,4 +411,5 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;
+module.exports.ensureFavoritesSchema = ensureFavoritesSchema;
