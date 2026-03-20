@@ -36,6 +36,7 @@ const transactionRouter = require('./routes/transaction');
 const institutionsRouter = require('./routes/institutions');
 const homeTitlesRouter = require('./routes/home-titles');
 const webviewRouter = require('./routes/webview');
+const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 
 const app = express();
 const port = 2000;
@@ -287,6 +288,9 @@ app.use('/api/original-artworks', artworksRouter);
 
 // 使用数字艺术品路由
 app.use('/api/digital-artworks', digitalArtworksRouter);
+
+// 定时同步外部数字艺术品到缓存表（用于列表/影藏展示）
+startDigitalArtworksSync();
 
 // 使用实物分类路由
 app.use('/api/physical-categories', physicalCategoriesRouter);

@@ -2,7 +2,6 @@
   <div>
     <div class="header">
       <h3>数字艺术品管理</h3>
-      <el-button type="primary" @click="handleAdd">添加作品</el-button>
     </div>
 
     <el-table :data="artworks" style="width: 100%">
@@ -35,7 +34,6 @@
       </el-table-column>
       <el-table-column label="操作" width="280">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
           <el-button 
             :type="row.is_hidden ? 'success' : 'warning'" 
             size="small" 
@@ -43,7 +41,6 @@
           >
             {{ row.is_hidden ? '显示' : '隐藏' }}
           </el-button>
-          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
