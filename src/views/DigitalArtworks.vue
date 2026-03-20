@@ -25,9 +25,17 @@
       <el-table-column prop="batch_quantity" label="本批发行数量" />
       <el-table-column prop="price" label="价格" />
       <el-table-column prop="created_at" label="创建时间" />
-      <el-table-column label="艺术家" width="120" show-overflow-tooltip>
+      <el-table-column label="艺术家" width="200" show-overflow-tooltip>
         <template #default="{ row }">
-          {{ row.artist?.name || row.artist_name || '—' }}
+          <div class="artist-cell">
+            <el-avatar
+              :size="36"
+              :src="getImageUrl(row.artist?.avatar)"
+            >
+              {{ (row.artist?.name || row.artist_name || '?').charAt(0) }}
+            </el-avatar>
+            <span class="artist-name">{{ row.artist?.name || row.artist_name || '—' }}</span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="80">
@@ -884,6 +892,17 @@ onMounted(() => {
   font-size: 13px;
   color: #606266;
   line-height: 1.5;
+}
+
+.artist-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.artist-cell .artist-name {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 图片上传容器 */

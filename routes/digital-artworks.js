@@ -139,8 +139,11 @@ router.get('/admin', authenticateToken, async (req, res) => {
     let query = `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.price, da.created_at, da.is_hidden,
-        da.artist_id, da.artist_name
+        da.artist_id,
+        COALESCE(a.name, da.artist_name) AS artist_display_name,
+        a.avatar AS artist_avatar
       FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} da
+      LEFT JOIN artists a ON a.id = da.artist_id
     `;
 
     const queryParams = [];
@@ -161,13 +164,14 @@ router.get('/admin', authenticateToken, async (req, res) => {
     }
 
     const artworksWithProcessedImages = rows.map(artwork => {
-      const processedArtwork = processObjectImages(artwork, ['image_url']);
+      const processedArtwork = processObjectImages(artwork, ['image_url', 'artist_avatar']);
+      const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processedArtwork;
       return {
-        ...processedArtwork,
+        ...rest,
         artist: {
-          id: artwork.artist_id,
-          name: artwork.artist_name,
-          avatar: ''
+          id: processedArtwork.artist_id,
+          name: artist_display_name,
+          avatar: artistAvatarCol || ''
         }
       };
     });
@@ -199,8 +203,11 @@ router.get('/', async (req, res) => {
     let query = `
       SELECT 
         dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
-        dae.artist_id, dae.artist_name
+        dae.artist_id,
+        COALESCE(a.name, dae.artist_name) AS artist_display_name,
+        a.avatar AS artist_avatar
       FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae
+      LEFT JOIN artists a ON a.id = dae.artist_id
       WHERE dae.is_hidden = 0
     `;
     const queryParams = [];
@@ -217,13 +224,14 @@ router.get('/', async (req, res) => {
     if (!rows || !Array.isArray(rows)) return res.json([]);
 
     const artworksWithProcessedImages = rows.map(artwork => {
-      const processedArtwork = processObjectImages(artwork, ['image_url']);
+      const processedArtwork = processObjectImages(artwork, ['image_url', 'artist_avatar']);
+      const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processedArtwork;
       return {
-        ...processedArtwork,
+        ...rest,
         artist: {
-          id: artwork.artist_id,
-          name: artwork.artist_name,
-          avatar: ''
+          id: processedArtwork.artist_id,
+          name: artist_display_name,
+          avatar: artistAvatarCol || ''
         }
       };
     });
@@ -235,27 +243,141 @@ router.get('/', async (req, res) => {
   }
 });
 
+// 公共数字艺术品列表（须放在 /:id 之前，否则会被当成 id=public）
+router.get('/public', async (req, res) => {
+  try {
+    const { artist_id, page = 1, pageSize = 20 } = req.query;
+    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
+    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
+    const offset = (pageNum - 1) * sizeNum;
+
+    if (artist_id) {
+      const artistId = parseInt(artist_id);
+      if (isNaN(artistId) || artistId <= 0) {
+        return res.status(400).json({ error: '无效的艺术家ID' });
+      }
+    }
+
+    let query = `
+      SELECT 
+        dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
+        dae.artist_id,
+        COALESCE(a.name, dae.artist_name) AS artist_display_name,
+        a.avatar AS artist_avatar
+      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae
+      LEFT JOIN artists a ON a.id = dae.artist_id
+      WHERE dae.is_hidden = 0
+    `;
+    const queryParams = [];
+
+    if (artist_id) {
+      query += ' AND dae.artist_id = ?';
+      queryParams.push(parseInt(artist_id));
+    }
+
+    query += ' ORDER BY dae.created_at DESC LIMIT ? OFFSET ?';
+    queryParams.push(sizeNum, offset);
+
+    const [rows] = await db.query(query, queryParams);
+    const artworksWithFullUrls = (rows || []).map((artwork) => {
+      const processed = processObjectImages(artwork, ['image_url', 'artist_avatar']);
+      const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processed;
+      return {
+        ...rest,
+        image: processed.image_url || '',
+        price: processed.price || 0,
+        artist: {
+          id: processed.artist_id,
+          name: artist_display_name,
+          avatar: artistAvatarCol || ''
+        }
+      };
+    });
+
+    res.json(artworksWithFullUrls);
+  } catch (error) {
+    console.error('Error fetching digital artworks (public):', error);
+    res.status(500).json({ error: '获取数字艺术品数据服务暂时不可用' });
+  }
+});
+
 // 获取数字艺术品详情（公开接口，支持融合外部数据）
 router.get('/:id', async (req, res) => {
   try {
-    // 验证ID参数
-    const id = parseInt(req.params.id);
-    if (isNaN(id) || id <= 0) {
+    const rawId = String(req.params.id || '').trim();
+    if (!rawId) {
       return res.status(400).json({ error: '无效的作品ID' });
     }
 
     const { goodsVerId, usn, fuse = 'true' } = req.query;
     const shouldFuse = fuse === 'true' || fuse === true;
+    const detailCacheKey = REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + rawId;
 
     // 如果不需要融合且没有 goodsVerId，直接使用缓存
     if (!shouldFuse && !goodsVerId) {
-      const cache = await redisClient.get(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
+      const cache = await redisClient.get(detailCacheKey);
       if (cache) {
         return res.json(JSON.parse(cache));
       }
     }
 
-    const [rows] = await db.query(`
+    let result;
+    let obtainedGoodsId = null;
+
+    const [extRows] = await db.query(
+      `
+      SELECT 
+        dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
+        dae.artist_id,
+        COALESCE(a.name, dae.artist_name) AS artist_display_name,
+        a.avatar AS artist_avatar,
+        a.description AS artist_description
+      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae
+      LEFT JOIN artists a ON a.id = dae.artist_id
+      WHERE dae.id = ?
+    `,
+      [rawId]
+    );
+
+    if (extRows && extRows.length > 0) {
+      const artwork = processObjectImages(extRows[0], ['image_url', 'artist_avatar']);
+      result = {
+        id: artwork.id,
+        title: artwork.title,
+        image_url: artwork.image_url,
+        description: artwork.description,
+        price: artwork.price,
+        created_at: artwork.created_at,
+        registration_certificate: null,
+        license_rights: null,
+        license_period: null,
+        owner_rights: null,
+        license_items: null,
+        project_name: null,
+        product_name: null,
+        project_owner: null,
+        issuer: null,
+        issue_batch: null,
+        issue_year: null,
+        batch_quantity: null,
+        updated_at: null,
+        goods_id: artwork.id,
+        artist: {
+          id: artwork.artist_id,
+          name: artwork.artist_display_name,
+          avatar: artwork.artist_avatar,
+          description: artwork.artist_description
+        }
+      };
+      obtainedGoodsId = result.id;
+    } else {
+      const id = parseInt(rawId, 10);
+      if (isNaN(id) || id <= 0) {
+        return res.status(404).json({ error: '作品不存在' });
+      }
+
+      const [rows] = await db.query(
+        `
       SELECT 
         da.id, da.title, da.image_url, da.description, da.registration_certificate,
         da.license_rights, da.license_period, da.owner_rights, da.license_items,
@@ -266,33 +388,35 @@ router.get('/:id', async (req, res) => {
       FROM digital_artworks da
       LEFT JOIN artists a ON da.artist_id = a.id
       WHERE da.id = ?
-    `, [id]);
+    `,
+        [id]
+      );
 
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ error: '作品不存在' });
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: '作品不存在' });
+      }
+
+      const artwork = processObjectImages(rows[0], ['image_url', 'artist_avatar']);
+
+      const artist = {
+        id: artwork.artist_id,
+        name: artwork.artist_name,
+        avatar: artwork.artist_avatar,
+        description: artwork.artist_description
+      };
+
+      const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
+
+      result = {
+        ...artworkData,
+        artist: artist
+      };
     }
 
-    const artwork = processObjectImages(rows[0], ['image_url', 'artist_avatar']);
+    // obtainedGoodsId 已由外部缓存表 id 提供；旧表作品仍通过下方 qgList 匹配
 
-    const artist = {
-      id: artwork.artist_id,
-      name: artwork.artist_name,
-      avatar: artwork.artist_avatar,
-      description: artwork.artist_description
-    };
-
-    // 移除 artist 相关字段，避免在顶层重复
-    const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
-
-    let result = {
-      ...artworkData,
-      artist: artist
-    };
-
-    let obtainedGoodsId = null;
-    
-    // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id
-    if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0) {
+    // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id（外部表已有 goods_id 时跳过）
+    if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0 && !obtainedGoodsId) {
       try {
         const authorization = getExternalAuthorization();
         
@@ -439,7 +563,7 @@ router.get('/:id', async (req, res) => {
     
     // 写入redis缓存（如果融合了外部数据，缓存时间缩短为1小时）
     const cacheTTL = shouldFuse && (targetGoodsVerId || obtainedGoodsId) ? 3600 : 604800;
-    await redisClient.setEx(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id, cacheTTL, JSON.stringify(result));
+    await redisClient.setEx(detailCacheKey, cacheTTL, JSON.stringify(result));
   } catch (error) {
     console.error('获取数字艺术品详情失败:', error);
 
@@ -452,53 +576,6 @@ router.get('/:id', async (req, res) => {
     }
 
     res.status(500).json({ error: '获取数字艺术品详情服务暂时不可用' });
-  }
-});
-
-
-
-// 公共数字艺术品列表接口（无需认证）
-router.get('/public', async (req, res) => {
-  try {
-    const { artist_id, page = 1, pageSize = 20 } = req.query;
-    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
-    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
-    const offset = (pageNum - 1) * sizeNum;
-
-    // 验证artist_id参数
-    if (artist_id) {
-      const artistId = parseInt(artist_id);
-      if (isNaN(artistId) || artistId <= 0) {
-        return res.status(400).json({ error: '无效的艺术家ID' });
-      }
-    }
-
-    let query = `
-      SELECT id, title, image_url, description, price, created_at
-      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
-      WHERE is_hidden = 0
-    `;
-    const queryParams = [];
-
-    if (artist_id) {
-      query += ' AND artist_id = ?';
-      queryParams.push(parseInt(artist_id));
-    }
-
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    queryParams.push(sizeNum, offset);
-
-    const [rows] = await db.query(query, queryParams);
-    const artworksWithFullUrls = (rows || []).map(artwork => ({
-      ...artwork,
-      image: artwork.image_url || '',
-      price: artwork.price || 0
-    }));
-
-    res.json(artworksWithFullUrls);
-  } catch (error) {
-    console.error('Error fetching digital artworks (public):', error);
-    res.status(500).json({ error: '获取数字艺术品数据服务暂时不可用' });
   }
 });
 
