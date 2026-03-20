@@ -1,5 +1,21 @@
 const axios = require('axios');
 const db = require('../db');
+const {
+  extractDetailsFromRawData,
+  detailValuesArray,
+  buildCreateTableDetailsFragment,
+  buildInsertDetailsColumnsSql,
+  buildOnDuplicateDetailsSql,
+  DETAILS_SCHEMA
+} = require('./digitalArtworksDetailsFields');
+const {
+  extractListV3Fields,
+  listV3ValuesArray,
+  buildCreateTableListV3Fragment,
+  buildInsertListV3ColumnsSql,
+  buildOnDuplicateListV3Sql,
+  LIST_V3_SCHEMA
+} = require('./digitalArtworksListV3Fields');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 
@@ -64,6 +80,8 @@ function resolveExternalImageUrl(item) {
 }
 
 async function ensureTable() {
+  const detailsFragment = buildCreateTableDetailsFragment();
+  const listV3Fragment = buildCreateTableListV3Fragment();
   const sql = `
     CREATE TABLE IF NOT EXISTS ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} (
       id VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -75,11 +93,57 @@ async function ensureTable() {
       artist_id BIGINT NULL,
       artist_name VARCHAR(255) NULL,
       is_hidden TINYINT(1) NOT NULL DEFAULT 0,
+${detailsFragment},
+${listV3Fragment},
       fetched_at DATETIME NULL,
+      wespace_details_json LONGTEXT NULL COMMENT '已废弃：改用语义化字段，仅兼容旧数据',
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `;
   await db.query(sql, []);
+}
+
+/** 已有库补列：details 拆分的各字段 */
+async function ensureDetailsFieldColumns() {
+  for (const { name, ddl } of DETAILS_SCHEMA) {
+    try {
+      await db.query(
+        `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN ${name} ${ddl}`
+      );
+    } catch (e) {
+      if (e.code !== 'ER_DUP_FIELDNAME') {
+        console.warn(`[digitalArtworksSync] add column ${name}:`, e.message);
+      }
+    }
+  }
+}
+
+/** 已有库补列：goods/ver/list/v3 拆分的各字段 */
+async function ensureListV3FieldColumns() {
+  for (const { name, ddl } of LIST_V3_SCHEMA) {
+    try {
+      await db.query(
+        `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN ${name} ${ddl}`
+      );
+    } catch (e) {
+      if (e.code !== 'ER_DUP_FIELDNAME') {
+        console.warn(`[digitalArtworksSync] add list/v3 column ${name}:`, e.message);
+      }
+    }
+  }
+}
+
+/** 兼容旧库：整包 JSON 列（不再写入） */
+async function ensureLegacyDetailsJsonColumn() {
+  try {
+    await db.query(
+      `ALTER TABLE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} ADD COLUMN wespace_details_json LONGTEXT NULL COMMENT '已废弃'`
+    );
+  } catch (e) {
+    if (e.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('[digitalArtworksSync] wespace_details_json:', e.message);
+    }
+  }
 }
 
 async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
@@ -117,7 +181,8 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
   });
 
   if (response?.data?.code === 200 && response?.data?.status === true && response?.data?.data?.list) {
-    const list = response.data.data.list || [];
+    const envelope = response.data.data;
+    const list = envelope.list || [];
     if (list.length === 0) return null;
     // 不能盲取 list[0]：同一 goodsId 可能有多条版本，需优先「在售/上架」且时间较新的一条
     const preferred = list.filter((row) => {
@@ -131,7 +196,7 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
       const tb = new Date((b?.createTime || b?.create_time || '').replace(' ', 'T')).getTime();
       return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
     });
-    return pool[0];
+    return { row: pool[0], data: envelope };
   }
 
   return null;
@@ -180,7 +245,7 @@ async function fetchQgListFromIndexV2(usn) {
 
 /**
  * 用 goodsVerId 拉详情（与线上一致，比 list 单条更准）
- * 返回 { goodsVer, goods, issueInfo }：goodsVerDes 为空时可从 goods.goodsDes、IssueInfo 文案兜底
+ * 返回 rawData = 接口 data 全文（goodsVer、IssueInfo、goods、goodsWhitePaper 等），便于落库
  */
 async function fetchGoodsVerDetails(goodsVerId) {
   if (!goodsVerId) return null;
@@ -211,9 +276,9 @@ async function fetchGoodsVerDetails(goodsVerId) {
   if (response?.data?.code === 200 && response?.data?.status === true && response?.data?.data?.goodsVer) {
     const data = response.data.data;
     return {
+      rawData: data,
       goodsVer: data.goodsVer,
       goods: data.goods || null,
-      // 部分商品 goodsVerDes、goodsDes 都为空时，发行信息里仍有 prContent / prIssueContent
       issueInfo: data.IssueInfo || data.issueInfo || null
     };
   }
@@ -222,6 +287,9 @@ async function fetchGoodsVerDetails(goodsVerId) {
 
 async function syncDigitalArtworksOnce() {
   await ensureTable();
+  await ensureDetailsFieldColumns();
+  await ensureListV3FieldColumns();
+  await ensureLegacyDetailsJsonColumn();
 
   const authorization = getExternalAuthorization();
   // 数字艺术品 goods_id：来自 GET orderApi/wespace/index/list/V2 的 data.qgList[].goods_id（与 curl 一致需传 usn）
@@ -267,10 +335,18 @@ async function syncDigitalArtworksOnce() {
     let description = null;
     let price = 0;
     let createdAt = createdAtFromBanner || toMysqlDate(fetchedAt);
+    /** details 接口拆成的列（见 digitalArtworksDetailsFields.js） */
+    let extractedDetails = null;
+    /** list/v3 接口拆成的列（见 digitalArtworksListV3Fields.js） */
+    let extractedListV3 = null;
 
     try {
-      const firstGoodsVer = await fetchGoodsVerListFirst(goodsId, buyerUsn);
+      const listPack = await fetchGoodsVerListFirst(goodsId, buyerUsn);
+      const firstGoodsVer = listPack?.row;
+      const listV3Envelope = listPack?.data;
       if (firstGoodsVer) {
+        extractedListV3 = extractListV3Fields(listV3Envelope, firstGoodsVer);
+
         title = firstGoodsVer?.goodsVerName || firstGoodsVer?.goodsName || title;
         imageUrl = firstGoodsVer?.goodsVerCover || firstGoodsVer?.goodsVerCoverUrl || imageUrl;
         description = firstGoodsVer?.goodsVerDes || firstGoodsVer?.goodsVerDesc || null;
@@ -285,6 +361,9 @@ async function syncDigitalArtworksOnce() {
         if (gvId) {
           const detailPack = await fetchGoodsVerDetails(gvId);
           if (detailPack?.goodsVer) {
+            if (detailPack.rawData) {
+              extractedDetails = extractDetailsFromRawData(detailPack.rawData);
+            }
             const detail = detailPack.goodsVer;
             const g = detailPack.goods;
             const iss = detailPack.issueInfo;
@@ -323,6 +402,8 @@ async function syncDigitalArtworksOnce() {
       // 不中断整个同步：当前 goodsId 用 qgList 兜底写入
     }
 
+    const detailVals = detailValuesArray(extractedDetails);
+    const listV3Vals = listV3ValuesArray(extractedListV3);
     rows.push([
       id,
       title || String(goodsId), // title 不允许为空
@@ -333,15 +414,21 @@ async function syncDigitalArtworksOnce() {
       null, // artist_id
       null, // artist_name
       is_hidden,
+      ...detailVals,
+      ...listV3Vals,
       toMysqlDate(fetchedAt)
     ]);
   }
 
   if (rows.length === 0) return { synced: 0 };
 
+  const detailsInsertCols = buildInsertDetailsColumnsSql();
+  const detailsDup = buildOnDuplicateDetailsSql();
+  const listV3InsertCols = buildInsertListV3ColumnsSql();
+  const listV3Dup = buildOnDuplicateListV3Sql();
   const sql = `
     INSERT INTO ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
-      (id, title, image_url, description, price, created_at, artist_id, artist_name, is_hidden, fetched_at)
+      (id, title, image_url, description, price, created_at, artist_id, artist_name, is_hidden, ${detailsInsertCols}, ${listV3InsertCols}, fetched_at)
     VALUES ?
     ON DUPLICATE KEY UPDATE
       title = VALUES(title),
@@ -349,6 +436,8 @@ async function syncDigitalArtworksOnce() {
       description = VALUES(description),
       price = VALUES(price),
       created_at = VALUES(created_at),
+    ${detailsDup},
+    ${listV3Dup},
       fetched_at = VALUES(fetched_at)
   `;
 

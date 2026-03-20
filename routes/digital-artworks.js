@@ -5,6 +5,7 @@ const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
+const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -189,6 +190,46 @@ router.get('/admin', authenticateToken, async (req, res) => {
     }
 
     res.status(500).json({ error: '获取数字艺术品列表失败' });
+  }
+});
+
+/**
+ * 读取同步落库的 orderApi/goods/ver/details 完整 data（goodsVer / IssueInfo / goods / goodsWhitePaper 等）
+ * GET /api/digital-artworks/admin/:id/wespace-details
+ */
+router.get('/admin/:id/wespace-details', authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (id === undefined || id === null || String(id).trim() === '') {
+      return res.status(400).json({ error: '无效的作品ID' });
+    }
+    const sid = String(id).trim();
+    const [rows] = await db.query(`SELECT * FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ?`, [sid]);
+    if (!rows.length) {
+      return res.status(404).json({ error: '作品不存在' });
+    }
+    const row = rows[0];
+    const fromColumns = assembleWespaceDetailsFromRow(row);
+    if (fromColumns) {
+      return res.json({ id: row.id, wespace_details: fromColumns, source: 'columns' });
+    }
+    const raw = row.wespace_details_json;
+    if (raw) {
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return res.json({ id: row.id, wespace_details: parsed, source: 'legacy_json' });
+      } catch (e) {
+        return res.status(500).json({ error: '存储的 JSON 解析失败' });
+      }
+    }
+    return res.json({
+      id: row.id,
+      wespace_details: null,
+      message: '尚未同步到 details 数据，请等待定时同步或检查 goodsVerId 是否可拉取'
+    });
+  } catch (error) {
+    console.error('读取 wespace details 失败:', error);
+    res.status(500).json({ error: '读取失败' });
   }
 });
 
