@@ -138,6 +138,47 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
 }
 
 /**
+ * 首页 V2 列表中的 qgList：数字艺术品 goods_id 来源（与线上一致）
+ * @param {string} usn 用户链上标识，与 curl 中 query 一致
+ * @returns {Promise<object[]>}
+ */
+async function fetchQgListFromIndexV2(usn) {
+  if (!usn || String(usn).trim() === '') return [];
+  const authorization = getExternalAuthorization();
+  const url = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
+  const response = await axios.get(url, {
+    params: {
+      newsPageSize: 5,
+      publicityPageSize: 5,
+      activityPageSize: 6,
+      usn: String(usn).trim()
+    },
+    headers: {
+      'pragma': 'no-cache',
+      'cache-control': 'no-cache',
+      'authorization': authorization,
+      'apptype': '16',
+      'tenantid': 'wespace',
+      'content-type': 'application/x-www-form-urlencoded',
+      'origin': 'https://m.wespace.cn',
+      'sec-fetch-site': 'same-site',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+      'referer': 'https://m.wespace.cn/',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'priority': 'u=1, i'
+    },
+    timeout: 15000
+  });
+
+  if (response?.data?.code === 200 && response?.data?.status === true && response?.data?.data) {
+    const raw = response.data.data.qgList || response.data.data.qg_list;
+    return Array.isArray(raw) ? raw : [];
+  }
+  return [];
+}
+
+/**
  * 用 goodsVerId 拉详情（与线上一致，比 list 单条更准）
  * 返回 { goodsVer, goods, issueInfo }：goodsVerDes 为空时可从 goods.goodsDes、IssueInfo 文案兜底
  */
@@ -183,49 +224,33 @@ async function syncDigitalArtworksOnce() {
   await ensureTable();
 
   const authorization = getExternalAuthorization();
-  // 你提供的列表接口：带 goodsId 的就是数字艺术品
-  const bannersUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/avatar/index/v2/banners?appType=6&type=0`;
+  // 数字艺术品 goods_id：来自 GET orderApi/wespace/index/list/V2 的 data.qgList[].goods_id（与 curl 一致需传 usn）
+  const buyerUsn =
+    process.env.DIGITAL_ARTWORKS_SYNC_BUYER_USN ||
+    extractUsnFromBearerAuthorization(authorization);
+  if (!buyerUsn) {
+    console.warn('[digitalArtworksSync] 缺少 usn（请配置 DIGITAL_ARTWORKS_SYNC_BUYER_USN 或使用含 usn 的 Bearer），无法拉取 qgList');
+    return { synced: 0 };
+  }
 
-  const response = await axios.get(bannersUrl, {
-    headers: {
-      'pragma': 'no-cache',
-      'cache-control': 'no-cache',
-      'authorization': authorization,
-      'apptype': '16',
-      'tenantid': 'wespace',
-      'content-type': 'application/x-www-form-urlencoded',
-      'origin': 'https://m.wespace.cn',
-      'sec-fetch-site': 'same-site',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-dest': 'empty',
-      'referer': 'https://m.wespace.cn/',
-      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      'priority': 'u=1, i'
-    },
-    timeout: 15000
-  });
-
-  const externalList = response?.data?.data;
+  const externalList = await fetchQgListFromIndexV2(buyerUsn);
   if (!Array.isArray(externalList) || externalList.length === 0) return { synced: 0 };
 
   // 为了避免一次同步拉太多 goodsId，做一个上限（可用 env 调大）
   const maxItems = parseInt(process.env.DIGITAL_ARTWORKS_SYNC_MAX_ITEMS || '200', 10);
-  const buyerUsn =
-    process.env.DIGITAL_ARTWORKS_SYNC_BUYER_USN ||
-    extractUsnFromBearerAuthorization(authorization);
   const items = externalList.slice(0, maxItems);
 
   const fetchedAt = new Date();
   const rows = [];
 
   for (const item of items) {
-    const goodsId = item?.goodsId ?? item?.goods_id ?? null;
+    const goodsId = item?.goods_id ?? item?.goodsId ?? null;
     if (!goodsId) continue;
 
     const id = String(goodsId);
 
-    // banners 接口：cover / createTime / isShow / goodsId
-    const coverUrl = item?.cover || item?.coverUrl || '';
+    // qgList：name / 封面等；再用 goods/ver/list/v3 与 ver/details 补齐
+    const coverUrl = resolveExternalImageUrl(item) || item?.cover || item?.coverUrl || '';
     const createdAtFromBanner = toMysqlDate(item?.createTime || item?.create_time || item?.created_at);
 
     const isShowRaw = item?.isShow ?? item?.is_show;
@@ -236,8 +261,8 @@ async function syncDigitalArtworksOnce() {
       else is_hidden = 1;
     }
 
-    // 先用 banners 兜底，再用 goods/ver/list/v3 补齐标题/价格/描述/封面
-    let title = item?.coverName || '';
+    // 先用 qgList 兜底，再用 goods/ver/list/v3 补齐标题/价格/描述/封面
+    let title = item?.name || item?.goodsName || item?.coverName || '';
     let imageUrl = coverUrl;
     let description = null;
     let price = 0;
@@ -295,7 +320,7 @@ async function syncDigitalArtworksOnce() {
         }
       }
     } catch (e) {
-      // 不中断整个同步：当前 goodsId 用 banners 兜底写入
+      // 不中断整个同步：当前 goodsId 用 qgList 兜底写入
     }
 
     rows.push([
