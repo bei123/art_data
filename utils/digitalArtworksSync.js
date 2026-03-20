@@ -139,7 +139,7 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
 
 /**
  * 用 goodsVerId 拉详情（与线上一致，比 list 单条更准）
- * 返回 { goodsVer, goods }：部分商品 goodsVerDes 为空，但 data.goods.goodsDes 有简介
+ * 返回 { goodsVer, goods, issueInfo }：goodsVerDes 为空时可从 goods.goodsDes、IssueInfo 文案兜底
  */
 async function fetchGoodsVerDetails(goodsVerId) {
   if (!goodsVerId) return null;
@@ -171,7 +171,9 @@ async function fetchGoodsVerDetails(goodsVerId) {
     const data = response.data.data;
     return {
       goodsVer: data.goodsVer,
-      goods: data.goods || null
+      goods: data.goods || null,
+      // 部分商品 goodsVerDes、goodsDes 都为空时，发行信息里仍有 prContent / prIssueContent
+      issueInfo: data.IssueInfo || data.issueInfo || null
     };
   }
   return null;
@@ -260,6 +262,11 @@ async function syncDigitalArtworksOnce() {
           if (detailPack?.goodsVer) {
             const detail = detailPack.goodsVer;
             const g = detailPack.goods;
+            const iss = detailPack.issueInfo;
+            const descFromIssue =
+              iss?.prBasicInfo?.prContent ||
+              iss?.prIssueContent ||
+              null;
             title =
               detail.goodsVerName ||
               g?.goodsName ||
@@ -270,6 +277,7 @@ async function syncDigitalArtworksOnce() {
               detail.goodsVerDes ||
               g?.goodsDes ||
               g?.goods_des ||
+              descFromIssue ||
               description;
             const pr =
               detail.goodsPrice ??
