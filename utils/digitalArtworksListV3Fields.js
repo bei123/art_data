@@ -144,6 +144,76 @@ function buildOnDuplicateListV3Sql() {
   return LIST_V3_SCHEMA.map((c) => `${c.name} = IFNULL(VALUES(${c.name}), ${c.name})`).join(',\n    ');
 }
 
+/**
+ * 从表行还原为接近 orderApi/goods/ver/list/v3 的 data 结构
+ * @param {object} row digital_artworks_external 一行（含 lv3_*）
+ */
+function assembleListV3FromRow(row) {
+  if (!row) return null;
+  const keys = listV3FieldKeys();
+  const hasAny = keys.some((k) => row[k] != null && row[k] !== '');
+  if (!hasAny) return null;
+
+  let page = null;
+  if (row.lv3_page_json) {
+    try {
+      page = JSON.parse(row.lv3_page_json);
+    } catch (_) {
+      page = null;
+    }
+  }
+
+  const listItem = {
+    id: row.lv3_row_pk_id,
+    goodsVerId: row.lv3_goods_ver_id,
+    goodsId: row.lv3_goods_id_row,
+    goodsVerName: row.lv3_goods_ver_name,
+    goodsVerCover: row.lv3_goods_ver_cover,
+    supplementOrder: row.lv3_supplement_order,
+    goodsNumber: row.lv3_goods_number,
+    goodsVerStatus: row.lv3_goods_ver_status,
+    goodsPrice: row.lv3_goods_price,
+    goodsVerDes: row.lv3_goods_ver_des,
+    goodsVerPicDes: row.lv3_goods_ver_pic_des,
+    createTime: row.lv3_row_create_time,
+    issueYear: row.lv3_issue_year,
+    issueBatch: row.lv3_issue_batch,
+    issueEdition: row.lv3_issue_edition,
+    shelfStatus: row.lv3_shelf_status,
+    issueInfo: row.lv3_issue_info,
+    payType: row.lv3_pay_type,
+    releaseTime: row.lv3_release_time,
+    minBuyNum: row.lv3_min_buy_num,
+    addNum: row.lv3_add_num,
+    lockNum: row.lv3_lock_num,
+    totalNum: row.lv3_total_num,
+    maxBuyNum: row.lv3_max_buy_num,
+    maxOnceBuyNum: row.lv3_max_once_buy_num,
+    goodsVerType: row.lv3_goods_ver_type,
+    maxBuyFrequency: row.lv3_max_buy_frequency,
+    rightsType: row.lv3_rights_type,
+    isSell: row.lv3_row_is_sell,
+    purchaseEligibility:
+      row.lv3_purchase_eligibility === 1
+        ? true
+        : row.lv3_purchase_eligibility === 0
+          ? false
+          : null,
+    canBeComposited:
+      row.lv3_can_be_composited === 1 ? true : row.lv3_can_be_composited === 0 ? false : null,
+    issueStatus: row.lv3_issue_status === 1 ? true : row.lv3_issue_status === 0 ? false : null,
+    originalPrice: row.lv3_original_price
+  };
+
+  return {
+    isSell: row.lv3_data_is_sell,
+    discount: row.lv3_data_discount != null ? Number(row.lv3_data_discount) : null,
+    shopId: row.lv3_shop_id,
+    page,
+    list: row.lv3_row_pk_id != null || row.lv3_goods_ver_id ? [listItem] : []
+  };
+}
+
 module.exports = {
   LIST_V3_SCHEMA,
   extractListV3Fields,
@@ -151,5 +221,6 @@ module.exports = {
   listV3ValuesArray,
   buildCreateTableListV3Fragment,
   buildInsertListV3ColumnsSql,
-  buildOnDuplicateListV3Sql
+  buildOnDuplicateListV3Sql,
+  assembleListV3FromRow
 };

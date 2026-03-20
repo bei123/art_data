@@ -6,6 +6,7 @@ const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
+const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -368,8 +369,7 @@ router.get('/:id', async (req, res) => {
     const [extRows] = await db.query(
       `
       SELECT 
-        dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
-        dae.artist_id,
+        dae.*,
         COALESCE(a.name, dae.artist_name) AS artist_display_name,
         a.avatar AS artist_avatar,
         a.description AS artist_description
@@ -381,7 +381,22 @@ router.get('/:id', async (req, res) => {
     );
 
     if (extRows && extRows.length > 0) {
-      const artwork = processObjectImages(extRows[0], ['image_url', 'artist_avatar']);
+      const rawExt = extRows[0];
+      const artwork = processObjectImages(rawExt, ['image_url', 'artist_avatar']);
+      const wespaceDetails = assembleWespaceDetailsFromRow(rawExt);
+      const wespaceListV3 = assembleListV3FromRow(rawExt);
+      let legacyDetailsJson = null;
+      if (rawExt.wespace_details_json) {
+        try {
+          legacyDetailsJson =
+            typeof rawExt.wespace_details_json === 'string'
+              ? JSON.parse(rawExt.wespace_details_json)
+              : rawExt.wespace_details_json;
+        } catch (_) {
+          legacyDetailsJson = null;
+        }
+      }
+
       result = {
         id: artwork.id,
         title: artwork.title,
@@ -401,13 +416,24 @@ router.get('/:id', async (req, res) => {
         issue_batch: null,
         issue_year: null,
         batch_quantity: null,
-        updated_at: null,
+        updated_at: rawExt.updated_at || null,
         goods_id: artwork.id,
+        is_hidden: rawExt.is_hidden === 1 || rawExt.is_hidden === true,
+        fetched_at: rawExt.fetched_at || null,
         artist: {
           id: artwork.artist_id,
           name: artwork.artist_display_name,
           avatar: artwork.artist_avatar,
           description: artwork.artist_description
+        },
+        /** 同步落库的外部接口全量（字段化存储后组装，供前端与详情页使用） */
+        wespace: {
+          /** 对应 orderApi/goods/ver/details 的 data */
+          goods_ver_details: wespaceDetails,
+          /** 对应 orderApi/goods/ver/list/v3 的 data */
+          goods_ver_list_v3: wespaceListV3,
+          /** 仅旧数据：曾整包保存的 JSON */
+          legacy_details_json: legacyDetailsJson
         }
       };
       obtainedGoodsId = result.id;
@@ -450,7 +476,8 @@ router.get('/:id', async (req, res) => {
 
       result = {
         ...artworkData,
-        artist: artist
+        artist: artist,
+        wespace: null
       };
     }
 
