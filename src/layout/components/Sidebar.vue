@@ -113,12 +113,13 @@ const isCollapse = ref(false)
 const activeMenu = computed(() => route.path)
 
 const hasRole = (role) => {
+  const target = String(role || '').toLowerCase()
   // 兼容 roles 数组和 role 字符串
   if (Array.isArray(userStore.userInfo?.roles)) {
-    return userStore.userInfo.roles.includes(role)
+    return userStore.userInfo.roles.some((r) => String(r || '').toLowerCase() === target)
   }
   if (typeof userStore.userInfo?.role === 'string') {
-    return userStore.userInfo.role === role
+    return String(userStore.userInfo.role || '').toLowerCase() === target
   }
   return false
 }
