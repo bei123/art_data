@@ -104,8 +104,7 @@
       </el-card>
 
       <div class="items-actions" style="margin-bottom: 12px">
-        <el-button type="primary" @click="openItemsDialog('append')" :disabled="!exhibitionDetail">追加展览作品</el-button>
-        <el-button type="warning" @click="openItemsDialog('replace')" :disabled="!exhibitionDetail">替换展览作品</el-button>
+        <el-button type="primary" @click="openItemsDialog" :disabled="!exhibitionDetail">追加展览作品</el-button>
       </div>
 
       <el-table v-loading="loadingDetail" :data="exhibitionDetail?.items || []" style="width: 100%">
@@ -160,11 +159,16 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="260">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="openEditArtistsDialog(row)">
-              编辑艺术家
-            </el-button>
+            <div class="detail-item-actions">
+              <el-button type="primary" size="small" @click="openEditArtistsDialog(row)">
+                编辑艺术家
+              </el-button>
+              <el-button type="danger" size="small" @click="handleRemoveItem(row)">
+                移除
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -183,8 +187,80 @@
         <el-form-item label="描述">
           <el-input v-model="exhibitionForm.description" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="封面图片 URL">
-          <el-input v-model="exhibitionForm.cover_image" placeholder="例如 https://wx.oss.2000gallery.art/xxx.jpg" />
+        <el-form-item label="封面图片">
+          <el-upload
+            class="avatar-uploader"
+            :class="{ 'uploading': isCoverUploading }"
+            :show-file-list="false"
+            :before-upload="beforeCoverUpload"
+            :http-request="customCoverUpload"
+            :on-success="handleCoverUploadSuccess"
+            :on-error="handleCoverUploadError"
+            :drag="true"
+            :accept="'image/*'"
+            name="file"
+            @dragenter="handleCoverDragEnter"
+            @dragleave="handleCoverDragLeave"
+            @dragover="handleCoverDragOver"
+            @drop="handleCoverDrop"
+          >
+            <div
+              class="upload-area"
+              :class="{ 'drag-over': isCoverDragOver, 'uploading': isCoverUploading }"
+            >
+              <el-image
+                v-if="exhibitionForm.cover_image"
+                :src="getImageUrl(exhibitionForm.cover_image)"
+                class="avatar"
+                lazy
+                fit="cover"
+              />
+
+              <div v-else class="upload-placeholder">
+                <el-icon class="avatar-uploader-icon">
+                  <Plus />
+                </el-icon>
+                <div class="upload-text">
+                  <p>点击或拖拽图片到此处上传</p>
+                  <p class="upload-hint">
+                    支持 JPG、PNG、GIF 格式，自动转换为 WebP 格式并压缩至 5MB 以内
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="isCoverDragOver" class="drag-overlay">
+              <el-icon class="drag-icon">
+                <Upload />
+              </el-icon>
+              <p>释放鼠标上传图片</p>
+            </div>
+          </el-upload>
+
+          <!-- 上传进度条 -->
+          <div v-if="coverUploadProgress > 0" class="upload-progress">
+            <el-progress
+              :percentage="coverUploadProgress"
+              :stroke-width="8"
+              :show-text="true"
+              :status="coverUploadProgress === 100 ? 'success' : ''"
+            />
+            <p class="progress-text">
+              <span v-if="coverUploadProgress < 100">正在上传图片... {{ coverUploadProgress }}%</span>
+              <span v-else class="success-text">上传完成！</span>
+            </p>
+          </div>
+
+          <div style="margin-top: 8px">
+            <el-button
+              v-if="exhibitionForm.cover_image"
+              type="danger"
+              plain
+              @click="removeCoverImage"
+            >
+              移除封面
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="exhibitionForm.status" placeholder="请选择状态">
@@ -193,10 +269,20 @@
           </el-select>
         </el-form-item>
         <el-form-item label="开始时间">
-          <el-input v-model="exhibitionForm.start_at" placeholder="YYYY-MM-DDTHH:mm:ss" />
+          <el-date-picker
+            v-model="exhibitionForm.start_at"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择开始日期"
+          />
         </el-form-item>
         <el-form-item label="结束时间">
-          <el-input v-model="exhibitionForm.end_at" placeholder="YYYY-MM-DDTHH:mm:ss" />
+          <el-date-picker
+            v-model="exhibitionForm.end_at"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择结束日期"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -210,7 +296,7 @@
     <!-- 追加/替换展览作品弹窗 -->
     <el-dialog
       v-model="itemsDialogVisible"
-      :title="itemsDialogMode === 'append' ? '追加展览作品' : '替换展览作品'"
+      title="追加展览作品"
       width="72%"
     >
       <div class="items-dialog-body">
@@ -286,9 +372,15 @@
         <div style="margin-top: 16px">
           <div class="text-muted" style="margin-bottom: 10px">待提交 items（将作为一次请求提交）</div>
           <el-table :data="pendingItems" style="width: 100%">
-            <el-table-column label="排序" width="120">
+            <el-table-column label="排序" width="180">
               <template #default="{ row }">
-                <el-input-number v-model="row.sort_order" :min="1" :step="1" />
+                <el-input-number
+                  v-model="row.sort_order"
+                  :min="1"
+                  :step="1"
+                  controls-position="right"
+                  style="width: 160px"
+                />
               </template>
             </el-table-column>
             <el-table-column label="类型" width="120">
@@ -298,10 +390,22 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="artwork_id" min-width="220" prop="artwork_id" />
-            <el-table-column label="artists" min-width="200">
+            <el-table-column label="作品" min-width="320">
               <template #default="{ row }">
-                <span v-if="row.artists && row.artists.length">{{ row.artists.join(', ') }}</span>
+                <div class="pending-item-artwork">
+                  <div style="font-weight: 600">{{ getPendingArtworkTitle(row) }}</div>
+                  <div class="text-muted" style="margin-top: 4px">
+                    artwork_id: {{ row.artwork_id }}
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="关联艺术家" min-width="280">
+              <template #default="{ row }">
+                <span v-if="row.artists && row.artists.length">
+                  {{ getPendingArtistNames(row.artists).join(', ') }}
+                </span>
                 <span v-else class="text-muted">自动匹配</span>
               </template>
             </el-table-column>
@@ -356,7 +460,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Upload } from '@element-plus/icons-vue'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const route = useRoute()
 const router = useRouter()
@@ -369,6 +475,9 @@ const exhibitionDetail = ref(null)
 const savingExhibition = ref(false)
 const savingItems = ref(false)
 const savingArtists = ref(false)
+const isCoverUploading = ref(false)
+const coverUploadProgress = ref(0)
+const isCoverDragOver = ref(false)
 
 const getImageUrl = (url) => {
   if (!url) return ''
@@ -395,8 +504,9 @@ const exhibitionForm = reactive({
 function toDateTimeInputValue(v) {
   if (!v) return ''
   // MySQL 返回一般是 "YYYY-MM-DD HH:mm:ss"
-  if (typeof v === 'string') return v.replace(' ', 'T')
-  return String(v)
+  // 日期选择器只需要 YYYY-MM-DD，因此只取前 10 位
+  if (typeof v === 'string') return v.slice(0, 10)
+  return String(v).slice(0, 10)
 }
 
 function resetExhibitionForm() {
@@ -407,6 +517,123 @@ function resetExhibitionForm() {
   exhibitionForm.status = 'draft'
   exhibitionForm.start_at = ''
   exhibitionForm.end_at = ''
+}
+
+async function beforeCoverUpload(file) {
+  // 使用同项目原图上传逻辑：压缩为 webp + 5MB 限制
+  const isImage = file?.type && file.type.startsWith('image/')
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件！')
+    return false
+  }
+
+  coverUploadProgress.value = 0
+  isCoverDragOver.value = false
+  isCoverUploading.value = true
+
+  const processedFile = await uploadImageToWebpLimit5MB(file)
+  if (!processedFile) {
+    isCoverUploading.value = false
+    coverUploadProgress.value = 0
+    return false
+  }
+
+  return Promise.resolve(processedFile)
+}
+
+const customCoverUpload = async (options) => {
+  const { onSuccess, onError, file, onProgress } = options
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    const resp = await axios.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          coverUploadProgress.value = percent
+          onProgress && onProgress({ percent })
+        } else {
+          // 没有 total 时模拟一下进度，避免 UI 卡住
+          coverUploadProgress.value = Math.min(coverUploadProgress.value + 10, 90)
+          onProgress && onProgress({ percent: coverUploadProgress.value })
+        }
+      }
+    })
+
+    coverUploadProgress.value = 100
+    onSuccess(resp)
+    return resp
+  } catch (err) {
+    onError(err)
+    throw err
+  }
+}
+
+function extractUploadedUrl(result) {
+  let url = ''
+  if (result && result.url) url = result.url
+  else if (result?.data?.url) url = result.data.url
+  else if (typeof result?.data === 'string') url = result.data
+  else if (typeof result === 'string') url = result
+  else if (result?.file) url = result.file
+  else if (result?.filename) url = result.filename
+  else if (result?.path) url = result.path
+  return url
+}
+
+function handleCoverUploadSuccess(response) {
+  const url = extractUploadedUrl(response)
+  if (url) {
+    exhibitionForm.cover_image = url
+    ElMessage.success('封面上传成功')
+  } else {
+    ElMessage.error('封面上传失败：未获取到图片URL')
+  }
+
+  isCoverUploading.value = false
+  setTimeout(() => {
+    coverUploadProgress.value = 0
+  }, 1000)
+}
+
+function handleCoverUploadError(err) {
+  console.error('cover upload error:', err)
+  isCoverUploading.value = false
+  coverUploadProgress.value = 0
+  ElMessage.error('封面上传失败')
+}
+
+function removeCoverImage() {
+  exhibitionForm.cover_image = ''
+  coverUploadProgress.value = 0
+  isCoverUploading.value = false
+}
+
+// 监听拖拽状态（用于 UI 高亮）
+function handleCoverDragEnter(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = true
+}
+
+function handleCoverDragLeave(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = false
+}
+
+function handleCoverDragOver(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = true
+}
+
+function handleCoverDrop(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = false
 }
 
 function openAddDialog() {
@@ -458,8 +685,8 @@ async function submitExhibition() {
       description: exhibitionForm.description || null,
       cover_image: exhibitionForm.cover_image || null,
       status: exhibitionForm.status || 'draft',
-      start_at: exhibitionForm.start_at ? exhibitionForm.start_at : null,
-      end_at: exhibitionForm.end_at ? exhibitionForm.end_at : null
+      start_at: exhibitionForm.start_at ? `${exhibitionForm.start_at}T00:00:00` : null,
+      end_at: exhibitionForm.end_at ? `${exhibitionForm.end_at}T00:00:00` : null
     }
 
     if (exhibitionDialogMode.value === 'add') {
@@ -534,6 +761,38 @@ async function fetchDigitalArtworksOptions() {
   }))
 }
 
+function getArtistNameById(artistId) {
+  if (!artistId) return ''
+  const sid = String(artistId)
+  const found = (artistsOptions.value || []).find((a) => String(a.id) === sid)
+  return found?.name || ''
+}
+
+function getPendingArtistNames(artistIds) {
+  if (!Array.isArray(artistIds) || artistIds.length === 0) return []
+  return artistIds.map((id) => {
+    const name = getArtistNameById(id)
+    return name || String(id)
+  })
+}
+
+function getPendingArtworkTitle(row) {
+  if (!row) return '-'
+  const aid = row.artwork_id
+  const type = row.artwork_type
+  if (type === 'original') {
+    const sid = String(aid)
+    const found = (originalArtworkOptions.value || []).find((a) => String(a.id) === sid)
+    return found?.title || sid
+  }
+  if (type === 'digital') {
+    const sid = String(aid)
+    const found = (digitalArtworkOptions.value || []).find((a) => String(a.id) === sid)
+    return found?.title || sid
+  }
+  return String(aid || '-')
+}
+
 async function ensureOptionsLoaded() {
   // 简单加载：避免重复请求
   if (artistsOptions.value.length && originalArtworkOptions.value.length && digitalArtworkOptions.value.length) return
@@ -591,7 +850,8 @@ onMounted(async () => {
 // ---------------------------
 
 const itemsDialogVisible = ref(false)
-const itemsDialogMode = ref('append') // append | replace
+// 目前仅保留追加模式
+// const itemsDialogMode = ref('append') // append | replace
 
 const itemDraft = reactive({
   artwork_type: 'original',
@@ -606,20 +866,18 @@ function handleArtworkTypeChange() {
   itemDraft.artwork_id = null
   // sort_order 由用户自己调整，默认按当前 pendingItems 继续
   const existingLen = (exhibitionDetail.value?.items?.length || 0)
-  const base = itemsDialogMode.value === 'append' ? existingLen : 0
+  const base = existingLen
   itemDraft.sort_order = base + pendingItems.value.length + 1
 }
 
-function openItemsDialog(mode) {
-  itemsDialogMode.value = mode
+function openItemsDialog() {
   itemsDialogVisible.value = true
   pendingItems.value = []
   itemDraft.artwork_type = 'original'
   itemDraft.artwork_id = null
   itemDraft.artists = []
   const existingLen = (exhibitionDetail.value?.items?.length || 0)
-  const base = mode === 'append' ? existingLen : 0
-  itemDraft.sort_order = base + 1
+  itemDraft.sort_order = existingLen + 1
 }
 
 function addDraftItem() {
@@ -639,8 +897,7 @@ function addDraftItem() {
 
   // 便于继续添加下一个
   const existingLen = (exhibitionDetail.value?.items?.length || 0)
-  const base = itemsDialogMode.value === 'append' ? existingLen : 0
-  itemDraft.sort_order = base + pendingItems.value.length + 1
+  itemDraft.sort_order = existingLen + pendingItems.value.length + 1
   itemDraft.artwork_id = null
   itemDraft.artists = []
 }
@@ -652,13 +909,8 @@ async function submitItems() {
   savingItems.value = true
   try {
     const payload = { items: pendingItems.value }
-    if (itemsDialogMode.value === 'append') {
-      await axios.post(`/exhibitions/${exhibitionId.value}/items`, payload)
-      ElMessage.success('追加成功')
-    } else {
-      await axios.put(`/exhibitions/${exhibitionId.value}/items`, payload)
-      ElMessage.success('替换成功')
-    }
+    await axios.post(`/exhibitions/${exhibitionId.value}/items`, payload)
+    ElMessage.success('追加成功')
     itemsDialogVisible.value = false
     await fetchDetail(exhibitionId.value)
   } catch (e) {
@@ -679,6 +931,27 @@ function openEditArtistsDialog(row) {
   editArtistsItemId.value = row.id
   editArtistsDraftArtistIds.value = (row.artists || []).map((a) => a.id)
   editArtistsDialogVisible.value = true
+}
+
+async function handleRemoveItem(row) {
+  if (!exhibitionId.value || !row?.id) return
+
+  try {
+    await ElMessageBox.confirm('确定移除该展览作品吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+
+    await axios.delete(`/exhibitions/${exhibitionId.value}/items/${row.id}`)
+    ElMessage.success('移除成功')
+    await fetchDetail(exhibitionId.value)
+  } catch (e) {
+    // cancel 时会抛异常，这里静默
+    if (e && e !== 'cancel') {
+      ElMessage.error(e?.response?.data?.error || '移除失败')
+    }
+  }
 }
 
 async function submitArtists() {
@@ -761,6 +1034,144 @@ async function submitArtists() {
 
 .items-dialog-body {
   min-height: 240px;
+}
+
+.detail-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 封面上传：复用其他页面的上传 UI 样式（简化子集） */
+.avatar-uploader {
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  width: 200px;
+  height: 200px;
+  transition: all 0.3s ease;
+  margin-bottom: 8px;
+}
+
+.avatar-uploader:hover {
+  border-color: #409eff;
+}
+
+.avatar-uploader.uploading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.avatar-uploader-icon {
+  font-size: 28px;
+  color: #8c939d;
+  width: 200px;
+  height: 200px;
+  text-align: center;
+  line-height: 200px;
+}
+
+.avatar {
+  width: 200px;
+  height: 200px;
+  display: block;
+  object-fit: cover;
+}
+
+.upload-area {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f7fa;
+  border: 2px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.upload-area.drag-over {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+  transform: scale(1.02);
+  box-shadow: 0 0 10px rgba(64, 158, 255, 0.3);
+}
+
+.upload-area.uploading {
+  background-color: #f0f9ff;
+  border-color: #409eff;
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(64, 158, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #409eff;
+  font-weight: bold;
+  z-index: 10;
+  border-radius: 6px;
+}
+
+.drag-icon {
+  font-size: 48px;
+  margin-bottom: 10px;
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.upload-text {
+  text-align: center;
+  color: #606266;
+  margin-top: 10px;
+}
+
+.upload-text p {
+  margin: 5px 0;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.upload-progress {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  width: 200px;
+}
+
+.progress-text {
+  margin: 10px 0 0 0;
+  text-align: center;
+  color: #606266;
+  font-size: 14px;
+}
+
+.success-text {
+  color: #67c23a;
+  font-weight: bold;
 }
 </style>
 

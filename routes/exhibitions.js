@@ -878,5 +878,52 @@ router.put('/:exhibitionId/items/:itemId/artists', authenticateToken, checkRole(
   }
 });
 
+// 移除展览作品（需要 admin）
+router.delete('/:exhibitionId/items/:itemId', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const exhibitionId = parsePositiveInt(req.params.exhibitionId);
+    const itemId = parsePositiveInt(req.params.itemId);
+    if (!exhibitionId || !itemId) return res.status(400).json({ error: '无效的展览ID或展览作品ID' });
+
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+    try {
+      const [itemRows] = await connection.query(
+        `SELECT id FROM ${EXHIBITION_ITEMS_TABLE} WHERE id = ? AND exhibition_id = ? LIMIT 1`,
+        [itemId, exhibitionId]
+      );
+
+      if (!itemRows || itemRows.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ error: '展览作品不存在' });
+      }
+
+      // 先删关联，再删 item
+      await connection.query(
+        `DELETE FROM ${EXHIBITION_ITEM_ARTISTS_TABLE} WHERE exhibition_item_id = ?`,
+        [itemId]
+      );
+      await connection.query(
+        `DELETE FROM ${EXHIBITION_ITEMS_TABLE} WHERE id = ? AND exhibition_id = ?`,
+        [itemId, exhibitionId]
+      );
+
+      await connection.commit();
+      connection.release();
+
+      res.json({ message: '移除成功', exhibition_id: exhibitionId, item_id: itemId });
+    } catch (e) {
+      await connection.rollback();
+      connection.release();
+      throw e;
+    }
+  } catch (e) {
+    console.error('delete exhibition item failed:', e);
+    const statusCode = e && e.statusCode ? e.statusCode : 500;
+    res.status(statusCode).json({ error: e.message || '移除失败' });
+  }
+});
+
 module.exports = router;
 
