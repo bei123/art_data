@@ -274,6 +274,7 @@ const linkTypeOptions = [
   { label: '数字艺术品', value: 'digital' },
   { label: '权益', value: 'rights' },
   { label: '原作', value: 'original' },
+  { label: '展览', value: 'exhibition' },
   { label: '艺术家', value: 'artist' }
 ]
 const linkOptionsLoading = ref(false)
@@ -287,6 +288,7 @@ const linkPathMap = {
   digital: '/pages/digital/detail',
   rights: '/pages/rights/detail',
   original: '/pages/artwork/detail',
+  exhibition: '/pages/exhibition/detail',
   artist: '/pages/artist/detail'
 }
 const composedLinkPreview = computed(() => {
@@ -611,6 +613,11 @@ async function loadLinkOptions() {
       // axios 实例已返回 data，rights 列表结构为 { data: [...], pagination: {...} }
       items = (res && Array.isArray(res.data)) ? res.data : (res && Array.isArray(res.data?.data)) ? res.data.data : (Array.isArray(res?.data) ? res.data : [])
       linkOptions.value = (items || []).map(it => ({ value: it.id, label: it.title }))
+    } else if (form.value.link_type === 'exhibition') {
+      const res = await axios.get('/exhibitions', { params: { status: 'published', page: 1, pageSize: 100 } })
+      // axios 实例已返回 data：{ data: [...], pagination: {...} }
+      items = (res && Array.isArray(res.data)) ? res.data : (Array.isArray(res?.data?.data) ? res.data.data : [])
+      linkOptions.value = (items || []).map(it => ({ value: it.id, label: it.title }))
     } else if (form.value.link_type === 'original') {
       // 聚合分页，最多抓取 ORIGINAL_MAX_PAGES 页
       const aggregated = []
@@ -671,10 +678,12 @@ function applyComposedLink() {
 function tryParseExistingLink(url) {
   if (!url || typeof url !== 'string') return
   // 接受 original 的别名 artwork
-  const match = url.match(/^\/pages\/(digital|rights|original|artist|artwork)\/detail\?id=(\d+)$/)
+  const match = url.match(/^\/pages\/(digital|rights|original|artist|artwork|exhibition|exhibitions)\/detail\?id=(\d+)$/)
   if (match) {
     let type = match[1]
     if (type === 'artwork') type = 'original'
+    if (type === 'exhibitions') type = 'exhibition'
+    if (type === 'exhibition') type = 'exhibition'
     const id = parseInt(match[2])
     form.value.link_type = type
     form.value.link_id = id
