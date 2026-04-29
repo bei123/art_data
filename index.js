@@ -36,6 +36,7 @@ const transactionRouter = require('./routes/transaction');
 const institutionsRouter = require('./routes/institutions');
 const homeTitlesRouter = require('./routes/home-titles');
 const webviewRouter = require('./routes/webview');
+const exhibitionsRouter = require('./routes/exhibitions');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 
 const app = express();
@@ -327,6 +328,9 @@ app.use('/api/institutions', institutionsRouter);
 
 // 使用首页标题路由
 app.use('/api/home-titles', homeTitlesRouter);
+
+// 使用展览路由
+app.use('/api/exhibitions', exhibitionsRouter);
 
 // 使用WebView代理路由
 app.use('/api/webview', webviewRouter);

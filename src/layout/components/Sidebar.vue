@@ -51,6 +51,13 @@
       <template #title>权益管理</template>
     </el-menu-item>
 
+    <el-menu-item v-if="hasRole('admin')" index="/exhibitions">
+      <el-icon>
+        <Document />
+      </el-icon>
+      <template #title>展览管理</template>
+    </el-menu-item>
+
     <el-menu-item index="/banners">
       <el-icon>
         <Picture />

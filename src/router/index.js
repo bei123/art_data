@@ -61,6 +61,26 @@ const routes = [
         component: () => import('@/views/RightDetail.vue')
       },
       {
+        path: 'exhibitions',
+        name: 'Exhibitions',
+        component: () => import('@/views/Exhibitions.vue'),
+        meta: {
+          title: '展览管理',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
+        path: 'exhibitions/:id',
+        name: 'ExhibitionDetail',
+        component: () => import('@/views/Exhibitions.vue'),
+        meta: {
+          title: '展览作品管理',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
         path: 'digital-identity/purchases/:user_id',
         name: 'DigitalIdentityPurchases',
         component: () => import('@/views/DigitalIdentityPurchases.vue')
