@@ -99,7 +99,110 @@
             <div style="margin-top: 8px"><b>开始时间：</b>{{ exhibitionDetail.exhibition?.start_at || '-' }}</div>
             <div style="margin-top: 8px"><b>结束时间：</b>{{ exhibitionDetail.exhibition?.end_at || '-' }}</div>
             <div style="margin-top: 8px"><b>作品数：</b>{{ exhibitionDetail.items_total ?? exhibitionDetail.items?.length ?? 0 }}</div>
+            <div style="margin-top: 8px">
+              <b>现场图：</b>{{ exhibitionDetail.live_photos_total ?? exhibitionDetail.live_photos?.length ?? 0 }} 张
+            </div>
           </div>
+        </div>
+      </el-card>
+
+      <el-card v-if="exhibitionDetail" shadow="hover" class="live-photos-card" style="margin-bottom: 16px">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">展览现场图</span>
+            <span class="text-muted" style="font-weight: normal; margin-left: 8px">
+              （{{ exhibitionDetail.live_photos?.length || 0 }} / {{ MAX_LIVE_PHOTOS }}）
+            </span>
+          </div>
+        </template>
+        <div class="images-upload-container">
+          <div v-if="(exhibitionDetail.live_photos || []).length > 0" class="images-list">
+            <div v-for="p in exhibitionDetail.live_photos" :key="p.id" class="image-item">
+              <img :src="getImageUrl(p.image_url)" class="item-image" alt="现场图" />
+              <div class="item-overlay">
+                <el-button
+                  type="danger"
+                  size="small"
+                  circle
+                  class="remove-btn"
+                  @click="confirmDeleteLivePhoto(p)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="(exhibitionDetail.live_photos?.length || 0) < MAX_LIVE_PHOTOS"
+            class="add-image-btn"
+            :class="{
+              'drag-over': isLivePhotosDragOver,
+              uploading: isLivePhotosUploading || isLivePhotosProcessing
+            }"
+            @click="triggerLivePhotosInput"
+            @dragenter="handleLivePhotosDragEnter"
+            @dragleave="handleLivePhotosDragLeave"
+            @dragover="handleLivePhotosDragOver"
+            @drop="handleLivePhotosDrop"
+          >
+            <el-icon class="add-icon" :class="{ spinning: isLivePhotosUploading || isLivePhotosProcessing }">
+              <component :is="isLivePhotosUploading || isLivePhotosProcessing ? Loading : Plus" />
+            </el-icon>
+            <p class="add-text">添加现场图</p>
+            <p class="add-hint">最多 {{ MAX_LIVE_PHOTOS }} 张，支持拖拽多选</p>
+          </div>
+
+          <input
+            ref="livePhotosInput"
+            type="file"
+            accept="image/*"
+            multiple
+            style="display: none"
+            @change="handleLivePhotosFileSelect"
+          />
+
+          <div v-if="isLivePhotosProcessing" class="live-photos-upload-progress">
+            <div class="progress-header">
+              <span class="progress-title">图片处理中</span>
+              <span class="progress-percentage">处理中...</span>
+            </div>
+            <el-progress
+              :percentage="0"
+              :stroke-width="6"
+              :show-text="false"
+              :indeterminate="true"
+              :color="progressColors"
+            />
+            <div class="progress-info">
+              <span class="file-name">{{ livePhotosFileName }}</span>
+              <span class="file-size">{{ formatFileSize(livePhotosFileSize) }}</span>
+            </div>
+            <div class="processing-hint">
+              <p>正在将图片转换为 WebP 格式并压缩...</p>
+            </div>
+          </div>
+
+          <div
+            v-if="livePhotosUploadProgress > 0 && livePhotosUploadProgress < 100 && !isLivePhotosProcessing"
+            class="live-photos-upload-progress"
+          >
+            <div class="progress-header">
+              <span class="progress-title">上传进度</span>
+              <span class="progress-percentage">{{ livePhotosUploadProgress }}%</span>
+            </div>
+            <el-progress
+              :percentage="livePhotosUploadProgress"
+              :stroke-width="6"
+              :show-text="false"
+              :color="progressColors"
+            />
+            <div class="progress-info">
+              <span class="file-name">{{ livePhotosFileName }}</span>
+              <span class="file-size">{{ formatFileSize(livePhotosFileSize) }}</span>
+            </div>
+          </div>
+
         </div>
       </el-card>
 
@@ -461,7 +564,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload } from '@element-plus/icons-vue'
+import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const route = useRoute()
@@ -475,6 +578,22 @@ const exhibitionDetail = ref(null)
 const savingExhibition = ref(false)
 const savingItems = ref(false)
 const savingArtists = ref(false)
+
+const livePhotosInput = ref(null)
+const isLivePhotosDragOver = ref(false)
+const livePhotosUploadProgress = ref(0)
+const isLivePhotosUploading = ref(false)
+const isLivePhotosProcessing = ref(false)
+const livePhotosFileName = ref('')
+const livePhotosFileSize = ref(0)
+
+const progressColors = [
+  { color: '#f56c6c', percentage: 20 },
+  { color: '#e6a23c', percentage: 40 },
+  { color: '#5cb87a', percentage: 60 },
+  { color: '#1989fa', percentage: 80 },
+  { color: '#6f7ad3', percentage: 100 }
+]
 const isCoverUploading = ref(false)
 const coverUploadProgress = ref(0)
 const isCoverDragOver = ref(false)
@@ -609,6 +728,169 @@ function removeCoverImage() {
   exhibitionForm.cover_image = ''
   coverUploadProgress.value = 0
   isCoverUploading.value = false
+}
+
+const MAX_LIVE_PHOTOS = 50
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
+}
+
+function resetLivePhotosUploadState() {
+  livePhotosUploadProgress.value = 0
+  isLivePhotosUploading.value = false
+  isLivePhotosProcessing.value = false
+  livePhotosFileName.value = ''
+  livePhotosFileSize.value = 0
+}
+
+function triggerLivePhotosInput() {
+  if (!isLivePhotosUploading.value && !isLivePhotosProcessing.value) {
+    livePhotosInput.value?.click()
+  }
+}
+
+function handleLivePhotosFileSelect(event) {
+  const files = Array.from(event.target.files || [])
+  if (files.length > 0) {
+    uploadLivePhotosFiles(files)
+  }
+  event.target.value = ''
+}
+
+async function uploadLivePhotosFiles(files) {
+  if (!exhibitionId.value || !exhibitionDetail.value) return
+
+  const imageFiles = files.filter((f) => f.type && f.type.startsWith('image/'))
+  if (!imageFiles.length) {
+    ElMessage.warning('请选择图片文件')
+    return
+  }
+
+  const current = exhibitionDetail.value.live_photos?.length || 0
+  if (current + imageFiles.length > MAX_LIVE_PHOTOS) {
+    ElMessage.warning(
+      `现场图最多 ${MAX_LIVE_PHOTOS} 张，当前 ${current} 张，还可添加 ${MAX_LIVE_PHOTOS - current} 张`
+    )
+    return
+  }
+
+  isLivePhotosUploading.value = true
+  isLivePhotosProcessing.value = true
+
+  const urls = []
+
+  for (const file of imageFiles) {
+    try {
+      const processedFile = await uploadImageToWebpLimit5MB(file)
+      if (!processedFile) {
+        continue
+      }
+
+      isLivePhotosProcessing.value = false
+      livePhotosFileName.value = processedFile.name
+      livePhotosFileSize.value = processedFile.size
+      livePhotosUploadProgress.value = 0
+
+      const formData = new FormData()
+      formData.append('file', processedFile)
+
+      const response = await axios.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            livePhotosUploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          } else {
+            livePhotosUploadProgress.value = Math.min(livePhotosUploadProgress.value + 10, 90)
+          }
+        }
+      })
+
+      const imageUrl = extractUploadedUrl(response)
+      if (imageUrl) {
+        urls.push(imageUrl)
+        livePhotosUploadProgress.value = 100
+        setTimeout(() => {
+          livePhotosUploadProgress.value = 0
+        }, 1500)
+      } else {
+        ElMessage.error('图片上传失败：未获取到图片URL')
+      }
+    } catch (error) {
+      console.error('现场图上传错误:', error)
+      ElMessage.error(error?.response?.data?.message || error?.response?.data?.error || '图片上传失败')
+    }
+  }
+
+  if (urls.length) {
+    try {
+      await axios.post(`/exhibitions/${exhibitionId.value}/live-photos`, { images: urls })
+      ElMessage.success(`已追加 ${urls.length} 张现场图`)
+      await fetchDetail(exhibitionId.value)
+    } catch (e) {
+      console.error('live photos save failed:', e)
+      ElMessage.error(e?.response?.data?.error || '保存现场图失败')
+    }
+  }
+
+  resetLivePhotosUploadState()
+}
+
+function handleLivePhotosDragEnter(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  const n = exhibitionDetail.value?.live_photos?.length || 0
+  if (!isLivePhotosUploading.value && !isLivePhotosProcessing.value && n < MAX_LIVE_PHOTOS) {
+    isLivePhotosDragOver.value = true
+  }
+}
+
+function handleLivePhotosDragLeave(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    isLivePhotosDragOver.value = false
+  }
+}
+
+function handleLivePhotosDragOver(e) {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function handleLivePhotosDrop(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isLivePhotosDragOver.value = false
+
+  const n = exhibitionDetail.value?.live_photos?.length || 0
+  if (isLivePhotosUploading.value || isLivePhotosProcessing.value || n >= MAX_LIVE_PHOTOS) return
+
+  const dropped = Array.from(e.dataTransfer?.files || [])
+  if (dropped.length > 0) {
+    uploadLivePhotosFiles(dropped)
+  }
+}
+
+async function confirmDeleteLivePhoto(p) {
+  if (!exhibitionId.value || !p?.id) return
+  try {
+    await ElMessageBox.confirm('确定删除这张现场图？', '确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await axios.delete(`/exhibitions/${exhibitionId.value}/live-photos/${p.id}`)
+    ElMessage.success('已删除')
+    await fetchDetail(exhibitionId.value)
+  } catch (e) {
+    console.error('delete live photo failed:', e)
+    ElMessage.error(e?.response?.data?.error || '删除失败')
+  }
 }
 
 // 监听拖拽状态（用于 UI 高亮）
@@ -1172,6 +1454,185 @@ async function submitArtists() {
 .success-text {
   color: #67c23a;
   font-weight: bold;
+}
+
+.live-photos-card .card-header {
+  display: flex;
+  align-items: center;
+}
+
+/* 与商家管理「商家图片」一致的多图上传样式 */
+.live-photos-card .images-upload-container {
+  width: 100%;
+}
+
+.live-photos-card .images-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.live-photos-card .image-item {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.live-photos-card .image-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.live-photos-card .item-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.live-photos-card .item-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.live-photos-card .image-item:hover .item-overlay {
+  opacity: 1;
+}
+
+.live-photos-card .add-image-btn {
+  width: 120px;
+  height: 120px;
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #fafafa;
+}
+
+.live-photos-card .add-image-btn:hover {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.live-photos-card .add-image-btn.drag-over {
+  border-color: #409eff;
+  background: #ecf5ff;
+  transform: scale(1.02);
+  box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
+}
+
+.live-photos-card .add-image-btn.uploading {
+  opacity: 0.7;
+  pointer-events: none;
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.live-photos-card .add-icon {
+  font-size: 32px;
+  color: #8c939d;
+  margin-bottom: 8px;
+  transition: all 0.3s ease;
+}
+
+.live-photos-card .add-icon.spinning {
+  animation: live-photos-spin 1s linear infinite;
+}
+
+@keyframes live-photos-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.live-photos-card .add-text {
+  margin: 0 0 4px 0;
+  color: #606266;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.live-photos-card .add-hint {
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+  text-align: center;
+  padding: 0 6px;
+}
+
+.live-photos-card .live-photos-upload-progress {
+  margin-top: 16px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.live-photos-card .progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.live-photos-card .progress-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.live-photos-card .progress-percentage {
+  font-size: 14px;
+  font-weight: bold;
+  color: #409eff;
+}
+
+.live-photos-card .progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.live-photos-card .file-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-photos-card .processing-hint {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.live-photos-card .processing-hint p {
+  margin: 0;
+  color: #909399;
+  font-size: 12px;
+  font-style: italic;
 }
 </style>
 

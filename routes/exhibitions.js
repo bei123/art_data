@@ -8,6 +8,10 @@ const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const EXHIBITIONS_TABLE = 'exhibitions';
 const EXHIBITION_ITEMS_TABLE = 'exhibition_items';
 const EXHIBITION_ITEM_ARTISTS_TABLE = 'exhibition_item_artists';
+const EXHIBITION_LIVE_PHOTOS_TABLE = 'exhibition_live_photos';
+
+/** 单个展览现场图数量上限 */
+const MAX_LIVE_PHOTOS_PER_EXHIBITION = 50;
 
 let schemaReady = false;
 
@@ -103,6 +107,19 @@ async function ensureSchema() {
       UNIQUE KEY uniq_item_artist (exhibition_item_id, artist_id),
       INDEX idx_item_artist_sort (exhibition_item_id, sort_order),
       INDEX idx_item_artist_id (artist_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  // 展览现场图（多图）
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ${EXHIBITION_LIVE_PHOTOS_TABLE} (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      exhibition_id INT NOT NULL,
+      image_url TEXT NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_live_photo_exhibition_sort (exhibition_id, sort_order)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 }
@@ -244,6 +261,61 @@ async function getDigitalArtworksByIds(ids) {
   return map;
 }
 
+async function getLivePhotos(exhibitionId) {
+  const [rows] = await db.query(
+    `
+    SELECT id, image_url, sort_order
+    FROM ${EXHIBITION_LIVE_PHOTOS_TABLE}
+    WHERE exhibition_id = ?
+    ORDER BY sort_order ASC, id ASC
+    `,
+    [exhibitionId]
+  );
+  return (rows || []).map((r) => {
+    const p = processObjectImages({ ...r }, ['image_url']);
+    return {
+      id: p.id,
+      image_url: p.image_url || '',
+      sort_order: p.sort_order,
+    };
+  });
+}
+
+async function countLivePhotos(exhibitionId) {
+  const [[row]] = await db.query(
+    `SELECT COUNT(*) AS c FROM ${EXHIBITION_LIVE_PHOTOS_TABLE} WHERE exhibition_id = ?`,
+    [exhibitionId]
+  );
+  return row && row.c !== undefined ? Number(row.c) : 0;
+}
+
+function parseLivePhotoImageList(body) {
+  const raw = body && (body.images !== undefined ? body.images : body.image_urls);
+  if (raw === undefined || raw === null) {
+    const err = new Error('请提供 images 数组（可为空数组以清空现场图）');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!Array.isArray(raw)) {
+    const err = new Error('images 必须为字符串数组');
+    err.statusCode = 400;
+    throw err;
+  }
+  const out = [];
+  for (const x of raw) {
+    if (x === undefined || x === null || x === '') continue;
+    const s = String(x).trim();
+    if (!s) continue;
+    if (!validateImageUrl(s)) {
+      const err = new Error('存在无效的图片 URL（需为允许域名或 /uploads/ 路径）');
+      err.statusCode = 400;
+      throw err;
+    }
+    out.push(s);
+  }
+  return uniqPreserveOrder(out);
+}
+
 async function getExhibitionDetail(exhibitionId) {
   const [rows] = await db.query(
     `
@@ -289,6 +361,8 @@ async function getExhibitionDetail(exhibitionId) {
     };
   });
 
+  const live_photos = await getLivePhotos(exhibitionId);
+
   return {
     exhibition: {
       id: exhibition.id,
@@ -303,6 +377,8 @@ async function getExhibitionDetail(exhibitionId) {
     },
     items: enrichedItems,
     items_total: enrichedItems.length,
+    live_photos,
+    live_photos_total: live_photos.length,
   };
 }
 
@@ -471,6 +547,161 @@ router.get('/:id/items', async (req, res) => {
   } catch (e) {
     console.error('get exhibition items failed:', e);
     res.status(500).json({ error: '获取展览作品失败' });
+  }
+});
+
+// 展览现场图列表（公开）
+router.get('/:id/live-photos', async (req, res) => {
+  try {
+    const exhibitionId = parsePositiveInt(req.params.id);
+    if (!exhibitionId) return res.status(400).json({ error: '无效的展览ID' });
+    if (!(await ensureExhibitionExists(exhibitionId))) {
+      return res.status(404).json({ error: '展览不存在' });
+    }
+    const live_photos = await getLivePhotos(exhibitionId);
+    res.json({ live_photos, live_photos_total: live_photos.length });
+  } catch (e) {
+    console.error('get exhibition live photos failed:', e);
+    res.status(500).json({ error: '获取展览现场图失败' });
+  }
+});
+
+// 替换展览现场图（全量，需要 admin）
+router.put('/:id/live-photos', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const exhibitionId = parsePositiveInt(req.params.id);
+    if (!exhibitionId) return res.status(400).json({ error: '无效的展览ID' });
+    if (!(await ensureExhibitionExists(exhibitionId))) {
+      return res.status(404).json({ error: '展览不存在' });
+    }
+
+    const urls = parseLivePhotoImageList(req.body || {});
+    if (urls.length > MAX_LIVE_PHOTOS_PER_EXHIBITION) {
+      return res.status(400).json({
+        error: `现场图最多 ${MAX_LIVE_PHOTOS_PER_EXHIBITION} 张`,
+        max: MAX_LIVE_PHOTOS_PER_EXHIBITION,
+      });
+    }
+
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+    try {
+      await connection.query(`DELETE FROM ${EXHIBITION_LIVE_PHOTOS_TABLE} WHERE exhibition_id = ?`, [
+        exhibitionId,
+      ]);
+      if (urls.length) {
+        const values = urls.map((url, idx) => [exhibitionId, url, idx + 1]);
+        await connection.query(
+          `
+            INSERT INTO ${EXHIBITION_LIVE_PHOTOS_TABLE} (exhibition_id, image_url, sort_order)
+            VALUES ?
+          `,
+          [values]
+        );
+      }
+      await connection.commit();
+      connection.release();
+    } catch (e) {
+      await connection.rollback();
+      connection.release();
+      throw e;
+    }
+
+    const live_photos = await getLivePhotos(exhibitionId);
+    res.json({ message: '现场图已更新', live_photos, live_photos_total: live_photos.length });
+  } catch (e) {
+    console.error('replace exhibition live photos failed:', e);
+    const statusCode = e && e.statusCode ? e.statusCode : 500;
+    res.status(statusCode).json({ error: e.message || '更新展览现场图失败' });
+  }
+});
+
+// 追加展览现场图（需要 admin）
+router.post('/:id/live-photos', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const exhibitionId = parsePositiveInt(req.params.id);
+    if (!exhibitionId) return res.status(400).json({ error: '无效的展览ID' });
+    if (!(await ensureExhibitionExists(exhibitionId))) {
+      return res.status(404).json({ error: '展览不存在' });
+    }
+
+    const urls = parseLivePhotoImageList(req.body || {});
+    if (!urls.length) {
+      return res.status(400).json({ error: 'images 不能为空数组' });
+    }
+
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+    try {
+      const [[cntRow]] = await connection.query(
+        `SELECT COUNT(*) AS c FROM ${EXHIBITION_LIVE_PHOTOS_TABLE} WHERE exhibition_id = ?`,
+        [exhibitionId]
+      );
+      const current = cntRow && cntRow.c !== undefined ? Number(cntRow.c) : 0;
+      if (current + urls.length > MAX_LIVE_PHOTOS_PER_EXHIBITION) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          error: `现场图最多 ${MAX_LIVE_PHOTOS_PER_EXHIBITION} 张，当前 ${current} 张，无法再添加 ${urls.length} 张`,
+          current,
+          max: MAX_LIVE_PHOTOS_PER_EXHIBITION,
+        });
+      }
+
+      const [[maxRow]] = await connection.query(
+        `SELECT COALESCE(MAX(sort_order), 0) AS m FROM ${EXHIBITION_LIVE_PHOTOS_TABLE} WHERE exhibition_id = ?`,
+        [exhibitionId]
+      );
+      let start = maxRow && maxRow.m !== undefined ? Number(maxRow.m) : 0;
+      const values = urls.map((url) => {
+        start += 1;
+        return [exhibitionId, url, start];
+      });
+      await connection.query(
+        `
+          INSERT INTO ${EXHIBITION_LIVE_PHOTOS_TABLE} (exhibition_id, image_url, sort_order)
+          VALUES ?
+        `,
+        [values]
+      );
+
+      await connection.commit();
+      connection.release();
+    } catch (e) {
+      await connection.rollback();
+      connection.release();
+      throw e;
+    }
+
+    const live_photos = await getLivePhotos(exhibitionId);
+    res.json({ message: '已追加现场图', live_photos, live_photos_total: live_photos.length });
+  } catch (e) {
+    console.error('append exhibition live photos failed:', e);
+    const statusCode = e && e.statusCode ? e.statusCode : 500;
+    res.status(statusCode).json({ error: e.message || '追加展览现场图失败' });
+  }
+});
+
+// 删除单张展览现场图（需要 admin）
+router.delete('/:exhibitionId/live-photos/:photoId', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const exhibitionId = parsePositiveInt(req.params.exhibitionId);
+    const photoId = parsePositiveInt(req.params.photoId);
+    if (!exhibitionId || !photoId) return res.status(400).json({ error: '无效的展览ID或图片ID' });
+
+    const [result] = await db.query(
+      `DELETE FROM ${EXHIBITION_LIVE_PHOTOS_TABLE} WHERE id = ? AND exhibition_id = ?`,
+      [photoId, exhibitionId]
+    );
+    if (!result || result.affectedRows === 0) {
+      return res.status(404).json({ error: '现场图不存在' });
+    }
+
+    const live_photos = await getLivePhotos(exhibitionId);
+    res.json({ message: '已删除', live_photos, live_photos_total: live_photos.length });
+  } catch (e) {
+    console.error('delete exhibition live photo failed:', e);
+    res.status(500).json({ error: '删除展览现场图失败' });
   }
 });
 
