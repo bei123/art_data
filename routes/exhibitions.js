@@ -3,6 +3,14 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken, checkRole } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const redisClient = require('../utils/redisClient');
+
+const REDIS_EXHIBITIONS_LIST_KEY_PREFIX = 'exhibitions:list:';
+const REDIS_EXHIBITION_DETAIL_KEY_PREFIX = 'exhibitions:detail:';
+/** 列表缓存 TTL，与 artworks 列表量级相近 */
+const REDIS_EXHIBITION_LIST_TTL_SEC = 1800;
+/** 详情缓存 TTL；变更时会主动删除，TTL 仅作兜底 */
+const REDIS_EXHIBITION_DETAIL_TTL_SEC = 604800;
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const EXHIBITIONS_TABLE = 'exhibitions';
@@ -61,6 +69,50 @@ function uniqPreserveOrder(arr) {
     }
   }
   return out;
+}
+
+function buildExhibitionListCacheKey(statusKey, pageNum, sizeNum) {
+  return `${REDIS_EXHIBITIONS_LIST_KEY_PREFIX}v1:${statusKey}:${pageNum}:${sizeNum}`;
+}
+
+async function invalidateExhibitionListCaches() {
+  try {
+    const keys = await redisClient.keys(`${REDIS_EXHIBITIONS_LIST_KEY_PREFIX}*`);
+    if (keys && keys.length) await redisClient.del(keys);
+  } catch (e) {
+    console.error('Redis 清除展览列表缓存失败:', e);
+  }
+}
+
+async function invalidateExhibitionDetailCache(exhibitionId) {
+  if (!exhibitionId) return;
+  try {
+    await redisClient.del(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`);
+  } catch (e) {
+    console.error('Redis 清除展览详情缓存失败:', e);
+  }
+}
+
+async function getCachedExhibitionDetail(exhibitionId) {
+  try {
+    const raw = await redisClient.get(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Redis 读取展览详情缓存失败:', e);
+  }
+  return null;
+}
+
+async function setCachedExhibitionDetail(exhibitionId, detail) {
+  try {
+    await redisClient.setEx(
+      `${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`,
+      REDIS_EXHIBITION_DETAIL_TTL_SEC,
+      JSON.stringify(detail)
+    );
+  } catch (e) {
+    console.error('Redis 写入展览详情缓存失败:', e);
+  }
 }
 
 async function ensureSchema() {
@@ -475,6 +527,7 @@ router.get('/', async (req, res) => {
     const sizeNum = Math.min(100, Math.max(1, parseInt(pageSize) || 20));
     const offset = (pageNum - 1) * sizeNum;
 
+    let statusKey = 'all';
     const where = [];
     const params = [];
     if (status) {
@@ -482,8 +535,19 @@ router.get('/', async (req, res) => {
       if (!['draft', 'published'].includes(s)) {
         return res.status(400).json({ error: 'status 仅支持 draft/published' });
       }
+      statusKey = s;
       where.push('status = ?');
       params.push(s);
+    }
+
+    const listCacheKey = buildExhibitionListCacheKey(statusKey, pageNum, sizeNum);
+    try {
+      const cache = await redisClient.get(listCacheKey);
+      if (cache) {
+        return res.json(JSON.parse(cache));
+      }
+    } catch (redisError) {
+      console.error('Redis 读取展览列表缓存失败:', redisError);
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -513,7 +577,13 @@ router.get('/', async (req, res) => {
       };
     });
 
-    res.json({ data, pagination: { page: pageNum, pageSize: sizeNum, total: total || 0 } });
+    const payload = { data, pagination: { page: pageNum, pageSize: sizeNum, total: total || 0 } };
+    res.json(payload);
+    try {
+      await redisClient.setEx(listCacheKey, REDIS_EXHIBITION_LIST_TTL_SEC, JSON.stringify(payload));
+    } catch (redisError) {
+      console.error('Redis 写入展览列表缓存失败:', redisError);
+    }
   } catch (e) {
     console.error('get exhibitions failed:', e);
     res.status(500).json({ error: '获取展览列表失败' });
@@ -526,9 +596,13 @@ router.get('/:id', async (req, res) => {
     const exhibitionId = parsePositiveInt(req.params.id);
     if (!exhibitionId) return res.status(400).json({ error: '无效的展览ID' });
 
+    const cached = await getCachedExhibitionDetail(exhibitionId);
+    if (cached) return res.json(cached);
+
     const detail = await getExhibitionDetail(exhibitionId);
     if (!detail) return res.status(404).json({ error: '展览不存在' });
     res.json(detail);
+    await setCachedExhibitionDetail(exhibitionId, detail);
   } catch (e) {
     console.error('get exhibition detail failed:', e);
     res.status(500).json({ error: '获取展览详情失败' });
@@ -541,9 +615,15 @@ router.get('/:id/items', async (req, res) => {
     const exhibitionId = parsePositiveInt(req.params.id);
     if (!exhibitionId) return res.status(400).json({ error: '无效的展览ID' });
 
+    const cached = await getCachedExhibitionDetail(exhibitionId);
+    if (cached) {
+      return res.json({ items: cached.items, items_total: cached.items_total });
+    }
+
     const detail = await getExhibitionDetail(exhibitionId);
     if (!detail) return res.status(404).json({ error: '展览不存在' });
     res.json({ items: detail.items, items_total: detail.items_total });
+    await setCachedExhibitionDetail(exhibitionId, detail);
   } catch (e) {
     console.error('get exhibition items failed:', e);
     res.status(500).json({ error: '获取展览作品失败' });
@@ -555,11 +635,26 @@ router.get('/:id/live-photos', async (req, res) => {
   try {
     const exhibitionId = parsePositiveInt(req.params.id);
     if (!exhibitionId) return res.status(400).json({ error: '无效的展览ID' });
+
+    const cached = await getCachedExhibitionDetail(exhibitionId);
+    if (cached) {
+      const live_photos = cached.live_photos || [];
+      return res.json({
+        live_photos,
+        live_photos_total: cached.live_photos_total ?? live_photos.length,
+      });
+    }
+
     if (!(await ensureExhibitionExists(exhibitionId))) {
       return res.status(404).json({ error: '展览不存在' });
     }
-    const live_photos = await getLivePhotos(exhibitionId);
-    res.json({ live_photos, live_photos_total: live_photos.length });
+    const detail = await getExhibitionDetail(exhibitionId);
+    if (!detail) return res.status(404).json({ error: '展览不存在' });
+    res.json({
+      live_photos: detail.live_photos || [],
+      live_photos_total: detail.live_photos_total ?? (detail.live_photos || []).length,
+    });
+    await setCachedExhibitionDetail(exhibitionId, detail);
   } catch (e) {
     console.error('get exhibition live photos failed:', e);
     res.status(500).json({ error: '获取展览现场图失败' });
@@ -608,6 +703,7 @@ router.put('/:id/live-photos', authenticateToken, checkRole(['admin']), async (r
     }
 
     const live_photos = await getLivePhotos(exhibitionId);
+    await invalidateExhibitionDetailCache(exhibitionId);
     res.json({ message: '现场图已更新', live_photos, live_photos_total: live_photos.length });
   } catch (e) {
     console.error('replace exhibition live photos failed:', e);
@@ -674,6 +770,7 @@ router.post('/:id/live-photos', authenticateToken, checkRole(['admin']), async (
     }
 
     const live_photos = await getLivePhotos(exhibitionId);
+    await invalidateExhibitionDetailCache(exhibitionId);
     res.json({ message: '已追加现场图', live_photos, live_photos_total: live_photos.length });
   } catch (e) {
     console.error('append exhibition live photos failed:', e);
@@ -698,6 +795,7 @@ router.delete('/:exhibitionId/live-photos/:photoId', authenticateToken, checkRol
     }
 
     const live_photos = await getLivePhotos(exhibitionId);
+    await invalidateExhibitionDetailCache(exhibitionId);
     res.json({ message: '已删除', live_photos, live_photos_total: live_photos.length });
   } catch (e) {
     console.error('delete exhibition live photo failed:', e);
@@ -745,6 +843,7 @@ router.post('/', authenticateToken, checkRole(['admin']), async (req, res) => {
       ]
     );
 
+    await invalidateExhibitionListCaches();
     res.json({
       id: result.insertId,
       title: cleanTitle,
@@ -839,8 +938,11 @@ router.put('/:id', authenticateToken, checkRole(['admin']), async (req, res) => 
 
     if (!result || result.affectedRows === 0) return res.status(404).json({ error: '展览不存在' });
 
+    await invalidateExhibitionListCaches();
+    await invalidateExhibitionDetailCache(exhibitionId);
     const detail = await getExhibitionDetail(exhibitionId);
     res.json({ message: '更新成功', detail });
+    await setCachedExhibitionDetail(exhibitionId, detail);
   } catch (e) {
     console.error('update exhibition failed:', e);
     res.status(500).json({ error: '更新展览失败' });
@@ -981,6 +1083,7 @@ router.post('/:id/items', authenticateToken, checkRole(['admin']), async (req, r
       const insertedItemIds = await insertItemsAndArtists(connection, exhibitionId, normalized);
       await connection.commit();
       connection.release();
+      await invalidateExhibitionDetailCache(exhibitionId);
       res.json({ message: '已追加展览作品', inserted_item_ids: insertedItemIds, items_total: insertedItemIds.length });
     } catch (e) {
       await connection.rollback();
@@ -1028,8 +1131,10 @@ router.put('/:id/items', authenticateToken, checkRole(['admin']), async (req, re
       await connection.commit();
       connection.release();
 
+      await invalidateExhibitionDetailCache(exhibitionId);
       const detail = await getExhibitionDetail(exhibitionId);
       res.json({ message: '已替换展览作品', detail, inserted_item_ids: insertedItemIds });
+      await setCachedExhibitionDetail(exhibitionId, detail);
     } catch (e) {
       await connection.rollback();
       connection.release();
@@ -1095,8 +1200,10 @@ router.put('/:exhibitionId/items/:itemId/artists', authenticateToken, checkRole(
       await connection.commit();
       connection.release();
 
+      await invalidateExhibitionDetailCache(exhibitionId);
       const detail = await getExhibitionDetail(exhibitionId);
       res.json({ message: '艺术家关联已更新', item_id: itemId, detail });
+      await setCachedExhibitionDetail(exhibitionId, detail);
     } catch (e) {
       await connection.rollback();
       connection.release();
@@ -1143,6 +1250,7 @@ router.delete('/:exhibitionId/items/:itemId', authenticateToken, checkRole(['adm
       await connection.commit();
       connection.release();
 
+      await invalidateExhibitionDetailCache(exhibitionId);
       res.json({ message: '移除成功', exhibition_id: exhibitionId, item_id: itemId });
     } catch (e) {
       await connection.rollback();
