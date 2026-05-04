@@ -170,6 +170,12 @@ const { code } = req.body;
         // 3. 生成你自己系统的 token（如 JWT）
         const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
+        // 与 auth.authenticateToken 一致：写入会话表，登出或过期即吊销
+        await db.query(
+            'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))',
+            [user.id, token]
+        );
+
         // 4. 返回用户信息和 token, 过滤掉敏感字段
         return adminResult(200, {
             token,

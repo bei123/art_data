@@ -17,7 +17,7 @@ const generateToken = (userId) => {
   return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '24h' });
 };
 
-// 验证token中间件
+// 验证token中间件（JWT 与 user_sessions 一致：登出或过期会话即失效）
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -28,16 +28,47 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+
+    const [sessions] = await query(
+      'SELECT user_id FROM user_sessions WHERE token = ? AND expires_at > NOW() LIMIT 1',
+      [token]
+    );
+
+    if (!sessions || sessions.length === 0) {
+      return res.status(401).json({ error: '登录已失效，请重新登录' });
+    }
+
+    if (Number(sessions[0].user_id) !== Number(decoded.userId)) {
+      return res.status(403).json({ error: '无效的token' });
+    }
+
     const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
-    
-    if (users.length === 0) {
+
+    if (users.length > 0) {
+      req.user = users[0];
+      return next();
+    }
+
+    const [wxUsers] = await query(
+      'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
+      [decoded.userId]
+    );
+
+    if (!wxUsers || wxUsers.length === 0) {
       return res.status(401).json({ error: '用户不存在' });
     }
 
-    req.user = users[0];
+    req.user = { ...wxUsers[0], is_wx_user: true };
     next();
   } catch (error) {
-    return res.status(403).json({ error: '无效的token' });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: '登录已过期，请重新登录' });
+    }
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(403).json({ error: '无效的token' });
+    }
+    console.error('authenticateToken', error);
+    return res.status(500).json({ error: '认证服务暂时不可用' });
   }
 };
 
@@ -279,12 +310,23 @@ const login = async (req, res) => {
 // 获取当前用户信息
 const getCurrentUser = async (req, res) => {
   try {
-    const users = await query(
+    if (req.user.is_wx_user) {
+      return res.json({
+        id: req.user.id,
+        openid: req.user.openid,
+        nickname: req.user.nickname,
+        avatar: req.user.avatar,
+        phone: req.user.phone,
+        role: 'wx_user'
+      });
+    }
+
+    const [users] = await query(
       'SELECT u.id, u.username, u.email, r.name as role FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
       [req.user.id]
     );
 
-    if (users.length === 0) {
+    if (!users || users.length === 0) {
       return res.status(404).json({ error: '用户不存在' });
     }
 
