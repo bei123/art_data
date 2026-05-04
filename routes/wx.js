@@ -3,7 +3,9 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const multer = require('multer');
 const upload = multer();
+const { authenticateToken, checkRole } = require('../auth');
 const svc = require('../services/wxService');
+const logisticsSvc = require('../services/logisticsService');
 
 router.post('/getPhoneNumber', async (req, res) => {
     try {
@@ -254,6 +256,83 @@ router.put('/addresses/:id/default', async (req, res) => {
     } catch (error) {
         logger.error('设置默认地址失败', { err: error });
         res.status(500).json({ error: '设置默认地址服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 买家：查询本人订单运单轨迹（小程序；需登录，与 admin 的 getPath 分离） */
+router.post('/logistics/me/path', authenticateToken, async (req, res) => {
+    try {
+        const r = await logisticsSvc.getPathAsBuyer(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('买家查询运单轨迹失败', { err: error });
+        res.status(500).json({ error: '查询运单轨迹失败', detail: error.message });
+    }
+});
+
+/** 买家：获取本人订单运单数据/面单（小程序；需登录） */
+router.post('/logistics/me/order', authenticateToken, async (req, res) => {
+    try {
+        const r = await logisticsSvc.getOrderAsBuyer(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('买家获取运单数据失败', { err: error });
+        res.status(500).json({ error: '获取运单数据失败', detail: error.message });
+    }
+});
+
+/** 微信物流助手：支持的快递公司列表（需 admin，供发货页下拉） */
+router.get('/logistics/deliveries', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.getAllDelivery();
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取快递公司列表失败', { err: error });
+        res.status(500).json({ error: '获取快递公司列表服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信物流助手：生成运单 addOrder（需 admin） */
+router.post('/logistics/orders', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.addOrder(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('生成运单失败', { err: error });
+        res.status(500).json({ error: '生成运单服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信物流助手：查询运单轨迹 getPath（需 admin） */
+router.post('/logistics/path', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.getPath(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('查询运单轨迹失败', { err: error });
+        res.status(500).json({ error: '查询运单轨迹服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信物流助手：获取运单数据 getOrder（需 admin，含面单 BASE64） */
+router.post('/logistics/order/get', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.getOrder(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取运单数据失败', { err: error });
+        res.status(500).json({ error: '获取运单数据服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信物流助手：取消运单 cancelOrder（需 admin） */
+router.post('/logistics/order/cancel', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.cancelOrder(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('取消运单失败', { err: error });
+        res.status(500).json({ error: '取消运单服务暂时不可用', detail: error.message });
     }
 });
 

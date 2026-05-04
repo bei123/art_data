@@ -9,7 +9,7 @@ const OpenApi = require('@alicloud/openapi-client');
 const Util = require('@alicloud/tea-util');
 const Credential = require('@alicloud/credentials');
 const sharp = require('sharp');
-const redisClient = require('../utils/redisClient');
+const { getAccessToken } = require('./wechatMiniProgramToken');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 
@@ -58,23 +58,6 @@ function createDytnsClient() {
 }
 
 // 微信小程序获取手机号接口
-async function getAccessToken(appid, secret) {
-    const cacheKey = `wx:access_token:${appid}`;
-    // 先查redis
-    const cache = await redisClient.get(cacheKey);
-    if (cache) {
-        return cache;
-    }
-    // 没有缓存，请求微信
-    const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${appid}&secret=${secret}`;
-    const res = await axios.get(url);
-    const access_token = res.data.access_token;
-    const expires_in = res.data.expires_in || 7200;
-    // 写入redis，提前1分钟过期
-    await redisClient.setEx(cacheKey, expires_in - 60, access_token);
-    return access_token;
-}
-
 async function getPhoneNumberFromWx(code, access_token) {
     const url = `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${access_token}`;
     const res = await axios.post(url, { code });
