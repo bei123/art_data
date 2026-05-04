@@ -3,6 +3,16 @@
     <div class="header">
       <h3>订单管理</h3>
       <div class="filters">
+        <el-input
+          v-model="filters.keyword"
+          class="filter-search"
+          placeholder="订单号、微信交易号、用户昵称、订单摘要或用户ID"
+          clearable
+          style="width: 280px; margin-right: 10px;"
+          aria-label="搜索订单"
+          @clear="handleSearch"
+          @keyup.enter="handleSearch"
+        />
         <el-select v-model="filters.status" placeholder="订单状态" clearable style="width: 150px; margin-right: 10px;">
           <el-option label="全部" value="" />
           <el-option label="未支付" value="NOTPAY" />
@@ -18,7 +28,7 @@
           <el-option label="数字艺术品" value="digital" />
           <el-option label="原作" value="artwork" />
         </el-select>
-        <el-button type="primary" @click="fetchOrders">查询</el-button>
+        <el-button type="primary" @click="handleSearch">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
       </div>
     </div>
@@ -209,7 +219,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
@@ -226,6 +236,7 @@ const userStore = useUserStore()
 
 
 const filters = reactive({
+  keyword: '',
   status: '',
   type: ''
 })
@@ -241,6 +252,11 @@ const retryFetchOrders = () => {
   fetchOrders()
 }
 
+const handleSearch = () => {
+  pagination.page = 1
+  fetchOrders()
+}
+
 const fetchOrders = async () => {
   loading.value = true
   listError.value = ''
@@ -252,6 +268,15 @@ const fetchOrders = async () => {
     
     if (filters.status) {
       params.status = filters.status
+    }
+
+    if (filters.type) {
+      params.type = filters.type
+    }
+
+    const kw = typeof filters.keyword === 'string' ? filters.keyword.trim() : ''
+    if (kw) {
+      params.keyword = kw
     }
     
     // 后台管理页面，始终查询所有订单
@@ -276,6 +301,7 @@ const fetchOrders = async () => {
 }
 
 const resetFilters = () => {
+  filters.keyword = ''
   filters.status = ''
   filters.type = ''
   pagination.page = 1

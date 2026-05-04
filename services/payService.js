@@ -2126,11 +2126,20 @@ async function digitalIdentityPurchases(req) {
     }
 }
 
+function sanitizeOrderSearchKeyword(raw) {
+    if (raw == null || typeof raw !== 'string') return '';
+    const t = raw.trim().slice(0, 100);
+    if (!t) return '';
+    // 去掉 LIKE 通配符与反斜杠，避免恶意/误用模式匹配整表
+    return t.replace(/[%_\\]/g, '');
+}
+
 async function adminOrders(req) {
     try {
         const {
             status,
             type,
+            keyword,
             page = 1,
             limit = 20
         } = req.query;
@@ -2147,28 +2156,60 @@ async function adminOrders(req) {
             return adminResult(400, { error: '无效的订单状态' });
         }
 
+        const cleanType = type && String(type).trim() ? String(type).trim() : null;
+        if (cleanType && !['right', 'digital', 'artwork'].includes(cleanType)) {
+            return adminResult(400, { error: '无效的商品类型' });
+        }
+
         // 清理输入
         const cleanPage = parseInt(page);
         const cleanLimit = parseInt(limit);
         const cleanStatus = status ? status.trim() : null;
+        const cleanKeyword = sanitizeOrderSearchKeyword(keyword != null ? String(keyword) : '');
 
-        // 构建查询条件
-        let query = `
-            SELECT o.*, u.nickname as user_nickname, u.avatar as user_avatar
+        // 构建查询条件（列表与计数使用相同 JOIN / WHERE，保证分页 total 一致）
+        const fromSql = `
             FROM orders o
             LEFT JOIN wx_users u ON o.user_id = u.id
         `;
-        let countQuery = 'SELECT COUNT(*) as total FROM orders o';
-        let params = [];
-        let countParams = [];
+        const whereParts = [];
+        const whereParams = [];
 
-        // 添加状态筛选
         if (cleanStatus) {
-            query += ' WHERE o.trade_state = ?';
-            countQuery += ' WHERE o.trade_state = ?';
-            params.push(cleanStatus);
-            countParams.push(cleanStatus);
+            whereParts.push('o.trade_state = ?');
+            whereParams.push(cleanStatus);
         }
+
+        if (cleanType) {
+            whereParts.push(
+                'EXISTS (SELECT 1 FROM order_items oi_f WHERE oi_f.order_id = o.id AND oi_f.type = ?)'
+            );
+            whereParams.push(cleanType);
+        }
+
+        if (cleanKeyword) {
+            const likeVal = `%${cleanKeyword}%`;
+            const idClause = /^\d+$/.test(cleanKeyword) ? ' OR o.user_id = ?' : '';
+            whereParts.push(`(
+                o.out_trade_no LIKE ?
+                OR (o.transaction_id IS NOT NULL AND o.transaction_id LIKE ?)
+                OR (u.nickname IS NOT NULL AND u.nickname LIKE ?)
+                OR (o.body IS NOT NULL AND o.body LIKE ?)${idClause}
+            )`);
+            whereParams.push(likeVal, likeVal, likeVal, likeVal);
+            if (idClause) whereParams.push(parseInt(cleanKeyword, 10));
+        }
+
+        const whereSql = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
+
+        let query = `
+            SELECT o.*, u.nickname as user_nickname, u.avatar as user_avatar
+            ${fromSql}
+            ${whereSql}
+        `;
+        let countQuery = `SELECT COUNT(*) as total ${fromSql} ${whereSql}`;
+        const params = [...whereParams];
+        const countParams = [...whereParams];
 
         // 添加排序和分页
         query += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
