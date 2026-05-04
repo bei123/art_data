@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/upload-logo', upload.single('file'), async (req, res) => {
+router.post('/upload-logo', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const r = await svc.uploadMerchantLogo(req.file);
     return res.status(r.status).json(r.body);
@@ -55,7 +55,7 @@ router.post('/upload-logo', upload.single('file'), async (req, res) => {
   }
 });
 
-router.post('/upload-images', upload.array('images', 10), async (req, res) => {
+router.post('/upload-images', authenticateToken, upload.array('images', 10), async (req, res) => {
   try {
     const r = await svc.uploadMerchantImages(req.files);
     return res.status(r.status).json(r.body);

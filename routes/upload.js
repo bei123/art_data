@@ -3,12 +3,13 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const multer = require('multer');
 const { uploadToOSS } = require('../config/oss');
+const { authenticateToken } = require('../auth');
 
 // 用 multer 处理 form-data 文件
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-router.post('/', upload.single('file'), async (req, res) => {
+router.post('/', authenticateToken, upload.single('file'), async (req, res) => {
   console.log('收到上传请求，req.file:', req.file);
   if (!req.file) {
     logger.error('没有收到文件');
