@@ -562,7 +562,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
+import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -600,7 +600,7 @@ const isCoverDragOver = ref(false)
 
 const getImageUrl = (url) => {
   if (!url) return ''
-  if (url.startsWith('https://wx.oss.2000gallery.art/')) return url
+  if (isOssPublicUrl(url)) return url
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
 }
 

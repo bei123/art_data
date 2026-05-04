@@ -1,7 +1,23 @@
-// API配置
-const API_BASE_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:2000'
-  : 'https://api.wx.2000gallery.art:2000';
+function trimTrailingSlash(s) {
+  return String(s || '').replace(/\/+$/, '');
+}
+
+const env = import.meta.env;
+
+/** 浏览器访问的后端 API 根（无尾斜杠），与 axios baseURL 拼接 /api 使用 */
+const API_BASE_URL = trimTrailingSlash(
+  env.VITE_PUBLIC_API_BASE_URL ||
+    env.VITE_API_BASE_URL ||
+    (env.MODE === 'development' ? 'http://localhost:2000' : 'https://api.wx.2000gallery.art:2000')
+);
+
+/** OSS 自定义域名根（无尾斜杠），用于判断展示用绝对图链 */
+const OSS_PUBLIC_ORIGIN = trimTrailingSlash(env.VITE_OSS_PUBLIC_ORIGIN || 'https://wx.oss.2000gallery.art');
+
+export function isOssPublicUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.startsWith(`${OSS_PUBLIC_ORIGIN}/`);
+}
 
 // 导出配置
 export const CONFIG = {
@@ -29,9 +45,9 @@ export const CONFIG = {
     withCredentials: true,
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      Accept: 'application/json'
     }
   }
 };
 
-export { API_BASE_URL }; 
+export { API_BASE_URL, OSS_PUBLIC_ORIGIN };

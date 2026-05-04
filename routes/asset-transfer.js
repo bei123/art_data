@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const axios = require('axios');
 
 /**
@@ -139,7 +140,7 @@ router.post('/transfer', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('资产过户失败:', error);
+    logger.error('资产过户失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -224,7 +225,7 @@ router.post('/callback', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('处理资产过户回调失败:', error);
+    logger.error('处理资产过户回调失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -270,7 +271,7 @@ router.get('/status/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('查询资产过户状态失败:', error);
+    logger.error('查询资产过户状态失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -321,7 +322,7 @@ router.post('/details', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取资产过户详情失败:', error);
+    logger.error('获取资产过户详情失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -392,7 +393,7 @@ router.get('/currencies', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('获取币种列表失败:', error);
+    logger.error('获取币种列表失败:', { err: error })
 
     res.status(500).json({
       code: 500,

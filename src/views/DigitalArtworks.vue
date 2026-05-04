@@ -294,7 +294,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
+import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const artworks = ref([])
@@ -814,7 +814,7 @@ const beforeImageUpload = async (file) => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
-  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
+  if (isOssPublicUrl(url)) {
     return url;
   }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;

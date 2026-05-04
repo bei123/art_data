@@ -142,26 +142,70 @@ redisClient.setEx = async function(key, ttl, value) {
     }
 };
 
-redisClient.del = async function(key) {
+/**
+ * 规范化 DEL 参数：支持 del('a','b')、del(['a','b'])，与 node-redis 多键删除一致
+ */
+function normalizeDelKeyArgs(args) {
+    if (!args || args.length === 0) return [];
+    if (args.length === 1 && Array.isArray(args[0])) {
+        return args[0].flat().filter((k) => k != null && k !== '');
+    }
+    return args.flat().filter((k) => k != null && k !== '');
+}
+
+redisClient.del = async function (...args) {
+    const keyList = normalizeDelKeyArgs(args);
     const startTime = Date.now();
     redisMetrics.totalRequests++;
-    
+
     try {
-        const result = await originalDel(key);
+        if (keyList.length === 0) {
+            return 0;
+        }
+        const result = await originalDel(keyList);
         const responseTime = Date.now() - startTime;
         redisMetrics.responseTimes.push(responseTime);
-        
-        // 记录慢查询
+
         if (responseTime > 100) {
-            console.warn(`Redis慢查询: ${responseTime}ms - DEL ${key}`);
+            const preview = keyList.length > 3 ? `${keyList.slice(0, 3).join(',')}...(${keyList.length} keys)` : keyList.join(',');
+            console.warn(`Redis慢查询: ${responseTime}ms - DEL ${preview}`);
         }
-        
+
         return result;
     } catch (error) {
         redisMetrics.errors++;
-        console.error(`Redis DEL错误: ${error.message} - key: ${key}`);
+        console.error(`Redis DEL错误: ${error.message} - keys: ${keyList.length}`);
         throw error;
     }
+};
+
+/** SCAN 每次返回 key 数量 hint（避免 KEYS 阻塞） */
+const SCAN_COUNT_DEFAULT = Math.min(1000, Math.max(50, parseInt(process.env.REDIS_SCAN_COUNT || '200', 10) || 200));
+
+/**
+ * 按 glob pattern 删除键（SCAN + 批量 DEL，生产环境勿用 KEYS）
+ * @param {string} pattern 如 exhibitions:list:*、artworks:list*
+ * @param {{ COUNT?: number }} [options]
+ * @returns {Promise<number>} 删除的 key 数量（估算为本次 DEL 的 key 数之和）
+ */
+redisClient.scanDelByPattern = async function scanDelByPattern(pattern, options = {}) {
+    const COUNT = options.COUNT || SCAN_COUNT_DEFAULT;
+    let cursor = '0';
+    let deleted = 0;
+    try {
+        do {
+            const reply = await redisClient.scan(cursor, { MATCH: pattern, COUNT });
+            cursor = String(reply.cursor);
+            const keys = reply.keys || [];
+            if (keys.length) {
+                await redisClient.del(keys);
+                deleted += keys.length;
+            }
+        } while (cursor !== '0');
+    } catch (error) {
+        console.error(`Redis scanDelByPattern 失败 pattern=${pattern}:`, error.message);
+    }
+    return deleted;
 };
 
 // 获取性能统计
@@ -192,6 +236,24 @@ setInterval(() => {
     const metrics = redisClient.getMetrics();
     console.log('Redis性能统计:', metrics);
 }, 5 * 60 * 1000); // 每5分钟输出一次
+
+/**
+ * 供负载均衡 / 编排探活：尝试连接并 PING，不暴露敏感配置。
+ */
+async function checkRedisHealth() {
+    try {
+        if (!redisClient.isOpen) {
+            await redisClient.connect();
+        }
+        const start = Date.now();
+        await redisClient.ping();
+        return { ok: true, latency_ms: Date.now() - start };
+    } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+    }
+}
+
+redisClient.checkRedisHealth = checkRedisHealth;
 
 // 连接Redis
 redisClient.connect().catch(console.error);

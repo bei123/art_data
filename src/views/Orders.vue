@@ -191,7 +191,7 @@
 import { ref, onMounted, reactive, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
+import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { useUserStore } from '../stores/user'
 import { Location } from '@element-plus/icons-vue'
 
@@ -273,7 +273,7 @@ const handleDetailClose = () => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
-  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
+  if (isOssPublicUrl(url)) {
     return url;
   }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;

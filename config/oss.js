@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { OSS_PUBLIC_ORIGIN } = require('./publicEnv');
 const OSS = require('ali-oss');
 const { v4: uuidv4 } = require('uuid');
 const http = require('http');
@@ -122,7 +123,7 @@ const uploadToOSS = async (file, prefix = '') => {
         });
 
         // 生成公开访问的 URL（使用自定义域名）
-        const downloadUrl = `https://wx.oss.2000gallery.art/${ossPath}`;
+        const downloadUrl = `${OSS_PUBLIC_ORIGIN}/${ossPath}`;
 
         return {
             url: downloadUrl,

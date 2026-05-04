@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const axios = require('axios');
 
 /**
@@ -59,7 +60,7 @@ router.post('/create', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('创建发行铸造失败:', error);
+    logger.error('创建发行铸造失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -136,7 +137,7 @@ router.put('/update/:id', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('更新发行铸造失败:', error);
+    logger.error('更新发行铸造失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -211,7 +212,7 @@ router.delete('/delete/:id', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('删除发行铸造失败:', error);
+    logger.error('删除发行铸造失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -311,7 +312,7 @@ router.get('/list', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取发行铸造列表失败:', error);
+    logger.error('获取发行铸造列表失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -550,7 +551,7 @@ router.post('/product/insert', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('产品信息录入失败:', error);
+    logger.error('产品信息录入失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -650,7 +651,7 @@ router.post('/assets/list', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取已铸造资产列表失败:', error);
+    logger.error('获取已铸造资产列表失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -719,7 +720,7 @@ router.post('/product/details', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取产品铸造详情失败:', error);
+    logger.error('获取产品铸造详情失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -794,7 +795,7 @@ router.get('/detail/:id', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取发行铸造详情失败:', error);
+    logger.error('获取发行铸造详情失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {

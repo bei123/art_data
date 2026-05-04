@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const multer = require('multer');
 const { uploadToOSS } = require('../config/oss');
 
@@ -10,7 +11,7 @@ const upload = multer({ storage: storage });
 router.post('/', upload.single('file'), async (req, res) => {
   console.log('收到上传请求，req.file:', req.file);
   if (!req.file) {
-    console.error('没有收到文件');
+    logger.error('没有收到文件');
     return res.json({ errno: 1, message: '没有收到文件' });
   }
   try {
@@ -26,7 +27,7 @@ router.post('/', upload.single('file'), async (req, res) => {
       name: result.name // 关键：加上 name 字段，兼容 el-upload
     });
   } catch (e) {
-    console.error('OSS 上传异常:', e);
+    logger.error('OSS 上传异常', { err: e });
     res.json({ errno: 1, message: '上传失败' });
   }
 });

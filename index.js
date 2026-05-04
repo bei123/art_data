@@ -3,6 +3,10 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const db = require('./db');
+const redisClient = require('./utils/redisClient');
+const { requestContextMiddleware } = require('./middleware/requestContext');
+const logger = require('./utils/logger');
+const { sendErrorResponse } = require('./utils/apiErrors');
 const https = require('https');
 const fs = require('fs');
 const { body } = require('express-validator');
@@ -12,6 +16,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const xml2js = require('xml2js');
 const { uploadToOSS } = require('./config/oss');
+const { PUBLIC_API_BASE_URL } = require('./config/publicEnv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const wxRouter = require('./routes/wx');
@@ -70,15 +75,24 @@ app.use(helmet({
   }
 }));
 
+app.use(requestContextMiddleware);
+
 // 速率限制配置
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1分钟
   max: 10000, // 限制每个IP 1分钟内最多10000个请求
-  message: {
-    error: '请求过于频繁，请稍后再试'
-  },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) =>
+    req.method === 'GET' &&
+    (req.path === '/health' || req.path === '/health/live'),
+  handler: (req, res) => {
+    res.status(429).json({
+      error: '请求过于频繁，请稍后再试',
+      code: 'RATE_LIMIT',
+      request_id: req.requestId || null,
+    });
+  },
 });
 
 // 对API路由应用速率限制
@@ -88,11 +102,15 @@ app.use('/api/', limiter);
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15分钟
   max: 10, // 限制每个IP 15分钟内最多5次登录尝试
-  message: {
-    error: '登录尝试过于频繁，请稍后再试'
-  },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: '登录尝试过于频繁，请稍后再试',
+      code: 'LOGIN_RATE_LIMIT',
+      request_id: req.requestId || null,
+    });
+  },
 });
 
 app.use('/api/auth/login', loginLimiter);
@@ -122,15 +140,15 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, origin);
     } else {
-      // 记录被拒绝的 origin 以便调试
-      console.warn('CORS rejected origin:', origin);
+      // 记录被拒绝的 origin 以便调试（结构化）
+      logger.warn('cors_rejected', { origin });
       callback(new Error('CORS not allowed'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-External-Authorization', 'x-external-authorization'],
-  exposedHeaders: ['Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization'],
+  exposedHeaders: ['Authorization', 'X-Request-Id']
 }));
 
 // 请求体大小限制
@@ -142,6 +160,41 @@ app.use(express.json());
 
 // 解析URL编码的请求体
 app.use(express.urlencoded({ extended: true }));
+
+async function apiHealthHandler(req, res) {
+  const [dbHealth, redisHealth] = await Promise.all([
+    db.checkPoolHealth(),
+    redisClient.checkRedisHealth(),
+  ]);
+  const dbOk = dbHealth.healthy === true;
+  const redisOk = redisHealth.ok === true;
+  const ok = dbOk && redisOk;
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'ok' : 'degraded',
+    timestamp: new Date().toISOString(),
+    request_id: req.requestId || null,
+    checks: {
+      database: {
+        healthy: dbOk,
+        ...(dbHealth.error ? { error: dbHealth.error } : {}),
+      },
+      redis: redisOk
+        ? {
+            ok: true,
+            ...(redisHealth.latency_ms != null
+              ? { latency_ms: redisHealth.latency_ms }
+              : {}),
+          }
+        : {
+            ok: false,
+            ...(redisHealth.error ? { error: redisHealth.error } : {}),
+          },
+    },
+  });
+}
+
+app.get('/api/health', apiHealthHandler);
+app.get('/api/health/live', apiHealthHandler);
 
 // 静态文件服务
 app.use('/uploads', express.static('uploads'));
@@ -156,9 +209,6 @@ const sslOptions = {
   key: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.key')),
   cert: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.pem'))
 };
-
-// 添加基础URL配置
-const BASE_URL = 'https://api.wx.2000gallery.art:2000';
 
 // 配置文件上传 - 使用内存存储
 const storage = multer.memoryStorage();
@@ -337,41 +387,25 @@ app.use('/api/webview', webviewRouter);
 
 // 全局错误处理中间件
 app.use((err, req, res, next) => {
-  console.error('未处理的错误:', err);
-  
-  // 根据错误类型返回不同的响应
-  if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: '文件大小超过限制' });
+  if (res.headersSent) {
+    return next(err);
   }
-  
-  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-    return res.status(400).json({ error: '不支持的文件类型' });
-  }
-  
-  if (err.message && err.message.includes('文件')) {
-    return res.status(400).json({ error: err.message });
-  }
-  
-  // 处理 CORS 错误
-  if (err.message === 'CORS not allowed') {
-    return res.status(403).json({ 
-      error: 'CORS策略不允许此来源',
-      message: 'Access denied by CORS policy'
-    });
-  }
-  
-  // 默认错误响应
-  res.status(500).json({ error: '服务器内部错误' });
+  logger.error('unhandled_error', { err, request_id: req.requestId });
+  return sendErrorResponse(res, err, req);
 });
 
 // 404处理
 app.use('*', (req, res) => {
-  res.status(404).json({ error: '接口不存在' });
+  res.status(404).json({
+    error: '接口不存在',
+    code: 'NOT_FOUND',
+    request_id: req.requestId || null,
+  });
 });
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
 https.createServer(sslOptions, app).listen(PORT, () => {
-  console.log(`HTTPS服务器运行在端口 ${PORT}`);
+  console.log(`HTTPS服务器运行在端口 ${PORT}，PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL}`);
 });
 

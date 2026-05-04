@@ -145,7 +145,7 @@
                        <el-upload
               class="avatar-uploader"
               :class="{ 'uploading': isUploading }"
-              :action="`${baseUrl}/api/upload`"
+              :action="`${API_BASE_URL}/api/upload`"
               :show-file-list="false"
               :on-success="handleUploadSuccess"
               :before-upload="beforeUpload"
@@ -351,11 +351,11 @@ import { Plus, Search, Picture, Upload } from '@element-plus/icons-vue'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import { API_BASE_URL } from '../config'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 
 const router = useRouter()
-const baseUrl = 'https://api.wx.2000gallery.art:2000'
 const artworks = ref([])
 const dialogVisible = ref(false)
 const dialogType = ref('add')
@@ -699,12 +699,12 @@ const fetchArtworks = async () => {
 
       // 处理图片URL
       if (artwork.image && !artwork.image.startsWith('http')) {
-        artwork.image = `${baseUrl}${artwork.image}`
+        artwork.image = `${API_BASE_URL}${artwork.image}`
       }
 
       // 处理艺术家头像
       if (artwork.artist && artwork.artist.avatar && !artwork.artist.avatar.startsWith('http')) {
-        artwork.artist.avatar = `${baseUrl}${artwork.artist.avatar}`
+        artwork.artist.avatar = `${API_BASE_URL}${artwork.artist.avatar}`
       }
 
 
@@ -951,7 +951,7 @@ const customUpload = async (options) => {
   formData.append('file', file);
 
   try {
-    const response = await axios.post(`${baseUrl}/api/upload`, formData, {
+    const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -1212,7 +1212,7 @@ const fetchSearchResults = async () => {
 
       // 处理图片URL
       if (artwork.image && !artwork.image.startsWith('http')) {
-        artwork.image = `${baseUrl}${artwork.image}`
+        artwork.image = `${API_BASE_URL}${artwork.image}`
       }
 
 

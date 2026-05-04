@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const axios = require('axios');
 
 /**
@@ -82,7 +83,7 @@ router.post('/records', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取交易记录失败:', error);
+    logger.error('获取交易记录失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -155,7 +156,7 @@ router.get('/detail/:id', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('获取交易记录详情失败:', error);
+    logger.error('获取交易记录详情失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -206,7 +207,7 @@ router.get('/statistics', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('获取交易统计信息失败:', error);
+    logger.error('获取交易统计信息失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -263,7 +264,7 @@ router.post('/export', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('导出交易记录失败:', error);
+    logger.error('导出交易记录失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -298,7 +299,7 @@ router.get('/types', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('获取交易类型列表失败:', error);
+    logger.error('获取交易类型列表失败:', { err: error })
 
     res.status(500).json({
       code: 500,

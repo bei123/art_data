@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
+const logger = require('../utils/logger');
 
 /**
  * WebView 代理接口
@@ -578,7 +579,7 @@ router.get('/proxy', async (req, res) => {
     res.status(response.status).send(htmlContent);
 
   } catch (error) {
-    console.error('代理请求失败:', error);
+    logger.error('代理请求失败:', { err: error })
     
     if (error.response) {
       // 如果目标服务器返回了错误，转发错误信息和状态码

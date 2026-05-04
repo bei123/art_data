@@ -40,6 +40,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import { API_BASE_URL } from '../config'
 
 const route = useRoute()
 const loading = ref(false)
@@ -50,12 +51,10 @@ const merchant = ref({
   images: []
 })
 
-const baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.wx.2000gallery.art:2000'
-
 const fetchMerchantDetail = async () => {
   loading.value = true
   try {
-    const response = await axios.get(`${baseUrl}/api/merchants/${route.params.id}`)
+    const response = await axios.get(`${API_BASE_URL}/api/merchants/${route.params.id}`)
     merchant.value = response.data.data
   } catch (error) {
     ElMessage.error('获取商家详情失败')

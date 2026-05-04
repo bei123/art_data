@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const axios = require('axios');
 const crypto = require('crypto');
 const querystring = require('querystring');
@@ -103,7 +104,7 @@ router.post('/user/generate-app-info', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('生成appInfo失败:', error);
+    logger.error('生成appInfo失败:', { err: error })
     res.status(500).json({
       error: '服务器内部错误'
     });
@@ -153,7 +154,7 @@ router.post('/user/get-token', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取访问令牌失败:', error);
+    logger.error('获取访问令牌失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -241,7 +242,7 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取手机验证码失败:', error);
+    logger.error('获取手机验证码失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -571,7 +572,7 @@ router.post('/user/login', async (req, res) => {
                     );
                     console.log('已更新Redis缓存, usn:', externalUser.usn, 'wx_user_id:', wxUserId);
                   } catch (redisError) {
-                    console.error('Redis缓存更新失败:', redisError);
+                    logger.error('Redis缓存更新失败:', { err: redisError })
                     // Redis错误不影响主要流程
                   }
                 } else {
@@ -674,7 +675,7 @@ router.post('/user/login', async (req, res) => {
                 );
                 console.log('已写入Redis缓存, usn:', externalUser.usn, 'wx_user_id:', wxUserId);
               } catch (redisError) {
-                console.error('Redis缓存写入失败:', redisError);
+                logger.error('Redis缓存写入失败:', { err: redisError })
                 // Redis错误不影响主要流程
               }
             }
@@ -682,7 +683,7 @@ router.post('/user/login', async (req, res) => {
         }
       } catch (dbError) {
         // 数据库操作失败不影响登录流程，只记录错误
-        console.error('保存用户数据到数据库失败:', dbError);
+        logger.error('保存用户数据到数据库失败:', { err: dbError })
         // 继续返回登录响应
       }
     }
@@ -691,20 +692,7 @@ router.post('/user/login', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('用户登录失败:', error);
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      } : null,
-      request: error.request ? {
-        method: error.config?.method,
-        url: error.config?.url,
-        data: error.config?.data
-      } : null
-    });
+    logger.error('用户登录失败', { err: error });
 
     // 处理不同类型的错误
     if (error.response) {
@@ -882,20 +870,7 @@ router.post('/user/register', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('用户注册失败:', error);
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      } : null,
-      request: error.request ? {
-        method: error.config?.method,
-        url: error.config?.url,
-        data: error.config?.data
-      } : null
-    });
+    logger.error('用户注册失败', { err: error });
 
     if (error.response) {
       const statusCode = error.response.status || 500;
@@ -962,7 +937,7 @@ router.post('/asset-types/save', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('调用外部资产类型保存接口失败:', error);
+    logger.error('调用外部资产类型保存接口失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -1076,7 +1051,7 @@ router.get('/assets/list', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取用户资产列表失败:', error);
+    logger.error('获取用户资产列表失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -1126,7 +1101,7 @@ router.get('/asset-types/list', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取外部资产类型列表失败:', error);
+    logger.error('获取外部资产类型列表失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -1197,7 +1172,7 @@ router.put('/asset-types/:id', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('更新外部资产类型失败:', error);
+    logger.error('更新外部资产类型失败:', { err: error })
 
     if (error.response) {
       res.status(error.response.status).json({
@@ -1236,7 +1211,7 @@ router.delete('/asset-types/:id', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('删除外部资产类型失败:', error);
+    logger.error('删除外部资产类型失败:', { err: error })
 
     if (error.response) {
       res.status(error.response.status).json({
@@ -1292,7 +1267,7 @@ router.all('/proxy/*', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('外部API代理调用失败:', error);
+    logger.error('外部API代理调用失败:', { err: error })
 
     if (error.response) {
       res.status(error.response.status).json({
@@ -1376,7 +1351,7 @@ router.post('/order/list', async (req, res) => {
     res.status(response.status).json(response.data);
 
   } catch (error) {
-    console.error('获取订单列表失败:', error);
+    logger.error('获取订单列表失败:', { err: error })
 
     if (error.response) {
       // 外部API返回了错误响应
@@ -1469,7 +1444,7 @@ router.post('/order/detail', async (req, res) => {
     res.status(response.status).json(response.data);
 
   } catch (error) {
-    console.error('获取订单详情失败:', error);
+    logger.error('获取订单详情失败:', { err: error })
 
     if (error.response) {
       // 外部API返回了错误响应
@@ -1562,7 +1537,7 @@ router.post('/order/cancel', async (req, res) => {
     res.status(response.status).json(response.data);
 
   } catch (error) {
-    console.error('取消订单失败:', error);
+    logger.error('取消订单失败:', { err: error })
 
     if (error.response) {
       // 外部API返回了错误响应

@@ -275,7 +275,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
+import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
@@ -621,7 +621,7 @@ const removeRule = (index) => {
 
 const getImageUrl = (url) => {
   if (!url) return '';
-  if (url.startsWith('https://wx.oss.2000gallery.art/')) {
+  if (isOssPublicUrl(url)) {
     return url;
   }
   return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
@@ -644,7 +644,7 @@ const saveEdit = async () => {
       rich_text: richTextHtml.value,
       images: form.value.images.map(image => {
         if (typeof image === 'string') {
-          if (image.startsWith('https://wx.oss.2000gallery.art/')) {
+          if (isOssPublicUrl(image)) {
             return image;
           }
           if (image.startsWith('http')) {

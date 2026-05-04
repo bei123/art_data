@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const redisClient = require('../utils/redisClient');
@@ -38,13 +39,13 @@ router.get('/', async (req, res) => {
     try {
       await redisClient.setEx(REDIS_HOME_TITLES_KEY, 3600, JSON.stringify(titleData));
     } catch (redisError) {
-      console.error('Redis缓存写入失败:', redisError);
+      logger.error('Redis缓存写入失败:', { err: redisError })
       // Redis错误不影响API响应
     }
 
     res.json(titleData);
   } catch (error) {
-    console.error('获取首页标题失败:', error);
+    logger.error('获取首页标题失败:', { err: error })
     // 出错时返回默认值
     res.json({
       main_title: '千年时间文化艺术中心',
@@ -96,7 +97,7 @@ router.put('/', authenticateToken, async (req, res) => {
     try {
       await redisClient.del(REDIS_HOME_TITLES_KEY);
     } catch (redisError) {
-      console.error('Redis缓存清除失败:', redisError);
+      logger.error('Redis缓存清除失败:', { err: redisError })
       // Redis错误不影响API响应
     }
 
@@ -108,7 +109,7 @@ router.put('/', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('更新首页标题失败:', error);
+    logger.error('更新首页标题失败:', { err: error })
     res.status(500).json({ error: '更新首页标题失败' });
   }
 });

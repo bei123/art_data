@@ -1,5 +1,7 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
+const logger = require('./utils/logger');
+const { getRequestId } = require('./middleware/requestContext');
 
 // 数据库配置 - 最简化版本（只使用MySQL2核心支持的选项）
 const dbConfig = {
@@ -84,9 +86,13 @@ const query = async (sql, params) => {
         const results = await pool.query(sql, params);
         const queryTime = Date.now() - startTime;
         
-        // 记录慢查询
+        // 记录慢查询（结构化，带 request_id 便于关联）
         if (queryTime > 1000) {
-            console.warn(`慢查询警告: ${queryTime}ms - ${sql.substring(0, 200)}...`);
+            logger.warn('slow_query', {
+                request_id: getRequestId(),
+                query_ms: queryTime,
+                sql_preview: sql.substring(0, 200),
+            });
         }
         
         if (process.env.NODE_ENV === 'development') {
@@ -96,9 +102,12 @@ const query = async (sql, params) => {
         return results;
     } catch (error) {
         const queryTime = Date.now() - startTime;
-        console.error(`数据库查询错误 (${queryTime}ms):`, error);
-        console.error('SQL:', sql);
-        console.error('参数:', params);
+        logger.error('db_query_error', {
+            request_id: getRequestId(),
+            query_ms: queryTime,
+            sql_preview: sql.substring(0, 200),
+            err: error,
+        });
         
         // 如果是连接池关闭错误，提供更详细的错误信息
         if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {

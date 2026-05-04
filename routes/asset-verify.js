@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const axios = require('axios');
 
 /**
@@ -83,7 +84,7 @@ router.get('/scan', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('资产查证失败:', error);
+    logger.error('资产查证失败:', { err: error })
 
     // 处理不同类型的错误
     if (error.response) {
@@ -151,7 +152,7 @@ router.post('/generate-info', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('生成查证信息失败:', error);
+    logger.error('生成查证信息失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -242,7 +243,7 @@ router.post('/batch-scan', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('批量资产查证失败:', error);
+    logger.error('批量资产查证失败:', { err: error })
 
     res.status(500).json({
       code: 500,
@@ -318,7 +319,7 @@ router.get('/history', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('获取查证历史记录失败:', error);
+    logger.error('获取查证历史记录失败:', { err: error })
 
     res.status(500).json({
       code: 500,

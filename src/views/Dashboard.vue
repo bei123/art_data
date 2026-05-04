@@ -108,7 +108,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import axios from '../utils/axios'
-import { API_BASE_URL } from '../config'
+import { API_BASE_URL, isOssPublicUrl } from '../config'
 
 const stats = ref({
   originalArtworks: 0,
@@ -121,7 +121,7 @@ const recentDigitalArtworks = ref([])
 
 const getImageUrl = (url) => {
   if (!url) return ''
-  if (url.startsWith('https://wx.oss.2000gallery.art/')) return url
+  if (isOssPublicUrl(url)) return url
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
 }
 

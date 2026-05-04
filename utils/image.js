@@ -1,6 +1,4 @@
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://api.wx.2000gallery.art:2000'
-  : 'http://localhost:2000';
+const { PUBLIC_API_BASE_URL: API_BASE_URL } = require('../config/publicEnv');
 
 /**
  * 处理图片URL，不再添加WebP转换参数

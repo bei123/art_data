@@ -346,8 +346,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from 'axios'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
-
-const baseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.wx.2000gallery.art:2000'
+import { API_BASE_URL } from '../config'
 
 // Logo上传相关状态
 const logoInput = ref(null)
@@ -380,12 +379,12 @@ const progressColors = [
 const getImageUrl = (url) => {
   if (!url) return ''
   if (url.startsWith('http')) return url
-  return `${baseUrl}${url}`
+  return `${API_BASE_URL}${url}`
 }
 
 // 创建axios实例
 const request = axios.create({
-  baseURL: baseUrl,
+  baseURL: API_BASE_URL,
   timeout: 15000
 })
 
@@ -417,8 +416,8 @@ request.interceptors.response.use(
 )
 
 // 修改上传组件的action
-const uploadAction = `${baseUrl}/api/merchants/upload-logo`
-const uploadImagesAction = `${baseUrl}/api/merchants/upload-images`
+const uploadAction = `${API_BASE_URL}/api/merchants/upload-logo`
+const uploadImagesAction = `${API_BASE_URL}/api/merchants/upload-images`
 
 const merchants = ref([])
 const loading = ref(false)

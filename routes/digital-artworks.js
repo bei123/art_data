@@ -1,9 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger');
 const axios = require('axios');
 const db = require('../db');
 const { authenticateToken } = require('../auth');
 const { processObjectImages } = require('../utils/image');
+const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
 const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
@@ -50,7 +52,7 @@ router.get('/health', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('健康检查失败:', error);
+    logger.error('健康检查失败', { err: error });
     res.status(500).json({
       status: 'error',
       timestamp: new Date().toISOString(),
@@ -58,20 +60,6 @@ router.get('/health', async (req, res) => {
     });
   }
 });
-
-// 验证图片URL的函数
-function validateImageUrl(url) {
-  if (!url) return false;
-  if (url.startsWith('/uploads/') || url.startsWith('https://wx.oss.2000gallery.art/')) {
-    return true;
-  }
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname === 'wx.oss.2000gallery.art';
-  } catch (e) {
-    return false;
-  }
-}
 
 /**
  * 获取外部API授权信息（统一使用测试token）
@@ -113,7 +101,7 @@ function parseIssueInfo(issueInfoStr) {
   try {
     return typeof issueInfoStr === 'string' ? JSON.parse(issueInfoStr) : issueInfoStr;
   } catch (e) {
-    console.error('解析 issueInfo 失败:', e);
+    logger.error('解析 issueInfo 失败', { err: e });
     return null;
   }
 }
@@ -199,7 +187,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     res.json(artworksWithProcessedImages);
   } catch (error) {
-    console.error('获取数字艺术品列表失败:', error);
+    logger.error('获取数字艺术品列表失败', { err: error });
 
     // 检查是否是连接池问题
     if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
@@ -248,7 +236,7 @@ router.get('/admin/:id/wespace-details', authenticateToken, async (req, res) => 
       message: '尚未同步到 details 数据，请等待定时同步或检查 goodsVerId 是否可拉取'
     });
   } catch (error) {
-    console.error('读取 wespace details 失败:', error);
+    logger.error('读取 wespace details 失败', { err: error });
     res.status(500).json({ error: '读取失败' });
   }
 });
@@ -299,7 +287,7 @@ router.get('/', async (req, res) => {
 
     res.json(artworksWithProcessedImages);
   } catch (error) {
-    console.error('获取数字艺术品列表失败:', error);
+    logger.error('获取数字艺术品列表失败', { err: error });
     res.status(500).json({ error: '获取数字艺术品列表失败' });
   }
 });
@@ -357,7 +345,7 @@ router.get('/public', async (req, res) => {
 
     res.json(artworksWithFullUrls);
   } catch (error) {
-    console.error('Error fetching digital artworks (public):', error);
+    logger.error('Error fetching digital artworks (public)', { err: error });
     res.status(500).json({ error: '获取数字艺术品数据服务暂时不可用' });
   }
 });
@@ -564,7 +552,7 @@ router.get('/:id', async (req, res) => {
           }
         }
       } catch (externalError) {
-        console.error('获取外部产品列表失败（用于获取goods_id）:', externalError);
+        logger.error('获取外部产品列表失败（用于获取goods_id）', { err: externalError });
         // 继续执行，不中断请求
       }
     }
@@ -641,11 +629,10 @@ router.get('/:id', async (req, res) => {
           console.log('商品接口返回非成功状态，code:', response.data?.code, 'status:', response.data?.status);
         }
       } catch (goodsError) {
-        console.error('获取商品列表失败（用于获取goodsVerId）:', goodsError.message);
-        if (goodsError.response) {
-          console.error('响应状态:', goodsError.response.status);
-          console.error('响应数据:', goodsError.response.data);
-        }
+        logger.error('获取商品列表失败（用于获取goodsVerId）', {
+          err: goodsError,
+          response_status: goodsError.response?.status,
+        });
         // 继续执行，不中断请求
       }
     }
@@ -673,7 +660,7 @@ router.get('/:id', async (req, res) => {
     const cacheTTL = shouldFuse && (targetGoodsVerId || obtainedGoodsId) ? 3600 : 604800;
     await redisClient.setEx(detailCacheKey, cacheTTL, JSON.stringify(result));
   } catch (error) {
-    console.error('获取数字艺术品详情失败:', error);
+    logger.error('获取数字艺术品详情失败', { err: error });
 
     // 检查是否是连接池问题
     if (error.message === 'Pool is closed.' || error.message.includes('Pool is closed')) {
@@ -765,7 +752,7 @@ router.post('/', authenticateToken, async (req, res) => {
       created_at: new Date()
     });
   } catch (error) {
-    console.error('Error creating digital artwork:', error);
+    logger.error('Error creating digital artwork', { err: error });
     res.status(500).json({ error: '创建失败' });
   }
 });
@@ -848,7 +835,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       price
     });
   } catch (error) {
-    console.error('Error updating digital artwork:', error);
+    logger.error('Error updating digital artwork', { err: error });
     res.status(500).json({ error: '更新失败' });
   }
 });
@@ -894,7 +881,7 @@ router.patch('/:id/hide', authenticateToken, async (req, res) => {
       is_hidden: is_hidden
     });
   } catch (error) {
-    console.error('Error updating artwork visibility:', error);
+    logger.error('Error updating artwork visibility', { err: error });
     res.status(500).json({ error: '更新失败' });
   }
 });
@@ -944,7 +931,7 @@ router.patch('/:id/purchase-link', authenticateToken, async (req, res) => {
       show_purchase_link: showPurchase
     });
   } catch (error) {
-    console.error('Error updating show_purchase_link:', error);
+    logger.error('Error updating show_purchase_link', { err: error });
     res.status(500).json({ error: '更新失败' });
   }
 });
@@ -1018,7 +1005,7 @@ router.patch('/:id/artist', authenticateToken, async (req, res) => {
       artist_name: artistName
     });
   } catch (error) {
-    console.error('Error updating digital artwork artist:', error);
+    logger.error('Error updating digital artwork artist', { err: error });
     res.status(500).json({ error: '更新失败' });
   }
 });
@@ -1055,7 +1042,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     res.json({ message: '删除成功' });
   } catch (error) {
     await connection.rollback();
-    console.error('Error deleting digital artwork:', error);
+    logger.error('Error deleting digital artwork', { err: error });
     res.status(500).json({ error: '删除失败' });
   } finally {
     connection.release();
@@ -1157,21 +1144,8 @@ router.get('/order/product-list', async (req, res) => {
     }
 
   } catch (error) {
-    console.error('获取产品列表失败:', error);
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      } : null,
-      request: error.request ? {
-        method: error.config?.method,
-        url: error.config?.url,
-        params: error.config?.params
-      } : null
-    });
-    
+    logger.error('获取产品列表失败', { err: error });
+
     if (error.response) {
       const statusCode = error.response.status || 500;
       const responseData = error.response.data || {
@@ -1258,21 +1232,8 @@ router.post('/goods/ver/list/v3', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取商品详情失败:', error);
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      } : null,
-      request: error.request ? {
-        method: error.config?.method,
-        url: error.config?.url,
-        params: error.config?.params
-      } : null
-    });
-    
+    logger.error('获取商品详情失败', { err: error });
+
     if (error.response) {
       const statusCode = error.response.status || 500;
       const responseData = error.response.data || {
@@ -1390,7 +1351,7 @@ router.post('/order/purchase', async (req, res) => {
         timeout: 10000
       });
     } catch (error) {
-      console.error('获取商品详情失败:', error.response?.data || error.message);
+      logger.error('获取商品详情失败（购买流程内联）', { err: error });
       // 如果获取商品详情失败，尝试继续使用价格查询的数据
     }
 
@@ -1524,20 +1485,7 @@ router.post('/order/purchase', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('购买流程失败:', error);
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      } : null,
-      request: error.request ? {
-        method: error.config?.method,
-        url: error.config?.url,
-        data: error.config?.data
-      } : null
-    });
+    logger.error('购买流程失败', { err: error });
 
     // 处理不同类型的错误
     if (error.response) {
@@ -1643,22 +1591,8 @@ router.post('/goods/ver/details', async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error('获取商品详情失败:', error);
-    console.error('错误详情:', {
-      message: error.message,
-      response: error.response ? {
-        status: error.response.status,
-        data: error.response.data,
-        headers: error.response.headers
-      } : null,
-      request: error.request ? {
-        method: error.config?.method,
-        url: error.config?.url,
-        params: error.config?.params,
-        data: error.config?.data
-      } : null
-    });
-    
+    logger.error('获取商品详情失败', { err: error });
+
     if (error.response) {
       const statusCode = error.response.status || 500;
       const responseData = error.response.data || {
