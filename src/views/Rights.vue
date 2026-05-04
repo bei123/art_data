@@ -5,18 +5,42 @@
       <el-button type="primary" @click="handleAdd">添加版权实物</el-button>
     </div>
 
+    <el-alert
+      v-if="listError && !listLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchRights">重试</el-button>
+    </el-alert>
+
+    <div v-loading="listLoading" class="table-wrap">
     <el-table :data="rights" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!listLoading" description="暂无版权实物数据" />
+        </template>
       <el-table-column label="图片">
         <template #default="{ row }">
           <div class="image-preview">
-            <el-image 
-              v-for="(image, index) in row.images" 
+            <el-image
+              lazy
+              v-for="(image, index) in row.images"
               :key="index"
               style="width: 100px; height: 100px; margin-right: 10px"
               :src="getImageUrl(image)"
               fit="cover"
               :preview-src-list="row.images.map(img => getImageUrl(img))"
-            />
+              :alt="row.title ? `${row.title} 配图 ${index + 1}` : '版权实物配图'"
+            >
+              <template #placeholder>
+                <div class="el-image-placeholder-slot el-image-placeholder-slot--md" aria-hidden="true">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                </div>
+              </template>
+            </el-image>
           </div>
         </template>
       </el-table-column>
@@ -62,6 +86,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -287,6 +312,8 @@ import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 
 const router = useRouter()
+const listLoading = ref(false)
+const listError = ref('')
 const rights = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
@@ -387,31 +414,36 @@ watch(dialogVisible, (val) => {
   }
 }, { immediate: true })
 
+const retryFetchRights = () => {
+  listError.value = ''
+  fetchRights()
+}
+
 const fetchRights = async () => {
+  listLoading.value = true
+  listError.value = ''
   try {
     const response = await axios.get('/rights')
-    console.log('版权实物API返回的原始数据：', response)
     let arr = []
     if (Array.isArray(response)) {
       arr = response
     } else if (response && Array.isArray(response.data)) {
       arr = response.data
-    }
-    if (arr.length) {
-      rights.value = arr.map(right => ({
-        ...right,
-        images: right.images ? right.images.map(image => getImageUrl(image)) : []
-      }))
-      console.log('设置后的版权实物数据：', rights.value)
-    } else {
-      console.error('返回的数据不是数组：', response)
+    } else if (response != null) {
       rights.value = []
-      ElMessage.error('获取数据格式不正确')
+      listError.value = '接口返回格式异常，无法展示列表'
+      return
     }
+    rights.value = arr.map((right) => ({
+      ...right,
+      images: right.images ? right.images.map((image) => getImageUrl(image)) : []
+    }))
   } catch (error) {
     console.error('获取版权实物列表失败：', error)
     rights.value = []
-    ElMessage.error('获取版权实物列表失败')
+    listError.value = '获取版权实物列表失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -1048,6 +1080,24 @@ onBeforeUnmount(() => {
 .artist-option .artist-name {
   font-size: 14px;
   color: #303133;
+}
+
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot--md {
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
 }
 
 /* 响应式设计 */

@@ -5,15 +5,39 @@
       <el-button type="primary" @click="handleAdd">添加轮播图</el-button>
     </div>
 
-    <el-table :data="banners" style="width: 100%">
+    <el-alert
+      v-if="listError && !listLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchBanners">重试</el-button>
+    </el-alert>
+
+    <div v-loading="listLoading" class="table-wrap">
+      <el-table :data="banners" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!listLoading" description="暂无轮播图" />
+        </template>
       <el-table-column prop="title" label="标题" />
       <el-table-column label="图片">
         <template #default="{ row }">
           <el-image
+            lazy
             style="width: 200px; height: 100px"
             :src="getImageUrl(row.image_url)"
             fit="cover"
-          />
+            :alt="row.title ? `轮播图：${row.title}` : '轮播图'"
+          >
+            <template #placeholder>
+              <div class="el-image-placeholder-slot" aria-hidden="true">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+            </template>
+          </el-image>
         </template>
       </el-table-column>
       <el-table-column prop="link_url" label="链接" />
@@ -32,6 +56,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -237,6 +262,8 @@ import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const banners = ref([])
+const listLoading = ref(false)
+const listError = ref('')
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 
@@ -297,22 +324,27 @@ const composedLinkPreview = computed(() => {
   return `${base}?id=${form.value.link_id}`
 })
 
+const retryFetchBanners = () => {
+  listError.value = ''
+  fetchBanners()
+}
+
 const fetchBanners = async () => {
+  listLoading.value = true
+  listError.value = ''
   try {
     const res = await axios.get('/banners/all')
-    console.log('原始数据:', res)
     const arr = Array.isArray(res) ? res : []
-    banners.value = arr.map(banner => {
-      console.log('处理单个banner:', banner)
-      return {
-        ...banner,
-        image_url: getImageUrl(banner.image_url)
-      }
-    })
-    console.log('处理后的banners:', banners.value)
+    banners.value = arr.map((banner) => ({
+      ...banner,
+      image_url: getImageUrl(banner.image_url)
+    }))
   } catch (error) {
     console.error('获取轮播图列表失败：', error)
-    ElMessage.error('获取轮播图列表失败')
+    banners.value = []
+    listError.value = '获取轮播图列表失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -928,6 +960,24 @@ function tryParseExistingLink(url) {
 /* 上传成功提示 */
 .upload-success {
   margin-top: 16px;
+}
+
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot {
+  width: 200px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
 }
 
 /* 响应式设计 */

@@ -1,6 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import Login from '../views/Login.vue'
+import { useUserStore } from '@/stores/user'
+import { userHasAnyRole } from '@/utils/roles'
 
+/**
+ * 子路由 path 使用相对片段（如 orders、refund-approval），不要写成 /orders，避免与 Vue Router「绝对子路径」语义混淆。
+ * 上述子路由挂在 path: '/' 的 DefaultLayout 下，主内容区由 DefaultLayout 内 <router-view> 渲染。
+ * meta.roles 在 beforeEach 中校验；侧栏菜单仍用完整 index（如 /orders）与最终 URL 一致。
+ */
 const routes = [
   {
     path: '/',
@@ -113,7 +121,7 @@ const routes = [
         }
       },
       {
-        path: '/refund-approval',
+        path: 'refund-approval',
         name: 'RefundApproval',
         component: () => import('@/views/RefundApproval.vue'),
         meta: {
@@ -123,7 +131,7 @@ const routes = [
         }
       },
       {
-        path: '/orders',
+        path: 'orders',
         name: 'Orders',
         component: () => import('@/views/Orders.vue'),
         meta: {
@@ -146,18 +154,29 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
-router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
-  const tokenExpiry = localStorage.getItem('tokenExpiry')
-  const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
+function hydrateUserFromStorage() {
+  const store = useUserStore()
+  if (store.userInfo && Object.keys(store.userInfo).length > 0) return
+  const raw = localStorage.getItem('user')
+  if (!raw) return
+  try {
+    store.setUserInfo(JSON.parse(raw))
+  } catch {
+    // ignore invalid cache
+  }
+}
 
-  // 简单的本地过期检查，避免引入循环依赖
+router.beforeEach((to, from, next) => {
+  const tokenExpiry = localStorage.getItem('tokenExpiry')
+
   const isExpired = () => {
+    const token = localStorage.getItem('token')
     if (!token || !tokenExpiry) return true
-    const expiryTime = parseInt(tokenExpiry)
+    const expiryTime = parseInt(tokenExpiry, 10)
     return Number.isFinite(expiryTime) && Date.now() >= expiryTime
   }
+
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth !== false)
 
   if (isExpired()) {
     localStorage.removeItem('token')
@@ -169,11 +188,29 @@ router.beforeEach((to, from, next) => {
     }
   }
 
-  if (requiresAuth && !token) {
+  if (requiresAuth && !localStorage.getItem('token')) {
     next('/login')
-  } else {
-    next()
+    return
   }
+
+  const requiredRoles = [
+    ...new Set(
+      to.matched.flatMap((r) => (Array.isArray(r.meta?.roles) ? r.meta.roles : []))
+    )
+  ]
+
+  // 合并 matched 上各段的 meta.roles（任一满足即可，见 @/utils/roles userHasAnyRole）
+  if (requiredRoles.length > 0 && localStorage.getItem('token')) {
+    hydrateUserFromStorage()
+    const store = useUserStore()
+    if (!userHasAnyRole(store.userInfo, requiredRoles)) {
+      ElMessage.error('无权限访问该页面')
+      next({ path: '/' })
+      return
+    }
+  }
+
+  next()
 })
 
-export default router 
+export default router

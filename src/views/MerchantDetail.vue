@@ -8,7 +8,7 @@
     <div v-loading="loading" class="content">
       <div class="basic-info">
         <div class="logo">
-          <el-image 
+          <el-image lazy 
             :src="merchant.logo" 
             :preview-src-list="[merchant.logo]"
             fit="cover"
@@ -22,7 +22,7 @@
 
       <div class="images-section">
         <h3>商家图片</h3>
-        <el-image
+        <el-image lazy
           v-for="(image, index) in merchant.images"
           :key="index"
           :src="image"

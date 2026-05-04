@@ -1,13 +1,53 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const devProxyTarget = (env.VITE_DEV_PROXY_TARGET || 'http://localhost:2000').replace(/\/+$/, '')
+  const proxyDebug = env.VITE_PROXY_DEBUG === 'true'
+
+  const apiProxy = {
+    target: devProxyTarget,
+    changeOrigin: true,
+    secure: false,
+    ws: true,
+    rewrite: (p) => p.replace(/^\/api/, '/api')
+  }
+
+  if (proxyDebug) {
+    apiProxy.configure = (proxy) => {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        console.log('代理请求:', {
+          url: req.url,
+          method: req.method,
+          headers: req.headers
+        })
+      })
+      proxy.on('proxyRes', (proxyRes, req) => {
+        console.log('代理响应:', {
+          url: req.url,
+          method: req.method,
+          statusCode: proxyRes.statusCode,
+          headers: proxyRes.headers
+        })
+      })
+      proxy.on('error', (err) => {
+        console.error('代理错误:', err)
+      })
+    }
+  }
 
   return {
-    plugins: [vue()],
+    plugins: [
+      vue(),
+      Components({
+        dts: false,
+        resolvers: [ElementPlusResolver({ importStyle: 'css' })]
+      })
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src')
@@ -27,44 +67,15 @@ export default defineConfig(({ mode }) => {
           }
         }
       },
-      // 调整chunk大小警告限制
       chunkSizeWarningLimit: 1000,
-      // 启用代码分割
-      target: 'es2015',
-      // 启用CSS代码分割
+      target: 'es2020',
       cssCodeSplit: true
     },
     server: {
       port: 5173,
       historyApiFallback: true,
       proxy: {
-        '/api': {
-          target: devProxyTarget,
-          changeOrigin: true,
-          secure: false,
-          ws: true,
-          rewrite: (p) => p.replace(/^\/api/, '/api'),
-          configure: (proxy) => {
-            proxy.on('proxyReq', (proxyReq, req) => {
-              console.log('代理请求:', {
-                url: req.url,
-                method: req.method,
-                headers: req.headers
-              })
-            })
-            proxy.on('proxyRes', (proxyRes, req) => {
-              console.log('代理响应:', {
-                url: req.url,
-                method: req.method,
-                statusCode: proxyRes.statusCode,
-                headers: proxyRes.headers
-              })
-            })
-            proxy.on('error', (err) => {
-              console.error('代理错误:', err)
-            })
-          }
-        }
+        '/api': apiProxy
       }
     }
   }

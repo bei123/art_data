@@ -5,15 +5,39 @@
       <el-button type="primary" @click="handleAdd">添加分类</el-button>
     </div>
 
+    <el-alert
+      v-if="listError && !listLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchCategories">重试</el-button>
+    </el-alert>
+
+    <div v-loading="listLoading" class="table-wrap">
     <el-table :data="categories" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!listLoading" description="暂无分类数据" />
+        </template>
       <el-table-column prop="title" label="标题" />
       <el-table-column label="图片">
         <template #default="{ row }">
           <el-image
+            lazy
             style="width: 100px; height: 100px"
             :src="getImageUrl(row.image)"
             fit="cover"
-          />
+            :alt="row.title ? `分类：${row.title}` : '分类配图'"
+          >
+            <template #placeholder>
+              <div class="el-image-placeholder-slot el-image-placeholder-slot--md" aria-hidden="true">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+            </template>
+          </el-image>
         </template>
       </el-table-column>
       <el-table-column prop="count" label="作品数量" />
@@ -25,6 +49,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -177,6 +202,8 @@ import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const categories = ref([])
+const listLoading = ref(false)
+const listError = ref('')
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 
@@ -206,32 +233,37 @@ const form = ref({
   description: ''
 })
 
+const retryFetchCategories = () => {
+  listError.value = ''
+  fetchCategories()
+}
+
 const fetchCategories = async () => {
+  listLoading.value = true
+  listError.value = ''
   try {
     const response = await axios.get('/physical-categories')
-    console.log('物理分类数据:', response)
-    
-    // 处理分页格式的响应数据
     let categoriesData = []
     if (response && response.data && Array.isArray(response.data)) {
-      // 新格式：分页响应
       categoriesData = response.data
     } else if (response && Array.isArray(response)) {
-      // 旧格式：直接数组
       categoriesData = response
     } else {
-      console.error('返回数据格式不正确:', response)
       categories.value = []
+      listError.value = '接口返回格式异常，无法展示列表'
       return
     }
-    
-    categories.value = categoriesData.map(category => ({
+
+    categories.value = categoriesData.map((category) => ({
       ...category,
       image: getImageUrl(category.image)
     }))
   } catch (error) {
     console.error('获取分类失败:', error)
-    ElMessage.error('获取数据失败')
+    categories.value = []
+    listError.value = '获取分类列表失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -484,6 +516,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot--md {
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+}
+
 .header {
   display: flex;
   justify-content: space-between;

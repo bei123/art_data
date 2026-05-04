@@ -1,5 +1,16 @@
 <template>
-  <div>
+  <div v-loading="statsLoading" class="dashboard-root">
+    <el-alert
+      v-if="statsError && !statsLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="statsError"
+    >
+      <el-button type="primary" link @click="retryFetchStats">重试</el-button>
+    </el-alert>
     <h3>数据概览</h3>
     <el-row :gutter="20" class="dashboard-row">
       <el-col :span="8">
@@ -55,11 +66,18 @@
             </div>
           </template>
           <el-table :data="recentOriginalArtworks" style="width: 100%">
+            <template #empty>
+              <el-empty v-if="!statsLoading" description="暂无最近添加的原作" />
+            </template>
             <el-table-column prop="title" label="标题" />
             <el-table-column label="艺术家" min-width="160">
               <template #default="{ row }">
                 <div class="artist-cell">
-                  <el-avatar :size="28" :src="getImageUrl(row.artist?.avatar)">
+                  <el-avatar
+                    :size="28"
+                    :src="getImageUrl(row.artist?.avatar)"
+                    :alt="row.artist?.name ? `${row.artist.name} 头像` : ''"
+                  >
                     {{ (row.artist?.name || '?').charAt(0) }}
                   </el-avatar>
                   <span>{{ row.artist?.name || '未知艺术家' }}</span>
@@ -82,11 +100,18 @@
             </div>
           </template>
           <el-table :data="recentDigitalArtworks" style="width: 100%">
+            <template #empty>
+              <el-empty v-if="!statsLoading" description="暂无最近添加的数字艺术品" />
+            </template>
             <el-table-column prop="title" label="标题" />
             <el-table-column label="艺术家" min-width="160">
               <template #default="{ row }">
                 <div class="artist-cell">
-                  <el-avatar :size="28" :src="getImageUrl(row.artist?.avatar)">
+                  <el-avatar
+                    :size="28"
+                    :src="getImageUrl(row.artist?.avatar)"
+                    :alt="row.artist?.name ? `${row.artist.name} 头像` : ''"
+                  >
                     {{ (row.artist?.name || '?').charAt(0) }}
                   </el-avatar>
                   <span>{{ row.artist?.name || '未知艺术家' }}</span>
@@ -118,6 +143,8 @@ const stats = ref({
 
 const recentOriginalArtworks = ref([])
 const recentDigitalArtworks = ref([])
+const statsLoading = ref(false)
+const statsError = ref('')
 
 const getImageUrl = (url) => {
   if (!url) return ''
@@ -138,7 +165,14 @@ const formatDate = (dateString) => {
   })
 }
 
+const retryFetchStats = () => {
+  statsError.value = ''
+  fetchStats()
+}
+
 const fetchStats = async () => {
+  statsLoading.value = true
+  statsError.value = ''
   try {
     // 获取原作艺术品数据（分页格式）
     const originalRes = await axios.get('/original-artworks?pageSize=1000')
@@ -200,6 +234,9 @@ const fetchStats = async () => {
     }
     recentOriginalArtworks.value = []
     recentDigitalArtworks.value = []
+    statsError.value = '概览数据加载失败，请检查网络或稍后重试'
+  } finally {
+    statsLoading.value = false
   }
 }
 
@@ -211,6 +248,14 @@ onMounted(() => {
 <style scoped>
 .dashboard-row {
   margin-bottom: 20px;
+}
+
+.dashboard-root {
+  min-height: 240px;
+}
+
+.list-state-alert {
+  margin-bottom: 12px;
 }
 
 .card-header {

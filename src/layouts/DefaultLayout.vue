@@ -8,7 +8,7 @@
         <h2>艺术数据管理系统</h2>
       </el-header>
       <el-main>
-        <router-view></router-view>
+        <router-view />
       </el-main>
     </el-container>
   </el-container>

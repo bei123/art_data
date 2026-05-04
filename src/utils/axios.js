@@ -7,7 +7,10 @@ import { checkAndHandleTokenExpiry, clearUserDataAndRedirect } from './tokenMana
 const logHttpDebug =
   import.meta.env.DEV === true || import.meta.env.VITE_DEBUG_HTTP === 'true';
 
-// 创建axios实例
+/**
+ * 默认导出为已配置 baseURL、拦截器与 withCredentials 的实例。
+ * 在组件中推荐：`const { api } = useApi()`（@/composables/use-api.js）或 `import api from '@/utils/axios'`。
+ */
 const instance = axios.create({
   baseURL: `${API_BASE_URL}/api`,
   timeout: CONFIG.api.timeout,

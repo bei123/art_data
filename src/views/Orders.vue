@@ -23,12 +23,28 @@
       </div>
     </div>
 
-    <el-table :data="orders" style="width: 100%" v-loading="loading">
+    <el-alert
+      v-if="listError && !loading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchOrders">重试</el-button>
+    </el-alert>
+
+    <div v-loading="loading" class="table-wrap">
+    <el-table :data="orders" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!loading" description="暂无订单数据" />
+        </template>
       <el-table-column prop="out_trade_no" label="订单号" width="180" />
       <el-table-column label="用户信息" width="150">
         <template #default="{ row }">
           <div class="user-info">
-            <el-avatar :size="30" :src="row.user_avatar" />
+            <el-avatar :size="30" :src="row.user_avatar" :alt="row.user_nickname ? `${row.user_nickname} 头像` : ''" />
             <span class="user-nickname">{{ row.user_nickname || '未知用户' }}</span>
           </div>
         </template>
@@ -37,10 +53,12 @@
         <template #default="{ row }">
           <div v-for="item in row.items" :key="item.id" class="order-item">
             <el-image
+              lazy
               v-if="item.images && item.images.length > 0"
               :src="getImageUrl(item.images[0])"
               style="width: 50px; height: 50px; margin-right: 10px;"
               fit="cover"
+              :alt="item.title ? `商品：${item.title}` : '商品图'"
             />
             <div class="item-info">
               <div class="item-title">{{ item.title }}</div>
@@ -87,6 +105,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <div class="pagination-wrapper">
       <el-pagination
@@ -147,10 +166,12 @@
           <div v-for="item in selectedOrder.items" :key="item.id" class="detail-item">
             <div class="item-header">
               <el-image
+                lazy
                 v-if="item.images && item.images.length > 0"
                 :src="getImageUrl(item.images[0])"
                 style="width: 80px; height: 80px;"
                 fit="cover"
+                :alt="item.title ? `商品：${item.title}` : '商品图'"
               />
               <div class="item-content">
                 <h5>{{ item.title }}</h5>
@@ -197,6 +218,7 @@ import { Location } from '@element-plus/icons-vue'
 
 const orders = ref([])
 const loading = ref(false)
+const listError = ref('')
 const detailDialogVisible = ref(false)
 const selectedOrder = ref(null)
 const userStore = useUserStore()
@@ -214,8 +236,14 @@ const pagination = reactive({
   total: 0
 })
 
+const retryFetchOrders = () => {
+  listError.value = ''
+  fetchOrders()
+}
+
 const fetchOrders = async () => {
   loading.value = true
+  listError.value = ''
   try {
     let params = {
       page: pagination.page,
@@ -233,11 +261,15 @@ const fetchOrders = async () => {
       orders.value = response.data.orders
       pagination.total = response.data.pagination.total
     } else {
-      ElMessage.error(response.error || '获取订单列表失败')
+      orders.value = []
+      pagination.total = 0
+      listError.value = response.error || '获取订单列表失败'
     }
   } catch (error) {
     console.error('获取订单列表失败:', error)
-    ElMessage.error('获取订单列表失败')
+    orders.value = []
+    pagination.total = 0
+    listError.value = '获取订单列表失败，请检查网络或稍后重试'
   } finally {
     loading.value = false
   }
@@ -481,5 +513,13 @@ onMounted(() => {
   margin-bottom: 10px;
   color: #303133;
   font-size: 14px;
+}
+
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
 }
 </style>

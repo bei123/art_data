@@ -16,14 +16,38 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="listError && !listLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchArtists">重试</el-button>
+    </el-alert>
+
+    <div v-loading="listLoading" class="table-wrap">
     <el-table :data="filteredArtists" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!listLoading" description="暂无艺术家数据" />
+        </template>
       <el-table-column label="头像">
         <template #default="{ row }">
           <el-image
+            lazy
             style="width: 50px; height: 50px"
             :src="row.avatar"
             fit="cover"
-          />
+            :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
+          >
+            <template #placeholder>
+              <div class="el-image-placeholder-slot el-image-placeholder-slot--sm" aria-hidden="true">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+            </template>
+          </el-image>
         </template>
       </el-table-column>
       <el-table-column prop="name" label="姓名" />
@@ -44,6 +68,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -390,6 +415,8 @@ import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const router = useRouter()
+const listLoading = ref(false)
+const listError = ref('')
 const artists = ref([])
 const institutions = ref([])
 const dialogVisible = ref(false)
@@ -438,25 +465,31 @@ const form = ref({
   institution_id: null
 })
 
+const retryFetchArtists = () => {
+  listError.value = ''
+  fetchArtists()
+}
+
 const fetchArtists = async () => {
+  listLoading.value = true
+  listError.value = ''
   try {
     const data = await axios.get('/artists')
-    console.log('API返回的原始数据：', data)
     if (Array.isArray(data)) {
       artists.value = data
       filteredArtists.value = data
-      console.log('设置后的艺术家数据：', artists.value)
     } else {
-      console.error('返回的数据不是数组：', data)
       artists.value = []
       filteredArtists.value = []
-      ElMessage.error('获取数据格式不正确')
+      listError.value = '接口返回格式异常，无法展示列表'
     }
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     artists.value = []
     filteredArtists.value = []
-    ElMessage.error('获取艺术家列表失败')
+    listError.value = '获取艺术家列表失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -1254,6 +1287,24 @@ onMounted(() => {
 /* 上传成功提示 */
 .upload-success {
   margin-top: 16px;
+}
+
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
 }
 
 /* 响应式设计 */

@@ -18,15 +18,38 @@
 
     <!-- 列表模式 -->
     <div v-if="!isDetailMode">
-      <el-table v-loading="loadingList" :data="exhibitions" style="width: 100%">
+      <el-alert
+        v-if="listError && !loadingList"
+        class="list-state-alert"
+        type="error"
+        :closable="false"
+        show-icon
+        role="alert"
+        :title="listError"
+      >
+        <el-button type="primary" link @click="retryFetchExhibitions">重试</el-button>
+      </el-alert>
+      <div v-loading="loadingList" class="table-wrap">
+      <el-table :data="exhibitions" style="width: 100%">
+          <template #empty>
+            <el-empty v-if="!loadingList" description="暂无展览数据" />
+          </template>
         <el-table-column label="封面" width="120">
           <template #default="{ row }">
             <el-image
+              lazy
               v-if="row.cover_image"
               style="width: 80px; height: 80px"
               :src="getImageUrl(row.cover_image)"
               fit="cover"
-            />
+              :alt="row.title ? `展览封面：${row.title}` : '展览封面'"
+            >
+              <template #placeholder>
+                <div class="el-image-placeholder-slot el-image-placeholder-slot--cover" aria-hidden="true">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                </div>
+              </template>
+            </el-image>
           </template>
         </el-table-column>
         <el-table-column prop="title" label="标题" />
@@ -57,10 +80,22 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
     </div>
 
     <!-- 详情模式 -->
     <div v-else>
+      <el-alert
+        v-if="detailError && !loadingDetail"
+        class="list-state-alert"
+        type="error"
+        :closable="false"
+        show-icon
+        role="alert"
+        :title="detailError"
+      >
+        <el-button type="primary" link @click="retryFetchDetail">重试</el-button>
+      </el-alert>
       <el-card v-if="exhibitionDetail" shadow="hover" class="detail-card" style="margin-bottom: 16px">
         <template #header>
           <div class="card-header">
@@ -85,7 +120,7 @@
 
         <div class="detail-body">
           <div class="cover">
-            <el-image
+            <el-image lazy
               v-if="exhibitionDetail.exhibition?.cover_image"
               style="width: 140px; height: 140px"
               :src="getImageUrl(exhibitionDetail.exhibition.cover_image)"
@@ -210,7 +245,14 @@
         <el-button type="primary" @click="openItemsDialog" :disabled="!exhibitionDetail">追加展览作品</el-button>
       </div>
 
-      <el-table v-loading="loadingDetail" :data="exhibitionDetail?.items || []" style="width: 100%">
+      <div v-loading="loadingDetail" class="table-wrap">
+      <el-table :data="exhibitionDetail?.items || []" style="width: 100%">
+          <template #empty>
+            <el-empty
+              v-if="exhibitionDetail && !loadingDetail"
+              description="暂无展览作品，可点击上方追加"
+            />
+          </template>
         <el-table-column label="排序" width="90" prop="sort_order" />
         <el-table-column label="作品类型" width="120">
           <template #default="{ row }">
@@ -221,13 +263,13 @@
         </el-table-column>
         <el-table-column label="图片" width="120">
           <template #default="{ row }">
-            <el-image
+            <el-image lazy
               v-if="row.artwork?.image"
               style="width: 80px; height: 80px"
               :src="getImageUrl(row.artwork.image)"
               fit="cover"
             />
-            <el-image
+            <el-image lazy
               v-else-if="row.artwork?.image_url"
               style="width: 80px; height: 80px"
               :src="getImageUrl(row.artwork.image_url)"
@@ -275,6 +317,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
     </div>
 
     <!-- 添加/编辑展览弹窗 -->
@@ -311,11 +354,10 @@
               class="upload-area"
               :class="{ 'drag-over': isCoverDragOver, 'uploading': isCoverUploading }"
             >
-              <el-image
+              <el-image lazy
                 v-if="exhibitionForm.cover_image"
                 :src="getImageUrl(exhibitionForm.cover_image)"
                 class="avatar"
-                lazy
                 fit="cover"
               />
 
@@ -475,6 +517,9 @@
         <div style="margin-top: 16px">
           <div class="text-muted" style="margin-bottom: 10px">待提交 items（将作为一次请求提交）</div>
           <el-table :data="pendingItems" style="width: 100%">
+            <template #empty>
+              <el-empty description="暂无待提交项，请在上方选择作品后加入" :image-size="64" />
+            </template>
             <el-table-column label="排序" width="180">
               <template #default="{ row }">
                 <el-input-number
@@ -572,6 +617,8 @@ const router = useRouter()
 
 const loadingList = ref(false)
 const loadingDetail = ref(false)
+const listError = ref('')
+const detailError = ref('')
 const exhibitions = ref([])
 const exhibitionDetail = ref(null)
 
@@ -994,18 +1041,29 @@ async function submitExhibition() {
   }
 }
 
+function retryFetchExhibitions() {
+  listError.value = ''
+  fetchExhibitions()
+}
+
 async function fetchExhibitions() {
   loadingList.value = true
+  listError.value = ''
   try {
     const res = await axios.get('/exhibitions?page=1&pageSize=100')
-    // axios 已返回 response.data
     const list = res?.data && Array.isArray(res.data) ? res.data : []
     exhibitions.value = list
   } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '获取展览列表失败')
+    exhibitions.value = []
+    listError.value = e?.response?.data?.error || e?.message || '获取展览列表失败，请稍后重试'
   } finally {
     loadingList.value = false
   }
+}
+
+function retryFetchDetail() {
+  detailError.value = ''
+  fetchDetail(exhibitionId.value)
 }
 
 // ---------------------------
@@ -1084,11 +1142,13 @@ async function ensureOptionsLoaded() {
 async function fetchDetail(id) {
   if (!id) return
   loadingDetail.value = true
+  detailError.value = ''
   try {
     const res = await axios.get(`/exhibitions/${id}`)
     exhibitionDetail.value = res
   } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '获取展览详情失败')
+    exhibitionDetail.value = null
+    detailError.value = e?.response?.data?.error || e?.message || '获取展览详情失败，请稍后重试'
   } finally {
     loadingDetail.value = false
   }
@@ -1256,6 +1316,24 @@ async function submitArtists() {
 </script>
 
 <style scoped>
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot--cover {
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+}
+
 .header {
   display: flex;
   justify-content: space-between;

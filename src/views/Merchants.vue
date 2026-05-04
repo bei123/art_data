@@ -19,16 +19,40 @@
       </div>
     </div>
 
-    <el-table :data="merchants" style="width: 100%" v-loading="loading">
+    <el-alert
+      v-if="listError && !loading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchMerchants">重试</el-button>
+    </el-alert>
+
+    <div v-loading="loading" class="table-wrap">
+    <el-table :data="merchants" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!loading" description="暂无商家数据" />
+        </template>
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column label="Logo" width="100">
         <template #default="{ row }">
-          <el-image 
-            :src="row.logo" 
+          <el-image
+            lazy
+            :src="row.logo"
             :preview-src-list="[row.logo]"
             fit="cover"
             style="width: 50px; height: 50px"
-          />
+            :alt="row.name ? `${row.name} Logo` : '商家 Logo'"
+          >
+            <template #placeholder>
+              <div class="el-image-placeholder-slot el-image-placeholder-slot--sm" aria-hidden="true">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+            </template>
+          </el-image>
         </template>
       </el-table-column>
       <el-table-column prop="name" label="商家名称" />
@@ -63,6 +87,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <div class="pagination-container">
       <el-pagination
@@ -421,6 +446,7 @@ const uploadImagesAction = `${API_BASE_URL}/api/merchants/upload-images`
 
 const merchants = ref([])
 const loading = ref(false)
+const listError = ref('')
 const dialogVisible = ref(false)
 const dialogType = ref('add')
 const formRef = ref(null)
@@ -453,9 +479,15 @@ const uploadHeaders = {
   Authorization: `Bearer ${localStorage.getItem('token')}`
 }
 
+const retryFetchMerchants = () => {
+  listError.value = ''
+  fetchMerchants()
+}
+
 // 获取商家列表
 const fetchMerchants = async () => {
   loading.value = true
+  listError.value = ''
   try {
     const response = await request.get('/api/merchants', {
       params: {
@@ -467,7 +499,9 @@ const fetchMerchants = async () => {
     merchants.value = response.data.data
     total.value = response.data.pagination.total
   } catch (error) {
-    ElMessage.error('获取商家列表失败')
+    merchants.value = []
+    total.value = 0
+    listError.value = '获取商家列表失败，请检查网络或稍后重试'
   } finally {
     loading.value = false
   }
@@ -940,6 +974,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot--sm {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+}
+
 .merchants-container {
   padding: 20px;
 }

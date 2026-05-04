@@ -5,14 +5,38 @@
       <el-button type="primary" @click="handleAdd">添加机构</el-button>
     </div>
 
+    <el-alert
+      v-if="listError && !listLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchInstitutions">重试</el-button>
+    </el-alert>
+
+    <div v-loading="listLoading" class="table-wrap">
     <el-table :data="institutions" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!listLoading" description="暂无机构数据" />
+        </template>
       <el-table-column label="Logo" width="100">
         <template #default="{ row }">
           <el-image
+            lazy
             style="width: 50px; height: 50px"
             :src="row.logo"
             fit="cover"
-          />
+            :alt="row.name ? `${row.name} Logo` : '机构 Logo'"
+          >
+            <template #placeholder>
+              <div class="el-image-placeholder-slot el-image-placeholder-slot--sm" aria-hidden="true">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+            </template>
+          </el-image>
         </template>
       </el-table-column>
       <el-table-column prop="name" label="机构名称" />
@@ -28,6 +52,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -188,13 +213,24 @@
         <el-empty description="该机构下暂无艺术家" />
       </div>
       <el-table v-else :data="institutionArtists" style="width: 100%">
+        <template #empty>
+          <el-empty description="暂无艺术家" />
+        </template>
         <el-table-column label="头像" width="100">
           <template #default="{ row }">
             <el-image
+              lazy
               style="width: 50px; height: 50px"
               :src="row.avatar"
               fit="cover"
-            />
+              :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
+            >
+              <template #placeholder>
+                <div class="el-image-placeholder-slot el-image-placeholder-slot--sm" aria-hidden="true">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                </div>
+              </template>
+            </el-image>
           </template>
         </el-table-column>
         <el-table-column prop="name" label="姓名" />
@@ -221,6 +257,8 @@ import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const router = useRouter()
 const institutions = ref([])
+const listLoading = ref(false)
+const listError = ref('')
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const artistsDialogVisible = ref(false)
@@ -254,19 +292,28 @@ const form = ref({
   website: ''
 })
 
+const retryFetchInstitutions = () => {
+  listError.value = ''
+  fetchInstitutions()
+}
+
 const fetchInstitutions = async () => {
+  listLoading.value = true
+  listError.value = ''
   try {
     const data = await axios.get('/institutions')
     if (Array.isArray(data)) {
       institutions.value = data
     } else {
       institutions.value = []
-      ElMessage.error('获取数据格式不正确')
+      listError.value = '接口返回格式异常，无法展示列表'
     }
   } catch (error) {
     console.error('获取机构列表失败：', error)
     institutions.value = []
-    ElMessage.error('获取机构列表失败')
+    listError.value = '获取机构列表失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -550,6 +597,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot--sm {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+}
+
 .header {
   display: flex;
   justify-content: space-between;

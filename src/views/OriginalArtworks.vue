@@ -47,21 +47,36 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="listError && !loading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchArtworks">重试</el-button>
+    </el-alert>
+
+    <div v-loading="loading" class="table-wrap">
     <el-table 
-      v-loading="loading"
       :data="artworks" 
       style="width: 100%"
     >
+        <template #empty>
+          <el-empty v-if="!loading" description="暂无原作数据" />
+        </template>
       <el-table-column prop="title" label="标题" />
              <el-table-column label="图片" width="120">
          <template #default="{ row }">
-           <el-image 
+           <el-image lazy 
              :src="row.image" 
              :preview-src-list="[row.image]"
              fit="cover"
-             lazy
              :initial-index="0"
              style="width: 80px; height: 80px"
+             :alt="row.title ? `原作：${row.title}` : '原作缩略图'"
            >
              <template #placeholder>
                <div class="image-placeholder">
@@ -107,6 +122,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <!-- 分页组件 -->
     <div class="pagination-container">
@@ -159,11 +175,10 @@
               @drop="handleDrop"
             >
              <div class="upload-area" :class="{ 'drag-over': isDragOver, 'uploading': isUploading }">
-               <el-image 
+               <el-image lazy 
                  v-if="form.image" 
                  :src="form.image" 
                  class="avatar"
-                 lazy
                  fit="cover"
                >
                  <template #placeholder>
@@ -360,6 +375,7 @@ const artworks = ref([])
 const dialogVisible = ref(false)
 const dialogType = ref('add')
 const loading = ref(false)
+const listError = ref('')
 const pagination = ref({
   page: 1,
   pageSize: 20,
@@ -654,11 +670,17 @@ const checkLoginStatus = () => {
   return true
 }
 
+const retryFetchArtworks = () => {
+  listError.value = ''
+  fetchArtworks()
+}
+
 // 获取艺术品列表
 const fetchArtworks = async () => {
   if (!checkLoginStatus()) return
   
   loading.value = true
+  listError.value = ''
   try {
     const response = await axios.get('/original-artworks', {
       params: {
@@ -721,19 +743,18 @@ const fetchArtworks = async () => {
     }
   } catch (error) {
     console.error('Error fetching artworks:', error)
+    artworks.value = []
     if (error.response) {
       if (error.response.status === 401) {
         ElMessage.error('登录已过期，请重新登录')
         router.push('/login')
       } else {
-        ElMessage.error(`获取艺术品列表失败: ${error.response.data.message || '服务器错误'}`)
+        listError.value = `获取列表失败：${error.response.data?.message || error.response.statusText || '服务器错误'}`
       }
     } else if (error.request) {
-      console.error('No response received:', error.request)
-      ElMessage.error('无法连接到服务器，请检查网络连接')
+      listError.value = '无法连接服务器，请检查网络后重试'
     } else {
-      console.error('Error message:', error.message)
-      ElMessage.error(`获取艺术品列表失败: ${error.message}`)
+      listError.value = `获取列表失败：${error.message || '未知错误'}`
     }
   } finally {
     loading.value = false
@@ -1314,6 +1335,14 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
 .artworks-container {
   padding: 20px;
 }

@@ -4,15 +4,39 @@
       <h3>数字艺术品管理</h3>
     </div>
 
+    <el-alert
+      v-if="listError && !listLoading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryFetchArtworks">重试</el-button>
+    </el-alert>
+
+    <div v-loading="listLoading" class="table-wrap">
     <el-table :data="artworks" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!listLoading" description="暂无数字艺术品数据" />
+        </template>
       <el-table-column prop="title" label="标题" />
       <el-table-column label="图片">
         <template #default="{ row }">
           <el-image
+            lazy
             style="width: 100px; height: 100px"
             :src="getImageUrl(row.image_url)"
             fit="cover"
-          />
+            :alt="row.title ? `数字艺术品：${row.title}` : '数字艺术品'"
+          >
+            <template #placeholder>
+              <div class="el-image-placeholder-slot el-image-placeholder-slot--md" aria-hidden="true">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+            </template>
+          </el-image>
         </template>
       </el-table-column>
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
@@ -31,6 +55,7 @@
             <el-avatar
               :size="36"
               :src="getImageUrl(row.artist?.avatar)"
+              :alt="(row.artist?.name || row.artist_name) ? `${row.artist?.name || row.artist_name} 头像` : ''"
             >
               {{ (row.artist?.name || row.artist_name || '?').charAt(0) }}
             </el-avatar>
@@ -70,6 +95,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -298,6 +324,8 @@ import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const artworks = ref([])
+const listLoading = ref(false)
+const listError = ref('')
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const artistOptions = ref([])
@@ -343,28 +371,34 @@ const form = ref({
   price: 0
 })
 
+const retryFetchArtworks = () => {
+  listError.value = ''
+  fetchArtworks()
+}
+
 const fetchArtworks = async () => {
+  listLoading.value = true
+  listError.value = ''
   try {
     const data = await axios.get('/digital-artworks/admin')
-    console.log('API返回的原始数据：', data)
     if (Array.isArray(data)) {
-      artworks.value = data.map(artwork => ({
+      artworks.value = data.map((artwork) => ({
         ...artwork,
         image_url: getImageUrl(artwork.image_url),
         is_hidden: artwork.is_hidden || false,
         show_purchase_link:
           artwork.show_purchase_link === 0 || artwork.show_purchase_link === false ? false : true
       }))
-      console.log('设置后的数字艺术品数据：', artworks.value)
     } else {
-      console.error('返回的数据不是数组：', data)
       artworks.value = []
-      ElMessage.error('获取数据格式不正确')
+      listError.value = '接口返回格式异常，无法展示列表'
     }
   } catch (error) {
     console.error('获取数字艺术品列表失败：', error)
     artworks.value = []
-    ElMessage.error('获取数据失败')
+    listError.value = '获取数字艺术品列表失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -906,6 +940,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
+}
+
+.el-image-placeholder-slot--md {
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #909399;
+}
+
 .header {
   display: flex;
   justify-content: space-between;

@@ -15,7 +15,23 @@
       </div>
     </div>
 
-    <el-table :data="refunds" style="width: 100%" v-loading="loading">
+    <el-alert
+      v-if="listError && !loading"
+      class="list-state-alert"
+      type="error"
+      :closable="false"
+      show-icon
+      role="alert"
+      :title="listError"
+    >
+      <el-button type="primary" link @click="retryLoadRefunds">重试</el-button>
+    </el-alert>
+
+    <div v-loading="loading" class="table-wrap">
+    <el-table :data="refunds" style="width: 100%">
+        <template #empty>
+          <el-empty v-if="!loading" description="暂无退款申请" />
+        </template>
       <el-table-column prop="id" label="ID" width="80"></el-table-column>
       <el-table-column prop="out_trade_no" label="订单号" width="180"></el-table-column>
       <el-table-column prop="out_refund_no" label="退款单号" width="180"></el-table-column>
@@ -57,6 +73,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <div class="pagination">
       <el-pagination
@@ -153,6 +170,7 @@ import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 
 const loading = ref(false)
+const listError = ref('')
 const refunds = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -171,32 +189,39 @@ const approveForm = ref({
   reject_reason: ''
 })
 
+const retryLoadRefunds = () => {
+  listError.value = ''
+  loadRefunds()
+}
+
 // 加载退款申请列表
 const loadRefunds = async () => {
   try {
-    loading.value = true;
+    loading.value = true
+    listError.value = ''
     const response = await axios.get('/wx/pay/refund/requests', {
       params: {
         status: filterStatus.value,
         page: currentPage.value,
         limit: pageSize.value
       }
-    });
-    
-    console.log('退款申请列表响应:', response);
-    
+    })
+
     if (response.success) {
-      refunds.value = response.data;
-      total.value = response.total || 0;
+      refunds.value = response.data
+      total.value = response.total || 0
     } else {
-      console.error('加载退款申请列表失败:', response.error);
-      ElMessage.error(response.error || '加载退款申请列表失败');
+      refunds.value = []
+      total.value = 0
+      listError.value = response.error || '加载退款申请列表失败'
     }
   } catch (error) {
-    console.error('加载退款申请列表失败:', error);
-    ElMessage.error('加载退款申请列表失败');
+    console.error('加载退款申请列表失败:', error)
+    refunds.value = []
+    total.value = 0
+    listError.value = '加载退款申请列表失败，请检查网络或稍后重试'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 };
 
@@ -306,6 +331,14 @@ onMounted(() => {
 <style scoped>
 .refund-approval {
   padding: 20px;
+}
+
+.list-state-alert {
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  min-height: 200px;
 }
 
 .header {
