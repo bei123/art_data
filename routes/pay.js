@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, assertSelfOrAdmin } = require('../auth');
+const { authenticateToken, assertSelfOrAdmin, checkRole } = require('../auth');
 const svc = require('../services/payService');
 
 router.post('/unifiedorder', authenticateToken, async (req, res) => {
@@ -114,6 +114,17 @@ router.get('/query', authenticateToken, async (req, res) => {
   }
 });
 
+/** 小程序/用户：本人订单详情（费用、支付脱敏、退款、物流 shipments；?include_wechat_path=1 拉微信轨迹） */
+router.get('/orders/:id', authenticateToken, async (req, res) => {
+  try {
+    const r = await svc.buyerOrderDetail(req);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('用户查询订单详情失败', { err: e });
+    return res.status(500).json({ success: false, error: '查询订单详情失败' });
+  }
+});
+
 router.get('/orders', authenticateToken, async (req, res) => {
   try {
     const r = await svc.listOrders(req);
@@ -145,6 +156,17 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
   } catch (e) {
     logger.error('管理员查询订单列表失败', { err: e });
     return res.status(500).json({ success: false, error: '管理员查询订单列表失败' });
+  }
+});
+
+/** 管理端订单详情（费用分项、支付脱敏、时间轴、退款、履约、业务 ID、shipments；?include_wechat_path=1 时顺带调微信 getPath） */
+router.get('/admin/orders/:id', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const r = await svc.adminOrderDetail(req);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('管理员查询订单详情失败', { err: e });
+    return res.status(500).json({ success: false, error: '管理员查询订单详情失败' });
   }
 });
 

@@ -8,6 +8,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const db = require('../db');
+const logisticsService = require('./logisticsService');
 const { PUBLIC_API_BASE_URL } = require('../config/publicEnv');
 const redisClient = require('../utils/redisClient');
 const LOCK_EXPIRE = 30; // 30秒
@@ -1942,6 +1943,9 @@ async function listOrders(req) {
                 let processedItem = {
                     id: item.id,
                     type: item.type,
+                    right_id: item.right_id != null ? item.right_id : null,
+                    digital_artwork_id: item.digital_artwork_id != null ? item.digital_artwork_id : null,
+                    artwork_id: item.artwork_id != null ? item.artwork_id : null,
                     quantity: item.quantity,
                     price: item.price,
                     address_id: item.address_id,
@@ -1987,7 +1991,14 @@ async function listOrders(req) {
                     };
                 }
 
-                return processedItem;
+                return {
+                    ...processedItem,
+                    business_ids: {
+                        right_id: processedItem.right_id,
+                        digital_artwork_id: processedItem.digital_artwork_id,
+                        artwork_id: processedItem.artwork_id,
+                    },
+                };
             });
 
             // 查询微信支付订单状态 - 完全以微信API返回的数据为准
@@ -2271,6 +2282,9 @@ async function adminOrders(req) {
                 let processedItem = {
                     id: item.id,
                     type: item.type,
+                    right_id: item.right_id != null ? item.right_id : null,
+                    digital_artwork_id: item.digital_artwork_id != null ? item.digital_artwork_id : null,
+                    artwork_id: item.artwork_id != null ? item.artwork_id : null,
                     quantity: item.quantity,
                     price: item.price,
                     address_id: item.address_id,
@@ -2316,7 +2330,14 @@ async function adminOrders(req) {
                     };
                 }
 
-                return processedItem;
+                return {
+                    ...processedItem,
+                    business_ids: {
+                        right_id: processedItem.right_id,
+                        digital_artwork_id: processedItem.digital_artwork_id,
+                        artwork_id: processedItem.artwork_id,
+                    },
+                };
             });
 
             // 查询微信支付订单状态
@@ -2582,6 +2603,566 @@ async function checkRepayable(req) {
         });
     }
 }
+
+const TRADE_TYPE_LABEL_MAP = {
+    JSAPI: '小程序/公众号支付',
+    NATIVE: '扫码支付',
+    APP: 'APP支付',
+    MICROPAY: '付款码支付',
+    MWEB: 'H5支付',
+};
+
+function tradeTypeLabel(code) {
+    if (!code) return null;
+    return TRADE_TYPE_LABEL_MAP[code] || String(code);
+}
+
+function bankTypeDisplay(code) {
+    if (!code) return null;
+    if (code === 'OTHERS' || code === 'OTHER') return '其他/余额等';
+    return String(code);
+}
+
+function parseRefundAmountJson(amountRaw) {
+    if (!amountRaw) return { refund_yuan: null, total_yuan: null };
+    try {
+        const a = typeof amountRaw === 'string' ? JSON.parse(amountRaw) : amountRaw;
+        const refundFen = a.refund != null ? Number(a.refund) : null;
+        const totalFen = a.total != null ? Number(a.total) : null;
+        return {
+            refund_yuan: refundFen != null && !Number.isNaN(refundFen) ? Math.round(refundFen) / 100 : null,
+            total_yuan: totalFen != null && !Number.isNaN(totalFen) ? Math.round(totalFen) / 100 : null,
+        };
+    } catch {
+        return { refund_yuan: null, total_yuan: null };
+    }
+}
+
+function toIsoOrNull(d) {
+    if (d == null) return null;
+    const t = d instanceof Date ? d.getTime() : new Date(d).getTime();
+    if (Number.isNaN(t)) return null;
+    return new Date(t).toISOString();
+}
+
+function maskOpenid(openid) {
+    if (!openid || typeof openid !== 'string') return null;
+    const s = openid.trim();
+    if (s.length <= 8) return '***';
+    return `${s.slice(0, 3)}***${s.slice(-4)}`;
+}
+
+function parseJsonColumn(raw) {
+    if (raw == null) return null;
+    if (typeof raw === 'object') return raw;
+    try {
+        return JSON.parse(String(raw));
+    } catch {
+        return null;
+    }
+}
+
+function mapShipmentRowFromDb(row) {
+    return {
+        id: row.id,
+        delivery_id: row.delivery_id,
+        waybill_id: row.waybill_id,
+        wechat_order_id: row.wechat_order_id,
+        biz_id: row.biz_id,
+        service_type: row.service_type,
+        service_name: row.service_name,
+        use_insured: row.use_insured,
+        insured_value_fen: row.insured_value_fen,
+        add_source: row.add_source != null ? Number(row.add_source) : 0,
+        wx_appid: row.wx_appid != null ? String(row.wx_appid) : null,
+        waybill_data: parseJsonColumn(row.waybill_data_json) || [],
+        company_name: row.company_name,
+        status: row.status,
+        created_at: toIsoOrNull(row.created_at),
+        updated_at: toIsoOrNull(row.updated_at),
+    };
+}
+
+function mapShipmentsForBuyer(shipments) {
+    if (!Array.isArray(shipments)) return [];
+    return shipments.map((s) => {
+        const row = {
+            id: s.id,
+            delivery_id: s.delivery_id,
+            waybill_id: s.waybill_id,
+            service_type: s.service_type,
+            service_name: s.service_name,
+            waybill_data: s.waybill_data,
+            company_name: s.company_name,
+            created_at: s.created_at,
+            use_insured: s.use_insured,
+            insured_value_fen: s.insured_value_fen,
+        };
+        if (s.wechat_path) row.wechat_path = s.wechat_path;
+        if (s.wechat_path_error) row.wechat_path_error = s.wechat_path_error;
+        return row;
+    });
+}
+
+function buildPhysicalItemLogistics(primaryShipment, includeWechatPath, options = {}) {
+    const audience = options.audience === 'buyer' ? 'buyer' : 'admin';
+    if (!primaryShipment) {
+        return {
+            waybill_id: null,
+            delivery_id: null,
+            company_name: null,
+            hint: audience === 'buyer'
+                ? '商家发货后将在此展示运单与物流进度。'
+                : '尚未生成微信运单；可在订单管理「物流」中发货。',
+        };
+    }
+    const out = {
+        shipment_id: primaryShipment.id,
+        waybill_id: primaryShipment.waybill_id,
+        delivery_id: primaryShipment.delivery_id,
+        company_name: primaryShipment.company_name,
+        wechat_order_id: primaryShipment.wechat_order_id,
+        biz_id: primaryShipment.biz_id,
+        service_type: primaryShipment.service_type,
+        service_name: primaryShipment.service_name,
+        use_insured: primaryShipment.use_insured,
+        insured_value_fen: primaryShipment.insured_value_fen,
+        add_source: primaryShipment.add_source,
+        wx_appid: primaryShipment.wx_appid,
+        waybill_data: primaryShipment.waybill_data,
+        shipment_created_at: primaryShipment.created_at,
+    };
+    if (audience === 'buyer') {
+        delete out.wechat_order_id;
+        delete out.biz_id;
+        delete out.wx_appid;
+        delete out.add_source;
+    }
+    if (includeWechatPath) {
+        if (primaryShipment.wechat_path) out.wechat_path = primaryShipment.wechat_path;
+        if (primaryShipment.wechat_path_error) out.wechat_path_error = primaryShipment.wechat_path_error;
+    }
+    return out;
+}
+
+/**
+ * 订单详情：mode=admin 任意订单；mode=buyer 仅本人订单（小程序/H5 登录用户）
+ */
+async function orderDetailForActor(req, options = {}) {
+    const mode = options.mode === 'buyer' ? 'buyer' : 'admin';
+    const rawId = req.params.id;
+    const orderId = parseInt(String(rawId), 10);
+    if (!rawId || Number.isNaN(orderId) || orderId <= 0) {
+        return adminResult(400, { success: false, error: '无效的订单 ID' });
+    }
+
+    let buyerId = null;
+    if (mode === 'buyer') {
+        buyerId = Number(req.user?.id);
+        if (req.user?.id == null || Number.isNaN(buyerId) || buyerId <= 0) {
+            return adminResult(401, { success: false, error: '请先登录' });
+        }
+    }
+
+    try {
+        let orderSql = `SELECT o.*, u.nickname AS user_nickname, u.avatar AS user_avatar
+             FROM orders o
+             LEFT JOIN wx_users u ON o.user_id = u.id
+             WHERE o.id = ?`;
+        const orderParams = [orderId];
+        if (mode === 'buyer') {
+            orderSql += ' AND o.user_id = ?';
+            orderParams.push(buyerId);
+        }
+        orderSql += ' LIMIT 1';
+        const [orderRows] = await db.query(orderSql, orderParams);
+        if (!orderRows || orderRows.length === 0) {
+            const notFoundMsg = mode === 'buyer' ? '订单不存在或无权查看' : '订单不存在';
+            return adminResult(404, { success: false, error: notFoundMsg });
+        }
+        const order = orderRows[0];
+
+        const includeWechatPath = req.query && (
+            req.query.include_wechat_path === '1'
+            || req.query.include_wechat_path === 'true'
+            || req.query.include_wechat_path === 'yes'
+        );
+
+        let shipmentRows = [];
+        try {
+            const [rows] = await db.query(
+                `SELECT id, order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
+                use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status, created_at, updated_at
+                FROM order_shipments WHERE order_id = ? AND status = 'active' ORDER BY id DESC`,
+                [orderId]
+            );
+            shipmentRows = rows || [];
+        } catch (shipErr) {
+            logger.warn('order_shipments 查询失败；未建表时可忽略，需要落库请执行 sql/migrations/001_order_shipments.sql', {
+                err: shipErr,
+                orderId,
+            });
+            shipmentRows = [];
+        }
+
+        const shipments = shipmentRows.map((row) => mapShipmentRowFromDb(row));
+
+        if (includeWechatPath && shipments.length > 0) {
+            for (let i = 0; i < shipments.length; i += 1) {
+                const pathBody = {
+                    internal_order_id: orderId,
+                    delivery_id: shipments[i].delivery_id,
+                    waybill_id: shipments[i].waybill_id,
+                    add_source: shipments[i].add_source === 2 ? 2 : 0,
+                };
+                if (shipments[i].add_source === 2 && shipments[i].wx_appid) {
+                    pathBody.wx_appid = shipments[i].wx_appid;
+                }
+                const r = await logisticsService.getPath({ body: pathBody });
+                if (r.ok && r.body) {
+                    shipments[i].wechat_path = {
+                        path_item_num: r.body.path_item_num,
+                        path_item_list: r.body.path_item_list || [],
+                    };
+                } else {
+                    shipments[i].wechat_path = null;
+                    shipments[i].wechat_path_error = r.body || { error: 'getPath failed' };
+                }
+            }
+        }
+
+        const primaryShipment = shipments.length > 0 ? shipments[0] : null;
+
+        const [orderItems] = await db.query(
+            `SELECT
+                oi.id,
+                oi.type,
+                oi.right_id,
+                oi.digital_artwork_id,
+                oi.artwork_id,
+                oi.quantity,
+                oi.price,
+                oi.address_id,
+                r.title AS right_title,
+                r.description AS right_description,
+                (SELECT ri.image_url FROM right_images ri WHERE ri.right_id = oi.right_id ORDER BY ri.id ASC LIMIT 1) AS right_image_url,
+                da.title AS digital_title,
+                da.description AS digital_description,
+                da.image_url AS digital_image_url,
+                oa.title AS artwork_title,
+                oa.description AS artwork_description,
+                oa.image AS artwork_image,
+                wa.receiver_name,
+                wa.receiver_phone,
+                wa.province,
+                wa.city,
+                wa.district,
+                wa.detail_address,
+                wa.is_default
+            FROM order_items oi
+            LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+            LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+            LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+            LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
+            WHERE oi.order_id = ?
+            ORDER BY oi.id ASC`,
+            [orderId]
+        );
+
+        let itemsSubtotalYuan = 0;
+        const items = (orderItems || []).map((row) => {
+            const qty = Number(row.quantity) > 0 ? Number(row.quantity) : 1;
+            const linePrice = parseFloat(row.price);
+            const lineTotal = (Number.isFinite(linePrice) ? linePrice : 0) * qty;
+            itemsSubtotalYuan += lineTotal;
+
+            const base = {
+                id: row.id,
+                type: row.type,
+                right_id: row.right_id,
+                digital_artwork_id: row.digital_artwork_id,
+                artwork_id: row.artwork_id,
+                quantity: qty,
+                price: row.price,
+                address_id: row.address_id,
+                line_subtotal_yuan: Math.round(lineTotal * 100) / 100,
+            };
+
+            const addressSnapshot = row.address_id
+                ? {
+                    receiver_name: row.receiver_name,
+                    receiver_phone: row.receiver_phone,
+                    province: row.province,
+                    city: row.city,
+                    district: row.district,
+                    detail_address: row.detail_address,
+                    full_address: [row.province, row.city, row.district, row.detail_address].filter(Boolean).join(' '),
+                    is_default: row.is_default === 1,
+                }
+                : null;
+
+            let title = '';
+            let description = '';
+            let images = [];
+            if (row.type === 'right') {
+                title = row.right_title;
+                description = row.right_description;
+                images = row.right_image_url ? [row.right_image_url] : [];
+            } else if (row.type === 'digital') {
+                title = row.digital_title;
+                description = row.digital_description;
+                images = row.digital_image_url ? [row.digital_image_url] : [];
+            } else if (row.type === 'artwork') {
+                title = row.artwork_title;
+                description = row.artwork_description;
+                images = row.artwork_image ? [row.artwork_image] : [];
+            }
+
+            const digital_view_hint =
+                row.type === 'digital'
+                    ? '数字权益/藏品：用户支付成功后可在小程序「我的」或订单相关入口查看（具体以小程序页面为准）。'
+                    : null;
+
+            const logisticsPayload = row.type === 'right' || row.type === 'artwork'
+                ? buildPhysicalItemLogistics(primaryShipment, includeWechatPath, { audience: mode })
+                : null;
+
+            return {
+                ...base,
+                business_ids: {
+                    right_id: row.right_id != null ? row.right_id : null,
+                    digital_artwork_id: row.digital_artwork_id != null ? row.digital_artwork_id : null,
+                    artwork_id: row.artwork_id != null ? row.artwork_id : null,
+                },
+                title,
+                description,
+                images,
+                address_snapshot: addressSnapshot,
+                fulfillment: {
+                    address_snapshot: addressSnapshot,
+                    logistics: logisticsPayload,
+                    digital_view_hint,
+                },
+            };
+        });
+
+        const discountYuan = parseFloat(order.discount_amount) || 0;
+        const totalFeeYuan = parseFloat(order.total_fee) || 0;
+        const actualFeeYuan = parseFloat(order.actual_fee) || 0;
+        const shippingFeeYuan = 0;
+
+        const fee = {
+            currency: 'CNY',
+            items_subtotal_yuan: Math.round(itemsSubtotalYuan * 100) / 100,
+            shipping_fee_yuan: shippingFeeYuan,
+            shipping_note: '当前库表未单独记录运费，按 0 展示；若含运费请后续扩展字段。',
+            discount_yuan: Math.round(discountYuan * 100) / 100,
+            amount_payable_yuan: Math.round(actualFeeYuan * 100) / 100,
+            amount_paid_yuan: order.trade_state === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null,
+            order_total_before_discount_yuan: Math.round(totalFeeYuan * 100) / 100,
+        };
+
+        let wxPay = null;
+        try {
+            const timestamp = Math.floor(Date.now() / 1000).toString();
+            const nonceStr = generateNonceStr();
+            const method = 'GET';
+            const pathUrl = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`;
+            const signature = generateSignV3(method, pathUrl, timestamp, nonceStr, '');
+            const response = await axios.get(
+                `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`,
+                {
+                    headers: {
+                        Accept: 'application/json',
+                        Authorization: `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                        'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
+                        'User-Agent': 'axios/1.9.0',
+                    },
+                    timeout: 15000,
+                }
+            );
+            if (response.status === 200) wxPay = response.data;
+        } catch (err) {
+            logger.warn('adminOrderDetail 查询微信支付单失败，使用库内字段', { err: err.message });
+        }
+
+        const payment = {
+            transaction_id: wxPay?.transaction_id || order.transaction_id || null,
+            trade_state: wxPay?.trade_state || order.trade_state || null,
+            trade_state_desc: wxPay?.trade_state_desc || order.trade_state_desc || null,
+            trade_type: wxPay?.trade_type || order.trade_type || null,
+            trade_type_label: tradeTypeLabel(wxPay?.trade_type || order.trade_type),
+            bank_type: wxPay?.bank_type || null,
+            bank_type_display: bankTypeDisplay(wxPay?.bank_type),
+            success_time: wxPay?.success_time || toIsoOrNull(order.success_time),
+            amount_payer_total_fen: wxPay?.amount?.payer_total != null ? Number(wxPay.amount.payer_total) : null,
+            amount_total_fen: wxPay?.amount?.total != null ? Number(wxPay.amount.total) : null,
+            currency: wxPay?.amount?.currency || 'CNY',
+            payer_openid_masked: maskOpenid(wxPay?.payer?.openid),
+        };
+
+        const [refundRows] = await db.query(
+            'SELECT * FROM refund_requests WHERE out_trade_no = ? ORDER BY id ASC',
+            [order.out_trade_no]
+        );
+
+        const refunds = (refundRows || []).map((r) => {
+            const amt = parseRefundAmountJson(r.amount);
+            return {
+                id: r.id,
+                out_refund_no: r.out_refund_no,
+                wx_refund_id: r.wx_refund_id || null,
+                status: r.status,
+                reason: r.reason || null,
+                reject_reason: r.reject_reason || null,
+                refund_amount_yuan: amt.refund_yuan,
+                order_total_snapshot_yuan: amt.total_yuan,
+                created_at: toIsoOrNull(r.created_at),
+                approved_at: toIsoOrNull(r.approved_at),
+                rejected_at: toIsoOrNull(r.rejected_at),
+                updated_at: toIsoOrNull(r.updated_at),
+            };
+        });
+
+        const timeline = [];
+
+        timeline.push({
+            stage: 'ORDER_CREATED',
+            at: toIsoOrNull(order.created_at),
+            title: '订单创建',
+            description: order.body || '—',
+        });
+
+        if (order.trade_state === 'NOTPAY' || order.trade_state === 'PAYERROR') {
+            timeline.push({
+                stage: 'AWAITING_PAYMENT',
+                at: toIsoOrNull(order.updated_at),
+                title: '待支付/待完成',
+                description: order.trade_state_desc || `当前状态：${order.trade_state}`,
+            });
+        }
+
+        const paidAt = wxPay?.success_time || toIsoOrNull(order.success_time);
+        if (paidAt && (order.trade_state === 'SUCCESS' || order.trade_state === 'REFUND')) {
+            timeline.push({
+                stage: 'PAID',
+                at: paidAt,
+                title: '支付成功',
+                description: (wxPay?.transaction_id || order.transaction_id)
+                    ? `微信订单号：${wxPay?.transaction_id || order.transaction_id}`
+                    : '已支付',
+            });
+        }
+
+        for (const r of refunds) {
+            timeline.push({
+                stage: 'REFUND_APPLIED',
+                at: r.created_at,
+                title: '退款申请',
+                description: [r.out_refund_no, r.reason ? `原因：${r.reason}` : ''].filter(Boolean).join(' · ') || '—',
+            });
+            if (r.approved_at) {
+                timeline.push({
+                    stage: 'REFUND_APPROVED',
+                    at: r.approved_at,
+                    title: '退款已批准',
+                    description: r.wx_refund_id ? `微信退款单：${r.wx_refund_id}` : `退款单 ${r.out_refund_no || ''}`,
+                });
+            }
+            if (r.rejected_at) {
+                timeline.push({
+                    stage: 'REFUND_REJECTED',
+                    at: r.rejected_at,
+                    title: '退款已拒绝',
+                    description: r.reject_reason || '—',
+                });
+            }
+            if (r.status === 'SUCCESS') {
+                timeline.push({
+                    stage: 'REFUND_SUCCESS',
+                    at: r.updated_at || r.approved_at,
+                    title: '退款到账',
+                    description: `约 ¥${r.refund_amount_yuan != null ? r.refund_amount_yuan : '—'}`,
+                });
+            }
+            if (r.status === 'FAILED') {
+                timeline.push({
+                    stage: 'REFUND_FAILED',
+                    at: r.updated_at,
+                    title: '退款失败',
+                    description: r.reject_reason || '见微信/银行返回',
+                });
+            }
+        }
+
+        if (order.trade_state === 'REFUND') {
+            timeline.push({
+                stage: 'ORDER_REFUNDED',
+                at: toIsoOrNull(order.updated_at),
+                title: '订单已退款',
+                description: order.trade_state_desc || '交易关闭或已退款',
+            });
+        }
+
+        if (order.trade_state === 'CLOSED' || order.trade_state === 'REVOKED') {
+            timeline.push({
+                stage: 'ORDER_CLOSED',
+                at: toIsoOrNull(order.updated_at),
+                title: order.trade_state === 'REVOKED' ? '订单已撤销' : '订单已关闭',
+                description: order.trade_state_desc || '',
+            });
+        }
+
+        timeline.sort((a, b) => {
+            const ta = a.at ? new Date(a.at).getTime() : 0;
+            const tb = b.at ? new Date(b.at).getTime() : 0;
+            return ta - tb;
+        });
+
+        const shipmentsForResponse = mode === 'buyer' ? mapShipmentsForBuyer(shipments) : shipments;
+
+        const orderPayload = {
+            id: order.id,
+            out_trade_no: order.out_trade_no,
+            body: order.body,
+            trade_state: order.trade_state,
+            trade_state_desc: order.trade_state_desc,
+            created_at: toIsoOrNull(order.created_at),
+            updated_at: toIsoOrNull(order.updated_at),
+            user_nickname: order.user_nickname,
+            user_avatar: order.user_avatar,
+        };
+        if (mode === 'admin') {
+            orderPayload.user_id = order.user_id;
+        }
+
+        return adminResult(200, {
+            success: true,
+            data: {
+                order: orderPayload,
+                fee,
+                payment,
+                timeline,
+                refunds,
+                shipments: shipmentsForResponse,
+                items,
+            },
+        });
+    } catch (error) {
+        const errMsg = mode === 'buyer' ? '查询订单详情失败' : '管理员查询订单详情失败';
+        logger.error(errMsg, { err: error, mode });
+        return adminResult(500, { success: false, error: errMsg });
+    }
+}
+
+async function adminOrderDetail(req) {
+    return orderDetailForActor(req, { mode: 'admin' });
+}
+
+async function buyerOrderDetail(req) {
+    return orderDetailForActor(req, { mode: 'buyer' });
+}
+
 module.exports = {
   unifiedOrder,
   singleOrder,
@@ -2598,5 +3179,7 @@ module.exports = {
   digitalIdentityPurchases,
   adminOrders,
   checkRepayable,
+  adminOrderDetail,
+  buyerOrderDetail,
 };
 

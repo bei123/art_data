@@ -43,8 +43,10 @@ async function resolveWechatLogisticsOrderContext(b) {
   let order_id = b.order_id != null && String(b.order_id).trim() !== '' ? String(b.order_id).trim() : ''
   let buyerOpenid = b.openid != null && String(b.openid).trim() !== '' ? String(b.openid).trim() : ''
 
+  let internal_order_id = null
   const internalOrderId = parseInt(String(b.internal_order_id ?? ''), 10)
   if (!Number.isNaN(internalOrderId) && internalOrderId > 0) {
+    internal_order_id = internalOrderId
     const [orderRows] = await db.query(
       'SELECT id, out_trade_no, user_id FROM orders WHERE id = ? LIMIT 1',
       [internalOrderId]
@@ -77,7 +79,7 @@ async function resolveWechatLogisticsOrderContext(b) {
       })
     }
   }
-  return { order_id, buyerOpenid, add_source }
+  return { order_id, buyerOpenid, add_source, internal_order_id }
 }
 
 /**
@@ -411,12 +413,48 @@ async function addOrder(req) {
       return adminResult(502, { error: '微信未返回运单号', wechat_response: data })
     }
 
+    const wechatReturnedOrderId = data.order_id != null && String(data.order_id).trim() !== ''
+      ? String(data.order_id).trim()
+      : wechatOrderId
+
+    let shipment_persisted = true
+    try {
+      await db.query(
+        `INSERT INTO order_shipments (
+          order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
+          use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+        [
+          internalOrderId,
+          delivery_id,
+          String(data.waybill_id).trim(),
+          clipUtf8(wechatReturnedOrderId, 512),
+          clipUtf8(biz_id, 64),
+          Number(service_type),
+          clipUtf8(service_name, 128),
+          insured.use_insured === 1 ? 1 : 0,
+          Number.isFinite(Number(insured.insured_value)) ? Math.round(Number(insured.insured_value)) : 0,
+          add_source,
+          add_source === 2 ? clipUtf8(wx_appid, 64) : null,
+          JSON.stringify(data.waybill_data || [])
+        ]
+      )
+    } catch (dbErr) {
+      shipment_persisted = false
+      logger.error('addOrder 微信已成功但写入 order_shipments 失败（请执行 sql/migrations/001_order_shipments.sql）', {
+        err: dbErr,
+        internalOrderId,
+        waybill_id: data.waybill_id
+      })
+    }
+
     return adminResult(200, {
       internal_order_id: internalOrderId,
       out_trade_no: orderRow.out_trade_no,
       order_id: data.order_id,
       waybill_id: data.waybill_id,
-      waybill_data: data.waybill_data || []
+      waybill_data: data.waybill_data || [],
+      shipment_persisted
     })
   } catch (err) {
     logger.error('addOrder 失败', { err })
@@ -453,6 +491,10 @@ async function getPath(req) {
       waybill_id
     }
     if (ctx.add_source === 0 && ctx.buyerOpenid) wxPayload.openid = ctx.buyerOpenid
+    if (ctx.add_source === 2) {
+      const wxa = b.wx_appid != null ? String(b.wx_appid).trim() : ''
+      if (wxa) wxPayload.wx_appid = clipUtf8(wxa, 64)
+    }
 
     const access_token = await getAccessToken(appid, secret)
     const url = `https://api.weixin.qq.com/cgi-bin/express/business/path/get?access_token=${encodeURIComponent(access_token)}`
@@ -514,6 +556,10 @@ async function getOrder(req) {
     }
     if (waybill_id) wxPayload.waybill_id = waybill_id
     if (ctx.add_source === 0 && ctx.buyerOpenid) wxPayload.openid = ctx.buyerOpenid
+    if (ctx.add_source === 2) {
+      const wxa = b.wx_appid != null ? String(b.wx_appid).trim() : ''
+      if (wxa) wxPayload.wx_appid = clipUtf8(wxa, 64)
+    }
 
     if (b.print_type !== undefined && b.print_type !== null && !Number.isNaN(Number(b.print_type))) {
       const pt = Number(b.print_type)
@@ -579,6 +625,10 @@ async function cancelOrder(req) {
       waybill_id
     }
     if (ctx.add_source === 0 && ctx.buyerOpenid) wxPayload.openid = ctx.buyerOpenid
+    if (ctx.add_source === 2) {
+      const wxa = b.wx_appid != null ? String(b.wx_appid).trim() : ''
+      if (wxa) wxPayload.wx_appid = clipUtf8(wxa, 64)
+    }
 
     const access_token = await getAccessToken(appid, secret)
     const url = `https://api.weixin.qq.com/cgi-bin/express/business/order/cancel?access_token=${encodeURIComponent(access_token)}`
@@ -601,6 +651,24 @@ async function cancelOrder(req) {
         delivery_resultcode: data.delivery_resultcode,
         delivery_resultmsg: data.delivery_resultmsg
       })
+    }
+
+    try {
+      if (ctx.internal_order_id != null) {
+        await db.query(
+          `UPDATE order_shipments SET status = 'cancelled', updated_at = NOW()
+           WHERE order_id = ? AND delivery_id = ? AND waybill_id = ? AND status = 'active'`,
+          [ctx.internal_order_id, delivery_id, waybill_id]
+        )
+      } else {
+        await db.query(
+          `UPDATE order_shipments SET status = 'cancelled', updated_at = NOW()
+           WHERE delivery_id = ? AND waybill_id = ? AND status = 'active'`,
+          [delivery_id, waybill_id]
+        )
+      }
+    } catch (dbErr) {
+      logger.error('cancelOrder 成功后更新 order_shipments 失败', { err: dbErr })
     }
 
     return adminResult(200, {
