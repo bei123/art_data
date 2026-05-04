@@ -1057,9 +1057,7 @@ const checkNetworkPerformance = () => {
 }
 
 const handleEditorCreated = (editor) => {
-  if (editorRef) {
-    editorRef.value = editor
-  }
+  editorRef.value = editor
   
   // 检测网络性能
   checkNetworkPerformance();

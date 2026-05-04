@@ -3,6 +3,8 @@ require('dotenv').config();
 const logger = require('./utils/logger');
 const { getRequestId } = require('./middleware/requestContext');
 
+const isDev = process.env.NODE_ENV === 'development';
+
 // 数据库配置 - 最简化版本（只使用MySQL2核心支持的选项）
 const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
@@ -21,49 +23,51 @@ if (!process.env.DB_PASSWORD) {
     process.exit(1);
 }
 
-console.log('Database configuration:', {
-    ...dbConfig,
-    password: '******' // 隐藏密码
-});
+if (isDev) {
+    console.log('Database configuration:', {
+        ...dbConfig,
+        password: '******' // 隐藏密码
+    });
+}
 
 // 创建连接池
 const pool = mysql.createPool(dbConfig);
 
-// 连接池事件监听
+// 连接池事件：高频，仅开发环境打印，避免生产刷屏与性能损耗
 pool.on('connection', (connection) => {
-    console.log('新的数据库连接已创建');
-    
+    if (isDev) console.log('新的数据库连接已创建');
+
     // 设置连接级别的配置
     connection.query('SET SESSION sql_mode = "NO_ENGINE_SUBSTITUTION"');
     connection.query('SET SESSION wait_timeout = 28800');
     connection.query('SET SESSION interactive_timeout = 28800');
 });
 
-pool.on('acquire', (connection) => {
-    console.log('连接已从连接池获取');
+pool.on('acquire', () => {
+    if (isDev) console.log('连接已从连接池获取');
 });
 
-pool.on('release', (connection) => {
-    console.log('连接已释放回连接池');
+pool.on('release', () => {
+    if (isDev) console.log('连接已释放回连接池');
 });
 
 pool.on('enqueue', () => {
-    console.log('等待可用的连接...');
+    if (isDev) console.log('等待可用的连接...');
 });
 
-// 测试连接
+// 启动时探测连接池（生产仅一条结构化就绪日志）
 pool.getConnection()
-    .then(connection => {
-        console.log('数据库连接成功');
-        // 测试查询
-        return connection.query('SELECT 1')
-            .then(([rows]) => {
-                console.log('测试查询成功:', rows);
-                connection.release();
-            });
+    .then((connection) => {
+        if (isDev) console.log('数据库连接成功');
+        else logger.info('db_pool_ready', { host: dbConfig.host, database: dbConfig.database });
+
+        return connection.query('SELECT 1').then(([rows]) => {
+            if (isDev) console.log('测试查询成功:', rows);
+            connection.release();
+        });
     })
-    .catch(err => {
-        console.error('数据库连接失败:', err);
+    .catch((err) => {
+        logger.error('db_startup_failed', { err });
     });
 
 // 执行查询的包装函数 - 性能优化版本
@@ -123,7 +127,7 @@ const getConnection = async () => {
     try {
         return await pool.getConnection();
     } catch (error) {
-        console.error('获取数据库连接失败:', error);
+        logger.error('db_get_connection_failed', { err: error });
         throw error;
     }
 };

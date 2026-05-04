@@ -16,30 +16,14 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
+          // 仅拆分前端实际依赖；勿把仅服务端使用的 @alicloud/*、ali-oss、sharp 写进来，否则会空 chunk 并触发 Node polyfill 告警
           manualChunks: {
-            // 将Vue相关库分离
             'vue-vendor': ['vue', 'vue-router'],
-            // 将Element Plus分离
-            'element-plus': ['element-plus'],
-            // 将Pinia状态管理分离
+            'element-plus': ['element-plus', '@element-plus/icons-vue'],
             pinia: ['pinia'],
-            // 将工具库分离
-            utils: ['axios', 'uuid'],
-            // 将阿里云相关库分离
-            aliyun: [
-              '@alicloud/credentials',
-              '@alicloud/dytnsapi20200217',
-              '@alicloud/ocr-api20210707',
-              '@alicloud/openapi-client',
-              '@alicloud/tea-console',
-              '@alicloud/tea-typescript',
-              '@alicloud/tea-util',
-              'ali-oss'
-            ],
-            // 将编辑器相关库分离
+            utils: ['axios'],
             editor: ['@wangeditor/editor', '@wangeditor/editor-for-vue'],
-            // 将图片处理相关库分离
-            'image-utils': ['browser-image-compression', 'sharp']
+            'image-utils': ['browser-image-compression']
           }
         }
       },

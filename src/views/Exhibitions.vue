@@ -513,7 +513,7 @@
               </template>
             </el-table-column>
             <el-table-column label="操作" width="120">
-              <template #default="{ row, $index }">
+              <template #default="{ $index }">
                 <el-button type="danger" size="small" @click="pendingItems.splice($index, 1)">移除</el-button>
               </template>
             </el-table-column>

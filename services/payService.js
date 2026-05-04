@@ -1649,10 +1649,10 @@ async function signPay(req) {
         // 构建签名参数
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
-        const package = `prepay_id=${cleanPrepayId}`;
+        const wxPayPackage = `prepay_id=${cleanPrepayId}`;
 
         // 构建签名串
-        const signStr = `${WX_PAY_CONFIG.appId}\n${timestamp}\n${nonceStr}\n${package}\n`;
+        const signStr = `${WX_PAY_CONFIG.appId}\n${timestamp}\n${nonceStr}\n${wxPayPackage}\n`;
 
         // 生成签名
         const sign = crypto.createSign('RSA-SHA256');
@@ -1663,7 +1663,7 @@ async function signPay(req) {
         return adminResult(200, {
             timeStamp: timestamp,
             nonceStr: nonceStr,
-            package: package,
+            package: wxPayPackage,
             signType: 'RSA',
             paySign: signature
         });

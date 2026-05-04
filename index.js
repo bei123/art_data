@@ -11,10 +11,6 @@ const https = require('https');
 const fs = require('fs');
 const { body } = require('express-validator');
 const auth = require('./auth');
-const axios = require('axios');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
-const xml2js = require('xml2js');
 const { uploadToOSS } = require('./config/oss');
 const { PUBLIC_API_BASE_URL } = require('./config/publicEnv');
 const helmet = require('helmet');
@@ -45,7 +41,6 @@ const exhibitionsRouter = require('./routes/exhibitions');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 
 const app = express();
-const port = 2000;
 
 // 微信支付回调接口必须用原始body字符串
 app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
@@ -80,12 +75,12 @@ app.use(requestContextMiddleware);
 // 速率限制配置
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1分钟
-  max: 10000, // 限制每个IP 1分钟内最多10000个请求
+  max: 300, // 每个 IP 1 分钟内最多 300 次请求（含管理端操作，过高会失去防爬意义）
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) =>
     req.method === 'GET' &&
-    (req.path === '/health' || req.path === '/health/live'),
+    (req.path === '/api/health' || req.path === '/api/health/live'),
   handler: (req, res) => {
     res.status(429).json({
       error: '请求过于频繁，请稍后再试',
@@ -101,7 +96,7 @@ app.use('/api/', limiter);
 // 对登录接口应用更严格的速率限制
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15分钟
-  max: 10, // 限制每个IP 15分钟内最多5次登录尝试
+  max: 5, // 每个 IP 15 分钟内最多 5 次登录尝试
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -151,15 +146,9 @@ app.use(cors({
   exposedHeaders: ['Authorization', 'X-Request-Id']
 }));
 
-// 请求体大小限制
+// 请求体解析（只注册一组，避免重复解析与体积异常）
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// 解析JSON请求体
-app.use(express.json());
-
-// 解析URL编码的请求体
-app.use(express.urlencoded({ extended: true }));
 
 async function apiHealthHandler(req, res) {
   const [dbHealth, redisHealth] = await Promise.all([
