@@ -41,8 +41,9 @@
         <template #default="{ row }">
           <el-image
             lazy
-            :src="row.logo"
-            :preview-src-list="[row.logo]"
+            :src="getImageUrl(row.logo)"
+            :preview-src-list="row.logo ? [getImageUrl(row.logo)] : []"
+            :preview-teleported="true"
             fit="cover"
             style="width: 50px; height: 50px"
             :alt="row.name ? `${row.name} Logo` : '商家 Logo'"

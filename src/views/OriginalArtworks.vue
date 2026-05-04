@@ -70,9 +70,11 @@
       <el-table-column prop="title" label="标题" />
              <el-table-column label="图片" width="120">
          <template #default="{ row }">
-           <el-image lazy 
-             :src="row.image" 
-             :preview-src-list="[row.image]"
+           <el-image
+             lazy
+             :src="row.image"
+             :preview-src-list="row.image ? [row.image] : []"
+             :preview-teleported="true"
              fit="cover"
              :initial-index="0"
              style="width: 80px; height: 80px"

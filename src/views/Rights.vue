@@ -32,7 +32,9 @@
               style="width: 100px; height: 100px; margin-right: 10px"
               :src="getImageUrl(image)"
               fit="cover"
-              :preview-src-list="row.images.map(img => getImageUrl(img))"
+              :preview-src-list="(row.images || []).map((img) => getImageUrl(img))"
+              :initial-index="index"
+              :preview-teleported="true"
               :alt="row.title ? `${row.title} 配图 ${index + 1}` : '版权实物配图'"
             >
               <template #placeholder>
