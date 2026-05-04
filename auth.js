@@ -310,7 +310,7 @@ const login = async (req, res) => {
 // 获取当前用户信息
 const getCurrentUser = async (req, res) => {
   try {
-    if (req.user.is_wx_user) {
+    if (req.user?.is_wx_user) {
       return res.json({
         id: req.user.id,
         openid: req.user.openid,
@@ -321,16 +321,19 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
-    const [users] = await query(
+    // db.query 与 mysql2 pool.query 一致，返回 [rows, fields]；只取 rows 的首行作为单个用户对象
+    const queryTuple = await query(
       'SELECT u.id, u.username, u.email, r.name as role FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
       [req.user.id]
     );
+    const rows = queryTuple[0];
+    const user = rows?.[0];
 
-    if (!users || users.length === 0) {
+    if (!user) {
       return res.status(404).json({ error: '用户不存在' });
     }
 
-    res.json(users[0]);
+    res.json(user);
   } catch (error) {
     console.error('获取用户信息失败:', error);
     res.status(500).json({ error: '获取用户信息失败: ' + error.message });
