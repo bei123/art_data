@@ -292,10 +292,17 @@ app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
 // 保护需要管理员权限的路由
 app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
 
-// 获取用户的数字身份购买记录
-app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
-  try {
-    const [purchases] = await db.query(`
+// 获取用户的数字身份购买记录（本人或 admin，防止越权）
+app.get(
+  '/api/digital-identity/purchases/:user_id',
+  auth.authenticateToken,
+  async (req, res) => {
+    const access = await auth.assertSelfOrAdmin(req, req.params.user_id)
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error })
+    }
+    try {
+      const [purchases] = await db.query(`
       SELECT 
         dip.*,
         da.title as artwork_title,
@@ -304,14 +311,15 @@ app.get('/api/digital-identity/purchases/:user_id', async (req, res) => {
       JOIN digital_artworks da ON dip.digital_artwork_id = da.id
       WHERE dip.user_id = ?
       ORDER BY dip.purchase_date DESC
-    `, [req.params.user_id]);
+    `, [access.userId])
 
-    res.json(purchases);
-  } catch (error) {
-    console.error('获取数字身份购买记录失败:', error);
-    res.status(500).json({ error: '获取数字身份购买记录失败' });
+      res.json(purchases)
+    } catch (error) {
+      console.error('获取数字身份购买记录失败:', error)
+      res.status(500).json({ error: '获取数字身份购买记录失败' })
+    }
   }
-});
+)
 
 // 使用微信路由
 app.use('/api/wx', wxRouter);

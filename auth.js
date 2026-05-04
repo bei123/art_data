@@ -41,6 +41,31 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
+/**
+ * 仅允许访问本人数据，或角色为 admin 的用户访问他人数据（防水平越权）
+ * @returns {{ ok: true, userId: number } | { ok: false, status: number, error: string }}
+ */
+async function assertSelfOrAdmin(req, targetUserId) {
+  const id = parseInt(String(targetUserId), 10)
+  if (!targetUserId || Number.isNaN(id) || id <= 0) {
+    return { ok: false, status: 400, error: '无效的用户ID' }
+  }
+  if (!req.user) {
+    return { ok: false, status: 401, error: '未认证' }
+  }
+  if (Number(req.user.id) === id) {
+    return { ok: true, userId: id }
+  }
+  const [userRoles] = await query(
+    'SELECT r.name FROM roles r JOIN users u ON r.id = u.role_id WHERE u.id = ?',
+    [req.user.id]
+  )
+  if (userRoles.length > 0 && userRoles[0].name === 'admin') {
+    return { ok: true, userId: id }
+  }
+  return { ok: false, status: 403, error: '无权查看该用户的购买记录' }
+}
+
 // 检查角色权限中间件
 const checkRole = (roles) => {
   return async (req, res, next) => {
@@ -286,6 +311,7 @@ const logout = async (req, res) => {
 
 module.exports = {
   authenticateToken,
+  assertSelfOrAdmin,
   checkRole,
   register,
   login,

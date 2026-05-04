@@ -83,7 +83,11 @@ const routes = [
       {
         path: 'digital-identity/purchases/:user_id',
         name: 'DigitalIdentityPurchases',
-        component: () => import('@/views/DigitalIdentityPurchases.vue')
+        component: () => import('@/views/DigitalIdentityPurchases.vue'),
+        meta: {
+          title: '数字身份购买记录',
+          requiresAuth: true
+        }
       },
       {
         path: 'banners',

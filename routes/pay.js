@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { authenticateToken, assertSelfOrAdmin } = require('../auth');
 const svc = require('../services/payService');
 
 router.post('/unifiedorder', authenticateToken, async (req, res) => {
@@ -124,8 +124,12 @@ router.get('/orders', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/digital-identity/purchases/:user_id', async (req, res) => {
+router.get('/digital-identity/purchases/:user_id', authenticateToken, async (req, res) => {
   try {
+    const access = await assertSelfOrAdmin(req, req.params.user_id);
+    if (!access.ok) {
+      return res.status(access.status).json({ error: access.error });
+    }
     const r = await svc.digitalIdentityPurchases(req);
     return res.status(r.status).json(r.body);
   } catch (e) {

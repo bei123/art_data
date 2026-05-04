@@ -6,6 +6,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.cursor
 
 # 日志文件
 npm-debug.log*
