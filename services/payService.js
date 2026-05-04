@@ -2746,15 +2746,10 @@ function buildPhysicalItemLogistics(primaryShipment, includeWechatPath, options 
 }
 
 /**
- * 订单详情：mode=admin 任意订单；mode=buyer 仅本人订单（小程序/H5 登录用户）
+ * 订单详情：admin 用库表主键 id；buyer 用商户订单号 out_trade_no + 本人 user_id（小程序/H5）
  */
 async function orderDetailForActor(req, options = {}) {
     const mode = options.mode === 'buyer' ? 'buyer' : 'admin';
-    const rawId = req.params.id;
-    const orderId = parseInt(String(rawId), 10);
-    if (!rawId || Number.isNaN(orderId) || orderId <= 0) {
-        return adminResult(400, { success: false, error: '无效的订单 ID' });
-    }
 
     let buyerId = null;
     if (mode === 'buyer') {
@@ -2764,15 +2759,35 @@ async function orderDetailForActor(req, options = {}) {
         }
     }
 
+    let outTradeNo = '';
+    let adminNumericId = null;
+    if (mode === 'buyer') {
+        const fromOpt = options.out_trade_no != null ? String(options.out_trade_no).trim() : '';
+        const fromQuery = req.query?.out_trade_no != null ? String(req.query.out_trade_no).trim() : '';
+        outTradeNo = fromOpt || fromQuery;
+        if (!outTradeNo || outTradeNo.length > 64) {
+            return adminResult(400, { success: false, error: '缺少或无效的订单号（请传 out_trade_no）' });
+        }
+    } else {
+        const rawId = req.params.id;
+        adminNumericId = parseInt(String(rawId), 10);
+        if (!rawId || Number.isNaN(adminNumericId) || adminNumericId <= 0) {
+            return adminResult(400, { success: false, error: '无效的订单 ID' });
+        }
+    }
+
     try {
         let orderSql = `SELECT o.*, u.nickname AS user_nickname, u.avatar AS user_avatar
              FROM orders o
              LEFT JOIN wx_users u ON o.user_id = u.id
-             WHERE o.id = ?`;
-        const orderParams = [orderId];
+             WHERE `;
+        const orderParams = [];
         if (mode === 'buyer') {
-            orderSql += ' AND o.user_id = ?';
-            orderParams.push(buyerId);
+            orderSql += 'o.out_trade_no = ? AND o.user_id = ?';
+            orderParams.push(outTradeNo, buyerId);
+        } else {
+            orderSql += 'o.id = ?';
+            orderParams.push(adminNumericId);
         }
         orderSql += ' LIMIT 1';
         const [orderRows] = await db.query(orderSql, orderParams);
@@ -2781,6 +2796,7 @@ async function orderDetailForActor(req, options = {}) {
             return adminResult(404, { success: false, error: notFoundMsg });
         }
         const order = orderRows[0];
+        const internalOrderId = order.id;
 
         const includeWechatPath = req.query && (
             req.query.include_wechat_path === '1'
@@ -2794,13 +2810,13 @@ async function orderDetailForActor(req, options = {}) {
                 `SELECT id, order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
                 use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status, created_at, updated_at
                 FROM order_shipments WHERE order_id = ? AND status = 'active' ORDER BY id DESC`,
-                [orderId]
+                [internalOrderId]
             );
             shipmentRows = rows || [];
         } catch (shipErr) {
             logger.warn('order_shipments 查询失败；未建表时可忽略，需要落库请执行 sql/migrations/001_order_shipments.sql', {
                 err: shipErr,
-                orderId,
+                internalOrderId,
             });
             shipmentRows = [];
         }
@@ -2810,7 +2826,7 @@ async function orderDetailForActor(req, options = {}) {
         if (includeWechatPath && shipments.length > 0) {
             for (let i = 0; i < shipments.length; i += 1) {
                 const pathBody = {
-                    internal_order_id: orderId,
+                    internal_order_id: internalOrderId,
                     delivery_id: shipments[i].delivery_id,
                     waybill_id: shipments[i].waybill_id,
                     add_source: shipments[i].add_source === 2 ? 2 : 0,
@@ -2866,7 +2882,7 @@ async function orderDetailForActor(req, options = {}) {
             LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
             WHERE oi.order_id = ?
             ORDER BY oi.id ASC`,
-            [orderId]
+            [internalOrderId]
         );
 
         let itemsSubtotalYuan = 0;

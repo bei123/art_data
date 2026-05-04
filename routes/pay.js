@@ -114,8 +114,8 @@ router.get('/query', authenticateToken, async (req, res) => {
   }
 });
 
-/** 小程序/用户：本人订单详情（费用、支付脱敏、退款、物流 shipments；?include_wechat_path=1 拉微信轨迹） */
-router.get('/orders/:id', authenticateToken, async (req, res) => {
+/** 小程序/用户：本人订单详情；须传商户订单号 ?out_trade_no=；可选 ?include_wechat_path=1 拉微信轨迹 */
+router.get('/orders/detail', authenticateToken, async (req, res) => {
   try {
     const r = await svc.buyerOrderDetail(req);
     return res.status(r.status).json(r.body);
