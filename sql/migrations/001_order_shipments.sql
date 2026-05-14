@@ -1,5 +1,6 @@
 -- 微信物流下单成功后写入；管理端订单详情联查；取消运单时 status=cancelled
 -- 执行：mysql -u... -p... your_db < sql/migrations/001_order_shipments.sql
+-- 若表早已建好但缺 add_source / wx_appid，另执行：002_order_shipments_add_source_wx_appid.sql
 
 CREATE TABLE IF NOT EXISTS order_shipments (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

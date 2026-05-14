@@ -2814,7 +2814,7 @@ async function orderDetailForActor(req, options = {}) {
             );
             shipmentRows = rows || [];
         } catch (shipErr) {
-            logger.warn('order_shipments 查询失败；未建表时可忽略，需要落库请执行 sql/migrations/001_order_shipments.sql', {
+            logger.warn('order_shipments 查询失败；未建表执行 001，缺列执行 002：sql/migrations/001_order_shipments.sql / 002_order_shipments_add_source_wx_appid.sql', {
                 err: shipErr,
                 internalOrderId,
             });

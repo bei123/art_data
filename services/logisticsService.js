@@ -441,7 +441,7 @@ async function addOrder(req) {
       )
     } catch (dbErr) {
       shipment_persisted = false
-      logger.error('addOrder 微信已成功但写入 order_shipments 失败（请执行 sql/migrations/001_order_shipments.sql）', {
+      logger.error('addOrder 微信已成功但写入 order_shipments 失败（未建表执行 001，缺 add_source/wx_appid 执行 002）', {
         err: dbErr,
         internalOrderId,
         waybill_id: data.waybill_id
