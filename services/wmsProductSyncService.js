@@ -3,7 +3,6 @@
  * 依赖表字段：original_artworks.wms_record_id、wms_last_modified（见 sql/migrations/003）
  */
 const db = require('../db')
-const redisClient = require('../utils/redisClient')
 const logger = require('../utils/logger')
 const { OSS_PUBLIC_ORIGIN, validatePublicImageUrl } = require('../config/publicEnv')
 const {
@@ -13,10 +12,8 @@ const {
   WMS_PRODUCT_DATA_LIST_DEFAULT_BODY,
 } = require('../utils/wmsHttpClient')
 const { WMS_SYNC_PLACEHOLDER_IMAGE } = require('../config/wmsHttp')
-const { resolveFinalArtistId } = require('./artworksService')
+const { resolveFinalArtistId, invalidateArtworksPublicCaches } = require('./artworksService')
 const { invalidateArtistsListCache } = require('./artistsService')
-
-const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:'
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
@@ -195,17 +192,6 @@ function recordIdFromListRow(row) {
   if (!last || typeof last !== 'object') return null
   if (last.entity === 'Product' && last.id) return String(last.id)
   return null
-}
-
-async function clearArtworksCachesForIds(artworkIds) {
-  try {
-    await redisClient.scanDelByPattern('artworks:list*')
-    for (const id of artworkIds) {
-      if (id) await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id)
-    }
-  } catch (e) {
-    logger.warn('wms_sync_cache_clear_failed', { err: e })
-  }
 }
 
 /**
@@ -449,7 +435,11 @@ async function syncFromWmsAdmin(body) {
       if (rows.length < pageSize) break
     }
 
-    await clearArtworksCachesForIds(touchedArtworkIds)
+    if (touchedArtworkIds.length > 0) {
+      await invalidateArtworksPublicCaches({ artworkDetailIds: touchedArtworkIds })
+    } else {
+      await invalidateArtworksPublicCaches({ listOnly: true })
+    }
     await invalidateArtistsListCache()
 
     return adminResult(200, { message: '同步完成', stats })

@@ -12,21 +12,48 @@ const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:';
 /**
  * 清理原作公开接口相关 Redis：所有列表/分页/total 键 + 详情键。
  * 列表中展示的艺术家信息、`is_public`、价格等变化后都应调用，避免与 MySQL 不一致。
- * @param {{ artworkDetailId?: number }} [options] 若传入 `artworkDetailId`，仍清理全部 `artworks:list*`，并删除对应 `artworks:detail:{id}`；不传则额外 `scanDel` 全部 `artworks:detail*`（适合艺术家变更、批量删作品等）。
+ * @param {{
+ *   artworkDetailId?: number|string,
+ *   artworkDetailIds?: Array<number|string>,
+ *   listOnly?: boolean
+ * }} [options]
+ * - `listOnly: true`：仅清 `artworks:list*`（无详情删除）。
+ * - 传 `artworkDetailIds`（非空数组）：清全部 `artworks:list*`，并逐个删除对应 `artworks:detail:{id}`（适合 WMS 批量同步）。
+ * - 仅传 `artworkDetailId`：清列表 + 删除单条详情（适合单条 PATCH/PUT）。
+ * - 不传或空：清列表 + `scanDel` 全部 `artworks:detail*`（适合艺术家变更、批量删作品等）。
  */
 async function invalidateArtworksPublicCaches(options = {}) {
-  const rawDetailId = options && options.artworkDetailId;
-  const detailId =
-    rawDetailId != null && rawDetailId !== '' ? parsePositiveIntId(rawDetailId) : null;
+  const opts = options || {}
+  if (opts.listOnly === true) {
+    try {
+      await redisClient.scanDelByPattern('artworks:list*')
+    } catch (e) {
+      logger.error('invalidateArtworksPublicCaches_list_only_failed', { err: e })
+    }
+    return
+  }
+  const idsRaw = opts.artworkDetailIds
+  const batchIds =
+    Array.isArray(idsRaw) && idsRaw.length > 0
+      ? [...new Set(idsRaw.map((x) => parsePositiveIntId(x)).filter((id) => id != null))]
+      : null
+  const singleId =
+    batchIds == null && opts.artworkDetailId != null && opts.artworkDetailId !== ''
+      ? parsePositiveIntId(opts.artworkDetailId)
+      : null
   try {
-    await redisClient.scanDelByPattern('artworks:list*');
-    if (detailId) {
-      await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + detailId);
+    await redisClient.scanDelByPattern('artworks:list*')
+    if (batchIds && batchIds.length > 0) {
+      for (const id of batchIds) {
+        await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id)
+      }
+    } else if (singleId) {
+      await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + singleId)
     } else {
-      await redisClient.scanDelByPattern('artworks:detail*');
+      await redisClient.scanDelByPattern('artworks:detail*')
     }
   } catch (e) {
-    logger.error('invalidateArtworksPublicCaches failed', { err: e });
+    logger.error('invalidateArtworksPublicCaches failed', { err: e })
   }
 }
 
