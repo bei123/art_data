@@ -9,6 +9,27 @@ const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
 const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:';
 
+/**
+ * 清理原作公开接口相关 Redis：所有列表/分页/total 键 + 详情键。
+ * 列表中展示的艺术家信息、`is_public`、价格等变化后都应调用，避免与 MySQL 不一致。
+ * @param {{ artworkDetailId?: number }} [options] 若传入 `artworkDetailId`，仍清理全部 `artworks:list*`，并删除对应 `artworks:detail:{id}`；不传则额外 `scanDel` 全部 `artworks:detail*`（适合艺术家变更、批量删作品等）。
+ */
+async function invalidateArtworksPublicCaches(options = {}) {
+  const rawDetailId = options && options.artworkDetailId;
+  const detailId =
+    rawDetailId != null && rawDetailId !== '' ? parsePositiveIntId(rawDetailId) : null;
+  try {
+    await redisClient.scanDelByPattern('artworks:list*');
+    if (detailId) {
+      await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + detailId);
+    } else {
+      await redisClient.scanDelByPattern('artworks:detail*');
+    }
+  } catch (e) {
+    logger.error('invalidateArtworksPublicCaches failed', { err: e });
+  }
+}
+
 const performanceMetrics = {
   queryTimes: [],
   cacheHitRate: 0,
@@ -427,7 +448,7 @@ async function createOriginalArtworkAdmin(body) {
     );
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
-    await redisClient.scanDelByPattern('artworks:list*');
+    await invalidateArtworksPublicCaches({ artworkDetailId: result.insertId });
     return adminResult(200, {
       id: result.insertId,
       title,
@@ -544,8 +565,7 @@ async function updateOriginalArtworkAdmin(rawId, body) {
 
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
     const artist = artistRows[0] || {};
-    await redisClient.scanDelByPattern('artworks:list*');
-    await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + artworkId);
+    await invalidateArtworksPublicCaches({ artworkDetailId: artworkId });
     return adminResult(200, {
       id: artworkId,
       title,
@@ -579,18 +599,13 @@ async function deleteOriginalArtworkAdmin(rawId) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的作品ID' });
   try {
-    const [rows] = await db.query('SELECT artist_id FROM original_artworks WHERE id = ?', [id]);
     await db.query('DELETE FROM original_artworks WHERE id = ?', [id]);
     try {
       await db.query('DELETE FROM artist_featured_artworks WHERE artwork_id = ?', [id]);
     } catch (assocErr) {
       logger.warn('deleteOriginalArtworkAdmin_featured_cleanup', { err: assocErr });
     }
-    await redisClient.scanDelByPattern('artworks:list*');
-    if (rows && rows.length > 0 && rows[0].artist_id) {
-      await redisClient.del(REDIS_ARTWORKS_LIST_KEY_PREFIX + rows[0].artist_id);
-    }
-    await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id);
+    await invalidateArtworksPublicCaches({ artworkDetailId: id });
     return adminResult(200, { message: '删除成功' });
   } catch (error) {
     logger.error('deleteOriginalArtworkAdmin failed', { err: error });
@@ -660,6 +675,23 @@ function resetArtworksPerformanceMetrics() {
   }
 }
 
+/** 仅更新 is_public（列表内快速切换，避免 PUT 须带全量字段） */
+async function patchOriginalArtworkIsPublicAdmin(rawId, body) {
+  const artworkId = parsePositiveIntId(rawId);
+  if (!artworkId) return adminResult(400, { error: '无效的作品ID' });
+  const v = body && body.is_public;
+  const isPublic = v === 0 || v === false || v === '0' ? 0 : 1;
+  try {
+    const [result] = await db.query('UPDATE original_artworks SET is_public = ? WHERE id = ?', [isPublic, artworkId]);
+    if (!result || result.affectedRows === 0) return adminResult(404, { error: '作品不存在' });
+    await invalidateArtworksPublicCaches({ artworkDetailId: artworkId });
+    return adminResult(200, { id: artworkId, is_public: isPublic });
+  } catch (e) {
+    logger.error('patchOriginalArtworkIsPublicAdmin failed', { err: e });
+    return adminResult(500, { error: '更新展示状态失败' });
+  }
+}
+
 module.exports = {
   REDIS_ARTWORKS_LIST_KEY,
   REDIS_ARTWORKS_LIST_KEY_PREFIX,
@@ -673,4 +705,6 @@ module.exports = {
   clearArtworksPerformanceCacheAdmin,
   resetArtworksPerformanceMetrics,
   resolveFinalArtistId,
+  patchOriginalArtworkIsPublicAdmin,
+  invalidateArtworksPublicCaches,
 }

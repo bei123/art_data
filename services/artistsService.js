@@ -324,6 +324,14 @@ async function updateArtistAdmin(rawId, body) {
     }
     await invalidateArtistsListCache();
     await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + artistRowId);
+    if (updateFields.length > 0) {
+      try {
+        const { invalidateArtworksPublicCaches } = require('./artworksService');
+        await invalidateArtworksPublicCaches();
+      } catch (invErr) {
+        logger.error('invalidate_artworks_after_artist_update_failed', { err: invErr });
+      }
+    }
 
     const [artists] = await db.query(
       `
@@ -378,6 +386,12 @@ async function deleteArtistAdmin(rawId) {
     await connection.commit();
     await invalidateArtistsListCache();
     await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + id);
+    try {
+      const { invalidateArtworksPublicCaches } = require('./artworksService');
+      await invalidateArtworksPublicCaches();
+    } catch (invErr) {
+      logger.error('invalidate_artworks_after_artist_delete_failed', { err: invErr });
+    }
     return adminResult(200, { message: '删除成功' });
   } catch (e) {
     await connection.rollback();

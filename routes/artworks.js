@@ -61,6 +61,16 @@ router.post(
   }
 );
 
+router.patch('/:id/is-public', authenticateToken, async (req, res) => {
+  try {
+    const r = await svc.patchOriginalArtworkIsPublicAdmin(req.params.id, req.body);
+    return res.status(r.status).json(r.body);
+  } catch (error) {
+    logger.error('更新原作展示状态失败', { err: error });
+    res.status(500).json({ error: '更新原作展示状态失败' });
+  }
+});
+
 router.get('/:id', optionalAuthenticate, async (req, res) => {
   try {
     const r = await svc.getPublicArtworkDetail(req.params.id, Boolean(req.includeHidden));

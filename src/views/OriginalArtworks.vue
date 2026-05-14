@@ -79,7 +79,7 @@
         <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
       <CardContent class="overflow-x-auto p-0 sm:p-6">
-        <table class="w-full min-w-[960px] text-sm">
+        <table class="w-full min-w-[1040px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
               <th class="h-10 px-3 text-left font-medium">标题</th>
@@ -88,7 +88,7 @@
               <th class="h-10 w-20 px-3 text-left font-medium">年份</th>
               <th class="h-10 min-w-[8rem] px-3 text-left font-medium">价格</th>
               <th class="h-10 min-w-[7rem] px-3 text-left font-medium">库存/销量</th>
-              <th class="h-10 w-24 px-3 text-left font-medium">公开</th>
+              <th class="h-10 min-w-[10rem] px-3 text-left font-medium">公开</th>
               <th class="h-10 w-24 px-3 text-left font-medium">状态</th>
               <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
             </tr>
@@ -130,9 +130,33 @@
                 <div>销量: {{ row.sales }}</div>
               </td>
               <td class="px-3 py-2.5">
-                <Badge :variant="Number(row.is_public) === 0 ? 'secondary' : 'default'">
-                  {{ Number(row.is_public) === 0 ? '仅后台' : '公开' }}
-                </Badge>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    type="button"
+                    :variant="Number(row.is_public) !== 0 ? 'default' : 'outline'"
+                    class="h-8"
+                    :disabled="artworkIsPublicUpdatingId === row.id"
+                    @click="handleArtworkListPublicChange(row, 1)"
+                  >
+                    公开
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    :variant="Number(row.is_public) === 0 ? 'default' : 'outline'"
+                    class="h-8"
+                    :disabled="artworkIsPublicUpdatingId === row.id"
+                    @click="handleArtworkListPublicChange(row, 0)"
+                  >
+                    仅后台
+                  </Button>
+                  <Loader2
+                    v-if="artworkIsPublicUpdatingId === row.id"
+                    class="size-4 shrink-0 animate-spin text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </div>
               </td>
               <td class="px-3 py-2.5">
                 <Badge :variant="row.is_on_sale ? 'default' : 'secondary'">
@@ -627,6 +651,8 @@ const deleteOriginalArtworkDialogOpen = ref(false)
 const deleteOriginalArtworkTarget = ref(null)
 const deletingOriginalArtwork = ref(false)
 
+const artworkIsPublicUpdatingId = ref(null)
+
 const totalPages = computed(() =>
   Math.max(1, Math.ceil((pagination.value.total || 0) / (pagination.value.pageSize || 20)))
 )
@@ -1045,6 +1071,24 @@ const retryFetchArtworks = () => {
   fetchArtworks()
 }
 
+const handleArtworkListPublicChange = async (row, nextPublic) => {
+  if (!checkLoginStatus()) return
+  const next = Number(nextPublic) === 0 ? 0 : 1
+  if (Number(row.is_public) === next) return
+  artworkIsPublicUpdatingId.value = row.id
+  try {
+    await axios.patch(`/original-artworks/${row.id}/is-public`, { is_public: next })
+    const idx = artworks.value.findIndex((a) => a.id === row.id)
+    if (idx >= 0) artworks.value[idx] = { ...artworks.value[idx], is_public: next }
+    ElMessage.success(next === 1 ? '已设为公开' : '已设为仅后台')
+  } catch (e) {
+    const msg = e?.response?.data?.error || e?.response?.data?.message || '更新失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '更新失败')
+  } finally {
+    artworkIsPublicUpdatingId.value = null
+  }
+}
+
 function resolveWmsSyncRequestBody() {
   const maxPages = Math.min(500, Math.max(1, parseInt(String(wmsSyncMaxPages.value), 10) || 20))
   const pageSize = Math.min(100, Math.max(1, parseInt(String(wmsSyncPageSize.value), 10) || 20))
@@ -1131,6 +1175,7 @@ const fetchArtworks = async () => {
         stock: Number(item.stock) || 0,
         sales: Number(item.sales) || 0,
         is_on_sale: Number(item.is_on_sale) || 0,
+        is_public: Number(item.is_public) === 0 ? 0 : 1,
         year: Number(item.year) || new Date().getFullYear()
       }
 
@@ -1520,6 +1565,7 @@ const fetchSearchResults = async () => {
         stock: Number(item.stock) || 0,
         sales: Number(item.sales) || 0,
         is_on_sale: Number(item.is_on_sale) || 0,
+        is_public: Number(item.is_public) === 0 ? 0 : 1,
         year: Number(item.year) || new Date().getFullYear(),
         artist_name: item.artist_name || ''
       }

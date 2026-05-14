@@ -49,14 +49,14 @@
         <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
       <CardContent class="overflow-x-auto p-0 sm:p-6">
-        <table class="w-full min-w-[720px] text-sm">
+        <table class="w-full min-w-[800px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
               <th class="h-10 w-16 px-3 text-left font-medium">头像</th>
               <th class="h-10 px-3 text-left font-medium">姓名</th>
               <th class="h-10 px-3 text-left font-medium">时代</th>
               <th class="h-10 min-w-[8rem] px-3 text-left font-medium">所属机构</th>
-              <th class="h-10 w-24 px-3 text-left font-medium">公开</th>
+              <th class="h-10 min-w-[10rem] px-3 text-left font-medium">公开</th>
               <th class="h-10 max-w-[14rem] px-3 text-left font-medium">艺术历程</th>
               <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
             </tr>
@@ -87,9 +87,33 @@
                 <span v-else class="text-muted-foreground">独立艺术家</span>
               </td>
               <td class="px-3 py-2.5">
-                <Badge :variant="Number(row.is_public) === 0 ? 'secondary' : 'default'">
-                  {{ Number(row.is_public) === 0 ? '仅后台' : '公开' }}
-                </Badge>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    type="button"
+                    :variant="Number(row.is_public) !== 0 ? 'default' : 'outline'"
+                    class="h-8"
+                    :disabled="artistIsPublicUpdatingId === row.id"
+                    @click="handleArtistListPublicChange(row, 1)"
+                  >
+                    公开
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    :variant="Number(row.is_public) === 0 ? 'default' : 'outline'"
+                    class="h-8"
+                    :disabled="artistIsPublicUpdatingId === row.id"
+                    @click="handleArtistListPublicChange(row, 0)"
+                  >
+                    仅后台
+                  </Button>
+                  <Loader2
+                    v-if="artistIsPublicUpdatingId === row.id"
+                    class="size-4 shrink-0 animate-spin text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </div>
               </td>
               <td class="max-w-[14rem] truncate px-3 py-2.5 text-muted-foreground" :title="row.description">
                 {{ row.description }}
@@ -641,6 +665,8 @@ const featuredSelected = ref([])
 const featuredSearch = ref('')
 const featuredSaving = ref(false)
 
+const artistIsPublicUpdatingId = ref(null)
+
 const institutionSelectValue = computed(() =>
   selectedInstitutionId.value == null ? 'all' : String(selectedInstitutionId.value)
 )
@@ -743,6 +769,32 @@ const handleInstitutionFilter = async () => {
     console.error('按机构筛选失败：', error)
     ElMessage.error('按机构筛选失败')
     filteredArtists.value = []
+  }
+}
+
+function syncArtistIsPublicInLists(artistId, isPublic) {
+  const v = Number(isPublic) === 0 ? 0 : 1
+  const patchList = (arr) => {
+    const i = arr.findIndex((a) => a.id === artistId)
+    if (i >= 0) arr[i] = { ...arr[i], is_public: v }
+  }
+  patchList(artists.value)
+  patchList(filteredArtists.value)
+}
+
+const handleArtistListPublicChange = async (row, nextPublic) => {
+  const next = Number(nextPublic) === 0 ? 0 : 1
+  if (Number(row.is_public) === next) return
+  artistIsPublicUpdatingId.value = row.id
+  try {
+    await axios.put(`/artists/${row.id}`, { is_public: next })
+    syncArtistIsPublicInLists(row.id, next)
+    ElMessage.success(next === 1 ? '已设为公开' : '已设为仅后台')
+  } catch (e) {
+    const msg = e?.response?.data?.error || '更新失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '更新失败')
+  } finally {
+    artistIsPublicUpdatingId.value = null
   }
 }
 
