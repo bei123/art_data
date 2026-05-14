@@ -1,126 +1,78 @@
 <template>
-  <el-menu :default-active="activeMenu" class="sidebar-menu" :collapse="isCollapse" background-color="#304156"
-    text-color="#bfcbd9" active-text-color="#409EFF" :router="true">
-
-    <el-menu-item index="/">
-      <el-icon>
-        <Monitor />
-      </el-icon>
-      <template #title>仪表盘</template>
-    </el-menu-item>
-
-    <el-menu-item index="/original-artworks">
-      <el-icon>
-        <Picture />
-      </el-icon>
-      <template #title>原作管理</template>
-    </el-menu-item>
-
-    <el-menu-item index="/artists">
-      <el-icon>
-        <User />
-      </el-icon>
-      <template #title>艺术家管理</template>
-    </el-menu-item>
-
-    <el-menu-item index="/institutions">
-      <el-icon>
-        <OfficeBuilding />
-      </el-icon>
-      <template #title>机构管理</template>
-    </el-menu-item>
-
-    <el-menu-item index="/digital-artworks">
-      <el-icon>
-        <PictureFilled />
-      </el-icon>
-      <template #title>数字艺术品</template>
-    </el-menu-item>
-
-    <el-menu-item index="/physical-categories">
-      <el-icon>
-        <Files />
-      </el-icon>
-      <template #title>实物分类</template>
-    </el-menu-item>
-
-    <el-menu-item index="/rights">
-      <el-icon>
-        <Document />
-      </el-icon>
-      <template #title>权益管理</template>
-    </el-menu-item>
-
-    <el-menu-item v-if="hasRole('admin')" index="/exhibitions">
-      <el-icon>
-        <Document />
-      </el-icon>
-      <template #title>展览管理</template>
-    </el-menu-item>
-
-    <el-menu-item index="/banners">
-      <el-icon>
-        <Picture />
-      </el-icon>
-      <template #title>轮播图管理</template>
-    </el-menu-item>
-
-    <el-menu-item index="/merchants">
-      <el-icon>
-        <Shop />
-      </el-icon>
-      <template #title>商家管理</template>
-    </el-menu-item>
-
-    <el-menu-item v-if="hasRole('admin')" index="/refund-approval">
-      <el-icon>
-        <Money />
-      </el-icon>
-      <template #title>退款审批</template>
-    </el-menu-item>
-
-    <el-menu-item index="/orders">
-      <el-icon>
-        <Document />
-      </el-icon>
-      <template #title>订单管理</template>
-    </el-menu-item>
-  </el-menu>
+  <nav
+    class="flex h-full w-52 shrink-0 flex-col gap-0.5 border-r border-sidebar-border bg-sidebar p-2 text-sidebar-foreground"
+    aria-label="主导航"
+  >
+    <RouterLink
+      v-for="item in visibleNavItems"
+      :key="item.path"
+      :to="item.path"
+      :class="navLinkClass(item.path)"
+    >
+      <component :is="item.icon" class="size-4 shrink-0 opacity-80" aria-hidden="true" />
+      <span class="truncate">{{ item.label }}</span>
+    </RouterLink>
+  </nav>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import {
+  Building2,
+  FileText,
+  FolderTree,
+  Image,
+  Images,
+  LayoutDashboard,
+  Store,
+  User,
+  Wallet,
+} from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
-import {
-  Monitor,
-  Picture,
-  User,
-  PictureFilled,
-  Files,
-  Document,
-  Money,
-  Shop,
-  OfficeBuilding
-} from '@element-plus/icons-vue'
+import { cn } from '@/lib/utils'
 
 const route = useRoute()
 const userStore = useUserStore()
 
-const isCollapse = ref(false)
-const activeMenu = computed(() => route.path)
+const navItems = [
+  { path: '/', label: '仪表盘', icon: LayoutDashboard },
+  { path: '/original-artworks', label: '原作管理', icon: Image },
+  { path: '/artists', label: '艺术家管理', icon: User },
+  { path: '/institutions', label: '机构管理', icon: Building2 },
+  { path: '/digital-artworks', label: '数字艺术品', icon: Images },
+  { path: '/physical-categories', label: '实物分类', icon: FolderTree },
+  { path: '/rights', label: '权益管理', icon: FileText },
+  { path: '/exhibitions', label: '展览管理', icon: FileText, role: 'admin' },
+  { path: '/banners', label: '轮播图管理', icon: Image },
+  { path: '/merchants', label: '商家管理', icon: Store },
+  { path: '/refund-approval', label: '退款审批', icon: Wallet, role: 'admin' },
+  { path: '/orders', label: '订单管理', icon: FileText },
+]
 
-const hasRole = (role) => userMatchesRole(userStore.userInfo, role)
+const visibleNavItems = computed(() =>
+  navItems.filter((item) => !item.role || hasRole(item.role)),
+)
+
+function hasRole(role) {
+  return userMatchesRole(userStore.userInfo, role)
+}
+
+function isNavActive(path) {
+  const p = route.path
+  if (path === '/') return p === '/' || p === ''
+  return p === path || p.startsWith(`${path}/`)
+}
+
+function navLinkClass(path) {
+  return cn(
+    'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors outline-none',
+    'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+    'focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+    isNavActive(path)
+      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+      : 'text-sidebar-foreground/90',
+  )
+}
 </script>
-
-<style scoped>
-.sidebar-menu {
-  height: 100%;
-  border-right: none;
-}
-
-.sidebar-menu:not(.el-menu--collapse) {
-  width: 200px;
-}
-</style>

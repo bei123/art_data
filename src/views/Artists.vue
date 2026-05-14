@@ -1,420 +1,532 @@
 <template>
-  <div>
-    <div class="header">
-      <h3>艺术家管理</h3>
-      <div class="header-actions">
-        <el-select v-model="selectedInstitutionId" placeholder="按机构筛选" clearable @change="handleInstitutionFilter">
-          <el-option label="全部艺术家" :value="null" />
-          <el-option
-            v-for="institution in institutions"
-            :key="institution.id"
-            :label="institution.name"
-            :value="institution.id"
-          />
-        </el-select>
-        <el-button type="primary" @click="handleAdd">添加艺术家</el-button>
+  <div class="flex flex-col gap-6 p-4 md:p-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <h2 class="text-xl font-semibold tracking-tight text-foreground">
+        艺术家管理
+      </h2>
+      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <Select
+          :model-value="institutionSelectValue"
+          @update:model-value="onInstitutionSelectChange"
+        >
+          <SelectTrigger class="h-9 w-full min-w-[200px] sm:w-[240px]">
+            <SelectValue placeholder="按机构筛选" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部艺术家</SelectItem>
+            <SelectItem
+              v-for="institution in institutions"
+              :key="institution.id"
+              :value="String(institution.id)"
+            >
+              {{ institution.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <Button type="button" @click="handleAdd">
+          添加艺术家
+        </Button>
       </div>
     </div>
 
-    <el-alert
-      v-if="listError && !listLoading"
-      class="list-state-alert"
-      type="error"
-      :closable="false"
-      show-icon
-      role="alert"
-      :title="listError"
-    >
-      <el-button type="primary" link @click="retryFetchArtists">重试</el-button>
-    </el-alert>
+    <Alert v-if="listError && !listLoading" variant="destructive">
+      <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+      <AlertTitle>{{ listError }}</AlertTitle>
+      <AlertDescription class="mt-2">
+        <Button type="button" variant="secondary" size="sm" @click="retryFetchArtists">
+          重试
+        </Button>
+      </AlertDescription>
+    </Alert>
 
-    <div v-loading="listLoading" class="table-wrap">
-    <el-table :data="filteredArtists" style="width: 100%">
-        <template #empty>
-          <el-empty v-if="!listLoading" description="暂无艺术家数据" />
-        </template>
-      <el-table-column label="头像">
-        <template #default="{ row }">
-          <el-image
-            lazy
-            style="width: 50px; height: 50px"
-            :src="row.avatar"
-            fit="cover"
-            :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
-          >
-            <template #placeholder>
-              <div class="el-image-placeholder-slot el-image-placeholder-slot--sm" aria-hidden="true">
-                <el-icon class="is-loading"><Loading /></el-icon>
-              </div>
-            </template>
-          </el-image>
-        </template>
-      </el-table-column>
-      <el-table-column prop="name" label="姓名" />
-      <el-table-column prop="era" label="时代" />
-      <el-table-column label="所属机构" width="150">
-        <template #default="{ row }">
-          <el-tag v-if="row.institution" type="info">
-            {{ row.institution.name }}
-          </el-tag>
-          <span v-else class="text-muted">独立艺术家</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="description" label="艺术历程" :show-overflow-tooltip="true" />
-      <el-table-column label="操作" width="200">
-        <template #default="{ row }">
-          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    </div>
-
-    <el-dialog
-      v-model="dialogVisible"
-      :title="isEdit ? '编辑艺术家' : '添加艺术家'"
-      width="50%"
-    >
-      <el-form :model="form" label-width="120px">
-        <el-form-item label="艺术家姓名">
-          <el-input v-model="form.name" />
-        </el-form-item>
-        <el-form-item label="所属时代">
-          <el-input v-model="form.era" />
-        </el-form-item>
-        <el-form-item label="所属机构">
-          <el-select v-model="form.institution_id" placeholder="请选择机构" clearable>
-            <el-option label="独立艺术家" :value="null" />
-            <el-option
-              v-for="institution in institutions"
-              :key="institution.id"
-              :label="institution.name"
-              :value="institution.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="头像" required>
-          <div class="image-upload-container">
-            <!-- 图片预览区域 -->
-            <div class="image-preview" v-if="form.avatar">
-              <img :src="getImageUrl(form.avatar)" class="preview-image" alt="头像" />
-              <div class="image-overlay">
-                <el-button 
-                  type="danger" 
-                  size="small" 
-                  circle 
-                  @click="removeAvatar"
-                  class="remove-btn"
-                >
-                  <el-icon><Delete /></el-icon>
-                </el-button>
-                <el-button 
-                  type="primary" 
-                  size="small" 
-                  @click="triggerAvatarInput"
-                  class="replace-btn"
-                >
-                  更换头像
-                </el-button>
-              </div>
-            </div>
-
-            <!-- 上传区域 -->
-            <div 
-              v-else
-              class="upload-zone"
-              :class="{ 
-                'drag-over': isAvatarDragOver, 
-                'uploading': isAvatarUploading || isAvatarProcessing 
-              }"
-              @click="triggerAvatarInput"
-              @dragenter="handleAvatarDragEnter"
-              @dragleave="handleAvatarDragLeave"
-              @dragover="handleAvatarDragOver"
-              @drop="handleAvatarDrop"
+    <Card class="relative overflow-hidden shadow-none ring-1">
+      <div
+        v-if="listLoading"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
+        aria-busy="true"
+        aria-label="加载中"
+      >
+        <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
+      </div>
+      <CardContent class="overflow-x-auto p-0 sm:p-6">
+        <table class="w-full min-w-[720px] text-sm">
+          <thead>
+            <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 w-16 px-3 text-left font-medium">头像</th>
+              <th class="h-10 px-3 text-left font-medium">姓名</th>
+              <th class="h-10 px-3 text-left font-medium">时代</th>
+              <th class="h-10 min-w-[8rem] px-3 text-left font-medium">所属机构</th>
+              <th class="h-10 max-w-[14rem] px-3 text-left font-medium">艺术历程</th>
+              <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in filteredArtists"
+              :key="row.id"
+              class="border-b border-border transition-colors hover:bg-muted/30"
             >
-              <div class="upload-content">
-                <el-icon class="upload-icon" :class="{ 'spinning': isAvatarUploading || isAvatarProcessing }">
-                  <component :is="(isAvatarUploading || isAvatarProcessing) ? 'Loading' : 'Upload'" />
-                </el-icon>
-                <div class="upload-text">
-                  <p class="upload-title">
-                    {{ isAvatarProcessing ? '正在处理图片...' : isAvatarUploading ? '正在上传...' : '点击或拖拽图片到此处上传' }}
-                  </p>
-                  <p class="upload-hint">支持 JPG、PNG、GIF 格式，自动转换为 WebP 格式并压缩至 5MB 以内</p>
+              <td class="px-3 py-2">
+                <div class="size-12 overflow-hidden rounded-md border border-border bg-muted/30">
+                  <img
+                    :src="getImageUrl(row.avatar)"
+                    :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
+                    class="size-full object-cover"
+                    loading="lazy"
+                    @error="(e) => { e.target.style.opacity = '0.35' }"
+                  >
+                </div>
+              </td>
+              <td class="px-3 py-2.5 font-medium">{{ row.name }}</td>
+              <td class="px-3 py-2.5 text-muted-foreground">{{ row.era }}</td>
+              <td class="px-3 py-2.5">
+                <Badge v-if="row.institution" variant="secondary">
+                  {{ row.institution.name }}
+                </Badge>
+                <span v-else class="text-muted-foreground">独立艺术家</span>
+              </td>
+              <td class="max-w-[14rem] truncate px-3 py-2.5 text-muted-foreground" :title="row.description">
+                {{ row.description }}
+              </td>
+              <td class="px-3 py-2.5">
+                <div class="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="secondary" type="button" @click="handleEdit(row)">
+                    编辑
+                  </Button>
+                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                    删除
+                  </Button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="filteredArtists.length === 0 && !listLoading">
+              <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
+                暂无艺术家数据
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+
+    <Dialog v-model:open="dialogVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{{ isEdit ? '编辑艺术家' : '添加艺术家' }}</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="flex flex-col gap-2">
+            <Label for="artist-name">艺术家姓名</Label>
+            <Input id="artist-name" v-model="form.name" autocomplete="name" />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="artist-era">所属时代</Label>
+            <Input id="artist-era" v-model="form.era" />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="artist-inst">所属机构</Label>
+            <select
+              id="artist-inst"
+              class="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              :value="form.institution_id == null ? '' : String(form.institution_id)"
+              @change="onFormInstitutionChange"
+            >
+              <option value="">独立艺术家</option>
+              <option
+                v-for="institution in institutions"
+                :key="institution.id"
+                :value="String(institution.id)"
+              >
+                {{ institution.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>头像 <span class="text-destructive">*</span></Label>
+            <div class="max-w-[400px] space-y-3">
+              <div
+                v-if="form.avatar"
+                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
+              >
+                <img
+                  :src="getImageUrl(form.avatar)"
+                  alt="头像"
+                  class="size-full object-cover"
+                >
+                <div
+                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <Button type="button" size="icon" variant="destructive" @click="removeAvatar">
+                    <Trash2 class="size-4" />
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" @click="triggerAvatarInput">
+                    更换头像
+                  </Button>
                 </div>
               </div>
-              
-              <!-- 拖拽提示遮罩 -->
-              <div v-if="isAvatarDragOver && !form.avatar" class="drag-overlay">
-                <el-icon class="drag-icon"><Upload /></el-icon>
-                <p>释放鼠标上传图片</p>
+              <div
+                v-else
+                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                :class="{
+                  'border-primary/50 bg-primary/5': isAvatarDragOver,
+                  'pointer-events-none opacity-70': isAvatarUploading || isAvatarProcessing,
+                }"
+                role="button"
+                tabindex="0"
+                @click="triggerAvatarInput"
+                @keydown.enter.prevent="triggerAvatarInput"
+                @keydown.space.prevent="triggerAvatarInput"
+                @dragenter="handleAvatarDragEnter"
+                @dragleave="handleAvatarDragLeave"
+                @dragover="handleAvatarDragOver"
+                @drop="handleAvatarDrop"
+              >
+                <Loader2
+                  v-if="isAvatarUploading || isAvatarProcessing"
+                  class="mb-2 size-10 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
+                <p class="px-2 text-center text-sm font-medium text-foreground">
+                  {{ isAvatarProcessing ? '正在处理图片…' : isAvatarUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
+                </p>
+                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
+                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
+                </p>
+                <div
+                  v-if="isAvatarDragOver && !form.avatar"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                >
+                  <Upload class="mb-2 size-10" aria-hidden="true" />
+                  <span>释放鼠标上传图片</span>
+                </div>
               </div>
-            </div>
-
-            <!-- 隐藏的文件输入 -->
-            <input
-              ref="avatarInput"
-              type="file"
-              accept="image/*"
-              style="display: none"
-              @change="handleAvatarFileSelect"
-            />
-
-            <!-- 图片处理提示 -->
-            <div v-if="isAvatarProcessing" class="upload-progress">
-              <div class="progress-header">
-                <span class="progress-title">图片处理中</span>
-                <span class="progress-percentage">处理中...</span>
+              <input
+                ref="avatarInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleAvatarFileSelect"
+              >
+              <div v-if="isAvatarProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                <div class="mb-2 flex justify-between text-muted-foreground">
+                  <span>图片处理中</span>
+                  <span>处理中…</span>
+                </div>
+                <Progress :model-value="40" class="h-2" />
+                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+                  <span class="max-w-[150px] truncate">{{ avatarFileName }}</span>
+                  <span>{{ formatFileSize(avatarFileSize) }}</span>
+                </div>
+                <p class="mt-2 text-center text-xs italic text-muted-foreground">
+                  正在将图片转换为 WebP 并压缩…
+                </p>
               </div>
-              <el-progress 
-                :percentage="0" 
-                :stroke-width="6"
-                :show-text="false"
-                :indeterminate="true"
-                :color="progressColors"
-              />
-              <div class="progress-info">
-                <span class="file-name">{{ avatarFileName }}</span>
-                <span class="file-size">{{ formatFileSize(avatarFileSize) }}</span>
+              <div
+                v-if="avatarUploadProgress > 0 && avatarUploadProgress < 100 && !isAvatarProcessing"
+                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+              >
+                <div class="mb-2 flex justify-between">
+                  <span class="font-medium">上传进度</span>
+                  <span class="font-semibold text-primary tabular-nums">{{ avatarUploadProgress }}%</span>
+                </div>
+                <Progress :model-value="avatarUploadProgress" class="h-2" />
+                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+                  <span class="max-w-[150px] truncate">{{ avatarFileName }}</span>
+                  <span>{{ formatFileSize(avatarFileSize) }}</span>
+                </div>
               </div>
-              <div class="processing-hint">
-                <p>正在将图片转换为 WebP 格式并压缩...</p>
-              </div>
-            </div>
-
-            <!-- 上传进度条 -->
-            <div v-if="avatarUploadProgress > 0 && avatarUploadProgress < 100 && !isAvatarProcessing" class="upload-progress">
-              <div class="progress-header">
-                <span class="progress-title">上传进度</span>
-                <span class="progress-percentage">{{ avatarUploadProgress }}%</span>
-              </div>
-              <el-progress 
-                :percentage="avatarUploadProgress" 
-                :stroke-width="6"
-                :show-text="false"
-                :color="progressColors"
-              />
-              <div class="progress-info">
-                <span class="file-name">{{ avatarFileName }}</span>
-                <span class="file-size">{{ formatFileSize(avatarFileSize) }}</span>
-              </div>
-            </div>
-
-            <!-- 上传完成提示 -->
-            <div v-if="avatarUploadProgress === 100" class="upload-success">
-              <el-alert
-                title="图片上传成功！"
-                type="success"
-                :closable="false"
-                show-icon
-              />
+              <Alert v-if="avatarUploadProgress === 100" class="border-primary/30">
+                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
+                <AlertTitle>头像上传成功</AlertTitle>
+              </Alert>
             </div>
           </div>
-        </el-form-item>
-        <el-form-item label="背景图" required>
-          <div class="image-upload-container">
-            <!-- 图片预览区域 -->
-            <div class="image-preview" v-if="form.banner">
-              <img :src="getImageUrl(form.banner)" class="preview-image" alt="背景图" />
-              <div class="image-overlay">
-                <el-button 
-                  type="danger" 
-                  size="small" 
-                  circle 
-                  @click="removeBanner"
-                  class="remove-btn"
-                >
-                  <el-icon><Delete /></el-icon>
-                </el-button>
-                <el-button 
-                  type="primary" 
-                  size="small" 
-                  @click="triggerBannerInput"
-                  class="replace-btn"
-                >
-                  更换背景图
-                </el-button>
-              </div>
-            </div>
 
-            <!-- 上传区域 -->
-            <div 
-              v-else
-              class="upload-zone"
-              :class="{ 
-                'drag-over': isBannerDragOver, 
-                'uploading': isBannerUploading || isBannerProcessing 
-              }"
-              @click="triggerBannerInput"
-              @dragenter="handleBannerDragEnter"
-              @dragleave="handleBannerDragLeave"
-              @dragover="handleBannerDragOver"
-              @drop="handleBannerDrop"
-            >
-              <div class="upload-content">
-                <el-icon class="upload-icon" :class="{ 'spinning': isBannerUploading || isBannerProcessing }">
-                  <component :is="(isBannerUploading || isBannerProcessing) ? 'Loading' : 'Upload'" />
-                </el-icon>
-                <div class="upload-text">
-                  <p class="upload-title">
-                    {{ isBannerProcessing ? '正在处理图片...' : isBannerUploading ? '正在上传...' : '点击或拖拽图片到此处上传' }}
-                  </p>
-                  <p class="upload-hint">支持 JPG、PNG、GIF 格式，自动转换为 WebP 格式并压缩至 5MB 以内</p>
+          <div class="flex flex-col gap-2">
+            <Label>背景图 <span class="text-destructive">*</span></Label>
+            <div class="max-w-[400px] space-y-3">
+              <div
+                v-if="form.banner"
+                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
+              >
+                <img
+                  :src="getImageUrl(form.banner)"
+                  alt="背景图"
+                  class="size-full object-cover"
+                >
+                <div
+                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <Button type="button" size="icon" variant="destructive" @click="removeBanner">
+                    <Trash2 class="size-4" />
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" @click="triggerBannerInput">
+                    更换背景图
+                  </Button>
                 </div>
               </div>
-              
-              <!-- 拖拽提示遮罩 -->
-              <div v-if="isBannerDragOver && !form.banner" class="drag-overlay">
-                <el-icon class="drag-icon"><Upload /></el-icon>
-                <p>释放鼠标上传图片</p>
+              <div
+                v-else
+                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                :class="{
+                  'border-primary/50 bg-primary/5': isBannerDragOver,
+                  'pointer-events-none opacity-70': isBannerUploading || isBannerProcessing,
+                }"
+                role="button"
+                tabindex="0"
+                @click="triggerBannerInput"
+                @keydown.enter.prevent="triggerBannerInput"
+                @keydown.space.prevent="triggerBannerInput"
+                @dragenter="handleBannerDragEnter"
+                @dragleave="handleBannerDragLeave"
+                @dragover="handleBannerDragOver"
+                @drop="handleBannerDrop"
+              >
+                <Loader2
+                  v-if="isBannerUploading || isBannerProcessing"
+                  class="mb-2 size-10 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
+                <p class="px-2 text-center text-sm font-medium text-foreground">
+                  {{ isBannerProcessing ? '正在处理图片…' : isBannerUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
+                </p>
+                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
+                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
+                </p>
+                <div
+                  v-if="isBannerDragOver && !form.banner"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                >
+                  <Upload class="mb-2 size-10" aria-hidden="true" />
+                  <span>释放鼠标上传图片</span>
+                </div>
               </div>
-            </div>
-
-            <!-- 隐藏的文件输入 -->
-            <input
-              ref="bannerInput"
-              type="file"
-              accept="image/*"
-              style="display: none"
-              @change="handleBannerFileSelect"
-            />
-
-            <!-- 图片处理提示 -->
-            <div v-if="isBannerProcessing" class="upload-progress">
-              <div class="progress-header">
-                <span class="progress-title">图片处理中</span>
-                <span class="progress-percentage">处理中...</span>
+              <input
+                ref="bannerInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleBannerFileSelect"
+              >
+              <div v-if="isBannerProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                <div class="mb-2 flex justify-between text-muted-foreground">
+                  <span>图片处理中</span>
+                  <span>处理中…</span>
+                </div>
+                <Progress :model-value="40" class="h-2" />
+                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+                  <span class="max-w-[150px] truncate">{{ bannerFileName }}</span>
+                  <span>{{ formatFileSize(bannerFileSize) }}</span>
+                </div>
+                <p class="mt-2 text-center text-xs italic text-muted-foreground">
+                  正在将图片转换为 WebP 并压缩…
+                </p>
               </div>
-              <el-progress 
-                :percentage="0" 
-                :stroke-width="6"
-                :show-text="false"
-                :indeterminate="true"
-                :color="progressColors"
-              />
-              <div class="progress-info">
-                <span class="file-name">{{ bannerFileName }}</span>
-                <span class="file-size">{{ formatFileSize(bannerFileSize) }}</span>
+              <div
+                v-if="bannerUploadProgress > 0 && bannerUploadProgress < 100 && !isBannerProcessing"
+                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+              >
+                <div class="mb-2 flex justify-between">
+                  <span class="font-medium">上传进度</span>
+                  <span class="font-semibold text-primary tabular-nums">{{ bannerUploadProgress }}%</span>
+                </div>
+                <Progress :model-value="bannerUploadProgress" class="h-2" />
+                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+                  <span class="max-w-[150px] truncate">{{ bannerFileName }}</span>
+                  <span>{{ formatFileSize(bannerFileSize) }}</span>
+                </div>
               </div>
-              <div class="processing-hint">
-                <p>正在将图片转换为 WebP 格式并压缩...</p>
-              </div>
-            </div>
-
-            <!-- 上传进度条 -->
-            <div v-if="bannerUploadProgress > 0 && bannerUploadProgress < 100 && !isBannerProcessing" class="upload-progress">
-              <div class="progress-header">
-                <span class="progress-title">上传进度</span>
-                <span class="progress-percentage">{{ bannerUploadProgress }}%</span>
-              </div>
-              <el-progress 
-                :percentage="bannerUploadProgress" 
-                :stroke-width="6"
-                :show-text="false"
-                :color="progressColors"
-              />
-              <div class="progress-info">
-                <span class="file-name">{{ bannerFileName }}</span>
-                <span class="file-size">{{ formatFileSize(bannerFileSize) }}</span>
-              </div>
-            </div>
-
-            <!-- 上传完成提示 -->
-            <div v-if="bannerUploadProgress === 100" class="upload-success">
-              <el-alert
-                title="图片上传成功！"
-                type="success"
-                :closable="false"
-                show-icon
-              />
+              <Alert v-if="bannerUploadProgress === 100" class="border-primary/30">
+                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
+                <AlertTitle>背景图上传成功</AlertTitle>
+              </Alert>
             </div>
           </div>
-        </el-form-item>
-        <el-form-item label="简介">
-          <el-input v-model="form.description" type="textarea" :rows="4" />
-        </el-form-item>
-        <el-form-item label="艺术历程">
-          <el-input v-model="form.journey" type="textarea" :rows="6" placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等" />
-        </el-form-item>
 
-        <el-divider>代表作品</el-divider>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <span>该艺术家全部作品（{{ filteredFeaturedAllArtworks.length }}）</span>
-                  <el-input v-model="featuredSearch" placeholder="搜索标题/ID/年份" size="small" style="max-width: 220px;" clearable />
+          <div class="flex flex-col gap-2">
+            <Label for="artist-desc">简介</Label>
+            <Textarea id="artist-desc" v-model="form.description" class="min-h-24" rows="4" />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="artist-journey">艺术历程</Label>
+            <Textarea
+              id="artist-journey"
+              v-model="form.journey"
+              class="min-h-32"
+              rows="6"
+              placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等"
+            />
+          </div>
+
+          <div class="flex items-center gap-4 py-1">
+            <Separator class="flex-1" />
+            <span class="shrink-0 text-sm text-muted-foreground">代表作品</span>
+            <Separator class="flex-1" />
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card class="shadow-none ring-1">
+              <CardHeader class="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle class="text-sm font-medium">
+                  该艺术家全部作品（{{ filteredFeaturedAllArtworks.length }}）
+                </CardTitle>
+                <Input
+                  v-model="featuredSearch"
+                  class="h-8 max-w-full sm:max-w-[220px]"
+                  placeholder="搜索标题/ID/年份"
+                />
+              </CardHeader>
+              <CardContent class="p-0">
+                <div class="max-h-[260px] overflow-y-auto p-3">
+                  <p
+                    v-if="filteredFeaturedAllArtworks.length === 0"
+                    class="py-8 text-center text-sm text-muted-foreground"
+                  >
+                    暂无作品或未匹配
+                  </p>
+                  <ul v-else class="divide-y divide-border">
+                    <li
+                      v-for="item in filteredFeaturedAllArtworks"
+                      :key="item.id"
+                      class="flex items-center justify-between gap-2 py-2.5 text-sm"
+                    >
+                      <span class="min-w-0 flex-1 truncate font-medium" :title="item.title">{{ item.title }}</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        type="button"
+                        :disabled="featuredSelected.some((i) => i.id === item.id)"
+                        @click="featuredAdd(item)"
+                      >
+                        {{ featuredSelected.some((i) => i.id === item.id) ? '已添加' : '添加' }}
+                      </Button>
+                    </li>
+                  </ul>
                 </div>
-              </template>
-              <el-scrollbar height="260px">
-                <el-empty v-if="filteredFeaturedAllArtworks.length === 0" description="暂无作品或未匹配" />
-                <div v-else class="artwork-list">
-                  <div v-for="item in filteredFeaturedAllArtworks" :key="item.id" class="artwork-item">
-                    <div class="artwork-meta">
-                      <div class="artwork-title" :title="item.title">{{ item.title }}</div>
-                    </div>
-                    <div class="artwork-actions">
-                      <el-button size="small" :disabled="featuredSelected.some(i=>i.id===item.id)" @click="featuredAdd(item)">
-                        {{ featuredSelected.some(i=>i.id===item.id) ? '已添加' : '添加' }}
-                      </el-button>
-                    </div>
-                  </div>
+              </CardContent>
+            </Card>
+
+            <Card class="shadow-none ring-1">
+              <CardHeader class="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle class="text-sm font-medium">
+                  已选代表作品（可排序，{{ featuredSelected.length }}）
+                </CardTitle>
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    :disabled="featuredSelected.length === 0"
+                    @click="featuredClear"
+                  >
+                    清空
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    :disabled="!isEdit || featuredSaving"
+                    @click="featuredSave"
+                  >
+                    <Loader2
+                      v-if="featuredSaving"
+                      class="mr-1.5 inline size-3.5 animate-spin align-middle"
+                      aria-hidden="true"
+                    />
+                    {{ featuredSaving ? '保存中…' : '保存' }}
+                  </Button>
                 </div>
-              </el-scrollbar>
-            </el-card>
-          </el-col>
-          <el-col :span="12">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <span>已选代表作品（可排序，{{ featuredSelected.length }}）</span>
-                  <div>
-                    <el-button size="small" @click="featuredClear" :disabled="featuredSelected.length===0">清空</el-button>
-                    <el-button type="primary" size="small" @click="featuredSave" :loading="featuredSaving" :disabled="!isEdit">保存</el-button>
-                  </div>
+              </CardHeader>
+              <CardContent class="p-0">
+                <div class="max-h-[260px] overflow-y-auto p-3">
+                  <p v-if="featuredSelected.length === 0" class="py-8 text-center text-sm text-muted-foreground">
+                    未选择
+                  </p>
+                  <ul v-else class="divide-y divide-border">
+                    <li
+                      v-for="(item, index) in featuredSelected"
+                      :key="item.id"
+                      class="flex flex-col gap-2 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <span class="min-w-0 flex-1 truncate font-medium" :title="item.title">{{ item.title }}</span>
+                      <div class="flex shrink-0 flex-wrap gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          :disabled="index === 0"
+                          @click="featuredMoveUp(index)"
+                        >
+                          上移
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          :disabled="index === featuredSelected.length - 1"
+                          @click="featuredMoveDown(index)"
+                        >
+                          下移
+                        </Button>
+                        <Button size="sm" variant="destructive" type="button" @click="featuredRemove(index)">
+                          移除
+                        </Button>
+                      </div>
+                    </li>
+                  </ul>
                 </div>
-              </template>
-              <el-scrollbar height="260px">
-                <el-empty v-if="featuredSelected.length === 0" description="未选择" />
-                <div v-else class="artwork-list">
-                  <div v-for="(item, index) in featuredSelected" :key="item.id" class="artwork-item">
-                    <div class="artwork-meta">
-                      <div class="artwork-title" :title="item.title">{{ item.title }}</div>
-                    </div>
-                    <div class="artwork-actions">
-                      <el-button size="small" :disabled="index===0" @click="featuredMoveUp(index)">上移</el-button>
-                      <el-button size="small" :disabled="index===featuredSelected.length-1" @click="featuredMoveDown(index)">下移</el-button>
-                      <el-button size="small" type="danger" @click="featuredRemove(index)">移除</el-button>
-                    </div>
-                  </div>
-                </div>
-              </el-scrollbar>
-            </el-card>
-          </el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="dialogVisible = false">
+            取消
+          </Button>
+          <Button type="button" @click="handleSubmit">
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
+import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 
-const router = useRouter()
 const listLoading = ref(false)
 const listError = ref('')
 const artists = ref([])
@@ -427,6 +539,20 @@ const featuredAllArtworks = ref([])
 const featuredSelected = ref([])
 const featuredSearch = ref('')
 const featuredSaving = ref(false)
+
+const institutionSelectValue = computed(() =>
+  selectedInstitutionId.value == null ? 'all' : String(selectedInstitutionId.value)
+)
+
+function onInstitutionSelectChange(v) {
+  selectedInstitutionId.value = v === 'all' ? null : Number(v)
+  handleInstitutionFilter()
+}
+
+function onFormInstitutionChange(e) {
+  const v = e.target.value
+  form.value.institution_id = v === '' ? null : Number(v)
+}
 
 // 头像上传相关状态
 const avatarInput = ref(null)
@@ -445,15 +571,6 @@ const isBannerUploading = ref(false)
 const isBannerProcessing = ref(false)
 const bannerFileName = ref('')
 const bannerFileSize = ref(0)
-
-// 进度条颜色配置
-const progressColors = [
-  { color: '#f56c6c', percentage: 20 },
-  { color: '#e6a23c', percentage: 40 },
-  { color: '#5cb87a', percentage: 60 },
-  { color: '#1989fa', percentage: 80 },
-  { color: '#6f7ad3', percentage: 100 }
-]
 
 const form = ref({
   name: '',
@@ -494,21 +611,18 @@ const fetchArtists = async () => {
 }
 
 const handleInstitutionFilter = async () => {
-  if (!selectedInstitutionId.value) {
-    // 显示全部艺术家
+  if (selectedInstitutionId.value == null) {
     filteredArtists.value = artists.value
     return
   }
-  
+
   try {
     const response = await axios.get(`/artists?institution_id=${selectedInstitutionId.value}`)
-    console.log('按机构筛选艺术家API返回的原始数据：', response)
     if (response && response.artists && Array.isArray(response.artists)) {
       filteredArtists.value = response.artists
     } else if (Array.isArray(response)) {
       filteredArtists.value = response
     } else {
-      console.error('返回的数据格式不正确：', response)
       filteredArtists.value = []
     }
   } catch (error) {
@@ -521,12 +635,9 @@ const handleInstitutionFilter = async () => {
 const fetchInstitutions = async () => {
   try {
     const data = await axios.get('/institutions')
-    console.log('机构API返回的原始数据：', data)
     if (Array.isArray(data)) {
       institutions.value = data
-      console.log('设置后的机构数据：', institutions.value)
     } else {
-      console.error('返回的数据不是数组：', data)
       institutions.value = []
     }
   } catch (error) {
@@ -546,6 +657,11 @@ const handleAdd = () => {
     journey: '',
     institution_id: null
   }
+  featuredSearch.value = ''
+  featuredAllArtworks.value = []
+  featuredSelected.value = []
+  resetAvatarUploadState()
+  resetBannerUploadState()
   dialogVisible.value = true
 }
 
@@ -561,11 +677,11 @@ const handleEdit = (row) => {
     journey: row.journey,
     institution_id: row.institution ? row.institution.id : null
   }
-  dialogVisible.value = true
-  // 重置代表作品区域状态（不清空右侧，避免保存后再次打开瞬间为空；实际数据以接口覆盖）
   featuredSearch.value = ''
   featuredAllArtworks.value = []
-  // 拉取该艺术家的作品与代表作品
+  resetAvatarUploadState()
+  resetBannerUploadState()
+  dialogVisible.value = true
   fetchFeaturedAll(row.id)
   fetchFeaturedSelected(row.id)
 }
@@ -580,7 +696,6 @@ const handleDelete = (row) => {
       await axios.delete(`/artists/${row.id}`)
       ElMessage.success('删除成功')
       fetchArtists()
-      // 重新应用筛选
       handleInstitutionFilter()
     } catch (error) {
       ElMessage.error('删除失败')
@@ -611,17 +726,13 @@ const uploadAvatarFile = async (file) => {
   avatarFileSize.value = file.size
 
   try {
-    console.log('开始处理头像文件:', file.name, file.size)
     const processedFile = await uploadImageToWebpLimit5MB(file)
-    
+
     if (!processedFile) {
-      console.log('头像处理失败，终止上传')
       resetAvatarUploadState()
       return
     }
 
-    console.log('头像处理成功:', processedFile.name, processedFile.size)
-    
     isAvatarProcessing.value = false
     avatarFileName.value = processedFile.name
     avatarFileSize.value = processedFile.size
@@ -629,7 +740,7 @@ const uploadAvatarFile = async (file) => {
     const formData = new FormData()
     formData.append('file', processedFile)
 
-    const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+    const response = await axios.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -650,10 +761,8 @@ const uploadAvatarFile = async (file) => {
 }
 
 const handleAvatarUploadSuccess = (response) => {
-  console.log('头像上传成功响应:', response)
-  
   let imageUrl = ''
-  
+
   if (response && response.url) {
     imageUrl = response.url
   } else if (response && response.data && response.data.url) {
@@ -673,17 +782,16 @@ const handleAvatarUploadSuccess = (response) => {
   if (imageUrl) {
     form.value.avatar = imageUrl
     avatarUploadProgress.value = 100
-    
+
     setTimeout(() => {
       avatarUploadProgress.value = 0
       isAvatarUploading.value = false
       avatarFileName.value = ''
       avatarFileSize.value = 0
     }, 2000)
-    
+
     ElMessage.success('头像上传成功')
   } else {
-    console.error('无法从响应中提取URL，完整响应:', response)
     ElMessage.error('头像上传失败：未获取到图片URL')
     resetAvatarUploadState()
   }
@@ -744,17 +852,13 @@ const uploadBannerFile = async (file) => {
   bannerFileSize.value = file.size
 
   try {
-    console.log('开始处理背景图文件:', file.name, file.size)
     const processedFile = await uploadImageToWebpLimit5MB(file)
-    
+
     if (!processedFile) {
-      console.log('背景图处理失败，终止上传')
       resetBannerUploadState()
       return
     }
 
-    console.log('背景图处理成功:', processedFile.name, processedFile.size)
-    
     isBannerProcessing.value = false
     bannerFileName.value = processedFile.name
     bannerFileSize.value = processedFile.size
@@ -762,7 +866,7 @@ const uploadBannerFile = async (file) => {
     const formData = new FormData()
     formData.append('file', processedFile)
 
-    const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+    const response = await axios.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -783,10 +887,8 @@ const uploadBannerFile = async (file) => {
 }
 
 const handleBannerUploadSuccess = (response) => {
-  console.log('背景图上传成功响应:', response)
-  
   let imageUrl = ''
-  
+
   if (response && response.url) {
     imageUrl = response.url
   } else if (response && response.data && response.data.url) {
@@ -806,17 +908,16 @@ const handleBannerUploadSuccess = (response) => {
   if (imageUrl) {
     form.value.banner = imageUrl
     bannerUploadProgress.value = 100
-    
+
     setTimeout(() => {
       bannerUploadProgress.value = 0
       isBannerUploading.value = false
       bannerFileName.value = ''
       bannerFileSize.value = 0
     }, 2000)
-    
+
     ElMessage.success('背景图上传成功')
   } else {
-    console.error('无法从响应中提取URL，完整响应:', response)
     ElMessage.error('背景图上传失败：未获取到图片URL')
     resetBannerUploadState()
   }
@@ -880,9 +981,9 @@ const handleAvatarDrop = (e) => {
   e.preventDefault()
   e.stopPropagation()
   isAvatarDragOver.value = false
-  
+
   if (isAvatarUploading.value || isAvatarProcessing.value || form.value.avatar) return
-  
+
   const files = e.dataTransfer.files
   if (files.length > 0) {
     uploadAvatarFile(files[0])
@@ -914,9 +1015,9 @@ const handleBannerDrop = (e) => {
   e.preventDefault()
   e.stopPropagation()
   isBannerDragOver.value = false
-  
+
   if (isBannerUploading.value || isBannerProcessing.value || form.value.banner) return
-  
+
   const files = e.dataTransfer.files
   if (files.length > 0) {
     uploadBannerFile(files[0])
@@ -933,20 +1034,18 @@ const formatFileSize = (bytes) => {
 }
 
 const getImageUrl = (url) => {
-  if (!url) return '';
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+  if (!url) return ''
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
 }
 
 // 代表作品：拉取全部作品
 const fetchFeaturedAll = async (artistId) => {
   try {
     const resp = await axios.get(`/original-artworks`, { params: { artist_id: artistId, pageSize: 1000 } })
-    // 兼容 axios 包装器返回值（可能是 resp.data 或直接是数据对象）
     const list = Array.isArray(resp)
       ? resp
       : (Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp?.data?.data) ? resp.data.data : []))
     featuredAllArtworks.value = list
-    console.log('代表作品-全部作品数量:', list.length)
   } catch {
     featuredAllArtworks.value = []
   }
@@ -959,7 +1058,6 @@ const fetchFeaturedSelected = async (artistId) => {
       ? resp
       : (Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp?.data?.data) ? resp.data.data : []))
     featuredSelected.value = list
-    console.log('代表作品-已选数量:', list.length)
   } catch {
     featuredSelected.value = []
   }
@@ -1001,7 +1099,7 @@ const featuredSave = async () => {
   try {
     featuredSaving.value = true
     const ids = featuredSelected.value.map(i => i.id)
-    await axios.put(`/artists/${form.value.id}`, {}) // 保持编辑上下文
+    await axios.put(`/artists/${form.value.id}`, {})
     await axios.put(`/artists/${form.value.id}/featured-artworks`, { artwork_ids: ids })
     ElMessage.success('已保存代表作品')
   } catch (e) {
@@ -1013,17 +1111,16 @@ const featuredSave = async () => {
 
 const handleSubmit = async () => {
   if (!form.value.name.trim()) {
-    ElMessage.warning('请输入艺术家姓名');
-    return;
+    ElMessage.warning('请输入艺术家姓名')
+    return
   }
 
   try {
-    // 确保提交的图片URL是相对路径
     const submitData = {
       ...form.value,
       avatar: form.value.avatar ? (form.value.avatar.startsWith('http') ? form.value.avatar.replace(API_BASE_URL, '') : form.value.avatar) : '',
       banner: form.value.banner ? (form.value.banner.startsWith('http') ? form.value.banner.replace(API_BASE_URL, '') : form.value.banner) : ''
-    };
+    }
 
     if (isEdit.value) {
       await axios.put(`/artists/${form.value.id}`, submitData)
@@ -1033,313 +1130,14 @@ const handleSubmit = async () => {
     ElMessage.success('保存成功')
     dialogVisible.value = false
     fetchArtists()
-    // 重新应用筛选
     handleInstitutionFilter()
   } catch (error) {
     ElMessage.error('保存失败')
   }
 }
 
-
-
-// 页面加载时获取数据
 onMounted(() => {
   fetchArtists()
   fetchInstitutions()
 })
 </script>
-
-<style scoped>
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-/* 图片上传容器 */
-.image-upload-container {
-  width: 100%;
-  max-width: 400px;
-}
-
-/* 图片预览 */
-.image-preview {
-  position: relative;
-  width: 200px;
-  height: 200px;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-}
-
-.image-preview:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
-
-.preview-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.image-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  gap: 10px;
-}
-
-.image-preview:hover .image-overlay {
-  opacity: 1;
-}
-
-.remove-btn {
-  background: rgba(245, 108, 108, 0.9);
-  border: none;
-}
-
-.remove-btn:hover {
-  background: #f56c6c;
-}
-
-.replace-btn {
-  background: rgba(64, 158, 255, 0.9);
-  border: none;
-}
-
-.replace-btn:hover {
-  background: #409eff;
-}
-
-/* 上传区域 */
-.upload-zone {
-  width: 200px;
-  height: 200px;
-  border: 2px dashed #d9d9d9;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-  background: #fafafa;
-}
-
-.upload-zone:hover {
-  border-color: #409eff;
-  background: #f0f9ff;
-}
-
-.upload-zone.drag-over {
-  border-color: #409eff;
-  background: #ecf5ff;
-  transform: scale(1.02);
-  box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
-}
-
-.upload-zone.uploading {
-  opacity: 0.7;
-  pointer-events: none;
-  border-color: #409eff;
-  background: #f0f9ff;
-}
-
-.upload-content {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  padding: 20px;
-  box-sizing: border-box;
-}
-
-.upload-icon {
-  font-size: 48px;
-  color: #8c939d;
-  margin-bottom: 16px;
-  transition: all 0.3s ease;
-}
-
-.upload-icon.spinning {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.upload-text {
-  text-align: center;
-}
-
-.upload-title {
-  margin: 0 0 8px 0;
-  color: #606266;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.upload-hint {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-/* 拖拽遮罩 */
-.drag-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(64, 158, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #409eff;
-  font-weight: bold;
-  z-index: 10;
-  border-radius: 8px;
-}
-
-.drag-icon {
-  font-size: 48px;
-  margin-bottom: 10px;
-}
-
-/* 上传进度 */
-.upload-progress {
-  margin-top: 16px;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.progress-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #606266;
-}
-
-.progress-percentage {
-  font-size: 14px;
-  font-weight: bold;
-  color: #409eff;
-}
-
-.progress-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.file-name {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.processing-hint {
-  margin-top: 8px;
-  text-align: center;
-}
-
-.processing-hint p {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-  font-style: italic;
-}
-
-/* 上传成功提示 */
-.upload-success {
-  margin-top: 16px;
-}
-
-.list-state-alert {
-  margin-bottom: 12px;
-}
-
-.table-wrap {
-  min-height: 200px;
-}
-
-.el-image-placeholder-slot {
-  width: 50px;
-  height: 50px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f5f7fa;
-  color: #909399;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .image-upload-container {
-    max-width: 100%;
-  }
-  
-  .image-preview,
-  .upload-zone {
-    width: 100%;
-    max-width: 300px;
-    height: 200px;
-  }
-}
-
-:deep(.el-table .el-image) {
-  width: 80px;
-  height: 80px;
-  border-radius: 4px;
-}
-
-:deep(.el-dialog .el-form-item) {
-  margin-bottom: 22px;
-}
-
-:deep(.el-upload:hover) {
-  border-color: #409eff;
-}
-
-:deep(.el-image) {
-  transition: transform 0.3s;
-}
-
-:deep(.el-image:hover) {
-  transform: scale(1.02);
-}
-</style> 

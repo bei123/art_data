@@ -1,191 +1,273 @@
 <template>
-  <div class="exhibitions-container">
-    <div v-if="!isDetailMode" class="header">
-      <h2>展览管理</h2>
-      <div class="header-actions">
-        <el-button type="info" @click="fetchExhibitions" :loading="loadingList">刷新数据</el-button>
-        <el-button type="primary" @click="openAddDialog">添加展览</el-button>
+  <div class="flex flex-col gap-6 p-4 md:p-6">
+    <div
+      v-if="!isDetailMode"
+      class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <h2 class="text-xl font-semibold tracking-tight text-foreground">
+        展览管理
+      </h2>
+      <div class="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" :disabled="loadingList" @click="fetchExhibitions">
+          <Loader2 v-if="loadingList" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+          {{ loadingList ? '刷新中…' : '刷新数据' }}
+        </Button>
+        <Button type="button" @click="openAddDialog">
+          添加展览
+        </Button>
       </div>
     </div>
 
-    <div v-else class="header">
-      <h2>展览作品管理</h2>
-      <div class="header-actions">
-        <el-button @click="goBackToList">返回展览列表</el-button>
-        <el-button type="info" @click="fetchDetail(exhibitionId)" :loading="loadingDetail">刷新详情</el-button>
+    <div
+      v-else
+      class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <h2 class="text-xl font-semibold tracking-tight text-foreground">
+        展览作品管理
+      </h2>
+      <div class="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" @click="goBackToList">
+          返回展览列表
+        </Button>
+        <Button type="button" variant="secondary" :disabled="loadingDetail" @click="fetchDetail(exhibitionId)">
+          <Loader2 v-if="loadingDetail" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+          {{ loadingDetail ? '刷新中…' : '刷新详情' }}
+        </Button>
       </div>
     </div>
 
     <!-- 列表模式 -->
     <div v-if="!isDetailMode">
-      <el-alert
-        v-if="listError && !loadingList"
-        class="list-state-alert"
-        type="error"
-        :closable="false"
-        show-icon
-        role="alert"
-        :title="listError"
-      >
-        <el-button type="primary" link @click="retryFetchExhibitions">重试</el-button>
-      </el-alert>
-      <div v-loading="loadingList" class="table-wrap">
-      <el-table :data="exhibitions" style="width: 100%">
-          <template #empty>
-            <el-empty v-if="!loadingList" description="暂无展览数据" />
-          </template>
-        <el-table-column label="封面" width="120">
-          <template #default="{ row }">
-            <el-image
-              lazy
-              v-if="row.cover_image"
-              style="width: 80px; height: 80px"
-              :src="getImageUrl(row.cover_image)"
-              fit="cover"
-              :alt="row.title ? `展览封面：${row.title}` : '展览封面'"
-            >
-              <template #placeholder>
-                <div class="el-image-placeholder-slot el-image-placeholder-slot--cover" aria-hidden="true">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                </div>
-              </template>
-            </el-image>
-          </template>
-        </el-table-column>
-        <el-table-column prop="title" label="标题" />
-        <el-table-column label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'published' ? 'success' : 'info'">
-              {{ row.status === 'published' ? '已发布' : '草稿' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="开始时间" width="180">
-          <template #default="{ row }">
-            <span v-if="row.start_at">{{ row.start_at }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="结束时间" width="180">
-          <template #default="{ row }">
-            <span v-if="row.end_at">{{ row.end_at }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column label="操作" width="260">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button type="success" size="small" @click="goToManageItems(row.id)">管理作品</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      </div>
+      <Alert v-if="listError && !loadingList" variant="destructive" class="mb-4">
+        <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+        <AlertTitle>{{ listError }}</AlertTitle>
+        <AlertDescription class="mt-2">
+          <Button type="button" variant="secondary" size="sm" @click="retryFetchExhibitions">
+            重试
+          </Button>
+        </AlertDescription>
+      </Alert>
+
+      <Card class="relative overflow-hidden shadow-none ring-1">
+        <div
+          v-if="loadingList"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
+          aria-busy="true"
+          aria-label="加载中"
+        >
+          <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
+        </div>
+        <CardContent class="overflow-x-auto p-0 sm:p-6">
+          <table class="w-full min-w-[960px] text-sm">
+            <thead>
+              <tr class="border-b border-border bg-muted/40">
+                <th class="h-10 w-28 px-3 text-left font-medium">封面</th>
+                <th class="h-10 min-w-[10rem] px-3 text-left font-medium">标题</th>
+                <th class="h-10 w-28 px-3 text-left font-medium">状态</th>
+                <th class="h-10 w-44 px-3 text-left font-medium">开始时间</th>
+                <th class="h-10 w-44 px-3 text-left font-medium">结束时间</th>
+                <th class="h-10 w-44 px-3 text-left font-medium">创建时间</th>
+                <th class="h-10 w-52 px-3 text-left font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in exhibitions"
+                :key="row.id"
+                class="border-b border-border transition-colors hover:bg-muted/30"
+              >
+                <td class="px-3 py-2">
+                  <div class="size-20 overflow-hidden rounded-md border border-border bg-muted/30">
+                    <img
+                      v-if="row.cover_image"
+                      :src="getImageUrl(row.cover_image)"
+                      :alt="row.title ? `展览封面：${row.title}` : '展览封面'"
+                      class="size-full object-cover"
+                      loading="lazy"
+                      @error="(e) => { e.target.style.opacity = '0.35' }"
+                    >
+                    <div v-else class="flex size-full items-center justify-center text-xs text-muted-foreground">
+                      —
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2.5 font-medium">{{ row.title }}</td>
+                <td class="px-3 py-2.5">
+                  <Badge :variant="row.status === 'published' ? 'default' : 'secondary'">
+                    {{ row.status === 'published' ? '已发布' : '草稿' }}
+                  </Badge>
+                </td>
+                <td class="px-3 py-2.5 text-muted-foreground">
+                  <span v-if="row.start_at">{{ row.start_at }}</span>
+                  <span v-else>—</span>
+                </td>
+                <td class="px-3 py-2.5 text-muted-foreground">
+                  <span v-if="row.end_at">{{ row.end_at }}</span>
+                  <span v-else>—</span>
+                </td>
+                <td class="px-3 py-2.5 tabular-nums text-muted-foreground">{{ row.created_at }}</td>
+                <td class="px-3 py-2.5">
+                  <div class="flex flex-wrap gap-1.5">
+                    <Button size="sm" variant="secondary" type="button" @click="openEditDialog(row)">
+                      编辑
+                    </Button>
+                    <Button size="sm" type="button" @click="goToManageItems(row.id)">
+                      管理作品
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="exhibitions.length === 0 && !loadingList">
+                <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">
+                  暂无展览数据
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
     </div>
 
     <!-- 详情模式 -->
-    <div v-else>
-      <el-alert
-        v-if="detailError && !loadingDetail"
-        class="list-state-alert"
-        type="error"
-        :closable="false"
-        show-icon
-        role="alert"
-        :title="detailError"
-      >
-        <el-button type="primary" link @click="retryFetchDetail">重试</el-button>
-      </el-alert>
-      <el-card v-if="exhibitionDetail" shadow="hover" class="detail-card" style="margin-bottom: 16px">
-        <template #header>
-          <div class="card-header">
-            <div>
-              <div class="card-title">
-                {{ exhibitionDetail.exhibition?.title || '未命名展览' }}
-              </div>
-              <div class="card-subtitle">
-                <el-tag :type="exhibitionDetail.exhibition?.status === 'published' ? 'success' : 'info'">
-                  {{ exhibitionDetail.exhibition?.status === 'published' ? '已发布' : '草稿' }}
-                </el-tag>
-                <span style="margin-left: 12px">
-                  创建时间：{{ exhibitionDetail.exhibition?.created_at || '-' }}
-                </span>
-              </div>
-            </div>
-            <div class="card-actions">
-              <el-button type="primary" size="small" @click="openEditDialogFromDetail">编辑展览</el-button>
-            </div>
-          </div>
-        </template>
+    <div v-else class="flex flex-col gap-4">
+      <Alert v-if="detailError && !loadingDetail" variant="destructive">
+        <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+        <AlertTitle>{{ detailError }}</AlertTitle>
+        <AlertDescription class="mt-2">
+          <Button type="button" variant="secondary" size="sm" @click="retryFetchDetail">
+            重试
+          </Button>
+        </AlertDescription>
+      </Alert>
 
-        <div class="detail-body">
-          <div class="cover">
-            <el-image lazy
+      <Card v-if="exhibitionDetail" class="shadow-none ring-1">
+        <CardHeader class="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div class="min-w-0 space-y-1">
+            <CardTitle class="text-lg">
+              {{ exhibitionDetail.exhibition?.title || '未命名展览' }}
+            </CardTitle>
+            <CardDescription class="flex flex-wrap items-center gap-2">
+              <Badge :variant="exhibitionDetail.exhibition?.status === 'published' ? 'default' : 'secondary'">
+                {{ exhibitionDetail.exhibition?.status === 'published' ? '已发布' : '草稿' }}
+              </Badge>
+              <span class="text-muted-foreground">
+                创建时间：{{ exhibitionDetail.exhibition?.created_at || '—' }}
+              </span>
+            </CardDescription>
+          </div>
+          <Button size="sm" type="button" @click="openEditDialogFromDetail">
+            编辑展览
+          </Button>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-4 sm:flex-row">
+          <div class="shrink-0">
+            <div
               v-if="exhibitionDetail.exhibition?.cover_image"
-              style="width: 140px; height: 140px"
-              :src="getImageUrl(exhibitionDetail.exhibition.cover_image)"
-              fit="cover"
-            />
-            <div v-else class="cover-placeholder">无封面</div>
-          </div>
-
-          <div class="meta">
-            <div><b>描述：</b>{{ exhibitionDetail.exhibition?.description || '-' }}</div>
-            <div style="margin-top: 8px"><b>开始时间：</b>{{ exhibitionDetail.exhibition?.start_at || '-' }}</div>
-            <div style="margin-top: 8px"><b>结束时间：</b>{{ exhibitionDetail.exhibition?.end_at || '-' }}</div>
-            <div style="margin-top: 8px"><b>作品数：</b>{{ exhibitionDetail.items_total ?? exhibitionDetail.items?.length ?? 0 }}</div>
-            <div style="margin-top: 8px">
-              <b>现场图：</b>{{ exhibitionDetail.live_photos_total ?? exhibitionDetail.live_photos?.length ?? 0 }} 张
+              class="size-36 overflow-hidden rounded-lg border border-border bg-muted/30"
+            >
+              <img
+                :src="getImageUrl(exhibitionDetail.exhibition.cover_image)"
+                alt="展览封面"
+                class="size-full object-cover"
+                loading="lazy"
+              >
+            </div>
+            <div
+              v-else
+              class="flex size-36 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground"
+            >
+              无封面
             </div>
           </div>
-        </div>
-      </el-card>
+          <div class="min-w-0 flex-1 space-y-2 text-sm">
+            <div>
+              <span class="font-medium text-foreground">描述：</span>
+              <span class="text-muted-foreground">{{ exhibitionDetail.exhibition?.description || '—' }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-foreground">开始时间：</span>
+              <span class="text-muted-foreground">{{ exhibitionDetail.exhibition?.start_at || '—' }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-foreground">结束时间：</span>
+              <span class="text-muted-foreground">{{ exhibitionDetail.exhibition?.end_at || '—' }}</span>
+            </div>
+            <div>
+              <span class="font-medium text-foreground">作品数：</span>
+              <span class="tabular-nums text-muted-foreground">
+                {{ exhibitionDetail.items_total ?? exhibitionDetail.items?.length ?? 0 }}
+              </span>
+            </div>
+            <div>
+              <span class="font-medium text-foreground">现场图：</span>
+              <span class="tabular-nums text-muted-foreground">
+                {{ exhibitionDetail.live_photos_total ?? exhibitionDetail.live_photos?.length ?? 0 }} 张
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <el-card v-if="exhibitionDetail" shadow="hover" class="live-photos-card" style="margin-bottom: 16px">
-        <template #header>
-          <div class="card-header">
-            <span class="card-title">展览现场图</span>
-            <span class="text-muted" style="font-weight: normal; margin-left: 8px">
+      <Card v-if="exhibitionDetail" class="shadow-none ring-1">
+        <CardHeader>
+          <CardTitle class="text-base">
+            展览现场图
+            <span class="ml-2 font-normal text-muted-foreground">
               （{{ exhibitionDetail.live_photos?.length || 0 }} / {{ MAX_LIVE_PHOTOS }}）
             </span>
-          </div>
-        </template>
-        <div class="images-upload-container">
-          <div v-if="(exhibitionDetail.live_photos || []).length > 0" class="images-list">
-            <div v-for="p in exhibitionDetail.live_photos" :key="p.id" class="image-item">
-              <img :src="getImageUrl(p.image_url)" class="item-image" alt="现场图" />
-              <div class="item-overlay">
-                <el-button
-                  type="danger"
-                  size="small"
-                  circle
-                  class="remove-btn"
-                  @click="confirmDeleteLivePhoto(p)"
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-4">
+          <div v-if="(exhibitionDetail.live_photos || []).length" class="flex flex-wrap gap-4">
+            <div
+              v-for="p in exhibitionDetail.live_photos"
+              :key="p.id"
+              class="group relative size-[120px] overflow-hidden rounded-lg border border-border shadow-sm"
+            >
+              <img :src="getImageUrl(p.image_url)" class="size-full object-cover" alt="现场图">
+              <div
+                class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+              >
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="destructive"
+                  class="size-8"
+                  @click="openDeleteLivePhotoDialog(p)"
                 >
-                  <el-icon><Delete /></el-icon>
-                </el-button>
+                  <Trash2 class="size-4" aria-hidden="true" />
+                </Button>
               </div>
             </div>
           </div>
 
           <div
             v-if="(exhibitionDetail.live_photos?.length || 0) < MAX_LIVE_PHOTOS"
-            class="add-image-btn"
+            class="relative flex size-[120px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
             :class="{
-              'drag-over': isLivePhotosDragOver,
-              uploading: isLivePhotosUploading || isLivePhotosProcessing
+              'border-primary/50 bg-primary/5': isLivePhotosDragOver,
+              'pointer-events-none opacity-70': isLivePhotosUploading || isLivePhotosProcessing,
             }"
+            role="button"
+            tabindex="0"
             @click="triggerLivePhotosInput"
+            @keydown.enter.prevent="triggerLivePhotosInput"
+            @keydown.space.prevent="triggerLivePhotosInput"
             @dragenter="handleLivePhotosDragEnter"
             @dragleave="handleLivePhotosDragLeave"
             @dragover="handleLivePhotosDragOver"
             @drop="handleLivePhotosDrop"
           >
-            <el-icon class="add-icon" :class="{ spinning: isLivePhotosUploading || isLivePhotosProcessing }">
-              <component :is="isLivePhotosUploading || isLivePhotosProcessing ? Loading : Plus" />
-            </el-icon>
-            <p class="add-text">添加现场图</p>
-            <p class="add-hint">最多 {{ MAX_LIVE_PHOTOS }} 张，支持拖拽多选</p>
+            <Loader2
+              v-if="isLivePhotosUploading || isLivePhotosProcessing"
+              class="mb-1 size-8 animate-spin text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Plus v-else class="mb-1 size-8 text-muted-foreground" aria-hidden="true" />
+            <p class="px-1 text-center text-xs font-medium text-foreground">添加现场图</p>
+            <p class="mt-0.5 px-1 text-center text-[10px] text-muted-foreground">
+              最多 {{ MAX_LIVE_PHOTOS }} 张，支持拖拽多选
+            </p>
           </div>
 
           <input
@@ -193,413 +275,525 @@
             type="file"
             accept="image/*"
             multiple
-            style="display: none"
+            class="hidden"
             @change="handleLivePhotosFileSelect"
-          />
+          >
 
-          <div v-if="isLivePhotosProcessing" class="live-photos-upload-progress">
-            <div class="progress-header">
-              <span class="progress-title">图片处理中</span>
-              <span class="progress-percentage">处理中...</span>
+          <div v-if="isLivePhotosProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+            <div class="mb-2 flex justify-between text-muted-foreground">
+              <span>图片处理中</span>
+              <span>处理中…</span>
             </div>
-            <el-progress
-              :percentage="0"
-              :stroke-width="6"
-              :show-text="false"
-              :indeterminate="true"
-              :color="progressColors"
-            />
-            <div class="progress-info">
-              <span class="file-name">{{ livePhotosFileName }}</span>
-              <span class="file-size">{{ formatFileSize(livePhotosFileSize) }}</span>
+            <Progress :model-value="40" class="h-2" />
+            <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+              <span class="max-w-[150px] truncate">{{ livePhotosFileName }}</span>
+              <span>{{ formatFileSize(livePhotosFileSize) }}</span>
             </div>
-            <div class="processing-hint">
-              <p>正在将图片转换为 WebP 格式并压缩...</p>
-            </div>
+            <p class="mt-2 text-center text-xs italic text-muted-foreground">
+              正在将图片转换为 WebP 并压缩…
+            </p>
           </div>
 
           <div
             v-if="livePhotosUploadProgress > 0 && livePhotosUploadProgress < 100 && !isLivePhotosProcessing"
-            class="live-photos-upload-progress"
+            class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
           >
-            <div class="progress-header">
-              <span class="progress-title">上传进度</span>
-              <span class="progress-percentage">{{ livePhotosUploadProgress }}%</span>
+            <div class="mb-2 flex justify-between">
+              <span class="font-medium">上传进度</span>
+              <span class="font-semibold text-primary tabular-nums">{{ livePhotosUploadProgress }}%</span>
             </div>
-            <el-progress
-              :percentage="livePhotosUploadProgress"
-              :stroke-width="6"
-              :show-text="false"
-              :color="progressColors"
-            />
-            <div class="progress-info">
-              <span class="file-name">{{ livePhotosFileName }}</span>
-              <span class="file-size">{{ formatFileSize(livePhotosFileSize) }}</span>
+            <Progress :model-value="livePhotosUploadProgress" class="h-2" />
+            <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+              <span class="max-w-[150px] truncate">{{ livePhotosFileName }}</span>
+              <span>{{ formatFileSize(livePhotosFileSize) }}</span>
             </div>
           </div>
+        </CardContent>
+      </Card>
 
+      <div class="flex flex-wrap gap-2">
+        <Button type="button" :disabled="!exhibitionDetail" @click="openItemsDialog">
+          追加展览作品
+        </Button>
+      </div>
+
+      <Card class="relative overflow-hidden shadow-none ring-1">
+        <div
+          v-if="loadingDetail"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
+          aria-busy="true"
+          aria-label="加载中"
+        >
+          <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
         </div>
-      </el-card>
-
-      <div class="items-actions" style="margin-bottom: 12px">
-        <el-button type="primary" @click="openItemsDialog" :disabled="!exhibitionDetail">追加展览作品</el-button>
-      </div>
-
-      <div v-loading="loadingDetail" class="table-wrap">
-      <el-table :data="exhibitionDetail?.items || []" style="width: 100%">
-          <template #empty>
-            <el-empty
-              v-if="exhibitionDetail && !loadingDetail"
-              description="暂无展览作品，可点击上方追加"
-            />
-          </template>
-        <el-table-column label="排序" width="90" prop="sort_order" />
-        <el-table-column label="作品类型" width="120">
-          <template #default="{ row }">
-            <el-tag :type="row.artwork_type === 'digital' ? 'warning' : 'info'">
-              {{ row.artwork_type === 'digital' ? '数字' : '原作' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="图片" width="120">
-          <template #default="{ row }">
-            <el-image lazy
-              v-if="row.artwork?.image"
-              style="width: 80px; height: 80px"
-              :src="getImageUrl(row.artwork.image)"
-              fit="cover"
-            />
-            <el-image lazy
-              v-else-if="row.artwork?.image_url"
-              style="width: 80px; height: 80px"
-              :src="getImageUrl(row.artwork.image_url)"
-              fit="cover"
-            />
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="标题/ID" min-width="220">
-          <template #default="{ row }">
-            <div class="item-title">
-              <div style="font-weight: 600">{{ row.artwork?.title || '未知作品' }}</div>
-              <div class="text-muted" style="margin-top: 4px">
-                item_id: {{ row.id }} / artwork_id: {{ row.artwork?.id || '-' }}
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="关联艺术家" min-width="220">
-          <template #default="{ row }">
-            <div class="artists-wrap">
-              <el-tag
-                v-for="a in (row.artists || [])"
-                :key="a.id"
-                size="small"
-                type="info"
-                style="margin-right: 6px; margin-bottom: 6px"
+        <CardContent class="overflow-x-auto p-0 sm:p-6">
+          <table class="w-full min-w-[900px] text-sm">
+            <thead>
+              <tr class="border-b border-border bg-muted/40">
+                <th class="h-10 w-20 px-3 text-left font-medium">排序</th>
+                <th class="h-10 w-28 px-3 text-left font-medium">类型</th>
+                <th class="h-10 w-28 px-3 text-left font-medium">图片</th>
+                <th class="h-10 min-w-[12rem] px-3 text-left font-medium">标题 / ID</th>
+                <th class="h-10 min-w-[10rem] px-3 text-left font-medium">关联艺术家</th>
+                <th class="h-10 w-52 px-3 text-left font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in exhibitionDetail?.items || []"
+                :key="row.id"
+                class="border-b border-border transition-colors hover:bg-muted/30"
               >
-                {{ a.name }}
-              </el-tag>
-              <span v-if="!(row.artists || []).length" class="text-muted">未关联</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="260">
-          <template #default="{ row }">
-            <div class="detail-item-actions">
-              <el-button type="primary" size="small" @click="openEditArtistsDialog(row)">
-                编辑艺术家
-              </el-button>
-              <el-button type="danger" size="small" @click="handleRemoveItem(row)">
-                移除
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-      </div>
+                <td class="px-3 py-2 tabular-nums text-muted-foreground">{{ row.sort_order }}</td>
+                <td class="px-3 py-2.5">
+                  <Badge :variant="row.artwork_type === 'digital' ? 'outline' : 'secondary'">
+                    {{ row.artwork_type === 'digital' ? '数字' : '原作' }}
+                  </Badge>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="size-20 overflow-hidden rounded-md border border-border bg-muted/30">
+                    <img
+                      v-if="row.artwork?.image"
+                      :src="getImageUrl(row.artwork.image)"
+                      alt=""
+                      class="size-full object-cover"
+                      loading="lazy"
+                    >
+                    <img
+                      v-else-if="row.artwork?.image_url"
+                      :src="getImageUrl(row.artwork.image_url)"
+                      alt=""
+                      class="size-full object-cover"
+                      loading="lazy"
+                    >
+                    <div v-else class="flex size-full items-center justify-center text-xs text-muted-foreground">
+                      —
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2.5">
+                  <div class="font-medium">{{ row.artwork?.title || '未知作品' }}</div>
+                  <div class="mt-1 text-xs text-muted-foreground">
+                    item_id: {{ row.id }} / artwork_id: {{ row.artwork?.id || '—' }}
+                  </div>
+                </td>
+                <td class="px-3 py-2.5">
+                  <div class="flex flex-wrap gap-1">
+                    <Badge
+                      v-for="a in (row.artists || [])"
+                      :key="a.id"
+                      variant="secondary"
+                      class="font-normal"
+                    >
+                      {{ a.name }}
+                    </Badge>
+                    <span v-if="!(row.artists || []).length" class="text-muted-foreground">未关联</span>
+                  </div>
+                </td>
+                <td class="px-3 py-2.5">
+                  <div class="flex flex-wrap gap-1.5">
+                    <Button size="sm" variant="secondary" type="button" @click="openEditArtistsDialog(row)">
+                      编辑艺术家
+                    </Button>
+                    <Button size="sm" variant="destructive" type="button" @click="openRemoveItemDialog(row)">
+                      移除
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="exhibitionDetail && !(exhibitionDetail.items || []).length && !loadingDetail">
+                <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
+                  暂无展览作品，可点击上方追加
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
     </div>
 
-    <!-- 添加/编辑展览弹窗 -->
-    <el-dialog
-      v-model="exhibitionDialogVisible"
-      :title="exhibitionDialogMode === 'add' ? '添加展览' : '编辑展览'"
-      width="60%"
-    >
-      <el-form :model="exhibitionForm" label-width="120px">
-        <el-form-item label="标题" required>
-          <el-input v-model="exhibitionForm.title" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="exhibitionForm.description" type="textarea" :rows="4" />
-        </el-form-item>
-        <el-form-item label="封面图片">
-          <el-upload
-            class="avatar-uploader"
-            :class="{ 'uploading': isCoverUploading }"
-            :show-file-list="false"
-            :before-upload="beforeCoverUpload"
-            :http-request="customCoverUpload"
-            :on-success="handleCoverUploadSuccess"
-            :on-error="handleCoverUploadError"
-            :drag="true"
-            :accept="'image/*'"
-            name="file"
-            @dragenter="handleCoverDragEnter"
-            @dragleave="handleCoverDragLeave"
-            @dragover="handleCoverDragOver"
-            @drop="handleCoverDrop"
-          >
-            <div
-              class="upload-area"
-              :class="{ 'drag-over': isCoverDragOver, 'uploading': isCoverUploading }"
-            >
-              <el-image lazy
-                v-if="exhibitionForm.cover_image"
-                :src="getImageUrl(exhibitionForm.cover_image)"
-                class="avatar"
-                fit="cover"
-              />
+    <!-- 添加/编辑展览 -->
+    <Dialog v-model:open="exhibitionDialogVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ exhibitionDialogMode === 'add' ? '添加展览' : '编辑展览' }}</DialogTitle>
+        </DialogHeader>
 
-              <div v-else class="upload-placeholder">
-                <el-icon class="avatar-uploader-icon">
-                  <Plus />
-                </el-icon>
-                <div class="upload-text">
-                  <p>点击或拖拽图片到此处上传</p>
-                  <p class="upload-hint">
-                    支持 JPG、PNG、GIF 格式，自动转换为 WebP 格式并压缩至 5MB 以内
-                  </p>
+        <div class="grid gap-4 py-2">
+          <div class="flex flex-col gap-2">
+            <Label for="ex-title">标题 <span class="text-destructive">*</span></Label>
+            <Input id="ex-title" v-model="exhibitionForm.title" autocomplete="off" />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="ex-desc">描述</Label>
+            <Textarea id="ex-desc" v-model="exhibitionForm.description" class="min-h-24" rows="4" />
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>封面图片</Label>
+            <div class="max-w-[400px] space-y-3">
+              <div
+                v-if="exhibitionForm.cover_image"
+                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
+              >
+                <img :src="getImageUrl(exhibitionForm.cover_image)" alt="封面" class="size-full object-cover">
+                <div
+                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <Button type="button" size="icon" variant="destructive" @click="removeCoverImage">
+                    <Trash2 class="size-4" />
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" @click="triggerCoverInput">
+                    更换图片
+                  </Button>
                 </div>
               </div>
+              <div
+                v-else
+                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                :class="{
+                  'border-primary/50 bg-primary/5': isCoverDragOver,
+                  'pointer-events-none opacity-70': isCoverUploading || isCoverProcessing,
+                }"
+                role="button"
+                tabindex="0"
+                @click="triggerCoverInput"
+                @keydown.enter.prevent="triggerCoverInput"
+                @keydown.space.prevent="triggerCoverInput"
+                @dragenter="handleCoverDragEnter"
+                @dragleave="handleCoverDragLeave"
+                @dragover="handleCoverDragOver"
+                @drop="handleCoverDrop"
+              >
+                <Loader2
+                  v-if="isCoverUploading || isCoverProcessing"
+                  class="mb-2 size-10 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
+                <p class="px-2 text-center text-sm font-medium text-foreground">
+                  {{ isCoverProcessing ? '正在处理图片…' : isCoverUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
+                </p>
+                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
+                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
+                </p>
+                <div
+                  v-if="isCoverDragOver && !exhibitionForm.cover_image"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                >
+                  <Upload class="mb-2 size-10" aria-hidden="true" />
+                  <span>释放鼠标上传图片</span>
+                </div>
+              </div>
+              <input
+                ref="coverImageInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleCoverFileSelect"
+              >
+              <div v-if="isCoverProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                <div class="mb-2 flex justify-between text-muted-foreground">
+                  <span>图片处理中</span>
+                  <span>处理中…</span>
+                </div>
+                <Progress :model-value="40" class="h-2" />
+              </div>
+              <div
+                v-if="coverUploadProgress > 0 && coverUploadProgress < 100 && !isCoverProcessing"
+                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+              >
+                <div class="mb-2 flex justify-between">
+                  <span class="font-medium">上传进度</span>
+                  <span class="font-semibold text-primary tabular-nums">{{ coverUploadProgress }}%</span>
+                </div>
+                <Progress :model-value="coverUploadProgress" class="h-2" />
+              </div>
+              <div v-if="coverUploadProgress === 100 && !isCoverProcessing" class="text-center text-sm text-primary">
+                上传完成
+              </div>
             </div>
+          </div>
 
-            <div v-if="isCoverDragOver" class="drag-overlay">
-              <el-icon class="drag-icon">
-                <Upload />
-              </el-icon>
-              <p>释放鼠标上传图片</p>
+          <div class="flex flex-col gap-2">
+            <Label for="ex-status">状态</Label>
+            <select
+              id="ex-status"
+              v-model="exhibitionForm.status"
+              class="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="draft">草稿</option>
+              <option value="published">已发布</option>
+            </select>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="flex flex-col gap-2">
+              <Label for="ex-start">开始时间</Label>
+              <Input id="ex-start" v-model="exhibitionForm.start_at" type="date" />
             </div>
-          </el-upload>
+            <div class="flex flex-col gap-2">
+              <Label for="ex-end">结束时间</Label>
+              <Input id="ex-end" v-model="exhibitionForm.end_at" type="date" />
+            </div>
+          </div>
+        </div>
 
-          <!-- 上传进度条 -->
-          <div v-if="coverUploadProgress > 0" class="upload-progress">
-            <el-progress
-              :percentage="coverUploadProgress"
-              :stroke-width="8"
-              :show-text="true"
-              :status="coverUploadProgress === 100 ? 'success' : ''"
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="exhibitionDialogVisible = false">
+            取消
+          </Button>
+          <Button type="button" :disabled="savingExhibition" @click="submitExhibition">
+            <Loader2 v-if="savingExhibition" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 追加展览作品 -->
+    <Dialog v-model:open="itemsDialogVisible">
+      <DialogContent class="max-h-[92vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>追加展览作品</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="flex flex-col gap-2">
+            <Label for="item-type">作品类型</Label>
+            <select
+              id="item-type"
+              v-model="itemDraft.artwork_type"
+              class="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              @change="handleArtworkTypeChange"
+            >
+              <option value="original">原作</option>
+              <option value="digital">数字</option>
+            </select>
+          </div>
+
+          <template v-if="itemDraft.artwork_type === 'original'">
+            <div class="flex flex-col gap-2">
+              <Label>选择作品（原作）</Label>
+              <Input v-model="originalArtworkFilter" placeholder="筛选标题或 ID" class="max-w-xl" autocomplete="off" />
+              <select
+                v-model.number="itemDraft.artwork_id"
+                class="flex h-36 w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                size="8"
+              >
+                <option :value="0" disabled>
+                  请选择 original_artworks
+                </option>
+                <option v-for="a in filteredOriginalArtworks" :key="a.id" :value="a.id">
+                  {{ a.title }} ({{ a.id }})
+                </option>
+              </select>
+            </div>
+          </template>
+          <template v-else>
+            <div class="flex flex-col gap-2">
+              <Label>选择作品（数字）</Label>
+              <Input v-model="digitalArtworkFilter" placeholder="筛选标题或 ID" class="max-w-xl" autocomplete="off" />
+              <select
+                v-model.number="itemDraft.artwork_id"
+                class="flex h-36 w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                size="8"
+              >
+                <option :value="0" disabled>
+                  请选择 digital_artworks_external
+                </option>
+                <option v-for="a in filteredDigitalArtworks" :key="a.id" :value="a.id">
+                  {{ a.title }} ({{ a.id }})
+                </option>
+              </select>
+            </div>
+          </template>
+
+          <div class="flex flex-col gap-2">
+            <Label for="item-sort">排序 sort_order</Label>
+            <Input
+              id="item-sort"
+              v-model.number="itemDraft.sort_order"
+              type="number"
+              min="1"
+              step="1"
+              class="max-w-xs"
             />
-            <p class="progress-text">
-              <span v-if="coverUploadProgress < 100">正在上传图片... {{ coverUploadProgress }}%</span>
-              <span v-else class="success-text">上传完成！</span>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>关联艺术家（可选）</Label>
+            <Input v-model="itemsArtistFilter" placeholder="筛选艺术家" class="max-w-xl" autocomplete="off" />
+            <p class="text-xs text-muted-foreground">
+              不选则自动使用该作品自带 artist_id；按住 Ctrl/Cmd 多选。
             </p>
-          </div>
-
-          <div style="margin-top: 8px">
-            <el-button
-              v-if="exhibitionForm.cover_image"
-              type="danger"
-              plain
-              @click="removeCoverImage"
-            >
-              移除封面
-            </el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="exhibitionForm.status" placeholder="请选择状态">
-            <el-option label="草稿" value="draft" />
-            <el-option label="已发布" value="published" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="开始时间">
-          <el-date-picker
-            v-model="exhibitionForm.start_at"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择开始日期"
-          />
-        </el-form-item>
-        <el-form-item label="结束时间">
-          <el-date-picker
-            v-model="exhibitionForm.end_at"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择结束日期"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="exhibitionDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="submitExhibition" :loading="savingExhibition">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 追加/替换展览作品弹窗 -->
-    <el-dialog
-      v-model="itemsDialogVisible"
-      title="追加展览作品"
-      width="72%"
-    >
-      <div class="items-dialog-body">
-        <el-form :model="itemDraft" label-width="120px">
-          <el-form-item label="作品类型">
-            <el-select v-model="itemDraft.artwork_type" style="width: 160px" @change="handleArtworkTypeChange">
-              <el-option label="原作" value="original" />
-              <el-option label="数字" value="digital" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="选择作品（原作）" v-if="itemDraft.artwork_type === 'original'">
-            <el-select
-              v-model="itemDraft.artwork_id"
-              filterable
-              placeholder="请选择 original_artworks"
-              style="width: 520px"
-            >
-              <el-option
-                v-for="a in originalArtworkOptions"
-                :key="a.id"
-                :label="`${a.title} (${a.id})`"
-                :value="a.id"
-              />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="选择作品（数字）" v-else>
-            <el-select
-              v-model="itemDraft.artwork_id"
-              filterable
-              placeholder="请选择 digital_artworks_external"
-              style="width: 520px"
-            >
-              <el-option
-                v-for="a in digitalArtworkOptions"
-                :key="a.id"
-                :label="`${a.title} (${a.id})`"
-                :value="a.id"
-              />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="排序 sort_order">
-            <el-input-number v-model="itemDraft.sort_order" :min="1" :step="1" />
-          </el-form-item>
-
-          <el-form-item label="关联艺术家（可选）">
-            <el-select
+            <select
               v-model="itemDraft.artists"
               multiple
-              collapse-tags
-              filterable
-              placeholder="不选则自动使用该作品自带 artist_id"
-              style="width: 520px"
+              class="min-h-[140px] w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              size="8"
             >
-              <el-option
-                v-for="a in artistsOptions"
-                :key="a.id"
-                :label="a.name"
-                :value="a.id"
-              />
-            </el-select>
-          </el-form-item>
+              <option v-for="a in filteredArtistsForItems" :key="a.id" :value="a.id">
+                {{ a.name }}
+              </option>
+            </select>
+          </div>
 
-          <el-form-item>
-            <el-button type="primary" @click="addDraftItem" :disabled="!itemDraft.artwork_id">
-              加入待提交列表
-            </el-button>
-          </el-form-item>
-        </el-form>
-
-        <div style="margin-top: 16px">
-          <div class="text-muted" style="margin-bottom: 10px">待提交 items（将作为一次请求提交）</div>
-          <el-table :data="pendingItems" style="width: 100%">
-            <template #empty>
-              <el-empty description="暂无待提交项，请在上方选择作品后加入" :image-size="64" />
-            </template>
-            <el-table-column label="排序" width="180">
-              <template #default="{ row }">
-                <el-input-number
-                  v-model="row.sort_order"
-                  :min="1"
-                  :step="1"
-                  controls-position="right"
-                  style="width: 160px"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="类型" width="120">
-              <template #default="{ row }">
-                <el-tag :type="row.artwork_type === 'digital' ? 'warning' : 'info'">
-                  {{ row.artwork_type === 'digital' ? '数字' : '原作' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="作品" min-width="320">
-              <template #default="{ row }">
-                <div class="pending-item-artwork">
-                  <div style="font-weight: 600">{{ getPendingArtworkTitle(row) }}</div>
-                  <div class="text-muted" style="margin-top: 4px">
-                    artwork_id: {{ row.artwork_id }}
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="关联艺术家" min-width="280">
-              <template #default="{ row }">
-                <span v-if="row.artists && row.artists.length">
-                  {{ getPendingArtistNames(row.artists).join(', ') }}
-                </span>
-                <span v-else class="text-muted">自动匹配</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120">
-              <template #default="{ $index }">
-                <el-button type="danger" size="small" @click="pendingItems.splice($index, 1)">移除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
+          <Button type="button" :disabled="!itemDraft.artwork_id" @click="addDraftItem">
+            加入待提交列表
+          </Button>
         </div>
-      </div>
 
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="itemsDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="submitItems" :loading="savingItems" :disabled="pendingItems.length === 0">
-            提交
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
+        <div class="mt-2 border-t border-border pt-4">
+          <p class="mb-2 text-sm text-muted-foreground">待提交 items（将作为一次请求提交）</p>
+          <div class="overflow-x-auto rounded-md border border-border">
+            <table class="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr class="border-b border-border bg-muted/40">
+                  <th class="h-9 px-2 text-left font-medium">排序</th>
+                  <th class="h-9 w-24 px-2 text-left font-medium">类型</th>
+                  <th class="h-9 min-w-[12rem] px-2 text-left font-medium">作品</th>
+                  <th class="h-9 min-w-[10rem] px-2 text-left font-medium">关联艺术家</th>
+                  <th class="h-9 w-24 px-2 text-left font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, idx) in pendingItems" :key="idx" class="border-b border-border">
+                  <td class="px-2 py-2">
+                    <Input v-model.number="row.sort_order" type="number" min="1" step="1" class="h-8 w-24" />
+                  </td>
+                  <td class="px-2 py-2">
+                    <Badge :variant="row.artwork_type === 'digital' ? 'outline' : 'secondary'">
+                      {{ row.artwork_type === 'digital' ? '数字' : '原作' }}
+                    </Badge>
+                  </td>
+                  <td class="px-2 py-2">
+                    <div class="font-medium">{{ getPendingArtworkTitle(row) }}</div>
+                    <div class="mt-0.5 text-xs text-muted-foreground">artwork_id: {{ row.artwork_id }}</div>
+                  </td>
+                  <td class="px-2 py-2 text-muted-foreground">
+                    <span v-if="row.artists && row.artists.length">{{ getPendingArtistNames(row.artists).join(', ') }}</span>
+                    <span v-else>自动匹配</span>
+                  </td>
+                  <td class="px-2 py-2">
+                    <Button size="sm" variant="destructive" type="button" @click="removePendingItem(idx)">
+                      移除
+                    </Button>
+                  </td>
+                </tr>
+                <tr v-if="pendingItems.length === 0">
+                  <td colspan="5" class="px-3 py-10 text-center text-muted-foreground">
+                    暂无待提交项，请在上方选择作品后加入
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <!-- 编辑某个展览作品的艺术家弹窗 -->
-    <el-dialog v-model="editArtistsDialogVisible" title="编辑作品-艺术家关联" width="50%">
-      <el-form>
-        <div class="text-muted">item_id: {{ editArtistsItemId }}</div>
-        <el-form-item style="margin-top: 12px">
-          <el-select
-            v-model="editArtistsDraftArtistIds"
-            multiple
-            collapse-tags
-            filterable
-            placeholder="选择艺术家"
-            style="width: 100%"
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="itemsDialogVisible = false">
+            取消
+          </Button>
+          <Button
+            type="button"
+            :disabled="pendingItems.length === 0 || savingItems"
+            @click="submitItems"
           >
-            <el-option v-for="a in artistsOptions" :key="a.id" :label="a.name" :value="a.id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="editArtistsDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="submitArtists" :loading="savingArtists">保存</el-button>
-        </span>
-      </template>
-    </el-dialog>
+            <Loader2 v-if="savingItems" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            提交
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 编辑作品-艺术家 -->
+    <Dialog v-model:open="editArtistsDialogVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>编辑作品-艺术家关联</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-3 py-2">
+          <p class="text-sm text-muted-foreground">item_id: {{ editArtistsItemId }}</p>
+          <div class="flex flex-col gap-2">
+            <Label>艺术家</Label>
+            <Input v-model="editArtistFilter" placeholder="筛选艺术家" autocomplete="off" />
+            <select
+              v-model="editArtistsDraftArtistIds"
+              multiple
+              class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              size="10"
+            >
+              <option v-for="a in filteredArtistsForEdit" :key="a.id" :value="a.id">
+                {{ a.name }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="editArtistsDialogVisible = false">
+            取消
+          </Button>
+          <Button type="button" :disabled="savingArtists" @click="submitArtists">
+            <Loader2 v-if="savingArtists" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 移除展览作品确认 -->
+    <AlertDialog v-model:open="removeItemDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>移除展览作品</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定从本展览中移除「{{ removeItemArtworkTitle }}」吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="removingItem"
+            @click="confirmRemoveItem"
+          >
+            <Loader2 v-if="removingItem" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            移除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <!-- 删除现场图确认 -->
+    <AlertDialog v-model:open="deleteLivePhotoDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除现场图</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除这张现场图吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingLivePhoto"
+            @click="confirmDeleteLivePhotoSubmit"
+          >
+            <Loader2 v-if="deletingLivePhoto" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
@@ -608,9 +802,33 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { AlertCircle, Loader2, Plus, Trash2, Upload } from 'lucide-vue-next'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import { Textarea } from '@/components/ui/textarea'
 
 const route = useRoute()
 const router = useRouter()
@@ -634,16 +852,16 @@ const isLivePhotosProcessing = ref(false)
 const livePhotosFileName = ref('')
 const livePhotosFileSize = ref(0)
 
-const progressColors = [
-  { color: '#f56c6c', percentage: 20 },
-  { color: '#e6a23c', percentage: 40 },
-  { color: '#5cb87a', percentage: 60 },
-  { color: '#1989fa', percentage: 80 },
-  { color: '#6f7ad3', percentage: 100 }
-]
+const coverImageInput = ref(null)
 const isCoverUploading = ref(false)
+const isCoverProcessing = ref(false)
 const coverUploadProgress = ref(0)
 const isCoverDragOver = ref(false)
+
+const originalArtworkFilter = ref('')
+const digitalArtworkFilter = ref('')
+const itemsArtistFilter = ref('')
+const editArtistFilter = ref('')
 
 const getImageUrl = (url) => {
   if (!url) return ''
@@ -652,11 +870,24 @@ const getImageUrl = (url) => {
 }
 
 const isDetailMode = computed(() => !!route.params.id)
-const exhibitionId = computed(() => route.params.id ? Number(route.params.id) : null)
+const exhibitionId = computed(() => (route.params.id ? Number(route.params.id) : null))
 
-// 列表/编辑展览表单
+const removeItemDialogOpen = ref(false)
+const removeItemTarget = ref(null)
+const removingItem = ref(false)
+
+const deleteLivePhotoDialogOpen = ref(false)
+const deleteLivePhotoTarget = ref(null)
+const deletingLivePhoto = ref(false)
+
+const removeItemArtworkTitle = computed(() => {
+  const row = removeItemTarget.value
+  if (!row) return '该作品'
+  return row.artwork?.title || '未知作品'
+})
+
 const exhibitionDialogVisible = ref(false)
-const exhibitionDialogMode = ref('add') // add | edit
+const exhibitionDialogMode = ref('add')
 const exhibitionForm = reactive({
   id: null,
   title: '',
@@ -664,13 +895,11 @@ const exhibitionForm = reactive({
   cover_image: '',
   status: 'draft',
   start_at: '',
-  end_at: ''
+  end_at: '',
 })
 
 function toDateTimeInputValue(v) {
   if (!v) return ''
-  // MySQL 返回一般是 "YYYY-MM-DD HH:mm:ss"
-  // 日期选择器只需要 YYYY-MM-DD，因此只取前 10 位
   if (typeof v === 'string') return v.slice(0, 10)
   return String(v).slice(0, 10)
 }
@@ -685,56 +914,10 @@ function resetExhibitionForm() {
   exhibitionForm.end_at = ''
 }
 
-async function beforeCoverUpload(file) {
-  // 使用同项目原图上传逻辑：压缩为 webp + 5MB 限制
-  const isImage = file?.type && file.type.startsWith('image/')
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件！')
-    return false
-  }
-
+function resetCoverUploadState() {
   coverUploadProgress.value = 0
-  isCoverDragOver.value = false
-  isCoverUploading.value = true
-
-  const processedFile = await uploadImageToWebpLimit5MB(file)
-  if (!processedFile) {
-    isCoverUploading.value = false
-    coverUploadProgress.value = 0
-    return false
-  }
-
-  return Promise.resolve(processedFile)
-}
-
-const customCoverUpload = async (options) => {
-  const { onSuccess, onError, file, onProgress } = options
-  const formData = new FormData()
-  formData.append('file', file)
-
-  try {
-    const resp = await axios.post('/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          coverUploadProgress.value = percent
-          onProgress && onProgress({ percent })
-        } else {
-          // 没有 total 时模拟一下进度，避免 UI 卡住
-          coverUploadProgress.value = Math.min(coverUploadProgress.value + 10, 90)
-          onProgress && onProgress({ percent: coverUploadProgress.value })
-        }
-      }
-    })
-
-    coverUploadProgress.value = 100
-    onSuccess(resp)
-    return resp
-  } catch (err) {
-    onError(err)
-    throw err
-  }
+  isCoverUploading.value = false
+  isCoverProcessing.value = false
 }
 
 function extractUploadedUrl(result) {
@@ -749,32 +932,101 @@ function extractUploadedUrl(result) {
   return url
 }
 
-function handleCoverUploadSuccess(response) {
-  const url = extractUploadedUrl(response)
-  if (url) {
-    exhibitionForm.cover_image = url
-    ElMessage.success('封面上传成功')
-  } else {
-    ElMessage.error('封面上传失败：未获取到图片URL')
-  }
-
-  isCoverUploading.value = false
-  setTimeout(() => {
-    coverUploadProgress.value = 0
-  }, 1000)
+function triggerCoverInput() {
+  if (!isCoverUploading.value && !isCoverProcessing.value) coverImageInput.value?.click()
 }
 
-function handleCoverUploadError(err) {
-  console.error('cover upload error:', err)
-  isCoverUploading.value = false
+function handleCoverFileSelect(event) {
+  const file = event.target.files?.[0]
+  if (file) uploadCoverFile(file)
+  event.target.value = ''
+}
+
+async function uploadCoverFile(file) {
+  if (!file?.type?.startsWith('image/')) {
+    ElMessage.error('只能上传图片文件！')
+    return
+  }
+
   coverUploadProgress.value = 0
-  ElMessage.error('封面上传失败')
+  isCoverDragOver.value = false
+  isCoverProcessing.value = true
+  isCoverUploading.value = true
+
+  const processedFile = await uploadImageToWebpLimit5MB(file)
+  if (!processedFile) {
+    resetCoverUploadState()
+    return
+  }
+
+  isCoverProcessing.value = false
+  coverUploadProgress.value = 0
+
+  const formData = new FormData()
+  formData.append('file', processedFile)
+
+  try {
+    const resp = await axios.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          coverUploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        } else {
+          coverUploadProgress.value = Math.min(coverUploadProgress.value + 10, 90)
+        }
+      },
+    })
+
+    coverUploadProgress.value = 100
+    const url = extractUploadedUrl(resp)
+    if (url) {
+      exhibitionForm.cover_image = url
+      ElMessage.success('封面上传成功')
+    } else {
+      ElMessage.error('封面上传失败：未获取到图片URL')
+    }
+    setTimeout(() => {
+      coverUploadProgress.value = 0
+    }, 1200)
+  } catch (err) {
+    console.error('cover upload error:', err)
+    ElMessage.error('封面上传失败')
+    coverUploadProgress.value = 0
+  } finally {
+    isCoverUploading.value = false
+    isCoverProcessing.value = false
+  }
 }
 
 function removeCoverImage() {
   exhibitionForm.cover_image = ''
-  coverUploadProgress.value = 0
-  isCoverUploading.value = false
+  resetCoverUploadState()
+}
+
+function handleCoverDragEnter(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = true
+}
+
+function handleCoverDragLeave(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!e.currentTarget.contains(e.relatedTarget)) isCoverDragOver.value = false
+}
+
+function handleCoverDragOver(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = true
+}
+
+function handleCoverDrop(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  isCoverDragOver.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (file?.type?.startsWith('image/')) uploadCoverFile(file)
 }
 
 const MAX_LIVE_PHOTOS = 50
@@ -796,16 +1048,12 @@ function resetLivePhotosUploadState() {
 }
 
 function triggerLivePhotosInput() {
-  if (!isLivePhotosUploading.value && !isLivePhotosProcessing.value) {
-    livePhotosInput.value?.click()
-  }
+  if (!isLivePhotosUploading.value && !isLivePhotosProcessing.value) livePhotosInput.value?.click()
 }
 
 function handleLivePhotosFileSelect(event) {
   const files = Array.from(event.target.files || [])
-  if (files.length > 0) {
-    uploadLivePhotosFiles(files)
-  }
+  if (files.length > 0) uploadLivePhotosFiles(files)
   event.target.value = ''
 }
 
@@ -821,7 +1069,7 @@ async function uploadLivePhotosFiles(files) {
   const current = exhibitionDetail.value.live_photos?.length || 0
   if (current + imageFiles.length > MAX_LIVE_PHOTOS) {
     ElMessage.warning(
-      `现场图最多 ${MAX_LIVE_PHOTOS} 张，当前 ${current} 张，还可添加 ${MAX_LIVE_PHOTOS - current} 张`
+      `现场图最多 ${MAX_LIVE_PHOTOS} 张，当前 ${current} 张，还可添加 ${MAX_LIVE_PHOTOS - current} 张`,
     )
     return
   }
@@ -834,9 +1082,7 @@ async function uploadLivePhotosFiles(files) {
   for (const file of imageFiles) {
     try {
       const processedFile = await uploadImageToWebpLimit5MB(file)
-      if (!processedFile) {
-        continue
-      }
+      if (!processedFile) continue
 
       isLivePhotosProcessing.value = false
       livePhotosFileName.value = processedFile.name
@@ -854,7 +1100,7 @@ async function uploadLivePhotosFiles(files) {
           } else {
             livePhotosUploadProgress.value = Math.min(livePhotosUploadProgress.value + 10, 90)
           }
-        }
+        },
       })
 
       const imageUrl = extractUploadedUrl(response)
@@ -899,9 +1145,7 @@ function handleLivePhotosDragEnter(e) {
 function handleLivePhotosDragLeave(e) {
   e.preventDefault()
   e.stopPropagation()
-  if (!e.currentTarget.contains(e.relatedTarget)) {
-    isLivePhotosDragOver.value = false
-  }
+  if (!e.currentTarget.contains(e.relatedTarget)) isLivePhotosDragOver.value = false
 }
 
 function handleLivePhotosDragOver(e) {
@@ -918,64 +1162,45 @@ function handleLivePhotosDrop(e) {
   if (isLivePhotosUploading.value || isLivePhotosProcessing.value || n >= MAX_LIVE_PHOTOS) return
 
   const dropped = Array.from(e.dataTransfer?.files || [])
-  if (dropped.length > 0) {
-    uploadLivePhotosFiles(dropped)
-  }
+  if (dropped.length > 0) uploadLivePhotosFiles(dropped)
 }
 
-async function confirmDeleteLivePhoto(p) {
+function openDeleteLivePhotoDialog(p) {
   if (!exhibitionId.value || !p?.id) return
-  try {
-    await ElMessageBox.confirm('确定删除这张现场图？', '确认', { type: 'warning' })
-  } catch {
-    return
-  }
+  deleteLivePhotoTarget.value = p
+  deleteLivePhotoDialogOpen.value = true
+}
+
+async function confirmDeleteLivePhotoSubmit() {
+  const p = deleteLivePhotoTarget.value
+  if (!exhibitionId.value || !p?.id) return
+  deletingLivePhoto.value = true
   try {
     await axios.delete(`/exhibitions/${exhibitionId.value}/live-photos/${p.id}`)
     ElMessage.success('已删除')
+    deleteLivePhotoDialogOpen.value = false
+    deleteLivePhotoTarget.value = null
     await fetchDetail(exhibitionId.value)
   } catch (e) {
     console.error('delete live photo failed:', e)
     ElMessage.error(e?.response?.data?.error || '删除失败')
+  } finally {
+    deletingLivePhoto.value = false
   }
-}
-
-// 监听拖拽状态（用于 UI 高亮）
-function handleCoverDragEnter(e) {
-  e.preventDefault()
-  e.stopPropagation()
-  isCoverDragOver.value = true
-}
-
-function handleCoverDragLeave(e) {
-  e.preventDefault()
-  e.stopPropagation()
-  isCoverDragOver.value = false
-}
-
-function handleCoverDragOver(e) {
-  e.preventDefault()
-  e.stopPropagation()
-  isCoverDragOver.value = true
-}
-
-function handleCoverDrop(e) {
-  e.preventDefault()
-  e.stopPropagation()
-  isCoverDragOver.value = false
 }
 
 function openAddDialog() {
   resetExhibitionForm()
+  resetCoverUploadState()
   exhibitionDialogMode.value = 'add'
   exhibitionDialogVisible.value = true
 }
 
 async function openEditDialog(row) {
   resetExhibitionForm()
+  resetCoverUploadState()
   exhibitionDialogMode.value = 'edit'
 
-  // 列表接口不返回 description，直接编辑可能把描述覆盖为空，所以编辑时补拉详情
   let ex = row
   try {
     if (row?.id) {
@@ -1015,7 +1240,7 @@ async function submitExhibition() {
       cover_image: exhibitionForm.cover_image || null,
       status: exhibitionForm.status || 'draft',
       start_at: exhibitionForm.start_at ? `${exhibitionForm.start_at}T00:00:00` : null,
-      end_at: exhibitionForm.end_at ? `${exhibitionForm.end_at}T00:00:00` : null
+      end_at: exhibitionForm.end_at ? `${exhibitionForm.end_at}T00:00:00` : null,
     }
 
     if (exhibitionDialogMode.value === 'add') {
@@ -1029,11 +1254,8 @@ async function submitExhibition() {
     }
 
     exhibitionDialogVisible.value = false
-    if (isDetailMode.value) {
-      await fetchDetail(exhibitionId.value)
-    } else {
-      await fetchExhibitions()
-    }
+    if (isDetailMode.value) await fetchDetail(exhibitionId.value)
+    else await fetchExhibitions()
   } catch (e) {
     ElMessage.error(e?.response?.data?.error || e.message || '操作失败')
   } finally {
@@ -1066,13 +1288,45 @@ function retryFetchDetail() {
   fetchDetail(exhibitionId.value)
 }
 
-// ---------------------------
-// 详情模式：展览作品 & 关联艺术家
-// ---------------------------
-
 const artistsOptions = ref([])
 const originalArtworkOptions = ref([])
 const digitalArtworkOptions = ref([])
+
+const filteredOriginalArtworks = computed(() => {
+  const q = originalArtworkFilter.value.trim().toLowerCase()
+  const list = originalArtworkOptions.value || []
+  if (!q) return list
+  return list.filter(
+    (a) =>
+      String(a.id).includes(q) ||
+      (a.title && String(a.title).toLowerCase().includes(q)),
+  )
+})
+
+const filteredDigitalArtworks = computed(() => {
+  const q = digitalArtworkFilter.value.trim().toLowerCase()
+  const list = digitalArtworkOptions.value || []
+  if (!q) return list
+  return list.filter(
+    (a) =>
+      String(a.id).includes(q) ||
+      (a.title && String(a.title).toLowerCase().includes(q)),
+  )
+})
+
+const filteredArtistsForItems = computed(() => {
+  const q = itemsArtistFilter.value.trim().toLowerCase()
+  const list = artistsOptions.value || []
+  if (!q) return list
+  return list.filter((a) => a.name && String(a.name).toLowerCase().includes(q))
+})
+
+const filteredArtistsForEdit = computed(() => {
+  const q = editArtistFilter.value.trim().toLowerCase()
+  const list = artistsOptions.value || []
+  if (!q) return list
+  return list.filter((a) => a.name && String(a.name).toLowerCase().includes(q))
+})
 
 async function fetchArtists() {
   const res = await axios.get('/artists')
@@ -1086,7 +1340,7 @@ async function fetchOriginalArtworksOptions() {
     id: a.id,
     title: a.title,
     image: a.image,
-    artist_name: a.artist_name
+    artist_name: a.artist_name,
   }))
 }
 
@@ -1097,7 +1351,7 @@ async function fetchDigitalArtworksOptions() {
     id: a.id,
     title: a.title,
     image_url: a.image_url,
-    artist_name: a.artist?.name || a.artist_name
+    artist_name: a.artist?.name || a.artist_name,
   }))
 }
 
@@ -1134,7 +1388,6 @@ function getPendingArtworkTitle(row) {
 }
 
 async function ensureOptionsLoaded() {
-  // 简单加载：避免重复请求
   if (artistsOptions.value.length && originalArtworkOptions.value.length && digitalArtworkOptions.value.length) return
   await Promise.all([fetchArtists(), fetchOriginalArtworksOptions(), fetchDigitalArtworksOptions()])
 }
@@ -1162,7 +1415,6 @@ function goBackToList() {
   router.push('/exhibitions')
 }
 
-// 子页面里切换路由参数时刷新
 watch(
   () => route.params.id,
   async (newVal) => {
@@ -1175,7 +1427,7 @@ watch(
       await fetchExhibitions()
     }
   },
-  { immediate: false }
+  { immediate: false },
 )
 
 onMounted(async () => {
@@ -1187,27 +1439,20 @@ onMounted(async () => {
   }
 })
 
-// ---------------------------
-// items 对话框：追加/替换
-// ---------------------------
-
 const itemsDialogVisible = ref(false)
-// 目前仅保留追加模式
-// const itemsDialogMode = ref('append') // append | replace
 
 const itemDraft = reactive({
   artwork_type: 'original',
-  artwork_id: null,
+  artwork_id: 0,
   sort_order: 1,
-  artists: []
+  artists: [],
 })
 
 const pendingItems = ref([])
 
 function handleArtworkTypeChange() {
-  itemDraft.artwork_id = null
-  // sort_order 由用户自己调整，默认按当前 pendingItems 继续
-  const existingLen = (exhibitionDetail.value?.items?.length || 0)
+  itemDraft.artwork_id = 0
+  const existingLen = exhibitionDetail.value?.items?.length || 0
   const base = existingLen
   itemDraft.sort_order = base + pendingItems.value.length + 1
 }
@@ -1216,9 +1461,12 @@ function openItemsDialog() {
   itemsDialogVisible.value = true
   pendingItems.value = []
   itemDraft.artwork_type = 'original'
-  itemDraft.artwork_id = null
+  itemDraft.artwork_id = 0
   itemDraft.artists = []
-  const existingLen = (exhibitionDetail.value?.items?.length || 0)
+  originalArtworkFilter.value = ''
+  digitalArtworkFilter.value = ''
+  itemsArtistFilter.value = ''
+  const existingLen = exhibitionDetail.value?.items?.length || 0
   itemDraft.sort_order = existingLen + 1
 }
 
@@ -1228,20 +1476,23 @@ function addDraftItem() {
     ElMessage.error('请选择 artwork_id')
     return
   }
-  const artists = Array.isArray(itemDraft.artists) ? itemDraft.artists.slice() : []
+  const artists = Array.isArray(itemDraft.artists) ? itemDraft.artists.map((id) => Number(id)) : []
 
   pendingItems.value.push({
     artwork_type: itemDraft.artwork_type,
-    artwork_id: itemDraft.artwork_id,
+    artwork_id: artworkId,
     sort_order: itemDraft.sort_order,
-    artists
+    artists,
   })
 
-  // 便于继续添加下一个
-  const existingLen = (exhibitionDetail.value?.items?.length || 0)
+  const existingLen = exhibitionDetail.value?.items?.length || 0
   itemDraft.sort_order = existingLen + pendingItems.value.length + 1
-  itemDraft.artwork_id = null
+  itemDraft.artwork_id = 0
   itemDraft.artists = []
+}
+
+function removePendingItem(index) {
+  pendingItems.value.splice(index, 1)
 }
 
 async function submitItems() {
@@ -1262,9 +1513,6 @@ async function submitItems() {
   }
 }
 
-// ---------------------------
-// 编辑某个 item 的 artists 关联
-// ---------------------------
 const editArtistsDialogVisible = ref(false)
 const editArtistsItemId = ref(null)
 const editArtistsDraftArtistIds = ref([])
@@ -1272,27 +1520,29 @@ const editArtistsDraftArtistIds = ref([])
 function openEditArtistsDialog(row) {
   editArtistsItemId.value = row.id
   editArtistsDraftArtistIds.value = (row.artists || []).map((a) => a.id)
+  editArtistFilter.value = ''
   editArtistsDialogVisible.value = true
 }
 
-async function handleRemoveItem(row) {
+function openRemoveItemDialog(row) {
   if (!exhibitionId.value || !row?.id) return
+  removeItemTarget.value = row
+  removeItemDialogOpen.value = true
+}
 
+async function confirmRemoveItem() {
+  if (!exhibitionId.value || !removeItemTarget.value?.id) return
+  removingItem.value = true
   try {
-    await ElMessageBox.confirm('确定移除该展览作品吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-
-    await axios.delete(`/exhibitions/${exhibitionId.value}/items/${row.id}`)
+    await axios.delete(`/exhibitions/${exhibitionId.value}/items/${removeItemTarget.value.id}`)
     ElMessage.success('移除成功')
+    removeItemDialogOpen.value = false
+    removeItemTarget.value = null
     await fetchDetail(exhibitionId.value)
   } catch (e) {
-    // cancel 时会抛异常，这里静默
-    if (e && e !== 'cancel') {
-      ElMessage.error(e?.response?.data?.error || '移除失败')
-    }
+    ElMessage.error(e?.response?.data?.error || '移除失败')
+  } finally {
+    removingItem.value = false
   }
 }
 
@@ -1300,9 +1550,10 @@ async function submitArtists() {
   if (!exhibitionId.value || !editArtistsItemId.value) return
   savingArtists.value = true
   try {
+    const artist_ids = (editArtistsDraftArtistIds.value || []).map((id) => Number(id))
     await axios.put(
       `/exhibitions/${exhibitionId.value}/items/${editArtistsItemId.value}/artists`,
-      { artist_ids: editArtistsDraftArtistIds.value }
+      { artist_ids },
     )
     ElMessage.success('艺术家关联已更新')
     editArtistsDialogVisible.value = false
@@ -1314,403 +1565,3 @@ async function submitArtists() {
   }
 }
 </script>
-
-<style scoped>
-.list-state-alert {
-  margin-bottom: 12px;
-}
-
-.table-wrap {
-  min-height: 200px;
-}
-
-.el-image-placeholder-slot--cover {
-  width: 80px;
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f5f7fa;
-  color: #909399;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.text-muted {
-  color: #909399;
-}
-
-.detail-card .card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.detail-card .card-title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.detail-card .card-subtitle {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.detail-card .detail-body {
-  display: flex;
-  gap: 20px;
-}
-
-.detail-card .cover {
-  width: 160px;
-}
-
-.cover-placeholder {
-  width: 140px;
-  height: 140px;
-  border: 1px dashed #dcdfe6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #909399;
-}
-
-.artists-wrap {
-  display: flex;
-  flex-wrap: wrap;
-}
-
-.items-dialog-body {
-  min-height: 240px;
-}
-
-.detail-item-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* 封面上传：复用其他页面的上传 UI 样式（简化子集） */
-.avatar-uploader {
-  border: 1px dashed #d9d9d9;
-  border-radius: 6px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  width: 200px;
-  height: 200px;
-  transition: all 0.3s ease;
-  margin-bottom: 8px;
-}
-
-.avatar-uploader:hover {
-  border-color: #409eff;
-}
-
-.avatar-uploader.uploading {
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.avatar-uploader-icon {
-  font-size: 28px;
-  color: #8c939d;
-  width: 200px;
-  height: 200px;
-  text-align: center;
-  line-height: 200px;
-}
-
-.avatar {
-  width: 200px;
-  height: 200px;
-  display: block;
-  object-fit: cover;
-}
-
-.upload-area {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background-color: #f5f7fa;
-  border: 2px dashed #d9d9d9;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-}
-
-.upload-area.drag-over {
-  border-color: #409eff;
-  background-color: #ecf5ff;
-  transform: scale(1.02);
-  box-shadow: 0 0 10px rgba(64, 158, 255, 0.3);
-}
-
-.upload-area.uploading {
-  background-color: #f0f9ff;
-  border-color: #409eff;
-}
-
-.drag-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(64, 158, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #409eff;
-  font-weight: bold;
-  z-index: 10;
-  border-radius: 6px;
-}
-
-.drag-icon {
-  font-size: 48px;
-  margin-bottom: 10px;
-}
-
-.upload-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  padding: 20px;
-  box-sizing: border-box;
-}
-
-.upload-text {
-  text-align: center;
-  color: #606266;
-  margin-top: 10px;
-}
-
-.upload-text p {
-  margin: 5px 0;
-}
-
-.upload-hint {
-  font-size: 12px;
-  color: #909399;
-}
-
-.upload-progress {
-  margin-top: 15px;
-  padding: 15px;
-  background-color: #f8f9fa;
-  border-radius: 6px;
-  border: 1px solid #e9ecef;
-  width: 200px;
-}
-
-.progress-text {
-  margin: 10px 0 0 0;
-  text-align: center;
-  color: #606266;
-  font-size: 14px;
-}
-
-.success-text {
-  color: #67c23a;
-  font-weight: bold;
-}
-
-.live-photos-card .card-header {
-  display: flex;
-  align-items: center;
-}
-
-/* 与商家管理「商家图片」一致的多图上传样式 */
-.live-photos-card .images-upload-container {
-  width: 100%;
-}
-
-.live-photos-card .images-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.live-photos-card .image-item {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-}
-
-.live-photos-card .image-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
-
-.live-photos-card .item-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.live-photos-card .item-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.live-photos-card .image-item:hover .item-overlay {
-  opacity: 1;
-}
-
-.live-photos-card .add-image-btn {
-  width: 120px;
-  height: 120px;
-  border: 2px dashed #d9d9d9;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  background: #fafafa;
-}
-
-.live-photos-card .add-image-btn:hover {
-  border-color: #409eff;
-  background: #f0f9ff;
-}
-
-.live-photos-card .add-image-btn.drag-over {
-  border-color: #409eff;
-  background: #ecf5ff;
-  transform: scale(1.02);
-  box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
-}
-
-.live-photos-card .add-image-btn.uploading {
-  opacity: 0.7;
-  pointer-events: none;
-  border-color: #409eff;
-  background: #f0f9ff;
-}
-
-.live-photos-card .add-icon {
-  font-size: 32px;
-  color: #8c939d;
-  margin-bottom: 8px;
-  transition: all 0.3s ease;
-}
-
-.live-photos-card .add-icon.spinning {
-  animation: live-photos-spin 1s linear infinite;
-}
-
-@keyframes live-photos-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.live-photos-card .add-text {
-  margin: 0 0 4px 0;
-  color: #606266;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.live-photos-card .add-hint {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-  text-align: center;
-  padding: 0 6px;
-}
-
-.live-photos-card .live-photos-upload-progress {
-  margin-top: 16px;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.live-photos-card .progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.live-photos-card .progress-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #606266;
-}
-
-.live-photos-card .progress-percentage {
-  font-size: 14px;
-  font-weight: bold;
-  color: #409eff;
-}
-
-.live-photos-card .progress-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.live-photos-card .file-name {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.live-photos-card .processing-hint {
-  margin-top: 8px;
-  text-align: center;
-}
-
-.live-photos-card .processing-hint p {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-  font-style: italic;
-}
-</style>
-

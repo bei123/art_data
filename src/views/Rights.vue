@@ -1,319 +1,432 @@
 <template>
-  <div>
-    <div class="header">
-      <h3>版权实物管理</h3>
-      <el-button type="primary" @click="handleAdd">添加版权实物</el-button>
+  <div class="flex flex-col gap-6 p-4 md:p-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <h2 class="text-xl font-semibold tracking-tight text-foreground">
+        版权实物管理
+      </h2>
+      <Button type="button" @click="handleAdd">
+        添加版权实物
+      </Button>
     </div>
 
-    <el-alert
-      v-if="listError && !listLoading"
-      class="list-state-alert"
-      type="error"
-      :closable="false"
-      show-icon
-      role="alert"
-      :title="listError"
-    >
-      <el-button type="primary" link @click="retryFetchRights">重试</el-button>
-    </el-alert>
+    <Alert v-if="listError && !listLoading" variant="destructive">
+      <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+      <AlertTitle>{{ listError }}</AlertTitle>
+      <AlertDescription class="mt-2">
+        <Button type="button" variant="secondary" size="sm" @click="retryFetchRights">
+          重试
+        </Button>
+      </AlertDescription>
+    </Alert>
 
-    <div v-loading="listLoading" class="table-wrap">
-    <el-table :data="rights" style="width: 100%">
-        <template #empty>
-          <el-empty v-if="!listLoading" description="暂无版权实物数据" />
-        </template>
-      <el-table-column label="图片">
-        <template #default="{ row }">
-          <div class="image-preview">
-            <el-image
-              lazy
-              v-for="(image, index) in row.images"
-              :key="index"
-              style="width: 100px; height: 100px; margin-right: 10px"
-              :src="getImageUrl(image)"
-              fit="cover"
-              :preview-src-list="(row.images || []).map((img) => getImageUrl(img))"
-              :initial-index="index"
-              :preview-teleported="true"
-              :alt="row.title ? `${row.title} 配图 ${index + 1}` : '版权实物配图'"
+    <Card class="relative overflow-hidden shadow-none ring-1">
+      <div
+        v-if="listLoading"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
+        aria-busy="true"
+        aria-label="加载中"
+      >
+        <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
+      </div>
+      <CardContent class="overflow-x-auto p-0 sm:p-6">
+        <table class="w-full min-w-[1100px] text-sm">
+          <thead>
+            <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 min-w-[12rem] px-3 text-left font-medium">图片</th>
+              <th class="h-10 px-3 text-left font-medium">标题</th>
+              <th class="h-10 w-24 px-3 text-left font-medium">状态</th>
+              <th class="h-10 min-w-[6rem] px-3 text-left font-medium">价格</th>
+              <th class="h-10 w-28 px-3 text-left font-medium">剩余</th>
+              <th class="h-10 px-3 text-left font-medium">所属分类</th>
+              <th class="h-10 min-w-[10rem] px-3 text-left font-medium">关联艺术家</th>
+              <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in rights"
+              :key="row.id"
+              class="border-b border-border transition-colors hover:bg-muted/30"
             >
-              <template #placeholder>
-                <div class="el-image-placeholder-slot el-image-placeholder-slot--md" aria-hidden="true">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                </div>
-              </template>
-            </el-image>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="title" label="标题" />
-      <el-table-column prop="status" label="状态">
-        <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)">
-            {{ getStatusText(row.status) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="price" label="价格">
-        <template #default="{ row }">
-          <div>
-            <div>¥{{ row.price }}</div>
-            <div v-if="row.discount_amount > 0" class="discount-info">
-              可抵扣: ¥{{ row.discount_amount }}
-            </div>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="remainingCount" label="剩余数量">
-        <template #default="{ row }">
-          {{ row.remainingCount }}/{{ row.totalCount }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="category_title" label="所属分类" />
-      <el-table-column label="关联艺术家">
-        <template #default="{ row }">
-          <div v-if="row.artist">
-            <div class="artist-info">
-              <el-avatar :size="30" :src="getImageUrl(row.artist.avatar)" />
-              <span class="artist-name">{{ row.artist.name }}</span>
-            </div>
-          </div>
-          <span v-else class="no-artist">未关联</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="200">
-        <template #default="{ row }">
-          <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    </div>
-
-    <el-dialog
-      v-model="dialogVisible"
-      :title="isEdit ? '编辑版权实物' : '添加版权实物'"
-      width="50%"
-    >
-      <el-form :model="form" label-width="120px">
-        <el-form-item label="标题">
-          <el-input v-model="form.title" />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="form.status" placeholder="请选择状态">
-            <el-option label="在售" value="onsale" />
-            <el-option label="已售罄" value="soldout" />
-            <el-option label="即将发售" value="upcoming" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="价格">
-          <el-input-number v-model="form.price" :precision="2" :step="0.1" :min="0" />
-        </el-form-item>
-        <el-form-item label="优惠价">
-          <el-input-number v-model="form.discount_price" :precision="2" :step="0.1" :min="0" />
-        </el-form-item>
-        <el-form-item label="原价">
-          <el-input-number v-model="form.originalPrice" :precision="2" :step="0.1" :min="0" />
-        </el-form-item>
-        <el-form-item label="可享优惠的数字资产">
-          <el-select
-            v-model="form.eligible_digital_artwork_ids"
-            multiple
-            clearable
-            filterable
-            placeholder="选择拥有即可享受优惠的数字艺术品"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in digitalOptions"
-              :key="item.id"
-              :label="item.title"
-              :value="item.id"
-            >
-              {{ item.title }}
-            </el-option>
-          </el-select>
-          <div class="hint">不选择则不限制，设置后仅拥有所选数字资产的用户可享受优惠价。</div>
-        </el-form-item>
-        <el-form-item label="可抵扣金额">
-          <el-input-number v-model="form.discountAmount" :precision="2" :step="0.1" :min="0" />
-        </el-form-item>
-        <el-form-item label="期限">
-          <el-input v-model="form.period" />
-        </el-form-item>
-        <el-form-item label="总数量">
-          <el-input-number v-model="form.totalCount" :min="0" />
-        </el-form-item>
-        <el-form-item label="剩余数量">
-          <el-input-number v-model="form.remainingCount" :min="0" :max="form.totalCount" />
-        </el-form-item>
-        <el-form-item label="所属分类">
-          <el-select v-model="form.category_id" placeholder="请选择分类">
-            <el-option
-              v-for="cat in categories"
-              :key="cat.id"
-              :label="cat.title"
-              :value="cat.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="关联艺术家">
-          <el-select v-model="form.artist_id" placeholder="请选择艺术家" clearable>
-            <el-option
-              v-for="artist in artists"
-              :key="artist.id"
-              :label="artist.name"
-              :value="artist.id"
-            >
-              <div class="artist-option">
-                <el-avatar :size="24" :src="getImageUrl(artist.avatar)" />
-                <span class="artist-name">{{ artist.name }}</span>
-              </div>
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" :rows="4" />
-        </el-form-item>
-        <el-form-item label="图片" required>
-          <div class="images-upload-container">
-            <!-- 已上传的图片列表 -->
-            <div class="images-list" v-if="form.images.length > 0">
-              <div 
-                v-for="(image, index) in form.images" 
-                :key="index"
-                class="image-item"
-              >
-                <img :src="getImageUrl(image)" class="item-image" alt="图片" />
-                <div class="item-overlay">
-                  <el-button 
-                    type="danger" 
-                    size="small" 
-                    circle 
-                    @click="removeImage(index)"
-                    class="remove-btn"
+              <td class="px-3 py-2">
+                <div class="flex max-w-[14rem] flex-wrap gap-1.5">
+                  <button
+                    v-for="(image, index) in row.images"
+                    :key="index"
+                    type="button"
+                    class="relative size-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
+                    :aria-label="row.title ? `预览：${row.title} 第 ${index + 1} 张` : `预览第 ${index + 1} 张`"
+                    @click="openImagePreview(row.images, index, row.title)"
                   >
-                    <el-icon><Delete /></el-icon>
-                  </el-button>
+                    <img
+                      :src="getImageUrl(image)"
+                      :alt="row.title ? `${row.title} 配图 ${index + 1}` : '版权实物配图'"
+                      class="size-full object-cover"
+                      loading="lazy"
+                    >
+                  </button>
+                </div>
+              </td>
+              <td class="max-w-[12rem] truncate px-3 py-2.5 font-medium" :title="row.title">{{ row.title }}</td>
+              <td class="px-3 py-2.5">
+                <Badge :variant="getStatusBadgeVariant(row.status)">
+                  {{ getStatusText(row.status) }}
+                </Badge>
+              </td>
+              <td class="px-3 py-2.5 tabular-nums">
+                <div>¥{{ row.price }}</div>
+                <div v-if="row.discount_amount > 0" class="mt-0.5 text-xs text-destructive">
+                  可抵扣: ¥{{ row.discount_amount }}
+                </div>
+              </td>
+              <td class="px-3 py-2.5 tabular-nums text-muted-foreground">
+                {{ row.remainingCount }}/{{ row.totalCount }}
+              </td>
+              <td class="max-w-[10rem] truncate px-3 py-2.5" :title="row.category_title">
+                {{ row.category_title }}
+              </td>
+              <td class="px-3 py-2.5">
+                <div v-if="row.artist" class="flex min-w-0 items-center gap-2">
+                  <Avatar class="size-8 shrink-0 border border-border">
+                    <AvatarImage :src="getImageUrl(row.artist.avatar)" :alt="row.artist.name" />
+                    <AvatarFallback class="text-xs">{{ row.artist.name?.charAt(0) || '?' }}</AvatarFallback>
+                  </Avatar>
+                  <span class="min-w-0 truncate text-sm">{{ row.artist.name }}</span>
+                </div>
+                <span v-else class="text-sm italic text-muted-foreground">未关联</span>
+              </td>
+              <td class="px-3 py-2.5">
+                <div class="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="secondary" type="button" @click="handleEdit(row)">
+                    编辑
+                  </Button>
+                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                    删除
+                  </Button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="rights.length === 0 && !listLoading">
+              <td colspan="8" class="px-3 py-12 text-center text-muted-foreground">
+                暂无版权实物数据
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+
+    <Dialog v-model:open="dialogVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{{ isEdit ? '编辑版权实物' : '添加版权实物' }}</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid max-h-[75vh] gap-4 overflow-y-auto py-2 pr-1">
+          <div class="flex flex-col gap-2">
+            <Label for="r-title">标题</Label>
+            <Input id="r-title" v-model="form.title" autocomplete="off" />
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label for="r-status">状态</Label>
+            <select
+              id="r-status"
+              v-model="form.status"
+              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <option disabled value="">
+                请选择状态
+              </option>
+              <option value="onsale">在售</option>
+              <option value="soldout">已售罄</option>
+              <option value="upcoming">即将发售</option>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div class="flex flex-col gap-2">
+              <Label for="r-price">价格</Label>
+              <Input id="r-price" v-model.number="form.price" type="number" min="0" step="0.01" />
+            </div>
+            <div class="flex flex-col gap-2">
+              <Label for="r-dp">优惠价</Label>
+              <Input id="r-dp" v-model.number="form.discount_price" type="number" min="0" step="0.01" />
+            </div>
+            <div class="flex flex-col gap-2">
+              <Label for="r-op">原价</Label>
+              <Input id="r-op" v-model.number="form.originalPrice" type="number" min="0" step="0.01" />
+            </div>
+            <div class="flex flex-col gap-2">
+              <Label for="r-da">可抵扣金额</Label>
+              <Input id="r-da" v-model.number="form.discountAmount" type="number" min="0" step="0.01" />
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>可享优惠的数字资产</Label>
+            <Input v-model="digitalFilter" placeholder="筛选标题…" class="max-w-md" />
+            <p class="text-xs text-muted-foreground">
+              不选择则不限制，设置后仅拥有所选数字资产的用户可享受优惠价。
+            </p>
+            <div class="max-h-48 overflow-y-auto rounded-lg border border-border p-2">
+              <ul class="space-y-2">
+                <li v-for="item in filteredDigitalOptions" :key="item.id" class="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    class="mt-1 size-4 shrink-0 rounded border border-input accent-primary"
+                    :checked="eligibleIdSet.has(Number(item.id))"
+                    @change="toggleEligibleDigital(Number(item.id), $event.target.checked)"
+                  >
+                  <span class="min-w-0 text-sm leading-snug">{{ item.title }}</span>
+                </li>
+              </ul>
+              <p v-if="filteredDigitalOptions.length === 0" class="py-4 text-center text-sm text-muted-foreground">
+                无匹配项
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label for="r-period">期限</Label>
+            <Input id="r-period" v-model="form.period" />
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div class="flex flex-col gap-2">
+              <Label for="r-total">总数量</Label>
+              <Input id="r-total" v-model.number="form.totalCount" type="number" min="0" step="1" />
+            </div>
+            <div class="flex flex-col gap-2">
+              <Label for="r-rem">剩余数量</Label>
+              <Input
+                id="r-rem"
+                v-model.number="form.remainingCount"
+                type="number"
+                min="0"
+                :max="form.totalCount"
+                step="1"
+              />
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label for="r-cat">所属分类</Label>
+            <select
+              id="r-cat"
+              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              :value="form.category_id == null ? '' : String(form.category_id)"
+              @change="onCategoryChange"
+            >
+              <option disabled value="">
+                请选择分类
+              </option>
+              <option v-for="cat in categories" :key="cat.id" :value="String(cat.id)">
+                {{ cat.title }}
+              </option>
+            </select>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label for="r-artist">关联艺术家</Label>
+            <select
+              id="r-artist"
+              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              :value="form.artist_id == null ? '' : String(form.artist_id)"
+              @change="onArtistChange"
+            >
+              <option value="">（不关联）</option>
+              <option v-for="artist in artists" :key="artist.id" :value="String(artist.id)">
+                {{ artist.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label for="r-desc">描述</Label>
+            <Textarea id="r-desc" v-model="form.description" class="min-h-24" rows="4" />
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>图片 <span class="text-destructive">*</span></Label>
+            <p class="text-xs text-muted-foreground">
+              最多 5 张，支持多选文件或拖拽到下方区域。
+            </p>
+            <div class="flex flex-wrap gap-3">
+              <div
+                v-for="(image, index) in form.images"
+                :key="index"
+                class="group relative size-[120px] shrink-0 overflow-hidden rounded-lg border border-border shadow-sm"
+              >
+                <img :src="getImageUrl(image)" alt="配图" class="size-full object-cover">
+                <div
+                  class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+                >
+                  <Button type="button" size="icon" variant="destructive" @click="removeImage(index)">
+                    <Trash2 class="size-4" />
+                  </Button>
                 </div>
               </div>
-            </div>
 
-            <!-- 添加图片按钮 -->
-            <div 
-              v-if="form.images.length < 5"
-              class="add-image-btn"
-              :class="{ 
-                'drag-over': isImageDragOver, 
-                'uploading': isImageUploading || isImageProcessing 
-              }"
-              @click="triggerImageInput"
-              @dragenter="handleImageDragEnter"
-              @dragleave="handleImageDragLeave"
-              @dragover="handleImageDragOver"
-              @drop="handleImageDrop"
-            >
-              <el-icon class="add-icon" :class="{ 'spinning': isImageUploading || isImageProcessing }">
-                <component :is="(isImageUploading || isImageProcessing) ? 'Loading' : 'Plus'" />
-              </el-icon>
-              <p class="add-text">添加图片</p>
-              <p class="add-hint">最多5张，支持拖拽</p>
+              <div
+                v-if="form.images.length < 5"
+                class="flex size-[120px] shrink-0 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                :class="{
+                  'border-primary/50 bg-primary/5': isImageDragOver,
+                  'pointer-events-none opacity-70': isImageUploading || isImageProcessing,
+                }"
+                role="button"
+                tabindex="0"
+                @click="triggerImageInput"
+                @keydown.enter.prevent="triggerImageInput"
+                @keydown.space.prevent="triggerImageInput"
+                @dragenter="handleImageDragEnter"
+                @dragleave="handleImageDragLeave"
+                @dragover="handleImageDragOver"
+                @drop="handleImageDrop"
+              >
+                <Loader2
+                  v-if="isImageUploading || isImageProcessing"
+                  class="mb-1 size-8 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Plus v-else class="mb-1 size-8 text-muted-foreground" aria-hidden="true" />
+                <span class="text-xs font-medium">添加图片</span>
+                <span class="mt-0.5 text-[10px] text-muted-foreground">还可 {{ 5 - form.images.length }} 张</span>
+              </div>
             </div>
-
-            <!-- 隐藏的文件输入 -->
             <input
               ref="imageInput"
               type="file"
               accept="image/*"
               multiple
-              style="display: none"
+              class="hidden"
               @change="handleImageFileSelect"
-            />
+            >
 
-            <!-- 图片处理提示 -->
-            <div v-if="isImageProcessing" class="upload-progress">
-              <div class="progress-header">
-                <span class="progress-title">图片处理中</span>
-                <span class="progress-percentage">处理中...</span>
+            <div v-if="isImageProcessing" class="max-w-md rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <div class="mb-2 flex justify-between text-muted-foreground">
+                <span>图片处理中</span>
+                <span>处理中…</span>
               </div>
-              <el-progress 
-                :percentage="0" 
-                :stroke-width="6"
-                :show-text="false"
-                :indeterminate="true"
-                :color="progressColors"
-              />
-              <div class="progress-info">
-                <span class="file-name">{{ imageFileName }}</span>
-                <span class="file-size">{{ formatFileSize(imageFileSize) }}</span>
-              </div>
-              <div class="processing-hint">
-                <p>正在将图片转换为 WebP 格式并压缩...</p>
+              <Progress :model-value="40" class="h-2" />
+              <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+                <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
+                <span>{{ formatFileSize(imageFileSize) }}</span>
               </div>
             </div>
-
-            <!-- 上传进度条 -->
-            <div v-if="imageUploadProgress > 0 && imageUploadProgress < 100 && !isImageProcessing" class="upload-progress">
-              <div class="progress-header">
-                <span class="progress-title">上传进度</span>
-                <span class="progress-percentage">{{ imageUploadProgress }}%</span>
+            <div
+              v-if="imageUploadProgress > 0 && imageUploadProgress < 100 && !isImageProcessing"
+              class="max-w-md rounded-lg border border-border bg-muted/40 p-3 text-sm"
+            >
+              <div class="mb-2 flex justify-between">
+                <span class="font-medium">上传进度</span>
+                <span class="font-semibold text-primary tabular-nums">{{ imageUploadProgress }}%</span>
               </div>
-              <el-progress 
-                :percentage="imageUploadProgress" 
-                :stroke-width="6"
-                :show-text="false"
-                :color="progressColors"
-              />
-              <div class="progress-info">
-                <span class="file-name">{{ imageFileName }}</span>
-                <span class="file-size">{{ formatFileSize(imageFileSize) }}</span>
+              <Progress :model-value="imageUploadProgress" class="h-2" />
+              <div class="mt-2 flex justify-between text-xs text-muted-foreground">
+                <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
+                <span>{{ formatFileSize(imageFileSize) }}</span>
               </div>
             </div>
+            <Alert v-if="imageUploadProgress === 100" class="max-w-md border-primary/30">
+              <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <AlertTitle>图片上传成功</AlertTitle>
+            </Alert>
+          </div>
 
-            <!-- 上传完成提示 -->
-            <div v-if="imageUploadProgress === 100" class="upload-success">
-              <el-alert
-                title="图片上传成功！"
-                type="success"
-                :closable="false"
-                show-icon
+          <div class="flex flex-col gap-2">
+            <Label>富文本内容</Label>
+            <div class="overflow-hidden rounded-lg border border-border">
+              <Toolbar :editor="editorRef" class="w-full border-b border-border" />
+              <Editor
+                v-model="richTextHtml"
+                :default-config="{ placeholder: '请输入富文本内容...', ...editorConfig }"
+                mode="default"
+                class="min-h-[300px] w-full min-w-0"
+                style="min-height: 300px"
+                @onCreated="handleEditorCreated"
               />
             </div>
           </div>
-        </el-form-item>
-        <el-form-item label="富文本内容">
-          <Toolbar :editor="editorRef" style="width: 100%" />
-          <Editor
-            v-model="richTextHtml"
-            :defaultConfig="{ placeholder: '请输入富文本内容...', ...editorConfig }"
-            mode="default"
-            style="width: 100%; min-width: 400px; height: 300px; border: 1px solid #ccc"
-            @onCreated="handleEditorCreated"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
+        </div>
+
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="dialogVisible = false">
+            取消
+          </Button>
+          <Button type="button" @click="handleSubmit">
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="previewOpen">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{{ previewTitle || '图片预览' }}</DialogTitle>
+        </DialogHeader>
+        <div class="flex flex-col items-center gap-4">
+          <img
+            v-if="previewUrls.length"
+            :src="previewUrls[previewIndex]"
+            alt="预览"
+            class="max-h-[70vh] w-full object-contain"
+          >
+          <div v-if="previewUrls.length > 1" class="flex w-full items-center justify-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="previewIndex <= 0"
+              @click="previewIndex--"
+            >
+              上一张
+            </Button>
+            <span class="text-sm text-muted-foreground tabular-nums">{{ previewIndex + 1 }} / {{ previewUrls.length }}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="previewIndex >= previewUrls.length - 1"
+              @click="previewIndex++"
+            >
+              下一张
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, onBeforeUnmount, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
+import { AlertCircle, Loader2, Plus, Trash2 } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import { Textarea } from '@/components/ui/textarea'
 
-const router = useRouter()
 const listLoading = ref(false)
 const listError = ref('')
 const rights = ref([])
@@ -322,7 +435,17 @@ const isEdit = ref(false)
 const categories = ref([])
 const artists = ref([])
 const digitalOptions = ref([])
-const fileList = ref([])
+const digitalFilter = ref('')
+
+const filteredDigitalOptions = computed(() => {
+  const q = digitalFilter.value.trim().toLowerCase()
+  if (!q) return digitalOptions.value
+  return digitalOptions.value.filter((d) =>
+    String(d.title ?? '')
+      .toLowerCase()
+      .includes(q)
+  )
+})
 
 const form = ref({
   title: '',
@@ -341,10 +464,11 @@ const form = ref({
   eligible_digital_artwork_ids: []
 })
 
+const eligibleIdSet = computed(() => new Set(form.value.eligible_digital_artwork_ids || []))
+
 const editorRef = ref(null)
 const richTextHtml = ref('')
 
-// 图片上传相关状态
 const imageInput = ref(null)
 const isImageDragOver = ref(false)
 const imageUploadProgress = ref(0)
@@ -353,68 +477,87 @@ const isImageProcessing = ref(false)
 const imageFileName = ref('')
 const imageFileSize = ref(0)
 
-// 进度条颜色配置
-const progressColors = [
-  { color: '#f56c6c', percentage: 20 },
-  { color: '#e6a23c', percentage: 40 },
-  { color: '#5cb87a', percentage: 60 },
-  { color: '#1989fa', percentage: 80 },
-  { color: '#6f7ad3', percentage: 100 }
-]
+const previewOpen = ref(false)
+const previewUrls = ref([])
+const previewIndex = ref(0)
+const previewTitle = ref('')
 
 const editorConfig = {
   MENU_CONF: {
     uploadImage: {
       async customUpload(file, insertFn) {
-        const processedFile = await uploadImageToWebpLimit5MB(file);
+        const processedFile = await uploadImageToWebpLimit5MB(file)
         if (!processedFile) {
-          ElMessage.error('图片处理失败');
-          return;
+          ElMessage.error('图片处理失败')
+          return
         }
-        const formData = new FormData();
-        formData.append('file', processedFile);
-        const token = localStorage.getItem('token');
+        const formData = new FormData()
+        formData.append('file', processedFile)
         try {
-          const resp = await fetch(`${API_BASE_URL}/api/upload`, {
-            method: 'POST',
-            body: formData,
-            headers: token ? { Authorization: `Bearer ${token}` } : {}
-          });
-          const result = await resp.json();
-          let url = '';
-          if (result.url) {
-            url = result.url;
-          } else if (result.data && result.data.url) {
-            url = result.data.url;
-          }
+          const result = await axios.post('/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          })
+          let url = ''
+          if (result?.url) url = result.url
+          else if (result?.data?.url) url = result.data.url
+          else if (typeof result?.data === 'string') url = result.data
           if (typeof url === 'string' && url) {
-            setTimeout(() => {
-              insertFn(url);
-              ElMessage.success('图片上传成功');
-            }, 0);
+            insertFn(url)
+            ElMessage.success('图片上传成功')
           } else {
-            ElMessage.error(result.message || '图片上传失败');
+            ElMessage.error(result?.message || '图片上传失败')
           }
-        } catch (err) {
-          ElMessage.error('图片上传异常');
+        } catch {
+          ElMessage.error('图片上传异常')
         }
       }
     }
   }
 }
 
-watch(() => form.value.images, (newVal) => {
-  fileList.value = (newVal || []).map(url => ({
-    url: getImageUrl(url),
-    name: url.split('/').pop()
-  }))
-}, { immediate: true })
-
 watch(dialogVisible, (val) => {
   if (val) {
-    richTextHtml.value = form.value.rich_text || ''
+    nextTick(() => {
+      richTextHtml.value = form.value.rich_text || ''
+    })
   }
-}, { immediate: true })
+})
+
+function onCategoryChange(e) {
+  const v = e.target.value
+  form.value.category_id = v === '' ? null : Number(v)
+}
+
+function onArtistChange(e) {
+  const v = e.target.value
+  form.value.artist_id = v === '' ? null : Number(v)
+}
+
+function toggleEligibleDigital(id, checked) {
+  const arr = [...(form.value.eligible_digital_artwork_ids || [])]
+  if (checked) {
+    if (!arr.includes(id)) arr.push(id)
+  } else {
+    const i = arr.indexOf(id)
+    if (i !== -1) arr.splice(i, 1)
+  }
+  form.value.eligible_digital_artwork_ids = arr
+}
+
+function openImagePreview(images, index, title) {
+  if (!images?.length) return
+  previewUrls.value = images.map((img) => getImageUrl(img))
+  previewIndex.value = Math.min(Math.max(0, index), previewUrls.value.length - 1)
+  previewTitle.value = title || ''
+  previewOpen.value = true
+}
+
+function getStatusBadgeVariant(status) {
+  if (status === 'onsale') return 'default'
+  if (status === 'soldout') return 'secondary'
+  if (status === 'upcoming') return 'outline'
+  return 'secondary'
+}
 
 const retryFetchRights = () => {
   listError.value = ''
@@ -453,7 +596,7 @@ const fetchDigitalOptions = async () => {
   try {
     const arr = await axios.get('/digital-artworks/admin', { params: { page: 1, pageSize: 200 } })
     digitalOptions.value = Array.isArray(arr) ? arr : []
-  } catch (e) {
+  } catch {
     digitalOptions.value = []
   }
 }
@@ -461,15 +604,11 @@ const fetchDigitalOptions = async () => {
 const fetchCategories = async () => {
   try {
     const response = await axios.get('/physical-categories')
-    console.log('分类API返回的原始数据：', response)
     if (response && response.data && Array.isArray(response.data)) {
       categories.value = response.data
-      console.log('设置后的分类数据：', categories.value)
     } else if (Array.isArray(response)) {
       categories.value = response
-      console.log('设置后的分类数据：', categories.value)
     } else {
-      console.error('返回的分类数据格式不正确：', response)
       categories.value = []
     }
   } catch (error) {
@@ -481,12 +620,9 @@ const fetchCategories = async () => {
 const fetchArtists = async () => {
   try {
     const response = await axios.get('/artists')
-    console.log('艺术家API返回的原始数据：', response)
     if (Array.isArray(response)) {
       artists.value = response
-      console.log('设置后的艺术家数据：', artists.value)
     } else {
-      console.error('返回的数据不是数组：', response)
       artists.value = []
       ElMessage.error('获取艺术家数据格式不正确')
     }
@@ -495,15 +631,6 @@ const fetchArtists = async () => {
     artists.value = []
     ElMessage.error('获取艺术家列表失败')
   }
-}
-
-const getStatusType = (status) => {
-  const types = {
-    onsale: 'success',
-    soldout: 'info',
-    upcoming: 'warning'
-  }
-  return types[status] || 'info'
 }
 
 const getStatusText = (status) => {
@@ -534,8 +661,13 @@ const handleAdd = () => {
     rich_text: '',
     eligible_digital_artwork_ids: []
   }
+  digitalFilter.value = ''
+  resetImageUploadState()
   dialogVisible.value = true
   richTextHtml.value = ''
+  nextTick(() => {
+    if (editorRef.value?.setHtml) editorRef.value.setHtml('')
+  })
   fetchDigitalOptions()
 }
 
@@ -550,8 +682,8 @@ const handleEdit = (row) => {
     originalPrice: parseFloat(row.original_price),
     discountAmount: parseFloat(row.discount_amount || 0),
     period: row.period,
-    totalCount: parseInt(row.total_count),
-    remainingCount: parseInt(row.remaining_count),
+    totalCount: parseInt(row.total_count, 10),
+    remainingCount: parseInt(row.remaining_count, 10),
     description: row.description,
     images: row.images || [],
     category_id: row.category_id,
@@ -559,12 +691,15 @@ const handleEdit = (row) => {
     rich_text: row.rich_text || '',
     eligible_digital_artwork_ids: []
   }
+  digitalFilter.value = ''
+  resetImageUploadState()
   dialogVisible.value = true
   richTextHtml.value = row.rich_text || ''
   fetchDigitalOptions()
-  // 取详情以加载可选资格ID
-  axios.get(`/rights/${row.id}`).then(data => {
-    form.value.eligible_digital_artwork_ids = Array.isArray(data.eligible_digital_artwork_ids) ? data.eligible_digital_artwork_ids : []
+  axios.get(`/rights/${row.id}`).then((data) => {
+    form.value.eligible_digital_artwork_ids = Array.isArray(data.eligible_digital_artwork_ids)
+      ? data.eligible_digital_artwork_ids
+      : []
   }).catch(() => {})
 }
 
@@ -584,7 +719,6 @@ const handleDelete = (row) => {
   })
 }
 
-// 图片上传相关函数
 const triggerImageInput = () => {
   if (!isImageUploading.value && !isImageProcessing.value) {
     imageInput.value?.click()
@@ -592,7 +726,7 @@ const triggerImageInput = () => {
 }
 
 const handleImageFileSelect = (event) => {
-  const files = Array.from(event.target.files)
+  const files = Array.from(event.target.files || [])
   if (files.length > 0) {
     uploadImageFiles(files)
   }
@@ -605,7 +739,7 @@ const uploadImageFiles = async (files) => {
       ElMessage.warning('最多只能上传5张图片')
       break
     }
-    
+
     imageUploadProgress.value = 0
     isImageUploading.value = true
     isImageProcessing.value = true
@@ -613,17 +747,13 @@ const uploadImageFiles = async (files) => {
     imageFileSize.value = file.size
 
     try {
-      console.log('开始处理图片文件:', file.name, file.size)
       const processedFile = await uploadImageToWebpLimit5MB(file)
-      
+
       if (!processedFile) {
-        console.log('图片处理失败，跳过此文件')
         resetImageUploadState()
         continue
       }
 
-      console.log('图片处理成功:', processedFile.name, processedFile.size)
-      
       isImageProcessing.value = false
       imageFileName.value = processedFile.name
       imageFileSize.value = processedFile.size
@@ -631,7 +761,7 @@ const uploadImageFiles = async (files) => {
       const formData = new FormData()
       formData.append('file', processedFile)
 
-      const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+      const response = await axios.post('/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
@@ -653,10 +783,8 @@ const uploadImageFiles = async (files) => {
 }
 
 const handleImageUploadSuccess = (response) => {
-  console.log('图片上传成功响应:', response)
-  
   let imageUrl = ''
-  
+
   if (response && response.url) {
     imageUrl = response.url
   } else if (response && response.data && response.data.url) {
@@ -679,17 +807,16 @@ const handleImageUploadSuccess = (response) => {
       form.value.images.push(imageUrl)
     }
     imageUploadProgress.value = 100
-    
+
     setTimeout(() => {
       imageUploadProgress.value = 0
       isImageUploading.value = false
       imageFileName.value = ''
       imageFileSize.value = 0
     }, 2000)
-    
+
     ElMessage.success('图片上传成功')
   } else {
-    console.error('无法从响应中提取URL，完整响应:', response)
     ElMessage.error('图片上传失败：未获取到图片URL')
     resetImageUploadState()
   }
@@ -727,7 +854,6 @@ const removeImage = async (index) => {
   }
 }
 
-// 拖拽处理函数
 const handleImageDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
@@ -753,16 +879,15 @@ const handleImageDrop = (e) => {
   e.preventDefault()
   e.stopPropagation()
   isImageDragOver.value = false
-  
+
   if (isImageUploading.value || isImageProcessing.value || form.value.images.length >= 5) return
-  
-  const files = Array.from(e.dataTransfer.files)
+
+  const files = Array.from(e.dataTransfer.files || [])
   if (files.length > 0) {
     uploadImageFiles(files)
   }
 }
 
-// 格式化文件大小
 const formatFileSize = (bytes) => {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -772,11 +897,11 @@ const formatFileSize = (bytes) => {
 }
 
 const getImageUrl = (url) => {
-  if (!url) return '';
+  if (!url) return ''
   if (isOssPublicUrl(url)) {
-    return url;
+    return url
   }
-  return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
+  return url.startsWith('http') ? url : `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`
 }
 
 const handleEditorCreated = (editor) => {
@@ -800,10 +925,10 @@ const handleSubmit = async () => {
   try {
     const submitData = {
       ...form.value,
-      images: form.value.images.map(image => {
+      images: form.value.images.map((image) => {
         if (typeof image === 'string') {
           if (isOssPublicUrl(image)) {
-            return image;
+            return image
           }
           if (image.startsWith('http')) {
             const url = new URL(image)
@@ -812,7 +937,7 @@ const handleSubmit = async () => {
           return image
         } else if (image.url) {
           if (isOssPublicUrl(image.url)) {
-            return image.url;
+            return image.url
           }
           if (image.url.startsWith('http')) {
             const url = new URL(image.url)
@@ -825,7 +950,9 @@ const handleSubmit = async () => {
       category_id: form.value.category_id,
       discount_amount: form.value.discountAmount,
       rich_text: richTextHtml.value,
-      eligible_digital_artwork_ids: Array.isArray(form.value.eligible_digital_artwork_ids) ? form.value.eligible_digital_artwork_ids : [],
+      eligible_digital_artwork_ids: Array.isArray(form.value.eligible_digital_artwork_ids)
+        ? form.value.eligible_digital_artwork_ids
+        : [],
       discount_price: form.value.discount_price
     }
 
@@ -848,270 +975,8 @@ onMounted(() => {
   fetchCategories()
   fetchArtists()
 })
+
 onBeforeUnmount(() => {
   if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
 })
 </script>
-
-<style scoped>
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-/* 多图片上传容器 */
-.images-upload-container {
-  width: 100%;
-}
-
-/* 图片列表 */
-.images-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.image-item {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-}
-
-.image-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
-
-.item-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.item-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.image-item:hover .item-overlay {
-  opacity: 1;
-}
-
-.remove-btn {
-  background: rgba(245, 108, 108, 0.9);
-  border: none;
-}
-
-.remove-btn:hover {
-  background: #f56c6c;
-}
-
-/* 添加图片按钮 */
-.add-image-btn {
-  width: 120px;
-  height: 120px;
-  border: 2px dashed #d9d9d9;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-  background: #fafafa;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
-.add-image-btn:hover {
-  border-color: #409eff;
-  background: #f0f9ff;
-}
-
-.add-image-btn.drag-over {
-  border-color: #409eff;
-  background: #ecf5ff;
-  transform: scale(1.02);
-  box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
-}
-
-.add-image-btn.uploading {
-  opacity: 0.7;
-  pointer-events: none;
-  border-color: #409eff;
-  background: #f0f9ff;
-}
-
-.add-icon {
-  font-size: 32px;
-  color: #8c939d;
-  margin-bottom: 8px;
-  transition: all 0.3s ease;
-}
-
-.add-icon.spinning {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.add-text {
-  margin: 0 0 4px 0;
-  color: #606266;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.add-hint {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-/* 上传进度 */
-.upload-progress {
-  margin-top: 16px;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.progress-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #606266;
-}
-
-.progress-percentage {
-  font-size: 14px;
-  font-weight: bold;
-  color: #409eff;
-}
-
-.progress-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.file-name {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.processing-hint {
-  margin-top: 8px;
-  text-align: center;
-}
-
-.processing-hint p {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-  font-style: italic;
-}
-
-/* 上传成功提示 */
-.upload-success {
-  margin-top: 16px;
-}
-
-.discount-info {
-  color: #f56c6c;
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-/* 艺术家相关样式 */
-.artist-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.artist-name {
-  font-size: 14px;
-  color: #606266;
-}
-
-.no-artist {
-  color: #909399;
-  font-size: 14px;
-  font-style: italic;
-}
-
-.artist-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.artist-option .artist-name {
-  font-size: 14px;
-  color: #303133;
-}
-
-.list-state-alert {
-  margin-bottom: 12px;
-}
-
-.table-wrap {
-  min-height: 200px;
-}
-
-.el-image-placeholder-slot--md {
-  width: 100px;
-  height: 100px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f5f7fa;
-  color: #909399;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .images-list {
-    gap: 8px;
-  }
-  
-  .image-item,
-  .add-image-btn {
-    width: 100px;
-    height: 100px;
-  }
-}
-</style> 
