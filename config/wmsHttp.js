@@ -6,6 +6,7 @@
  * - 与浏览器不一致：WMS 要求「登录名」而 .env 填了邮箱（或相反），以 Web 登录页实际输入为准
  * - 密码含特殊字符：可用 WMS_HTTP_PASSWORD_B64（UTF-8 明文做 base64，无换行）
  * - REBUILD 约定：URL 中 passwd 为占位 ******，真实密码在 POST body；客户端须与之一致（见 wmsHttpClient.wmsUserLogin）
+ * - 返回 VCODE：站点开启图形验证码时，可设 WMS_HTTP_VCODE（与图一致），或 WMS_HTTP_COOKIE（从已打开 /user/login 的浏览器复制整段 Cookie，须含 RBSESSION）
  */
 require('dotenv').config()
 
@@ -38,6 +39,14 @@ function getWmsHttpPasswordForLogin() {
 const WMS_SYNC_PLACEHOLDER_IMAGE = String(process.env.WMS_SYNC_PLACEHOLDER_IMAGE || '').trim()
 /** 可选：JSON 字符串，合并进请求头，如 {"X-Api-Key":"xxx"} */
 const WMS_HTTP_EXTRA_HEADERS_JSON = String(process.env.WMS_HTTP_EXTRA_HEADERS_JSON || '').trim()
+/** 可选：登录 POST 使用的 Cookie（如从 DevTools 复制，须含 RBSESSION）；若设置则跳过自动 GET /user/login 预热 */
+const WMS_HTTP_COOKIE = String(process.env.WMS_HTTP_COOKIE || '').trim()
+/** 可选：图形验证码字符（与 WMS 登录页一致）；开启验证码且未用 Cookie 兜底时填写 */
+const WMS_HTTP_VCODE = String(process.env.WMS_HTTP_VCODE || '').trim()
+/** 可选；默认 Chrome UA，与浏览器行为接近 */
+const WMS_HTTP_USER_AGENT =
+  String(process.env.WMS_HTTP_USER_AGENT || '').trim() ||
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 function isWmsHttpConfigured() {
   return Boolean(WMS_HTTP_BASE_URL)
@@ -60,6 +69,9 @@ module.exports = {
   getWmsHttpPasswordForLogin,
   WMS_SYNC_PLACEHOLDER_IMAGE,
   WMS_HTTP_EXTRA_HEADERS_JSON,
+  WMS_HTTP_COOKIE,
+  WMS_HTTP_VCODE,
+  WMS_HTTP_USER_AGENT,
   isWmsHttpConfigured,
   parseExtraHeaders,
 }

@@ -8,6 +8,9 @@ const {
   WMS_HTTP_BEARER_TOKEN,
   WMS_HTTP_USER,
   getWmsHttpPasswordForLogin,
+  WMS_HTTP_COOKIE,
+  WMS_HTTP_VCODE,
+  WMS_HTTP_USER_AGENT,
   isWmsHttpConfigured,
   parseExtraHeaders,
 } = require('../config/wmsHttp')
@@ -32,7 +35,7 @@ function wmsOrigin() {
 
 /**
  * 与 RB/WEB 浏览器一致的通用头（JSON 接口多为 Content-Type: text/plain + JSON 字符串）
- * @param {{ refererPath: string, cookie?: string, noCache?: boolean, contentType?: string }} p
+ * @param {{ refererPath: string, cookie?: string, noCache?: boolean, contentType?: string, userAgent?: string }} p
  */
 function buildRbWebHeaders(p) {
   const origin = wmsOrigin()
@@ -42,6 +45,7 @@ function buildRbWebHeaders(p) {
     ...parseExtraHeaders(),
     Accept: '*/*',
     'Content-Type': p.contentType || 'text/plain;charset=UTF-8',
+    'User-Agent': p.userAgent != null && String(p.userAgent).trim() ? String(p.userAgent).trim() : WMS_HTTP_USER_AGENT,
     'X-CsrfToken': '',
     'X-AuthToken': '',
     'X-ReqRandom': newWmsReqRandom(),
@@ -89,9 +93,42 @@ function mergeCookieHeader(existing, fromSetCookie) {
 }
 
 /**
+ * 与浏览器一致：先打开登录页，拿到 RBSESSION（及验证码会话），再 POST /user/user-login。
+ * @returns {Promise<string>} Cookie 请求头片段（可能为空）
+ */
+async function wmsWarmLoginSessionCookie() {
+  if (!isWmsHttpConfigured()) return ''
+  const url = joinBaseAndPath(WMS_HTTP_BASE_URL, '/user/login')
+  const origin = wmsOrigin()
+  const headers = {
+    ...parseExtraHeaders(),
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    'User-Agent': WMS_HTTP_USER_AGENT,
+    Referer: `${origin}/user/login`,
+  }
+  try {
+    const res = await axios.get(url, {
+      headers,
+      timeout: 30000,
+      validateStatus: () => true,
+    })
+    if (res.status < 200 || res.status >= 400) {
+      logger.warn('wms_warm_login_page_http', { status: res.status })
+    }
+    return cookieHeaderFromSetCookie(res)
+  } catch (e) {
+    logger.warn('wms_warm_login_page_failed', { err: e.message })
+    return ''
+  }
+}
+
+/**
  * RB/WEB 登录（与 REBUILD login.js 一致：URL 中 passwd 固定为 ******，真实密码放在 POST body）
  * @see https://github.com/getrebuild/rebuild/blob/master/src/main/resources/web/assets/js/login.js
- * @param {{ user: string, passwd: string, autoLogin?: boolean, vcode?: string, cookie?: string, postBody?: string }} creds postBody 可覆盖默认正文（默认即明文密码）
+ * @param {{ user: string, passwd: string, autoLogin?: boolean, vcode?: string, cookie?: string, postBody?: string, noCache?: boolean }} creds postBody 可覆盖默认正文（默认即明文密码）；noCache 默认 true（与浏览器 DevTools 一致）
  */
 async function wmsUserLogin(creds) {
   if (!isWmsHttpConfigured()) {
@@ -118,10 +155,11 @@ async function wmsUserLogin(creds) {
   urlObj.searchParams.set('autoLogin', String(autoLogin))
   urlObj.searchParams.set('vcode', vcode)
 
+  const useNoCache = creds.noCache !== false
   const headers = buildRbWebHeaders({
     refererPath: '/user/login',
     cookie: creds.cookie,
-    noCache: false,
+    noCache: useNoCache,
   })
 
   const timeoutMs = 30000
@@ -140,7 +178,8 @@ async function wmsUserLogin(creds) {
 }
 
 /**
- * 使用环境变量 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD（或 WMS_HTTP_PASSWORD_B64）登录
+ * 使用环境变量 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD（或 WMS_HTTP_PASSWORD_B64）登录。
+ * 默认先 GET /user/login 取 RBSESSION（与浏览器一致）；可设 WMS_HTTP_COOKIE 跳过预热；WMS_HTTP_VCODE 传验证码。
  * @returns {Promise<{ response: import('axios').AxiosResponse, sessionCookie: string }>}
  */
 async function wmsUserLoginFromEnv() {
@@ -152,12 +191,19 @@ async function wmsUserLoginFromEnv() {
     err.code = 'WMS_HTTP_BAD_REQUEST'
     throw err
   }
-  return wmsUserLogin({
+  const fromEnvCookie = String(WMS_HTTP_COOKIE || '').trim()
+  const preCookie = fromEnvCookie || (await wmsWarmLoginSessionCookie())
+  const vcode = String(WMS_HTTP_VCODE || '').trim()
+  const { response, sessionCookie } = await wmsUserLogin({
     user: WMS_HTTP_USER,
     passwd,
     autoLogin: false,
-    vcode: '',
+    vcode,
+    cookie: preCookie || undefined,
   })
+  const fromLogin = sessionCookie && String(sessionCookie).trim()
+  const merged = fromLogin || String(preCookie).trim()
+  return { response, sessionCookie: merged }
 }
 
 /** 与列表页默认请求体一致；可用展开覆盖 pageNo、pageSize、fields、sort 等 */
@@ -358,6 +404,7 @@ module.exports = {
   wmsRequest,
   wmsUserLogin,
   wmsUserLoginFromEnv,
+  wmsWarmLoginSessionCookie,
   wmsRbWebJsonPost,
   wmsRbWebGet,
   wmsProductDataList,
