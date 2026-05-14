@@ -24,18 +24,42 @@ function parsePositiveIntId(raw) {
   return id;
 }
 
+/**
+ * 按 ID 或名称解析艺术家；表内无同名记录时插入 `artists`（与后台创建接口列一致），并清理公开艺术家列表缓存。
+ * @param {unknown} artist_id
+ * @param {unknown} artist_name
+ * @returns {Promise<number|null>}
+ */
 async function resolveFinalArtistId(artist_id, artist_name) {
-  let finalArtistId = artist_id;
-  if (!finalArtistId && artist_name) {
-    const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ?', [artist_name]);
-    if (existingArtists.length > 0) {
-      finalArtistId = existingArtists[0].id;
-    } else {
-      const [artistResult] = await db.query('INSERT INTO artists (name) VALUES (?)', [artist_name]);
-      finalArtistId = artistResult.insertId;
+  const parsedId =
+    artist_id != null && artist_id !== '' ? parsePositiveIntId(artist_id) : null
+  if (parsedId) return parsedId
+
+  const name = String(artist_name ?? '').trim()
+  if (!name) return null
+
+  const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name])
+  if (existingArtists.length > 0) return existingArtists[0].id
+
+  try {
+    const [artistResult] = await db.query(
+      'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
+      [null, name, '', null]
+    )
+    try {
+      await redisClient.del('artists:list')
+    } catch (e) {
+      logger.warn('artists_list_cache_invalidate_failed', { err: e.message })
     }
+    return artistResult.insertId
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      const [again] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name])
+      if (again.length > 0) return again[0].id
+    }
+    logger.error('resolveFinalArtistId_insert_failed', { err: e.message, code: e.code, name })
+    throw e
   }
-  return finalArtistId;
 }
 
 /**

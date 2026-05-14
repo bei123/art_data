@@ -40,6 +40,18 @@ function elementTextValue(el) {
   return String(el.value).trim()
 }
 
+/** WMS 艺术家字段常为文本或 REFERENCE（value 为对象，含 name/text 等） */
+function elementArtistDisplayName(el) {
+  if (!el || el.value === undefined || el.value === null) return ''
+  const v = el.value
+  if (typeof v === 'object') {
+    if (typeof v.name === 'string' && v.name.trim()) return String(v.name).trim()
+    if (typeof v.text === 'string' && v.text.trim()) return String(v.text).trim()
+    if (typeof v.label === 'string' && v.label.trim()) return String(v.label).trim()
+  }
+  return elementTextValue(el)
+}
+
 function picklistDisplayText(el) {
   if (!el || el.type !== 'PICKLIST') return ''
   const vid = el.value
@@ -72,7 +84,7 @@ function buildCollectionSize(elements) {
  */
 function mapElementsToSyncPayload(elements) {
   const title = elementTextValue(findElement(elements, 'ProductName'))
-  const artistName = elementTextValue(findElement(elements, 'yishujia31'))
+  const artistName = elementArtistDisplayName(findElement(elements, 'yishujia31'))
   const yearRaw = elementTextValue(findElement(elements, 'chuangzuoniandai'))
   const year = yearRaw || null
   const priceNum = parseMoneyToNumber(elementTextValue(findElement(elements, 'UnitPrice')))
