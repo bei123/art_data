@@ -3,6 +3,7 @@ const redisClient = require('../utils/redisClient');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
+const { invalidateArtistsListCache } = require('./artistsService');
 
 const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
@@ -24,6 +25,20 @@ function parsePositiveIntId(raw) {
   return id;
 }
 
+/** 统一空格与 Unicode，减少「韦少东」与「韦少东 」重复插入 */
+function normalizeArtistDisplayName(raw) {
+  let s = String(raw ?? '')
+    .replace(/\u3000/g, ' ')
+    .trim();
+  s = s.replace(/\s+/g, ' ');
+  try {
+    s = s.normalize('NFC');
+  } catch {
+    /* ignore */
+  }
+  return s;
+}
+
 /**
  * 按 ID 或名称解析艺术家；表内无同名记录时插入 `artists`（与后台创建接口列一致），并清理公开艺术家列表缓存。
  * @param {unknown} artist_id
@@ -32,33 +47,29 @@ function parsePositiveIntId(raw) {
  */
 async function resolveFinalArtistId(artist_id, artist_name) {
   const parsedId =
-    artist_id != null && artist_id !== '' ? parsePositiveIntId(artist_id) : null
-  if (parsedId) return parsedId
+    artist_id != null && artist_id !== '' ? parsePositiveIntId(artist_id) : null;
+  if (parsedId) return parsedId;
 
-  const name = String(artist_name ?? '').trim()
-  if (!name) return null
+  const name = normalizeArtistDisplayName(artist_name);
+  if (!name) return null;
 
-  const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name])
-  if (existingArtists.length > 0) return existingArtists[0].id
+  const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name]);
+  if (existingArtists.length > 0) return existingArtists[0].id;
 
   try {
     const [artistResult] = await db.query(
       'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
       [null, name, '', null]
-    )
-    try {
-      await redisClient.del('artists:list')
-    } catch (e) {
-      logger.warn('artists_list_cache_invalidate_failed', { err: e.message })
-    }
-    return artistResult.insertId
+    );
+    await invalidateArtistsListCache();
+    return artistResult.insertId;
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY') {
-      const [again] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name])
-      if (again.length > 0) return again[0].id
+      const [again] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name]);
+      if (again.length > 0) return again[0].id;
     }
-    logger.error('resolveFinalArtistId_insert_failed', { err: e.message, code: e.code, name })
-    throw e
+    logger.error('resolveFinalArtistId_insert_failed', { err: e.message, code: e.code, name });
+    throw e;
   }
 }
 

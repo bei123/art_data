@@ -14,6 +14,7 @@ const {
 } = require('../utils/wmsHttpClient')
 const { WMS_SYNC_PLACEHOLDER_IMAGE } = require('../config/wmsHttp')
 const { resolveFinalArtistId } = require('./artworksService')
+const { invalidateArtistsListCache } = require('./artistsService')
 
 const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:'
 
@@ -449,6 +450,7 @@ async function syncFromWmsAdmin(body) {
     }
 
     await clearArtworksCachesForIds(touchedArtworkIds)
+    await invalidateArtistsListCache()
 
     return adminResult(200, { message: '同步完成', stats })
   } catch (e) {

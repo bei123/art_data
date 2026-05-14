@@ -17,6 +17,15 @@ function parsePositiveIntId(raw) {
   return id;
 }
 
+/** 清除全量艺术家列表缓存（GET /api/artists 无 institution_id 时走 Redis `artists:list`） */
+async function invalidateArtistsListCache() {
+  try {
+    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
+  } catch (e) {
+    logger.error('invalidate_artists_list_cache_failed', { err: e });
+  }
+}
+
 /**
  * 公开列表：支持 ?institution_id= 或全量（带 Redis 列表缓存）
  * @returns {{ ok: true, status: number, body: object|Array } | { ok: false, status: number, body: { error: string } }}
@@ -199,7 +208,7 @@ async function createArtistAdmin(body) {
       'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
       [avatar, cleanName, cleanDescription, institution_id || null]
     );
-    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
+    await invalidateArtistsListCache();
     return adminResult(200, {
       id: result.insertId,
       name: cleanName,
@@ -290,7 +299,7 @@ async function updateArtistAdmin(rawId, body) {
       updateValues.push(artistRowId);
       await db.query(`UPDATE artists SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
     }
-    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
+    await invalidateArtistsListCache();
     await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + artistRowId);
 
     const [artists] = await db.query(
@@ -344,7 +353,7 @@ async function deleteArtistAdmin(rawId) {
     await connection.query('DELETE FROM artist_featured_artworks WHERE artist_id = ?', [id]);
     await connection.query('DELETE FROM artists WHERE id = ?', [id]);
     await connection.commit();
-    await redisClient.del(REDIS_ARTISTS_LIST_KEY);
+    await invalidateArtistsListCache();
     await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + id);
     return adminResult(200, { message: '删除成功' });
   } catch (e) {
@@ -467,4 +476,5 @@ module.exports = {
   deleteArtistAdmin,
   setFeaturedArtworksAdmin,
   getPublicFeaturedArtworks,
+  invalidateArtistsListCache,
 };
