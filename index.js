@@ -72,6 +72,41 @@ app.use(helmet({
 
 app.use(requestContextMiddleware);
 
+function parseExtraCorsOrigins() {
+  const raw = process.env.CORS_ORIGINS || ''
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function getAllowedCorsOrigins() {
+  const base = [
+    'http://localhost:5173',
+    'https://wx.ht.2000gallery.art',
+    'http://wx.ht.2000gallery.art',
+    'https://www.wx.ht.2000gallery.art',
+    'http://www.wx.ht.2000gallery.art',
+    'https://m.wespace.cn',
+    'http://m.wespace.cn',
+  ]
+  return [...new Set([...base, ...parseExtraCorsOrigins()])]
+}
+
+// CORS 必须在限流、登录限流之前：否则 OPTIONS 预检若被限流直接响应，将不带 ACAO，浏览器报 CORS
+app.use(cors({
+  origin(origin, callback) {
+    const allowedOrigins = getAllowedCorsOrigins()
+    if (!origin)
+      return callback(null, true)
+    if (allowedOrigins.includes(origin))
+      return callback(null, origin)
+    logger.warn('cors_rejected', { origin })
+    callback(new Error('CORS not allowed'))
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization'],
+  exposedHeaders: ['Authorization', 'X-Request-Id'],
+}))
+
 // 速率限制配置
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1分钟
@@ -79,8 +114,9 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) =>
-    req.method === 'GET' &&
-    (req.path === '/api/health' || req.path === '/api/health/live'),
+    req.method === 'OPTIONS' ||
+    (req.method === 'GET' &&
+      (req.path === '/api/health' || req.path === '/api/health/live')),
   handler: (req, res) => {
     res.status(429).json({
       error: '请求过于频繁，请稍后再试',
@@ -99,6 +135,7 @@ const loginLimiter = rateLimit({
   max: 5, // 每个 IP 15 分钟内最多 5 次登录尝试
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   handler: (req, res) => {
     res.status(429).json({
       error: '登录尝试过于频繁，请稍后再试',
@@ -112,39 +149,6 @@ app.use('/api/auth/login', loginLimiter);
 
 // 为 webview 代理路由禁用 CSP（使用更宽松的 meta CSP）
 // 在路由处理中会移除 CSP 头，让页面使用注入的 meta CSP
-
-// CORS 配置
-app.use(cors({
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'https://wx.ht.2000gallery.art',
-      'http://wx.ht.2000gallery.art',
-      'https://www.wx.ht.2000gallery.art',
-      'http://www.wx.ht.2000gallery.art',
-      'https://m.wespace.cn',
-      'http://m.wespace.cn'
-    ];
-
-    // 如果没有 origin（例如同源请求、Postman 等），允许通过
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    // 检查是否在允许列表中
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, origin);
-    } else {
-      // 记录被拒绝的 origin 以便调试（结构化）
-      logger.warn('cors_rejected', { origin });
-      callback(new Error('CORS not allowed'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization'],
-  exposedHeaders: ['Authorization', 'X-Request-Id']
-}));
 
 // 请求体解析（只注册一组，避免重复解析与体积异常）
 app.use(express.json({ limit: '10mb' }));

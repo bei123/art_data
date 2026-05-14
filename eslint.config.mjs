@@ -1,6 +1,8 @@
 import js from '@eslint/js'
+import tsParser from '@typescript-eslint/parser'
 import pluginVue from 'eslint-plugin-vue'
 import globals from 'globals'
+import vueParser from 'vue-eslint-parser'
 
 /** 前后端 JS + Vue；渐进加严，未使用变量先 warn 便于存量代码落地 */
 export default [
@@ -42,12 +44,36 @@ export default [
   // 管理端 Vue + ESM（essential：核心规则，避免 recommended 下大量格式类告警拖垮存量项目）
   ...pluginVue.configs['flat/essential'],
   {
-    files: ['src/**/*.{js,vue}'],
+    files: ['src/**/*.js'],
     languageOptions: {
       globals: globals.browser,
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
+      },
+    },
+    rules: {
+      'vue/multi-word-component-names': 'off',
+      'no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrors: 'none',
+          varsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/**/*.vue'],
+    languageOptions: {
+      globals: globals.browser,
+      parser: vueParser,
+      parserOptions: {
+        parser: tsParser,
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        extraFileExtensions: ['.vue'],
       },
     },
     rules: {
