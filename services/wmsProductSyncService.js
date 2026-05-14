@@ -40,14 +40,97 @@ function elementTextValue(el) {
   return String(el.value).trim()
 }
 
-/** WMS 艺术家字段常为文本或 REFERENCE（value 为对象，含 name/text 等） */
-function elementArtistDisplayName(el) {
-  if (!el || el.value === undefined || el.value === null) return ''
-  const v = el.value
-  if (typeof v === 'object') {
+/** 与 REBUILD 列表单元格类似：REFERENCE 常渲染为 text / html，详情里可能只有 id */
+function stripHtmlToText(html) {
+  const s = String(html ?? '')
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return s
+}
+
+/** 从字段 options 里用 id 解析展示名（REFERENCE / 分类 等） */
+function textFromElementOptions(el) {
+  if (!el || !Array.isArray(el.options) || el.options.length === 0) return ''
+  const raw = el.value
+  if (raw === undefined || raw === null) return ''
+  const key =
+    typeof raw === 'object' && raw !== null && raw.id !== undefined && raw.id !== null
+      ? String(raw.id)
+      : String(raw)
+  const hit = el.options.find((o) => o != null && (String(o.id) === key || o.id === raw))
+  if (!hit) return ''
+  if (typeof hit.text === 'string' && hit.text.trim()) return String(hit.text).trim()
+  if (typeof hit.label === 'string' && hit.label.trim()) return String(hit.label).trim()
+  return ''
+}
+
+/** 列表行去掉末尾「记录 id」元格，得到与 fields 对齐的数据格 */
+function dataCellsFromListRow(row) {
+  if (!Array.isArray(row) || row.length === 0) return []
+  const last = row[row.length - 1]
+  if (last && typeof last === 'object' && last.entity === 'Product' && last.id) return row.slice(0, -1)
+  return row
+}
+
+function stringifyListCellArtist(cell) {
+  if (cell == null || cell === '') return ''
+  if (typeof cell === 'string' || typeof cell === 'number') return String(cell).trim()
+  if (typeof cell !== 'object') return ''
+  if (typeof cell.text === 'string' && cell.text.trim()) return String(cell.text).trim()
+  if (typeof cell.html === 'string' && cell.html.trim()) {
+    const plain = stripHtmlToText(cell.html)
+    if (plain) return plain
+  }
+  const v = cell.value
+  if (v != null && typeof v !== 'object') {
+    const s = String(v).trim()
+    if (!s) return ''
+    if (/^\d+-[0-9a-f]{8,}$/i.test(s)) return ''
+    return s
+  }
+  if (v != null && typeof v === 'object') {
     if (typeof v.name === 'string' && v.name.trim()) return String(v.name).trim()
     if (typeof v.text === 'string' && v.text.trim()) return String(v.text).trim()
     if (typeof v.label === 'string' && v.label.trim()) return String(v.label).trim()
+  }
+  if (typeof cell.label === 'string' && cell.label.trim()) return String(cell.label).trim()
+  return ''
+}
+
+function extractArtistHintFromDataListRow(row, fields) {
+  if (!Array.isArray(fields) || fields.length === 0) return ''
+  const idx = fields.indexOf('yishujia31')
+  if (idx < 0) return ''
+  const cells = dataCellsFromListRow(row)
+  if (idx >= cells.length) return ''
+  return stringifyListCellArtist(cells[idx])
+}
+
+/** WMS 艺术家：用 value（如 TEXT「韦少东」）；勿用 el.label——那是字段标题「艺术家」，不是人名 */
+function elementArtistDisplayName(el) {
+  if (!el || el.value === undefined || el.value === null) return ''
+
+  const fromOpts = textFromElementOptions(el)
+  if (fromOpts) return fromOpts
+
+  const v = el.value
+  if (typeof v === 'string' || typeof v === 'number') return String(v).trim()
+  if (typeof v === 'object' && v !== null) {
+    if (typeof v.name === 'string' && v.name.trim()) return String(v.name).trim()
+    if (typeof v.text === 'string' && v.text.trim()) return String(v.text).trim()
+    if (typeof v.label === 'string' && v.label.trim()) return String(v.label).trim()
+    if (v.id !== undefined && v.id !== null) {
+      const idStr = String(v.id)
+      const hit = Array.isArray(el.options)
+        ? el.options.find((o) => o != null && String(o.id) === idStr)
+        : null
+      if (hit) {
+        if (typeof hit.text === 'string' && hit.text.trim()) return String(hit.text).trim()
+        if (typeof hit.label === 'string' && hit.label.trim()) return String(hit.label).trim()
+      }
+    }
   }
   return elementTextValue(el)
 }
@@ -81,10 +164,14 @@ function buildCollectionSize(elements) {
 
 /**
  * @param {object[]} elements view-model elements
+ * @param {{ row?: unknown[], fields?: string[] } | null | undefined} listHint 同次列表接口的行与 fields，用于艺术家展示名后备
  */
-function mapElementsToSyncPayload(elements) {
+function mapElementsToSyncPayload(elements, listHint) {
   const title = elementTextValue(findElement(elements, 'ProductName'))
-  const artistName = elementArtistDisplayName(findElement(elements, 'yishujia31'))
+  let artistName = elementArtistDisplayName(findElement(elements, 'yishujia31'))
+  if (!artistName && listHint && Array.isArray(listHint.row) && Array.isArray(listHint.fields)) {
+    artistName = extractArtistHintFromDataListRow(listHint.row, listHint.fields)
+  }
   const yearRaw = elementTextValue(findElement(elements, 'chuangzuoniandai'))
   const year = yearRaw || null
   const priceNum = parseMoneyToNumber(elementTextValue(findElement(elements, 'UnitPrice')))
@@ -123,9 +210,10 @@ async function clearArtworksCachesForIds(artworkIds) {
 /**
  * @param {string} cookie
  * @param {string} recordId
+ * @param {{ row?: unknown[], fields?: string[] } | null | undefined} listHint 列表行里艺术家列常有可读文本
  * @returns {Promise<{ ok: boolean, status: string, artworkId?: number, error?: string }>}
  */
-async function upsertOneProductFromWms(cookie, recordId) {
+async function upsertOneProductFromWms(cookie, recordId, listHint) {
   const res = await wmsProductViewModel({ cookie, id: recordId })
   if (res.status < 200 || res.status >= 300) {
     return { ok: false, status: 'http_error', error: `HTTP ${res.status}` }
@@ -146,7 +234,7 @@ async function upsertOneProductFromWms(cookie, recordId) {
     d.lastModified !== undefined && d.lastModified !== null
       ? Number(d.lastModified)
       : null
-  const payload = mapElementsToSyncPayload(d.elements)
+  const payload = mapElementsToSyncPayload(d.elements, listHint)
   if (!payload.title) {
     return { ok: false, status: 'skip', error: '无作品名称' }
   }
@@ -289,13 +377,14 @@ async function syncFromWmsAdmin(body) {
     }
 
     for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+      const listRequestBody = {
+        ...WMS_PRODUCT_DATA_LIST_DEFAULT_BODY,
+        pageNo,
+        pageSize,
+      }
       const listRes = await wmsProductDataList({
         cookie,
-        body: {
-          ...WMS_PRODUCT_DATA_LIST_DEFAULT_BODY,
-          pageNo,
-          pageSize,
-        },
+        body: listRequestBody,
       })
       if (listRes.status < 200 || listRes.status >= 300) {
         stats.errors.push({ page: pageNo, error: `列表 HTTP ${listRes.status}` })
@@ -315,15 +404,25 @@ async function syncFromWmsAdmin(body) {
       stats.pages += 1
       stats.listRows += rows.length
 
+      const listFields = Array.isArray(listRequestBody.fields) && listRequestBody.fields.length
+        ? listRequestBody.fields
+        : WMS_PRODUCT_DATA_LIST_DEFAULT_BODY.fields
+
+      const idToListRow = new Map()
       const ids = []
       for (const row of rows) {
         const rid = recordIdFromListRow(row)
-        if (rid) ids.push(rid)
+        if (rid) {
+          ids.push(rid)
+          idToListRow.set(rid, row)
+        }
       }
 
       const results = await runPool(ids, detailConcurrency, async (recordId) => {
         try {
-          const r = await upsertOneProductFromWms(cookie, recordId)
+          const row = idToListRow.get(recordId)
+          const listHint = row ? { row, fields: listFields } : null
+          const r = await upsertOneProductFromWms(cookie, recordId, listHint)
           return { recordId, ...r }
         } catch (e) {
           return { recordId, ok: false, status: 'exception', error: e.message }
