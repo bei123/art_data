@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { authenticateToken, checkRole } = require('../auth');
 const svc = require('../services/artworksService');
+const wmsSync = require('../services/wmsProductSyncService');
 
 router.get('/', async (req, res) => {
   try {
@@ -43,6 +44,22 @@ router.post('/performance/reset', authenticateToken, async (req, res) => {
     res.status(500).json({ error: '重置性能统计失败' });
   }
 });
+
+/** 从 WMS 同步原作（管理员）；需 .env 中 WMS_HTTP_* 与库表 wms_record_id 迁移 */
+router.post(
+  '/admin/sync-from-wms',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const r = await wmsSync.syncFromWmsAdmin(req.body || {});
+      return res.status(r.status).json(r.body);
+    } catch (error) {
+      logger.error('WMS 同步失败', { err: error });
+      res.status(500).json({ error: 'WMS 同步失败' });
+    }
+  }
+);
 
 router.get('/:id', async (req, res) => {
   try {

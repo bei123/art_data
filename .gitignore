@@ -35,3 +35,6 @@ Thumbs.db
 .env.*
 uploads
 ssl/
+
+# 本地克隆 REBUILD 仅用于对照源码，勿提交
+.tmp-rebuild

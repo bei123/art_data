@@ -599,4 +599,5 @@ module.exports = {
   getArtworksPerformanceMetrics,
   clearArtworksPerformanceCacheAdmin,
   resetArtworksPerformanceMetrics,
-};
+  resolveFinalArtistId,
+}

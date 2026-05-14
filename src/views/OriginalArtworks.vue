@@ -8,6 +8,20 @@
         <Button variant="secondary" :disabled="loading" @click="refreshData">
           {{ loading ? '刷新中…' : '刷新数据' }}
         </Button>
+        <Button
+          v-if="isAdmin"
+          variant="outline"
+          :disabled="loading || wmsSyncing"
+          class="gap-1.5"
+          @click="syncFromWms"
+        >
+          <RefreshCw
+            class="size-4 shrink-0"
+            :class="{ 'animate-spin': wmsSyncing }"
+            aria-hidden="true"
+          />
+          {{ wmsSyncing ? 'WMS 同步中…' : '从 WMS 同步' }}
+        </Button>
         <Button @click="showAddDialog">
           添加艺术品
         </Button>
@@ -446,9 +460,11 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Plus, Search, Upload } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Plus, RefreshCw, Search, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { userMatchesRole } from '@/utils/roles'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
 import '@wangeditor/editor/dist/css/style.css'
@@ -487,10 +503,13 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 
 const router = useRouter()
+const userStore = useUserStore()
+const isAdmin = computed(() => userMatchesRole(userStore.userInfo, 'admin'))
 const artworks = ref([])
 const dialogVisible = ref(false)
 const dialogType = ref('add')
 const loading = ref(false)
+const wmsSyncing = ref(false)
 const listError = ref('')
 const pagination = ref({
   page: 1,
@@ -916,6 +935,36 @@ const checkLoginStatus = () => {
 const retryFetchArtworks = () => {
   listError.value = ''
   fetchArtworks()
+}
+
+/** 管理员：从 WMS 拉取列表与详情并 upsert（依赖服务端 WMS_HTTP_* 与库表 wms_record_id） */
+const syncFromWms = async () => {
+  if (!checkLoginStatus() || !isAdmin.value) return
+  wmsSyncing.value = true
+  try {
+    const data = await axios.post('/original-artworks/admin/sync-from-wms', {
+      maxPages: 20,
+      pageSize: 20,
+      detailConcurrency: 3,
+    })
+    const s = data?.stats
+    if (s) {
+      ElMessage.success(
+        `同步完成：新建 ${s.inserted}，更新 ${s.updated}，未变 ${s.skipped_unchanged}，跳过 ${s.skipped_skip}，列表 ${s.listRows} 行 / ${s.pages} 页`
+      )
+      if (Array.isArray(s.errors) && s.errors.length > 0) {
+        console.warn('WMS 同步部分错误', s.errors)
+        ElMessage.warning(`有 ${s.errors.length} 条记录同步失败，详情见控制台`)
+      }
+    } else {
+      ElMessage.success(data?.message || '同步已提交')
+    }
+    await fetchArtworks()
+  } catch (e) {
+    if (import.meta.env.DEV) console.error('WMS 同步失败', e)
+  } finally {
+    wmsSyncing.value = false
+  }
 }
 
 // 获取艺术品列表
