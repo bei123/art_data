@@ -85,7 +85,7 @@
                   <Button size="sm" variant="outline" type="button" @click="handleViewArtists(row)">
                     查看艺术家
                   </Button>
-                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                  <Button size="sm" variant="destructive" type="button" @click="openDeleteInstitutionDialog(row)">
                     删除
                   </Button>
                 </div>
@@ -124,7 +124,7 @@
                 <div
                   class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="removeLogo">
+                  <Button type="button" size="icon" variant="destructive" @click="openRemoveInstitutionLogoDialog">
                     <Trash2 class="size-4" />
                   </Button>
                   <Button type="button" size="sm" variant="secondary" @click="triggerLogoInput">
@@ -299,17 +299,70 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="deleteInstitutionDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除机构</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除「{{ deleteInstitutionName }}」吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingInstitution"
+            @click="confirmDeleteInstitution"
+          >
+            <Loader2 v-if="deletingInstitution" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeInstitutionLogoDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除 Logo</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这个 Logo 吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveInstitutionLogo">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -351,6 +404,17 @@ const form = ref({
   phone: '',
   website: ''
 })
+
+const deleteInstitutionDialogOpen = ref(false)
+const deleteInstitutionTarget = ref(null)
+const deletingInstitution = ref(false)
+const deleteInstitutionName = computed(() => {
+  const row = deleteInstitutionTarget.value
+  if (!row) return '该机构'
+  return row.name || '未命名'
+})
+
+const removeInstitutionLogoDialogOpen = ref(false)
 
 function normalizeWebsiteHref(website) {
   const w = (website || '').trim()
@@ -413,20 +477,26 @@ const handleEdit = (row) => {
   dialogVisible.value = true
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个机构吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/institutions/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchInstitutions()
-    } catch (error) {
-      ElMessage.error('删除失败')
-    }
-  })
+function openDeleteInstitutionDialog(row) {
+  deleteInstitutionTarget.value = row
+  deleteInstitutionDialogOpen.value = true
+}
+
+async function confirmDeleteInstitution() {
+  const row = deleteInstitutionTarget.value
+  if (!row?.id) return
+  deletingInstitution.value = true
+  try {
+    await axios.delete(`/institutions/${row.id}`)
+    ElMessage.success('删除成功')
+    deleteInstitutionDialogOpen.value = false
+    deleteInstitutionTarget.value = null
+    fetchInstitutions()
+  } catch {
+    ElMessage.error('删除失败')
+  } finally {
+    deletingInstitution.value = false
+  }
 }
 
 const handleViewArtists = async (row) => {
@@ -555,22 +625,14 @@ const resetLogoUploadState = () => {
   logoFileSize.value = 0
 }
 
-const removeLogo = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这个Logo吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.logo = ''
-    ElMessage.success('Logo已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveInstitutionLogoDialog() {
+  removeInstitutionLogoDialogOpen.value = true
+}
+
+function confirmRemoveInstitutionLogo() {
+  form.value.logo = ''
+  ElMessage.success('Logo已删除')
+  removeInstitutionLogoDialogOpen.value = false
 }
 
 const handleLogoDragEnter = (e) => {

@@ -124,7 +124,7 @@
                   <Button size="sm" variant="secondary" @click="editArtwork(row)">
                     编辑
                   </Button>
-                  <Button size="sm" variant="destructive" @click="deleteArtwork(row)">
+                  <Button size="sm" variant="destructive" @click="openDeleteOriginalArtworkDialog(row)">
                     删除
                   </Button>
                 </div>
@@ -415,12 +415,37 @@
         >
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="deleteOriginalArtworkDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除艺术品</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这个艺术品吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingOriginalArtwork"
+            @click="confirmDeleteOriginalArtwork"
+          >
+            <Loader2 v-if="deletingOriginalArtwork" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Plus, Search, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { useRouter } from 'vue-router'
@@ -428,6 +453,15 @@ import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -463,6 +497,10 @@ const pagination = ref({
   pageSize: 20,
   total: 0
 })
+
+const deleteOriginalArtworkDialogOpen = ref(false)
+const deleteOriginalArtworkTarget = ref(null)
+const deletingOriginalArtwork = ref(false)
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil((pagination.value.total || 0) / (pagination.value.pageSize || 20)))
@@ -1021,34 +1059,39 @@ const editArtwork = async (row) => {
   }
 }
 
-// 删除艺术品
-const deleteArtwork = async (row) => {
+function openDeleteOriginalArtworkDialog(row) {
   if (!checkLoginStatus()) return
+  deleteOriginalArtworkTarget.value = row
+  deleteOriginalArtworkDialogOpen.value = true
+}
+
+async function confirmDeleteOriginalArtwork() {
+  const row = deleteOriginalArtworkTarget.value
+  if (!row?.id) return
+  if (!checkLoginStatus()) return
+  deletingOriginalArtwork.value = true
   try {
-    await ElMessageBox.confirm('确定要删除这个艺术品吗？', '提示', {
-      type: 'warning'
-    })
-    const response = await axios.delete(`/original-artworks/${row.id}`)
+    await axios.delete(`/original-artworks/${row.id}`)
     ElMessage.success('删除成功')
-    // 删除后重置到第一页
+    deleteOriginalArtworkDialogOpen.value = false
+    deleteOriginalArtworkTarget.value = null
     pagination.value.page = 1
-    fetchArtworks().then(() => {
-      scrollToTop()
-    })
+    await fetchArtworks()
+    scrollToTop()
   } catch (error) {
-    if (error !== 'cancel') {
-      console.error('Delete error:', error)
-      if (error.response) {
-        if (error.response.status === 401) {
-          ElMessage.error('登录已过期，请重新登录')
-          router.push('/login')
-        } else {
-          ElMessage.error(error.response.data.message || '删除失败')
-        }
+    console.error('Delete error:', error)
+    if (error.response) {
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        router.push('/login')
       } else {
-        ElMessage.error('删除失败')
+        ElMessage.error(error.response.data.message || '删除失败')
       }
+    } else {
+      ElMessage.error('删除失败')
     }
+  } finally {
+    deletingOriginalArtwork.value = false
   }
 }
 

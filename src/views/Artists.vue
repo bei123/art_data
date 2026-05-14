@@ -93,7 +93,7 @@
                   <Button size="sm" variant="secondary" type="button" @click="handleEdit(row)">
                     编辑
                   </Button>
-                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                  <Button size="sm" variant="destructive" type="button" @click="openDeleteArtistDialog(row)">
                     删除
                   </Button>
                 </div>
@@ -158,7 +158,7 @@
                 <div
                   class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="removeAvatar">
+                  <Button type="button" size="icon" variant="destructive" @click="openRemoveAvatarDialog">
                     <Trash2 class="size-4" />
                   </Button>
                   <Button type="button" size="sm" variant="secondary" @click="triggerAvatarInput">
@@ -260,7 +260,7 @@
                 <div
                   class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="removeBanner">
+                  <Button type="button" size="icon" variant="destructive" @click="openRemoveBannerDialog">
                     <Trash2 class="size-4" />
                   </Button>
                   <Button type="button" size="sm" variant="secondary" @click="triggerBannerInput">
@@ -493,16 +493,88 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="deleteArtistDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除艺术家</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除「{{ deleteArtistName }}」吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingArtist"
+            @click="confirmDeleteArtist"
+          >
+            <Loader2 v-if="deletingArtist" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeAvatarDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除头像</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张头像吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveAvatar">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeBannerDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除背景图</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张背景图吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveBanner">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -581,6 +653,18 @@ const form = ref({
   journey: '',
   institution_id: null
 })
+
+const deleteArtistDialogOpen = ref(false)
+const deleteArtistTarget = ref(null)
+const deletingArtist = ref(false)
+const deleteArtistName = computed(() => {
+  const row = deleteArtistTarget.value
+  if (!row) return '该艺术家'
+  return row.name || '未命名'
+})
+
+const removeAvatarDialogOpen = ref(false)
+const removeBannerDialogOpen = ref(false)
 
 const retryFetchArtists = () => {
   listError.value = ''
@@ -686,21 +770,37 @@ const handleEdit = (row) => {
   fetchFeaturedSelected(row.id)
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个艺术家吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/artists/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchArtists()
-      handleInstitutionFilter()
-    } catch (error) {
-      ElMessage.error('删除失败')
-    }
-  })
+function openDeleteArtistDialog(row) {
+  deleteArtistTarget.value = row
+  deleteArtistDialogOpen.value = true
+}
+
+async function confirmDeleteArtist() {
+  const row = deleteArtistTarget.value
+  if (!row?.id) return
+  deletingArtist.value = true
+  try {
+    await axios.delete(`/artists/${row.id}`)
+    ElMessage.success('删除成功')
+    deleteArtistDialogOpen.value = false
+    deleteArtistTarget.value = null
+    fetchArtists()
+    handleInstitutionFilter()
+  } catch {
+    ElMessage.error('删除失败')
+  } finally {
+    deletingArtist.value = false
+  }
+}
+
+function openRemoveAvatarDialog() {
+  removeAvatarDialogOpen.value = true
+}
+
+function confirmRemoveAvatar() {
+  form.value.avatar = ''
+  ElMessage.success('头像已删除')
+  removeAvatarDialogOpen.value = false
 }
 
 // 头像上传相关函数
@@ -811,24 +911,6 @@ const resetAvatarUploadState = () => {
   avatarFileSize.value = 0
 }
 
-const removeAvatar = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张头像吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.avatar = ''
-    ElMessage.success('头像已删除')
-  } catch {
-    // 用户取消删除
-  }
-}
-
 // 背景图上传相关函数
 const triggerBannerInput = () => {
   if (!isBannerUploading.value && !isBannerProcessing.value) {
@@ -937,22 +1019,14 @@ const resetBannerUploadState = () => {
   bannerFileSize.value = 0
 }
 
-const removeBanner = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张背景图吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.banner = ''
-    ElMessage.success('背景图已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveBannerDialog() {
+  removeBannerDialogOpen.value = true
+}
+
+function confirmRemoveBanner() {
+  form.value.banner = ''
+  ElMessage.success('背景图已删除')
+  removeBannerDialogOpen.value = false
 }
 
 // 拖拽处理函数

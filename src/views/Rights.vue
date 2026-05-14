@@ -100,7 +100,7 @@
                   <Button size="sm" variant="secondary" type="button" @click="handleEdit(row)">
                     编辑
                   </Button>
-                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                  <Button size="sm" variant="destructive" type="button" @click="openDeleteRightDialog(row)">
                     删除
                   </Button>
                 </div>
@@ -262,7 +262,7 @@
                 <div
                   class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="removeImage(index)">
+                  <Button type="button" size="icon" variant="destructive" @click="openRemoveRightsImageDialog(index)">
                     <Trash2 class="size-4" />
                   </Button>
                 </div>
@@ -398,18 +398,71 @@
         </div>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="deleteRightDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除版权实物</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这个版权实物吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingRight"
+            @click="confirmDeleteRight"
+          >
+            <Loader2 v-if="deletingRight" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeRightsImageDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除图片</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张图片吗？
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveRightsImage">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Plus, Trash2 } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -436,6 +489,13 @@ const categories = ref([])
 const artists = ref([])
 const digitalOptions = ref([])
 const digitalFilter = ref('')
+
+const deleteRightDialogOpen = ref(false)
+const deleteRightTarget = ref(null)
+const deletingRight = ref(false)
+
+const removeRightsImageDialogOpen = ref(false)
+const removeRightsImageIndex = ref(null)
 
 const filteredDigitalOptions = computed(() => {
   const q = digitalFilter.value.trim().toLowerCase()
@@ -703,20 +763,43 @@ const handleEdit = (row) => {
   }).catch(() => {})
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个版权实物吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/rights/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchRights()
-    } catch (error) {
-      ElMessage.error('删除失败')
-    }
-  })
+function openDeleteRightDialog(row) {
+  deleteRightTarget.value = row
+  deleteRightDialogOpen.value = true
+}
+
+async function confirmDeleteRight() {
+  const row = deleteRightTarget.value
+  if (!row?.id) return
+  deletingRight.value = true
+  try {
+    await axios.delete(`/rights/${row.id}`)
+    ElMessage.success('删除成功')
+    deleteRightDialogOpen.value = false
+    deleteRightTarget.value = null
+    fetchRights()
+  } catch {
+    ElMessage.error('删除失败')
+  } finally {
+    deletingRight.value = false
+  }
+}
+
+function openRemoveRightsImageDialog(index) {
+  removeRightsImageIndex.value = index
+  removeRightsImageDialogOpen.value = true
+}
+
+function confirmRemoveRightsImage() {
+  const index = removeRightsImageIndex.value
+  if (index == null || index < 0) {
+    removeRightsImageDialogOpen.value = false
+    return
+  }
+  form.value.images.splice(index, 1)
+  ElMessage.success('图片已删除')
+  removeRightsImageDialogOpen.value = false
+  removeRightsImageIndex.value = null
 }
 
 const triggerImageInput = () => {
@@ -834,24 +917,6 @@ const resetImageUploadState = () => {
   isImageProcessing.value = false
   imageFileName.value = ''
   imageFileSize.value = 0
-}
-
-const removeImage = async (index) => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张图片吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.images.splice(index, 1)
-    ElMessage.success('图片已删除')
-  } catch {
-    // 用户取消删除
-  }
 }
 
 const handleImageDragEnter = (e) => {

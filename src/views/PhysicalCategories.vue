@@ -66,7 +66,7 @@
                   <Button size="sm" variant="secondary" type="button" @click="handleEdit(row)">
                     编辑
                   </Button>
-                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                  <Button size="sm" variant="destructive" type="button" @click="openDeleteCategoryDialog(row)">
                     删除
                   </Button>
                 </div>
@@ -105,7 +105,7 @@
                 <div
                   class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="removeImage">
+                  <Button type="button" size="icon" variant="destructive" @click="openRemoveCategoryImageDialog">
                     <Trash2 class="size-4" />
                   </Button>
                   <Button type="button" size="sm" variant="secondary" @click="triggerImageInput">
@@ -208,16 +208,69 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="deleteCategoryDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除分类</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这个分类吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingCategory"
+            @click="confirmDeleteCategory"
+          >
+            <Loader2 v-if="deletingCategory" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeCategoryImageDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除图片</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张图片吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveCategoryImage">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -252,6 +305,12 @@ const form = ref({
   image: '',
   description: ''
 })
+
+const deleteCategoryDialogOpen = ref(false)
+const deleteCategoryTarget = ref(null)
+const deletingCategory = ref(false)
+
+const removeCategoryImageDialogOpen = ref(false)
 
 const retryFetchCategories = () => {
   listError.value = ''
@@ -305,20 +364,26 @@ const handleEdit = (row) => {
   dialogVisible.value = true
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个分类吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/physical-categories/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchCategories()
-    } catch (error) {
-      ElMessage.error('删除失败')
-    }
-  })
+function openDeleteCategoryDialog(row) {
+  deleteCategoryTarget.value = row
+  deleteCategoryDialogOpen.value = true
+}
+
+async function confirmDeleteCategory() {
+  const row = deleteCategoryTarget.value
+  if (!row?.id) return
+  deletingCategory.value = true
+  try {
+    await axios.delete(`/physical-categories/${row.id}`)
+    ElMessage.success('删除成功')
+    deleteCategoryDialogOpen.value = false
+    deleteCategoryTarget.value = null
+    fetchCategories()
+  } catch {
+    ElMessage.error('删除失败')
+  } finally {
+    deletingCategory.value = false
+  }
 }
 
 const triggerImageInput = () => {
@@ -428,22 +493,14 @@ const resetImageUploadState = () => {
   imageFileSize.value = 0
 }
 
-const removeImage = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张图片吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.image = ''
-    ElMessage.success('图片已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveCategoryImageDialog() {
+  removeCategoryImageDialogOpen.value = true
+}
+
+function confirmRemoveCategoryImage() {
+  form.value.image = ''
+  ElMessage.success('图片已删除')
+  removeCategoryImageDialogOpen.value = false
 }
 
 const handleImageDragEnter = (e) => {

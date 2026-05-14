@@ -61,7 +61,7 @@
                     size="icon-sm"
                     class="rounded-full"
                     aria-label="删除头像"
-                    @click="removeAvatar"
+                    @click="openRemoveAvatarDialog"
                   >
                     <Trash2 aria-hidden="true" />
                   </Button>
@@ -181,7 +181,7 @@
                     size="icon-sm"
                     class="rounded-full"
                     aria-label="删除背景图"
-                    @click="removeBanner"
+                    @click="openRemoveBannerDialog"
                   >
                     <Trash2 aria-hidden="true" />
                   </Button>
@@ -493,6 +493,44 @@
         </CardContent>
       </Card>
     </div>
+
+    <AlertDialog v-model:open="removeAvatarDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除头像</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张头像吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveAvatar">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeBannerDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除背景图</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张背景图吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveBanner">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
@@ -508,10 +546,19 @@ import {
   Upload,
   X,
 } from 'lucide-vue-next'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -535,6 +582,9 @@ const allArtworks = ref([])
 const featuredList = ref([])
 const showFeaturedManager = ref(true)
 const featuredManagerRef = ref(null)
+
+const removeAvatarDialogOpen = ref(false)
+const removeBannerDialogOpen = ref(false)
 
 const form = ref({
   name: '',
@@ -683,22 +733,14 @@ const resetAvatarUploadState = () => {
   avatarFileSize.value = 0
 }
 
-const removeAvatar = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张头像吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-    form.value.avatar = ''
-    ElMessage.success('头像已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveAvatarDialog() {
+  removeAvatarDialogOpen.value = true
+}
+
+function confirmRemoveAvatar() {
+  form.value.avatar = ''
+  ElMessage.success('头像已删除')
+  removeAvatarDialogOpen.value = false
 }
 
 const handleAvatarDragEnter = (e) => {
@@ -838,22 +880,14 @@ const resetBannerUploadState = () => {
   bannerFileSize.value = 0
 }
 
-const removeBanner = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张背景图吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-    form.value.banner = ''
-    ElMessage.success('背景图已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveBannerDialog() {
+  removeBannerDialogOpen.value = true
+}
+
+function confirmRemoveBanner() {
+  form.value.banner = ''
+  ElMessage.success('背景图已删除')
+  removeBannerDialogOpen.value = false
 }
 
 const handleBannerDragEnter = (e) => {

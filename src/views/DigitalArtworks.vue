@@ -130,14 +130,14 @@
                     size="sm"
                     :variant="row.is_hidden ? 'default' : 'secondary'"
                     type="button"
-                    @click="handleToggleVisibility(row)"
+                    @click="openToggleVisibilityDialog(row)"
                   >
                     {{ row.is_hidden ? '显示' : '隐藏' }}
                   </Button>
                   <Button size="sm" variant="outline" type="button" @click="handleEdit(row)">
                     编辑
                   </Button>
-                  <Button size="sm" variant="destructive" type="button" @click="handleDelete(row)">
+                  <Button size="sm" variant="destructive" type="button" @click="openDeleteDigitalDialog(row)">
                     删除
                   </Button>
                 </div>
@@ -176,7 +176,7 @@
                 <div
                   class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="removeImage">
+                  <Button type="button" size="icon" variant="destructive" @click="openRemoveDigitalImageDialog">
                     <Trash2 class="size-4" />
                   </Button>
                   <Button type="button" size="sm" variant="secondary" @click="triggerImageInput">
@@ -396,16 +396,93 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="toggleVisibilityDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认操作</AlertDialogTitle>
+          <AlertDialogDescription>
+            {{ toggleVisibilityDescription }}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            :disabled="toggleVisibilitySubmitting"
+            @click="confirmToggleVisibility"
+          >
+            <Loader2 v-if="toggleVisibilitySubmitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            确定
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="deleteDigitalDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除数字作品</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这个作品吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingDigital"
+            @click="confirmDeleteDigital"
+          >
+            <Loader2 v-if="deletingDigital" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog v-model:open="removeDigitalImageDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除图片</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张图片吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveDigitalImage">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -447,6 +524,22 @@ const associateArtistVisible = ref(false)
 const associateRow = ref(null)
 const associateArtistId = ref(null)
 const associateArtistSearch = ref('')
+
+const toggleVisibilityDialogOpen = ref(false)
+const toggleVisibilityRow = ref(null)
+const toggleVisibilitySubmitting = ref(false)
+const toggleVisibilityDescription = computed(() => {
+  const row = toggleVisibilityRow.value
+  if (!row) return ''
+  const action = row.is_hidden ? '显示' : '隐藏'
+  return `确定要${action}这个作品吗？`
+})
+
+const deleteDigitalDialogOpen = ref(false)
+const deleteDigitalTarget = ref(null)
+const deletingDigital = ref(false)
+
+const removeDigitalImageDialogOpen = ref(false)
 
 const filteredAssociateArtistOptions = computed(() => {
   const q = associateArtistSearch.value.trim().toLowerCase()
@@ -654,49 +747,59 @@ const handlePurchaseLinkToggle = async (row, val) => {
   }
 }
 
-const handleToggleVisibility = (row) => {
-  const action = row.is_hidden ? '显示' : '隐藏'
-  ElMessageBox.confirm(`确定要${action}这个作品吗？`, '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.patch(`/digital-artworks/${row.id}/hide`, {
-        is_hidden: !row.is_hidden
-      })
-      ElMessage.success(`${action}成功`)
-      fetchArtworks()
-    } catch (error) {
-      console.error(`${action}失败:`, error)
-      if (error.response) {
-        ElMessage.error(error.response.data.error || `${action}失败`)
-      } else {
-        ElMessage.error(`${action}失败`)
-      }
-    }
-  })
+function openToggleVisibilityDialog(row) {
+  toggleVisibilityRow.value = row
+  toggleVisibilityDialogOpen.value = true
 }
 
-const handleDelete = (row) => {
-  ElMessageBox.confirm('确定要删除这个作品吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await axios.delete(`/digital-artworks/${row.id}`)
-      ElMessage.success('删除成功')
-      fetchArtworks()
-    } catch (error) {
-      console.error('删除失败:', error)
-      if (error.response) {
-        ElMessage.error(error.response.data.error || '删除失败')
-      } else {
-        ElMessage.error('删除失败')
-      }
-    }
-  })
+async function confirmToggleVisibility() {
+  const row = toggleVisibilityRow.value
+  if (!row?.id) return
+  const action = row.is_hidden ? '显示' : '隐藏'
+  toggleVisibilitySubmitting.value = true
+  try {
+    await axios.patch(`/digital-artworks/${row.id}/hide`, {
+      is_hidden: !row.is_hidden
+    })
+    ElMessage.success(`${action}成功`)
+    toggleVisibilityDialogOpen.value = false
+    toggleVisibilityRow.value = null
+    fetchArtworks()
+  } catch (error) {
+    console.error(`${action}失败:`, error)
+    if (error.response)
+      ElMessage.error(error.response.data.error || `${action}失败`)
+    else
+      ElMessage.error(`${action}失败`)
+  } finally {
+    toggleVisibilitySubmitting.value = false
+  }
+}
+
+function openDeleteDigitalDialog(row) {
+  deleteDigitalTarget.value = row
+  deleteDigitalDialogOpen.value = true
+}
+
+async function confirmDeleteDigital() {
+  const row = deleteDigitalTarget.value
+  if (!row?.id) return
+  deletingDigital.value = true
+  try {
+    await axios.delete(`/digital-artworks/${row.id}`)
+    ElMessage.success('删除成功')
+    deleteDigitalDialogOpen.value = false
+    deleteDigitalTarget.value = null
+    fetchArtworks()
+  } catch (error) {
+    console.error('删除失败:', error)
+    if (error.response)
+      ElMessage.error(error.response.data.error || '删除失败')
+    else
+      ElMessage.error('删除失败')
+  } finally {
+    deletingDigital.value = false
+  }
 }
 
 const triggerImageInput = () => {
@@ -806,22 +909,14 @@ const resetImageUploadState = () => {
   imageFileSize.value = 0
 }
 
-const removeImage = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张图片吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.image_url = ''
-    ElMessage.success('图片已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveDigitalImageDialog() {
+  removeDigitalImageDialogOpen.value = true
+}
+
+function confirmRemoveDigitalImage() {
+  form.value.image_url = ''
+  ElMessage.success('图片已删除')
+  removeDigitalImageDialogOpen.value = false
 }
 
 const handleImageDragEnter = (e) => {

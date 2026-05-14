@@ -125,7 +125,7 @@
                     type="danger" 
                     size="small" 
                     circle 
-                    @click="removeImage(index)"
+                    @click="openRemoveRightDetailImageDialog(index)"
                     class="remove-btn"
                   >
                     <el-icon><Delete /></el-icon>
@@ -266,20 +266,48 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <AlertDialog v-model:open="removeRightDetailImageDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除图片</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张图片吗？
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveRightDetailImage">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Plus, Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
-import { onBeforeUnmount } from 'vue'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 
 const route = useRoute()
 const router = useRouter()
@@ -324,6 +352,9 @@ const isImageUploading = ref(false)
 const isImageProcessing = ref(false)
 const imageFileName = ref('')
 const imageFileSize = ref(0)
+
+const removeRightDetailImageDialogOpen = ref(false)
+const removeRightDetailImageIndex = ref(null)
 
 // 进度条颜色配置
 const progressColors = [
@@ -535,22 +566,21 @@ const resetImageUploadState = () => {
   imageFileSize.value = 0
 }
 
-const removeImage = async (index) => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张图片吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.images.splice(index, 1)
-    ElMessage.success('图片已删除')
-  } catch {
-    // 用户取消删除
+function openRemoveRightDetailImageDialog(index) {
+  removeRightDetailImageIndex.value = index
+  removeRightDetailImageDialogOpen.value = true
+}
+
+function confirmRemoveRightDetailImage() {
+  const index = removeRightDetailImageIndex.value
+  if (index == null || index < 0) {
+    removeRightDetailImageDialogOpen.value = false
+    return
   }
+  form.value.images.splice(index, 1)
+  ElMessage.success('图片已删除')
+  removeRightDetailImageDialogOpen.value = false
+  removeRightDetailImageIndex.value = null
 }
 
 // 拖拽处理函数

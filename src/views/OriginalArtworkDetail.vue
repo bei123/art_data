@@ -35,7 +35,7 @@
                   type="danger" 
                   size="small" 
                   circle 
-                  @click="removeImage"
+                  @click="openRemoveOaDetailImageDialog"
                   class="remove-btn"
                 >
                   <el-icon><Delete /></el-icon>
@@ -250,17 +250,46 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <AlertDialog v-model:open="removeOaDetailImageDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除图片</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除这张图片吗？保存前仍可重新上传。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button type="button" variant="destructive" @click="confirmRemoveOaDetailImage">
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Upload, Delete, Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 
 const route = useRoute()
 const router = useRouter()
@@ -273,6 +302,8 @@ const isImageProcessing = ref(false) // 新增：图片处理状态
 const imageInput = ref(null)
 const imageFileName = ref('')
 const imageFileSize = ref(0)
+
+const removeOaDetailImageDialogOpen = ref(false)
 
 // 进度条颜色配置
 const progressColors = [
@@ -538,23 +569,14 @@ const resetImageUploadState = () => {
   imageFileSize.value = 0
 }
 
-// 移除图片
-const removeImage = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除这张图片吗？',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    form.value.image = ''
-    ElMessage.success('图片已删除')
-  } catch {
-    // 用户取消删除
-  }
+function openRemoveOaDetailImageDialog() {
+  removeOaDetailImageDialogOpen.value = true
+}
+
+function confirmRemoveOaDetailImage() {
+  form.value.image = ''
+  ElMessage.success('图片已删除')
+  removeOaDetailImageDialogOpen.value = false
 }
 
 // 格式化文件大小
