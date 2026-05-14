@@ -30,7 +30,7 @@ async function invalidateArtistsListCache() {
  * 公开列表：支持 ?institution_id= 或全量（带 Redis 列表缓存）
  * @returns {{ ok: true, status: number, body: object|Array } | { ok: false, status: number, body: { error: string } }}
  */
-async function getPublicArtistsList(query) {
+async function getPublicArtistsList(query, includeHidden = false) {
   const { institution_id } = query || {};
 
   if (institution_id) {
@@ -53,6 +53,7 @@ async function getPublicArtistsList(query) {
         FROM artists a
         LEFT JOIN institutions i ON a.institution_id = i.id
         WHERE a.institution_id = ?
+        ${!includeHidden ? 'AND COALESCE(a.is_public, 1) = 1' : ''}
         ORDER BY a.created_at DESC
       `,
       [institutionId]
@@ -82,14 +83,18 @@ async function getPublicArtistsList(query) {
     });
   }
 
-  try {
-    const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
-    if (cache) {
-      return adminResult(200, JSON.parse(cache));
+  if (!includeHidden) {
+    try {
+      const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
+      if (cache) {
+        return adminResult(200, JSON.parse(cache));
+      }
+    } catch (e) {
+      logger.error('Redis 读取艺术家列表失败', { err: e });
     }
-  } catch (e) {
-    logger.error('Redis 读取艺术家列表失败', { err: e });
   }
+
+  const publicWhere = !includeHidden ? 'WHERE COALESCE(a.is_public, 1) = 1' : '';
 
   const [rows] = await db.query(`
     SELECT 
@@ -100,6 +105,7 @@ async function getPublicArtistsList(query) {
       i.description as institution_description
     FROM artists a
     LEFT JOIN institutions i ON a.institution_id = i.id
+    ${publicWhere}
     ORDER BY a.created_at DESC
   `);
 
@@ -120,23 +126,29 @@ async function getPublicArtistsList(query) {
   });
 
   try {
-    await redisClient.set(REDIS_ARTISTS_LIST_KEY, JSON.stringify(artistsWithProcessedImages));
+    if (!includeHidden) {
+      await redisClient.set(REDIS_ARTISTS_LIST_KEY, JSON.stringify(artistsWithProcessedImages));
+    }
   } catch (e) {
     logger.error('Redis 写入艺术家列表失败', { err: e });
   }
   return adminResult(200, artistsWithProcessedImages);
 }
 
-async function getPublicArtistDetail(rawId) {
+async function getPublicArtistDetail(rawId, includeHidden = false) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的艺术家ID' });
-  try {
-    const cache = await redisClient.get(REDIS_ARTIST_DETAIL_KEY_PREFIX + id);
-    if (cache) {
-      return adminResult(200, JSON.parse(cache));
+  if (!includeHidden) {
+    try {
+      const cache = await redisClient.get(REDIS_ARTIST_DETAIL_KEY_PREFIX + id);
+      if (cache) {
+        const parsed = JSON.parse(cache);
+        if (Number(parsed.is_public) === 0) return adminResult(404, { error: '艺术家不存在' });
+        return adminResult(200, parsed);
+      }
+    } catch (e) {
+      logger.error('Redis 读取艺术家详情失败', { err: e });
     }
-  } catch (e) {
-    logger.error('Redis 读取艺术家详情失败', { err: e });
   }
 
   const [rows] = await db.query(
@@ -150,6 +162,7 @@ async function getPublicArtistDetail(rawId) {
       FROM artists a
       LEFT JOIN institutions i ON a.institution_id = i.id
       WHERE a.id = ?
+      ${!includeHidden ? 'AND COALESCE(a.is_public, 1) = 1' : ''}
     `,
     [id]
   );
@@ -173,7 +186,9 @@ async function getPublicArtistDetail(rawId) {
   };
 
   try {
-    await redisClient.set(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, JSON.stringify(artistWithInstitution));
+    if (!includeHidden) {
+      await redisClient.set(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, JSON.stringify(artistWithInstitution));
+    }
   } catch (e) {
     logger.error('Redis 写入艺术家详情失败', { err: e });
   }
@@ -203,10 +218,12 @@ async function createArtistAdmin(body) {
   }
   const cleanName = name.trim();
   const cleanDescription = description ? description.trim() : '';
+  const is_public =
+    body?.is_public === 0 || body?.is_public === false || body?.is_public === '0' ? 0 : 1;
   try {
     const [result] = await db.query(
-      'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
-      [avatar, cleanName, cleanDescription, institution_id || null]
+      'INSERT INTO artists (avatar, name, description, institution_id, is_public) VALUES (?, ?, ?, ?, ?)',
+      [avatar, cleanName, cleanDescription, institution_id || null, is_public]
     );
     await invalidateArtistsListCache();
     return adminResult(200, {
@@ -226,7 +243,8 @@ async function updateArtistAdmin(rawId, body) {
   const artistRowId = parsePositiveIntId(rawId);
   if (!artistRowId) return adminResult(400, { error: '无效的艺术家ID' });
 
-  const { name, era, avatar, banner, description, biography, journey, institution_id, achievements } = body || {};
+  const { name, era, avatar, banner, description, biography, journey, institution_id, achievements, is_public } =
+    body || {};
   const updateData = {};
   if (name !== undefined && name !== null) updateData.name = name;
   if (era !== undefined && era !== null) updateData.era = era;
@@ -237,6 +255,7 @@ async function updateArtistAdmin(rawId, body) {
   if (journey !== undefined && journey !== null) updateData.journey = journey;
   if (institution_id !== undefined && institution_id !== null) updateData.institution_id = institution_id;
   if (achievements !== undefined && achievements !== null) updateData.achievements = achievements;
+  if (is_public !== undefined && is_public !== null) updateData.is_public = is_public;
 
   if (avatar && !validateImageUrl(avatar)) {
     return adminResult(400, { error: '无效的头像URL' });
@@ -292,6 +311,10 @@ async function updateArtistAdmin(rawId, body) {
   if (updateData.achievements !== undefined) {
     updateFields.push('achievements = ?');
     updateValues.push(updateData.achievements ? JSON.stringify(updateData.achievements) : null);
+  }
+  if (updateData.is_public !== undefined) {
+    updateFields.push('is_public = ?');
+    updateValues.push(updateData.is_public === 0 || updateData.is_public === false || updateData.is_public === '0' ? 0 : 1);
   }
 
   try {
@@ -430,10 +453,17 @@ async function setFeaturedArtworksAdmin(rawId, body) {
   }
 }
 
-async function getPublicFeaturedArtworks(rawId) {
+async function getPublicFeaturedArtworks(rawId, includeHidden = false) {
   const artistId = parsePositiveIntId(rawId);
   if (!artistId) return adminResult(400, { error: '无效的艺术家ID' });
   try {
+    if (!includeHidden) {
+      const [artistOk] = await db.query(
+        'SELECT id FROM artists WHERE id = ? AND COALESCE(is_public, 1) = 1',
+        [artistId]
+      );
+      if (!artistOk.length) return adminResult(404, { error: '艺术家不存在' });
+    }
     const [rows] = await db.query(
       `
       SELECT 
@@ -443,6 +473,7 @@ async function getPublicFeaturedArtworks(rawId) {
       INNER JOIN original_artworks oa ON oa.id = afa.artwork_id
       INNER JOIN artists a ON a.id = oa.artist_id
       WHERE afa.artist_id = ?
+      ${!includeHidden ? 'AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1' : ''}
       ORDER BY afa.sort_order ASC
     `,
       [artistId]

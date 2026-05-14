@@ -80,7 +80,10 @@ async function getCartList(userId) {
     let artistIds = [];
     if (artworkIds.length > 0) {
       const [artworks] = await db.query(
-        'SELECT id, title, image, year, description, original_price, discount_price, artist_id FROM original_artworks WHERE id IN (?)',
+        `SELECT oa.id, oa.title, oa.image, oa.year, oa.description, oa.original_price, oa.discount_price, oa.artist_id
+         FROM original_artworks oa
+         INNER JOIN artists a ON a.id = oa.artist_id
+         WHERE oa.id IN (?) AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
         [artworkIds]
       );
       artworks.forEach((a) => {
@@ -234,7 +237,10 @@ async function addCartItem(userId, body) {
         return adminResult(400, { error: '缺少艺术品ID' });
       }
       const [artwork] = await db.query(
-        'SELECT original_price, discount_price, stock, is_on_sale FROM original_artworks WHERE id = ?',
+        `SELECT oa.original_price, oa.discount_price, oa.stock, oa.is_on_sale
+         FROM original_artworks oa
+         INNER JOIN artists a ON a.id = oa.artist_id
+         WHERE oa.id = ? AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
         [artwork_id]
       );
       if (!artwork || artwork.length === 0) {
@@ -310,7 +316,14 @@ async function updateCartItemQuantity(userId, rawCartItemId, body) {
         return adminResult(400, { error: '库存不足' });
       }
     } else if (cartItem.type === 'artwork') {
-      const [artworkRows] = await db.query('SELECT stock FROM original_artworks WHERE id = ? AND is_on_sale = 1', [cartItem.artwork_id]);
+      const [artworkRows] = await db.query(
+        `SELECT oa.stock
+         FROM original_artworks oa
+         INNER JOIN artists a ON a.id = oa.artist_id
+         WHERE oa.id = ? AND oa.is_on_sale = 1
+           AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
+        [cartItem.artwork_id]
+      );
       if (!artworkRows || artworkRows.length === 0) {
         return adminResult(404, { error: '艺术品不存在或已下架' });
       }

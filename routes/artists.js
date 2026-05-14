@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { authenticateToken, optionalAuthenticate } = require('../auth');
 const svc = require('../services/artistsService');
 
-router.get('/', async (req, res) => {
+router.get('/', optionalAuthenticate, async (req, res) => {
   try {
-    const r = await svc.getPublicArtistsList(req.query);
+    const r = await svc.getPublicArtistsList(req.query, Boolean(req.includeHidden));
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取艺术家列表失败', { err: error });
@@ -14,9 +14,9 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/:id/featured-artworks', async (req, res) => {
+router.get('/:id/featured-artworks', optionalAuthenticate, async (req, res) => {
   try {
-    const r = await svc.getPublicFeaturedArtworks(req.params.id);
+    const r = await svc.getPublicFeaturedArtworks(req.params.id, Boolean(req.includeHidden));
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取代表作品失败', { err: error });
@@ -24,9 +24,9 @@ router.get('/:id/featured-artworks', async (req, res) => {
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuthenticate, async (req, res) => {
   try {
-    const r = await svc.getPublicArtistDetail(req.params.id);
+    const r = await svc.getPublicArtistDetail(req.params.id, Boolean(req.includeHidden));
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取艺术家详情失败', { err: error });

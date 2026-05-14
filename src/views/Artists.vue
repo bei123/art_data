@@ -56,6 +56,7 @@
               <th class="h-10 px-3 text-left font-medium">姓名</th>
               <th class="h-10 px-3 text-left font-medium">时代</th>
               <th class="h-10 min-w-[8rem] px-3 text-left font-medium">所属机构</th>
+              <th class="h-10 w-24 px-3 text-left font-medium">公开</th>
               <th class="h-10 max-w-[14rem] px-3 text-left font-medium">艺术历程</th>
               <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
             </tr>
@@ -85,6 +86,11 @@
                 </Badge>
                 <span v-else class="text-muted-foreground">独立艺术家</span>
               </td>
+              <td class="px-3 py-2.5">
+                <Badge :variant="Number(row.is_public) === 0 ? 'secondary' : 'default'">
+                  {{ Number(row.is_public) === 0 ? '仅后台' : '公开' }}
+                </Badge>
+              </td>
               <td class="max-w-[14rem] truncate px-3 py-2.5 text-muted-foreground" :title="row.description">
                 {{ row.description }}
               </td>
@@ -100,7 +106,7 @@
               </td>
             </tr>
             <tr v-if="filteredArtists.length === 0 && !listLoading">
-              <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
+              <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">
                 暂无艺术家数据
               </td>
             </tr>
@@ -348,6 +354,29 @@
           </div>
 
           <div class="flex flex-col gap-2">
+            <Label>公开接口展示</Label>
+            <p class="text-xs text-muted-foreground">
+              关闭后未登录访客无法在列表、详情与搜索中看到该艺术家；管理员登录后台后仍可管理。
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                :variant="form.is_public === 1 ? 'default' : 'outline'"
+                @click="form.is_public = 1"
+              >
+                展示
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                :variant="form.is_public === 0 ? 'default' : 'outline'"
+                @click="form.is_public = 0"
+              >
+                不展示
+              </Button>
+            </div>
+
             <Label for="artist-desc">简介</Label>
             <Textarea id="artist-desc" v-model="form.description" class="min-h-24" rows="4" />
           </div>
@@ -651,7 +680,8 @@ const form = ref({
   banner: '',
   description: '',
   journey: '',
-  institution_id: null
+  institution_id: null,
+  is_public: 1
 })
 
 const deleteArtistDialogOpen = ref(false)
@@ -739,7 +769,8 @@ const handleAdd = () => {
     banner: '',
     description: '',
     journey: '',
-    institution_id: null
+    institution_id: null,
+    is_public: 1
   }
   featuredSearch.value = ''
   featuredAllArtworks.value = []
@@ -759,7 +790,8 @@ const handleEdit = (row) => {
     banner: row.banner,
     description: row.description,
     journey: row.journey,
-    institution_id: row.institution ? row.institution.id : null
+    institution_id: row.institution ? row.institution.id : null,
+    is_public: Number(row.is_public) === 0 ? 0 : 1
   }
   featuredSearch.value = ''
   featuredAllArtworks.value = []

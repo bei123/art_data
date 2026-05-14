@@ -4,6 +4,8 @@ const { PUBLIC_API_BASE_URL: BASE_URL } = require('../config/publicEnv');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const DIGITAL_PUBLIC_WHERE = `(dae.is_hidden = 0 OR dae.is_hidden IS NULL)`;
+const ARTIST_PUBLIC_NO_ALIAS = 'COALESCE(is_public, 1) = 1';
+const OA_ARTIST_ALIAS = 'oa_pub_a';
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -48,11 +50,14 @@ async function getSearchResults(query) {
   try {
     if (!type || type === 'all') {
       const [artistCount] = await db.query(
-        `SELECT COUNT(*) as count FROM artists WHERE name LIKE ? OR description LIKE ?`,
+        `SELECT COUNT(*) as count FROM artists WHERE (name LIKE ? OR description LIKE ?) AND ${ARTIST_PUBLIC_NO_ALIAS}`,
         [searchTerm, searchTerm]
       );
       const [artworkCount] = await db.query(
-        `SELECT COUNT(*) as count FROM original_artworks WHERE title LIKE ? OR description LIKE ?`,
+        `SELECT COUNT(*) as count FROM original_artworks oa
+           LEFT JOIN artists ${OA_ARTIST_ALIAS} ON ${OA_ARTIST_ALIAS}.id = oa.artist_id
+           WHERE (oa.title LIKE ? OR oa.description LIKE ?)
+             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(${OA_ARTIST_ALIAS}.is_public, 1) = 1`,
         [searchTerm, searchTerm]
       );
       const [digitalCount] = await db.query(
@@ -68,14 +73,16 @@ async function getSearchResults(query) {
       const [artistRows] = await db.query(
         `SELECT id, name, avatar, description, 'artist' as type 
            FROM artists 
-           WHERE name LIKE ? OR description LIKE ?
+           WHERE (name LIKE ? OR description LIKE ?) AND ${ARTIST_PUBLIC_NO_ALIAS}
            LIMIT ? OFFSET ?`,
         [searchTerm, searchTerm, limitNum, offset]
       );
       const [artworkRows] = await db.query(
-        `SELECT id, title, image, description, 'original_artwork' as type 
-           FROM original_artworks 
-           WHERE title LIKE ? OR description LIKE ?
+        `SELECT oa.id, oa.title, oa.image, oa.description, 'original_artwork' as type 
+           FROM original_artworks oa
+           LEFT JOIN artists ${OA_ARTIST_ALIAS} ON ${OA_ARTIST_ALIAS}.id = oa.artist_id
+           WHERE (oa.title LIKE ? OR oa.description LIKE ?)
+             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(${OA_ARTIST_ALIAS}.is_public, 1) = 1
            LIMIT ? OFFSET ?`,
         [searchTerm, searchTerm, limitNum, offset]
       );
@@ -104,7 +111,7 @@ async function getSearchResults(query) {
       ];
     } else if (type === 'artist') {
       const [countResult] = await db.query(
-        `SELECT COUNT(*) as count FROM artists WHERE name LIKE ? OR description LIKE ?`,
+        `SELECT COUNT(*) as count FROM artists WHERE (name LIKE ? OR description LIKE ?) AND ${ARTIST_PUBLIC_NO_ALIAS}`,
         [searchTerm, searchTerm]
       );
       totalCount = countResult[0].count;
@@ -112,7 +119,7 @@ async function getSearchResults(query) {
       const [artistRows] = await db.query(
         `SELECT id, name, avatar, description, 'artist' as type 
            FROM artists 
-           WHERE name LIKE ? OR description LIKE ?
+           WHERE (name LIKE ? OR description LIKE ?) AND ${ARTIST_PUBLIC_NO_ALIAS}
            LIMIT ? OFFSET ?`,
         [searchTerm, searchTerm, limitNum, offset]
       );
@@ -125,7 +132,8 @@ async function getSearchResults(query) {
         `SELECT COUNT(*) as count 
            FROM original_artworks oa
            LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?`,
+           WHERE (oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?)
+             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
         [searchTerm, searchTerm, searchTerm]
       );
       totalCount = countResult[0].count;
@@ -134,7 +142,8 @@ async function getSearchResults(query) {
         `SELECT oa.id, oa.title, oa.image, oa.description, oa.artist_id, a.name as artist_name, a.avatar as artist_avatar, 'original_artwork' as type 
            FROM original_artworks oa
            LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?
+           WHERE (oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?)
+             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1
            LIMIT ? OFFSET ?`,
         [searchTerm, searchTerm, searchTerm, limitNum, offset]
       );

@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, checkRole } = require('../auth');
+const { authenticateToken, checkRole, optionalAuthenticate } = require('../auth');
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
 
-router.get('/', async (req, res) => {
+router.get('/', optionalAuthenticate, async (req, res) => {
   try {
-    const r = await svc.getPublicArtworksList(req.query);
+    const r = await svc.getPublicArtworksList(req.query, Boolean(req.includeHidden));
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取艺术品列表失败', { err: error });
@@ -61,9 +61,9 @@ router.post(
   }
 );
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuthenticate, async (req, res) => {
   try {
-    const r = await svc.getPublicArtworkDetail(req.params.id);
+    const r = await svc.getPublicArtworkDetail(req.params.id, Boolean(req.includeHidden));
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取作品详情失败', { err: error });

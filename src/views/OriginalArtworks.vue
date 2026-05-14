@@ -88,6 +88,7 @@
               <th class="h-10 w-20 px-3 text-left font-medium">年份</th>
               <th class="h-10 min-w-[8rem] px-3 text-left font-medium">价格</th>
               <th class="h-10 min-w-[7rem] px-3 text-left font-medium">库存/销量</th>
+              <th class="h-10 w-24 px-3 text-left font-medium">公开</th>
               <th class="h-10 w-24 px-3 text-left font-medium">状态</th>
               <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
             </tr>
@@ -129,6 +130,11 @@
                 <div>销量: {{ row.sales }}</div>
               </td>
               <td class="px-3 py-2.5">
+                <Badge :variant="Number(row.is_public) === 0 ? 'secondary' : 'default'">
+                  {{ Number(row.is_public) === 0 ? '仅后台' : '公开' }}
+                </Badge>
+              </td>
+              <td class="px-3 py-2.5">
                 <Badge :variant="row.is_on_sale ? 'default' : 'secondary'">
                   {{ row.is_on_sale ? '在售' : '下架' }}
                 </Badge>
@@ -145,7 +151,7 @@
               </td>
             </tr>
             <tr v-if="artworks.length === 0 && !loading">
-              <td colspan="8" class="px-3 py-12 text-center text-muted-foreground">
+              <td colspan="9" class="px-3 py-12 text-center text-muted-foreground">
                 暂无原作数据
               </td>
             </tr>
@@ -374,6 +380,31 @@
                 @click="form.is_on_sale = 0"
               >
                 下架
+              </Button>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>公开接口展示</Label>
+            <p class="text-xs text-muted-foreground">
+              关闭后未登录访客无法在列表、详情与搜索中看到该作品；若艺术家为「不展示」，作品也不会出现在公开接口。
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                :variant="form.is_public === 1 ? 'default' : 'outline'"
+                @click="form.is_public = 1"
+              >
+                展示
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                :variant="form.is_public === 0 ? 'default' : 'outline'"
+                @click="form.is_public = 0"
+              >
+                不展示
               </Button>
             </div>
           </div>
@@ -617,7 +648,8 @@ const form = ref({
   description: '',
   collection_number: '',
   collection_size: '',
-  collection_material: ''
+  collection_material: '',
+  is_public: 1
 })
 
 const dialogImageInput = ref(null)
@@ -665,7 +697,8 @@ const resetForm = () => {
     is_on_sale: 1,
     collection_number: '',
     collection_size: '',
-    collection_material: ''
+    collection_material: '',
+    is_public: 1
   }
   
   // 重置富文本编辑器内容
@@ -1178,6 +1211,7 @@ const editArtwork = async (row) => {
       stock: Number(detail.stock) || 0,
       sales: Number(detail.sales) || 0,
       is_on_sale: Number(detail.is_on_sale) || 1,
+      is_public: Number(detail.is_public) === 0 ? 0 : 1,
       // 移除 collection_location 字段
       collection_number: detail.collection?.number || '',
       collection_size: detail.collection?.size || '',
@@ -1254,6 +1288,7 @@ const submitForm = async () => {
       stock: Number(form.value.stock),
       sales: Number(form.value.sales),
       is_on_sale: Number(form.value.is_on_sale),
+      is_public: Number(form.value.is_public) === 0 ? 0 : 1,
       // 移除 collection_location 字段
       collection_number: form.value.collection_number,
       collection_size: form.value.collection_size,

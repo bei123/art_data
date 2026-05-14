@@ -73,6 +73,49 @@ const authenticateToken = async (req, res, next) => {
 };
 
 /**
+ * 有 token 则解析并挂载 req.user；无 token 或无效 token 不报错。
+ * 若已登录且为后台用户（非微信用户）且角色为 admin，则 req.includeHidden = true（可查看未公开展示的艺术家/原作）。
+ */
+const optionalAuthenticate = async (req, res, next) => {
+  req.user = undefined;
+  req.includeHidden = false;
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return next();
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const [sessions] = await query(
+      'SELECT user_id FROM user_sessions WHERE token = ? AND expires_at > NOW() LIMIT 1',
+      [token]
+    );
+    if (!sessions || sessions.length === 0) return next();
+    if (Number(sessions[0].user_id) !== Number(decoded.userId)) return next();
+
+    const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
+    if (users.length > 0) {
+      req.user = users[0];
+    } else {
+      const [wxUsers] = await query(
+        'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
+        [decoded.userId]
+      );
+      if (wxUsers && wxUsers.length > 0) req.user = { ...wxUsers[0], is_wx_user: true };
+    }
+
+    if (req.user && !req.user.is_wx_user) {
+      const [userRoles] = await query(
+        'SELECT r.name FROM roles r JOIN users u ON r.id = u.role_id WHERE u.id = ?',
+        [req.user.id]
+      );
+      if (userRoles.length > 0 && userRoles[0].name === 'admin') req.includeHidden = true;
+    }
+  } catch {
+    /* 匿名访问 */
+  }
+  next();
+};
+
+/**
  * 仅允许访问本人数据，或角色为 admin 的用户访问他人数据（防水平越权）
  * @returns {{ ok: true, userId: number } | { ok: false, status: number, error: string }}
  */
@@ -356,6 +399,7 @@ const logout = async (req, res) => {
 
 module.exports = {
   authenticateToken,
+  optionalAuthenticate,
   assertSelfOrAdmin,
   checkRole,
   register,

@@ -76,7 +76,7 @@ async function resolveFinalArtistId(artist_id, artist_name) {
 /**
  * 公开列表（分页、缓存、异步写回带 processObjectImages 的缓存）
  */
-async function getPublicArtworksList(query) {
+async function getPublicArtworksList(query, includeHidden = false) {
   const startTime = Date.now();
   performanceMetrics.totalRequests++;
 
@@ -109,13 +109,14 @@ async function getPublicArtworksList(query) {
     }
 
     let cacheKey;
+    const scopeSuffix = includeHidden ? ':all' : ':pub';
     if (artist_id && selectedArtworkIds.length > 0) {
       const idsKey = selectedArtworkIds.slice().sort((a, b) => a - b).join('-');
-      cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:${pageNum}:${sizeNum}`;
+      cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:${pageNum}:${sizeNum}${scopeSuffix}`;
     } else if (artist_id) {
-      cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:${pageNum}:${sizeNum}`;
+      cacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:${pageNum}:${sizeNum}${scopeSuffix}`;
     } else {
-      cacheKey = `${REDIS_ARTWORKS_LIST_KEY}:${pageNum}:${sizeNum}`;
+      cacheKey = `${REDIS_ARTWORKS_LIST_KEY}:${pageNum}:${sizeNum}${scopeSuffix}`;
     }
 
     try {
@@ -135,13 +136,17 @@ async function getPublicArtworksList(query) {
     let sql = `
       SELECT 
         oa.id, oa.title, oa.year, oa.image, oa.price, oa.original_price, oa.discount_price,
-        oa.is_on_sale, oa.stock, oa.sales, oa.created_at,
+        oa.is_on_sale, oa.stock, oa.sales, oa.created_at, oa.is_public,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM original_artworks oa
       LEFT JOIN artists a ON oa.artist_id = a.id
     `;
     const whereClauses = [];
     const params = [];
+
+    if (!includeHidden) {
+      whereClauses.push('COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1');
+    }
 
     if (artist_id) {
       whereClauses.push('oa.artist_id = ?');
@@ -173,13 +178,14 @@ async function getPublicArtworksList(query) {
 
     let total;
     let totalCacheKey;
+    const totalScopeSuffix = includeHidden ? ':all' : ':pub';
     if (artist_id && selectedArtworkIds.length > 0) {
       const idsKey = selectedArtworkIds.slice().sort((a, b) => a - b).join('-');
-      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:total`;
+      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:ids:${idsKey}:total${totalScopeSuffix}`;
     } else if (artist_id) {
-      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:total`;
+      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY_PREFIX}${artist_id}:total${totalScopeSuffix}`;
     } else {
-      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY}:total`;
+      totalCacheKey = `${REDIS_ARTWORKS_LIST_KEY}:total${totalScopeSuffix}`;
     }
 
     try {
@@ -194,6 +200,9 @@ async function getPublicArtworksList(query) {
         `;
         const countWhere = [];
         const countParams = [];
+        if (!includeHidden) {
+          countWhere.push('COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1');
+        }
         if (artist_id) {
           countWhere.push('oa.artist_id = ?');
           countParams.push(parseInt(artist_id, 10));
@@ -281,17 +290,18 @@ async function getPublicArtworksList(query) {
   }
 }
 
-async function getPublicArtworkDetail(rawId) {
+async function getPublicArtworkDetail(rawId, includeHidden = false) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的作品ID' });
   try {
-    const cache = await redisClient.get(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id);
-    if (cache) {
-      return adminResult(200, JSON.parse(cache));
+    if (!includeHidden) {
+      const cache = await redisClient.get(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id);
+      if (cache) {
+        return adminResult(200, JSON.parse(cache));
+      }
     }
 
-    const [rows] = await db.query(
-      `
+    let sql = `
       SELECT 
         oa.*,
         a.id as artist_id,
@@ -301,9 +311,13 @@ async function getPublicArtworkDetail(rawId) {
       FROM original_artworks oa
       LEFT JOIN artists a ON oa.artist_id = a.id
       WHERE oa.id = ?
-    `,
-      [id]
-    );
+    `;
+    const params = [id];
+    if (!includeHidden) {
+      sql += ' AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1';
+    }
+
+    const [rows] = await db.query(sql, params);
 
     if (!rows || rows.length === 0) {
       return adminResult(404, { error: '作品不存在' });
@@ -339,9 +353,12 @@ async function getPublicArtworkDetail(rawId) {
       original_price: artwork.original_price,
       sales: artwork.sales,
       is_on_sale: artwork.is_on_sale,
+      is_public: artwork.is_public,
     };
     try {
-      await redisClient.setEx(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
+      if (!includeHidden) {
+        await redisClient.setEx(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
+      }
     } catch (e) {
       logger.warn('artwork_detail_cache_write_failed', { err: e });
     }
@@ -372,6 +389,9 @@ async function createOriginalArtworkAdmin(body) {
     discount_price,
   } = body || {};
 
+  const is_public =
+    body?.is_public === 0 || body?.is_public === false || body?.is_public === '0' ? 0 : 1;
+
   try {
     const finalArtistId = await resolveFinalArtistId(artist_id, artist_name);
     if (!finalArtistId) {
@@ -384,8 +404,8 @@ async function createOriginalArtworkAdmin(body) {
       `INSERT INTO original_artworks (
         title, image, artist_id, year, description, long_description,
         background, features, collection_location, 
-        collection_number, collection_size, collection_material, price, original_price, discount_price
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        collection_number, collection_size, collection_material, price, original_price, discount_price, is_public
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         image,
@@ -402,6 +422,7 @@ async function createOriginalArtworkAdmin(body) {
         price,
         original_price,
         discount_price,
+        is_public,
       ]
     );
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
@@ -455,6 +476,7 @@ async function updateOriginalArtworkAdmin(rawId, body) {
     sales,
     is_on_sale,
     price,
+    is_public,
   } = body || {};
 
   try {
@@ -462,6 +484,19 @@ async function updateOriginalArtworkAdmin(rawId, body) {
     if (!finalArtistId) {
       return adminResult(400, { error: '缺少有效的艺术家ID' });
     }
+
+    const [existingRows] = await db.query('SELECT is_public FROM original_artworks WHERE id = ?', [artworkId]);
+    if (!existingRows || existingRows.length === 0) {
+      return adminResult(404, { error: '作品不存在' });
+    }
+    const resolvedIsPublic =
+      is_public === undefined || is_public === null
+        ? Number(existingRows[0].is_public) === 0
+          ? 0
+          : 1
+        : is_public === 0 || is_public === false || is_public === '0'
+          ? 0
+          : 1;
 
     await db.query(
       `UPDATE original_artworks SET 
@@ -481,7 +516,8 @@ async function updateOriginalArtworkAdmin(rawId, body) {
         discount_price = ?,
         stock = ?,
         sales = ?,
-        is_on_sale = ?
+        is_on_sale = ?,
+        is_public = ?
       WHERE id = ?`,
       [
         title,
@@ -501,6 +537,7 @@ async function updateOriginalArtworkAdmin(rawId, body) {
         stock,
         sales,
         is_on_sale,
+        resolvedIsPublic,
         artworkId,
       ]
     );
