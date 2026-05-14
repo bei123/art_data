@@ -5,6 +5,7 @@
  * - .env 里密码含 # 或行首有空格，未用双引号导致被截断或读错
  * - 与浏览器不一致：WMS 要求「登录名」而 .env 填了邮箱（或相反），以 Web 登录页实际输入为准
  * - 密码含特殊字符：可用 WMS_HTTP_PASSWORD_B64（UTF-8 明文做 base64，无换行）
+ * - REBUILD 约定：URL 中 passwd 为占位 ******，真实密码在 POST body；客户端须与之一致（见 wmsHttpClient.wmsUserLogin）
  */
 require('dotenv').config()
 
@@ -18,7 +19,8 @@ const WMS_HTTP_BEARER_TOKEN = String(process.env.WMS_HTTP_BEARER_TOKEN || '').tr
 const WMS_HTTP_USER = String(process.env.WMS_HTTP_USER || '').trim()
 
 /**
- * 登录用密码：优先 WMS_HTTP_PASSWORD_B64（base64），否则 WMS_HTTP_PASSWORD 原样（不 trim，避免误伤）
+ * 登录用密码：优先 WMS_HTTP_PASSWORD_B64（base64），否则 WMS_HTTP_PASSWORD 原样（不 trim，避免误伤）。
+ * 与 REBUILD 网页一致：该明文由 wmsUserLogin 写入 POST body，而非 URL 查询串。
  */
 function getWmsHttpPasswordForLogin() {
   const b64 = String(process.env.WMS_HTTP_PASSWORD_B64 || '').trim()

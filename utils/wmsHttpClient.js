@@ -89,9 +89,9 @@ function mergeCookieHeader(existing, fromSetCookie) {
 }
 
 /**
- * RB/WEB 登录（与浏览器 POST /user/user-login 一致）
- * @param {{ user: string, passwd: string, autoLogin?: boolean, vcode?: string, cookie?: string }} creds
- * @returns {Promise<{ response: import('axios').AxiosResponse, sessionCookie: string }>}
+ * RB/WEB 登录（与 REBUILD login.js 一致：URL 中 passwd 固定为 ******，真实密码放在 POST body）
+ * @see https://github.com/getrebuild/rebuild/blob/master/src/main/resources/web/assets/js/login.js
+ * @param {{ user: string, passwd: string, autoLogin?: boolean, vcode?: string, cookie?: string, postBody?: string }} creds postBody 可覆盖默认正文（默认即明文密码）
  */
 async function wmsUserLogin(creds) {
   if (!isWmsHttpConfigured()) {
@@ -108,10 +108,13 @@ async function wmsUserLogin(creds) {
   }
   const autoLogin = creds.autoLogin === true
   const vcode = creds.vcode != null ? String(creds.vcode) : ''
-  const postBody = creds.postBody != null ? String(creds.postBody) : ''
+  const bodyPayload =
+    creds.postBody !== undefined && creds.postBody !== null
+      ? String(creds.postBody)
+      : String(passwd)
   const urlObj = new URL(joinBaseAndPath(WMS_HTTP_BASE_URL, '/user/user-login'))
   urlObj.searchParams.set('user', user)
-  urlObj.searchParams.set('passwd', passwd)
+  urlObj.searchParams.set('passwd', '******')
   urlObj.searchParams.set('autoLogin', String(autoLogin))
   urlObj.searchParams.set('vcode', vcode)
 
@@ -123,7 +126,7 @@ async function wmsUserLogin(creds) {
 
   const timeoutMs = 30000
   try {
-    const response = await axios.post(urlObj.toString(), postBody, {
+    const response = await axios.post(urlObj.toString(), bodyPayload, {
       headers,
       timeout: timeoutMs,
       validateStatus: () => true,
