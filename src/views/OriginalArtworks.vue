@@ -961,7 +961,7 @@ const syncFromWms = async () => {
     }
     await fetchArtworks()
   } catch (e) {
-    if (import.meta.env.DEV) console.error('WMS 同步失败', e)
+    if (import.meta.env.DEV) console.error('WMS 同步失败', e?.response?.data || e)
   } finally {
     wmsSyncing.value = false
   }

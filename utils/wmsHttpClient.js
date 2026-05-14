@@ -7,7 +7,7 @@ const {
   WMS_HTTP_BASE_URL,
   WMS_HTTP_BEARER_TOKEN,
   WMS_HTTP_USER,
-  WMS_HTTP_PASSWORD,
+  getWmsHttpPasswordForLogin,
   isWmsHttpConfigured,
   parseExtraHeaders,
 } = require('../config/wmsHttp')
@@ -137,18 +137,21 @@ async function wmsUserLogin(creds) {
 }
 
 /**
- * 使用环境变量 WMS_HTTP_USER / WMS_HTTP_PASSWORD 登录
+ * 使用环境变量 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD（或 WMS_HTTP_PASSWORD_B64）登录
  * @returns {Promise<{ response: import('axios').AxiosResponse, sessionCookie: string }>}
  */
 async function wmsUserLoginFromEnv() {
-  if (!WMS_HTTP_USER || !WMS_HTTP_PASSWORD) {
-    const err = new Error('wmsUserLoginFromEnv 需要 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD')
+  const passwd = getWmsHttpPasswordForLogin()
+  if (!WMS_HTTP_USER || !passwd) {
+    const err = new Error(
+      'wmsUserLoginFromEnv 需要 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD（或 WMS_HTTP_PASSWORD_B64）'
+    )
     err.code = 'WMS_HTTP_BAD_REQUEST'
     throw err
   }
   return wmsUserLogin({
     user: WMS_HTTP_USER,
-    passwd: WMS_HTTP_PASSWORD,
+    passwd,
     autoLogin: false,
     vcode: '',
   })
