@@ -13,7 +13,7 @@
           variant="outline"
           :disabled="loading || wmsSyncing"
           class="gap-1.5"
-          @click="syncFromWms"
+          @click="openWmsSyncDialog"
         >
           <RefreshCw
             class="size-4 shrink-0"
@@ -416,6 +416,76 @@
       </DialogContent>
     </Dialog>
 
+    <Dialog v-model:open="wmsSyncDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>从 WMS 同步</DialogTitle>
+          <DialogDescription>
+            与 WMS 列表分页一致；页数 × 每页条数为单次最多处理的列表行数上限（详情仍逐条拉取）。
+          </DialogDescription>
+        </DialogHeader>
+        <div class="flex flex-col gap-4 py-2">
+          <div class="space-y-2">
+            <Label for="wms-sync-max-pages">最大列表页数</Label>
+            <Input
+              id="wms-sync-max-pages"
+              v-model.number="wmsSyncMaxPages"
+              type="number"
+              min="1"
+              max="500"
+              class="max-w-[160px]"
+              :disabled="wmsSyncing"
+              aria-describedby="wms-sync-max-pages-hint"
+            />
+            <p id="wms-sync-max-pages-hint" class="text-xs text-muted-foreground">
+              服务端允许 1–500，默认 20。
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="wms-sync-page-size">WMS 每页条数</Label>
+            <Input
+              id="wms-sync-page-size"
+              v-model.number="wmsSyncPageSize"
+              type="number"
+              min="1"
+              max="100"
+              class="max-w-[160px]"
+              :disabled="wmsSyncing"
+              aria-describedby="wms-sync-page-size-hint"
+            />
+            <p id="wms-sync-page-size-hint" class="text-xs text-muted-foreground">
+              服务端允许 1–100，默认 20；调大可减少请求次数。
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="wms-sync-detail-concurrency">详情并发数</Label>
+            <Input
+              id="wms-sync-detail-concurrency"
+              v-model.number="wmsSyncDetailConcurrency"
+              type="number"
+              min="1"
+              max="10"
+              class="max-w-[160px]"
+              :disabled="wmsSyncing"
+              aria-describedby="wms-sync-detail-concurrency-hint"
+            />
+            <p id="wms-sync-detail-concurrency-hint" class="text-xs text-muted-foreground">
+              同时拉取详情的请求数，服务端允许 1–10，默认 3。
+            </p>
+          </div>
+        </div>
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="wmsSyncing" @click="wmsSyncDialogOpen = false">
+            取消
+          </Button>
+          <Button type="button" :disabled="wmsSyncing" @click="confirmSyncFromWms">
+            <Loader2 v-if="wmsSyncing" class="mr-2 size-4 shrink-0 animate-spin" aria-hidden="true" />
+            {{ wmsSyncing ? '同步中…' : '开始同步' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <Dialog v-model:open="previewOpen">
       <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] sm:max-w-3xl">
         <DialogHeader>
@@ -485,6 +555,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -510,6 +581,10 @@ const dialogVisible = ref(false)
 const dialogType = ref('add')
 const loading = ref(false)
 const wmsSyncing = ref(false)
+const wmsSyncDialogOpen = ref(false)
+const wmsSyncMaxPages = ref(20)
+const wmsSyncPageSize = ref(20)
+const wmsSyncDetailConcurrency = ref(3)
 const listError = ref('')
 const pagination = ref({
   page: 1,
@@ -937,16 +1012,28 @@ const retryFetchArtworks = () => {
   fetchArtworks()
 }
 
-/** 管理员：从 WMS 拉取列表与详情并 upsert（依赖服务端 WMS_HTTP_* 与库表 wms_record_id） */
-const syncFromWms = async () => {
+function resolveWmsSyncRequestBody() {
+  const maxPages = Math.min(500, Math.max(1, parseInt(String(wmsSyncMaxPages.value), 10) || 20))
+  const pageSize = Math.min(100, Math.max(1, parseInt(String(wmsSyncPageSize.value), 10) || 20))
+  const detailConcurrency = Math.min(10, Math.max(1, parseInt(String(wmsSyncDetailConcurrency.value), 10) || 3))
+  return { maxPages, pageSize, detailConcurrency }
+}
+
+const openWmsSyncDialog = () => {
   if (!checkLoginStatus() || !isAdmin.value) return
+  wmsSyncDialogOpen.value = true
+}
+
+/** 管理员：从 WMS 拉取列表与详情并 upsert（依赖服务端 WMS_HTTP_* 与库表 wms_record_id） */
+const confirmSyncFromWms = async () => {
+  if (!checkLoginStatus() || !isAdmin.value) return
+  const body = resolveWmsSyncRequestBody()
+  wmsSyncMaxPages.value = body.maxPages
+  wmsSyncPageSize.value = body.pageSize
+  wmsSyncDetailConcurrency.value = body.detailConcurrency
   wmsSyncing.value = true
   try {
-    const data = await axios.post('/original-artworks/admin/sync-from-wms', {
-      maxPages: 20,
-      pageSize: 20,
-      detailConcurrency: 3,
-    })
+    const data = await axios.post('/original-artworks/admin/sync-from-wms', body)
     const s = data?.stats
     if (s) {
       ElMessage.success(
@@ -959,9 +1046,12 @@ const syncFromWms = async () => {
     } else {
       ElMessage.success(data?.message || '同步已提交')
     }
+    wmsSyncDialogOpen.value = false
     await fetchArtworks()
   } catch (e) {
     if (import.meta.env.DEV) console.error('WMS 同步失败', e?.response?.data || e)
+    const msg = e?.response?.data?.error || e?.message || '同步失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '同步失败')
   } finally {
     wmsSyncing.value = false
   }
