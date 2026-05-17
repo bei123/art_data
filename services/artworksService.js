@@ -4,6 +4,10 @@ const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const { invalidateArtistsListCache } = require('./artistsService');
+const {
+  attachAdminWmsImageFields,
+  stripWmsFieldsForPublic,
+} = require('./wmsArtworkImageService');
 
 const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
@@ -247,7 +251,7 @@ async function getPublicArtworksList(query, includeHidden = false) {
     let sql = `
       SELECT 
         oa.id, oa.title, oa.year, oa.image, oa.price, oa.original_price, oa.discount_price,
-        oa.is_on_sale, oa.stock, oa.sales, oa.created_at, oa.is_public,
+        oa.is_on_sale, oa.stock, oa.sales, oa.created_at, oa.is_public, oa.wms_image_paths,
         a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar
       FROM original_artworks oa
       LEFT JOIN artists a ON oa.artist_id = a.id
@@ -334,24 +338,31 @@ async function getPublicArtworksList(query, includeHidden = false) {
       total = rows.length === sizeNum ? (pageNum + 1) * sizeNum : pageNum * sizeNum;
     }
 
+    const mapListRow = (artwork, processedArtwork) => {
+      let item = {
+        ...processedArtwork,
+        artist: {
+          id: artwork.artist_id,
+          name: artwork.artist_name,
+          avatar: processedArtwork.artist_avatar || '',
+        },
+        collection: {
+          location: artwork.collection_location,
+          number: artwork.collection_number,
+          size: artwork.collection_size,
+          material: artwork.collection_material,
+        },
+      };
+      if (includeHidden) item = attachAdminWmsImageFields(item);
+      else item = stripWmsFieldsForPublic(item);
+      return item;
+    };
+
     const processImagesAsync = async () => {
       try {
         const artworksWithFullUrls = rows.map((artwork) => {
           const processedArtwork = processObjectImages(artwork, ['image', 'avatar']);
-          return {
-            ...processedArtwork,
-            artist: {
-              id: artwork.artist_id,
-              name: artwork.artist_name,
-              avatar: processedArtwork.artist_avatar || '',
-            },
-            collection: {
-              location: artwork.collection_location,
-              number: artwork.collection_number,
-              size: artwork.collection_size,
-              material: artwork.collection_material,
-            },
-          };
+          return mapListRow(artwork, processedArtwork);
         });
 
         const result = {
@@ -370,20 +381,7 @@ async function getPublicArtworksList(query, includeHidden = false) {
     };
 
     const immediateResult = {
-      data: rows.map((artwork) => ({
-        ...artwork,
-        artist: {
-          id: artwork.artist_id,
-          name: artwork.artist_name,
-          avatar: artwork.artist_avatar || '',
-        },
-        collection: {
-          location: artwork.collection_location,
-          number: artwork.collection_number,
-          size: artwork.collection_size,
-          material: artwork.collection_material,
-        },
-      })),
+      data: rows.map((artwork) => mapListRow(artwork, artwork)),
       pagination: { page: pageNum, pageSize: sizeNum, total },
     };
 
@@ -447,7 +445,7 @@ async function getPublicArtworkDetail(rawId, includeHidden = false) {
       avatar: artwork.artist_avatar,
       description: artwork.artist_description,
     };
-    const result = {
+    let result = {
       id: artwork.id,
       title: artwork.title,
       year: artwork.year,
@@ -465,7 +463,10 @@ async function getPublicArtworkDetail(rawId, includeHidden = false) {
       sales: artwork.sales,
       is_on_sale: artwork.is_on_sale,
       is_public: artwork.is_public,
+      wms_image_paths: artwork.wms_image_paths,
     };
+    if (includeHidden) result = attachAdminWmsImageFields(result);
+    else result = stripWmsFieldsForPublic(result);
     try {
       if (!includeHidden) {
         await redisClient.setEx(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));

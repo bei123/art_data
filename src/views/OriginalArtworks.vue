@@ -151,15 +151,22 @@
                   type="button"
                   class="relative size-20 overflow-hidden rounded-md border border-border bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
                   :aria-label="row.title ? `预览：${row.title}` : '预览图片'"
-                  @click="openImagePreview(row.image, row.title)"
+                  @click="openImagePreview(displayArtworkImageUrl(row), row.title)"
                 >
                   <img
-                    :src="row.image"
+                    :src="displayArtworkImageUrl(row)"
                     :alt="row.title ? `原作：${row.title}` : '原作缩略图'"
                     class="size-full object-cover"
                     loading="lazy"
                     @error="(e) => { e.target.style.opacity = '0.3' }"
                   >
+                  <Badge
+                    v-if="artworkUsesWmsThumb(row)"
+                    variant="secondary"
+                    class="absolute bottom-0.5 left-0.5 max-w-[4.5rem] truncate px-1 text-[10px]"
+                  >
+                    仓库图
+                  </Badge>
                 </button>
               </td>
               <td class="px-3 py-2.5">{{ row.artist_name }}</td>
@@ -211,6 +218,15 @@
               </td>
               <td class="px-3 py-2.5">
                 <div class="flex flex-wrap gap-1.5">
+                  <Button
+                    v-if="artworkUsesWmsThumb(row)"
+                    size="sm"
+                    variant="outline"
+                    :disabled="applyingWmsImageId === row.id"
+                    @click="handleApplyWmsImage(row)"
+                  >
+                    采用仓库图
+                  </Button>
                   <Button size="sm" variant="secondary" @click="editArtwork(row)">
                     编辑
                   </Button>
@@ -335,6 +351,46 @@
                 <span v-if="uploadProgress < 100">正在上传图片... {{ uploadProgress }}%</span>
                 <span v-else class="font-medium text-primary">上传完成！</span>
               </p>
+            </div>
+          </div>
+
+          <div
+            v-if="form.id && form.wms_image_paths?.length"
+            class="flex flex-col gap-3 rounded-lg border border-amber-200/80 bg-amber-50/50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20"
+          >
+            <div class="flex flex-col gap-1">
+              <p class="text-sm font-medium text-foreground">仓库图片</p>
+              <p class="text-xs text-muted-foreground">
+                仅管理后台可见。采用后将上传至 OSS，前台才会展示该图。
+              </p>
+            </div>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+              <img
+                :src="wmsAdminImageUrl(form.id, 0)"
+                alt="仓库图片预览"
+                class="size-[178px] shrink-0 rounded-md border border-border object-cover"
+                loading="lazy"
+              >
+              <div class="flex flex-col gap-2">
+                <p class="break-all text-xs text-muted-foreground">
+                  {{ form.wms_image_paths[0] }}
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  class="w-fit"
+                  :disabled="applyingWmsImageId === form.id"
+                  @click="handleApplyWmsImage({ id: form.id })"
+                >
+                  <Loader2
+                    v-if="applyingWmsImageId === form.id"
+                    class="mr-1.5 size-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
+                  采用仓库图片并发布
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -724,6 +780,7 @@ const deleteOriginalArtworkTarget = ref(null)
 const deletingOriginalArtwork = ref(false)
 
 const artworkIsPublicUpdatingId = ref(null)
+const applyingWmsImageId = ref(null)
 
 const selectedArtworkIds = ref([])
 const bulkDeleteArtworkDialogOpen = ref(false)
@@ -805,8 +862,10 @@ const totalPages = computed(() =>
 const searchKeyword = ref('')
 const isSearchMode = ref(false)
 const form = ref({
+  id: null,
   title: '',
   image: '',
+  wms_image_paths: [],
   long_description: '',
   artist_id: '',
   year: new Date().getFullYear(),
@@ -852,8 +911,10 @@ const longDescriptionHtml = ref('')
 const resetForm = () => {
   // 重置表单数据
   form.value = {
+    id: null,
     title: '',
     image: '',
+    wms_image_paths: [],
     long_description: '',
     artist_id: '',
     year: new Date().getFullYear(),
@@ -941,6 +1002,56 @@ function openImagePreview(url, title) {
   previewSrc.value = full
   previewTitle.value = title || ''
   previewOpen.value = true
+}
+
+function wmsAdminImageUrl(artworkId, index = 0) {
+  if (!artworkId) return ''
+  const token = localStorage.getItem('token') || ''
+  const q = new URLSearchParams({ index: String(index) })
+  if (token) q.set('token', token)
+  return `${API_BASE_URL}/api/original-artworks/${artworkId}/admin/wms-image?${q}`
+}
+
+function artworkUsesWmsThumb(row) {
+  if (!row?.has_wms_image && !(row?.wms_image_paths?.length > 0)) return false
+  if (row.image_is_placeholder === true) return true
+  if (row.image_is_published === false) return true
+  return !row.image || String(row.image).includes('wms-sync-placeholder')
+}
+
+function displayArtworkImageUrl(row) {
+  if (!row) return ''
+  if (artworkUsesWmsThumb(row)) return wmsAdminImageUrl(row.id, 0)
+  if (row.image && !row.image.startsWith('http')) return `${API_BASE_URL}${row.image}`
+  return row.image || ''
+}
+
+async function handleApplyWmsImage(row) {
+  if (!checkLoginStatus() || !row?.id) return
+  applyingWmsImageId.value = row.id
+  try {
+    const data = await axios.post(`/original-artworks/${row.id}/admin/apply-wms-image`, { index: 0 })
+    const ossUrl = data?.image
+    if (!ossUrl) {
+      ElMessage.error('采用失败：未返回图片地址')
+      return
+    }
+    ElMessage.success(data?.message || '已采用仓库图片')
+    const item = artworks.value.find((a) => a.id === row.id)
+    if (item) {
+      item.image = ossUrl
+      item.image_is_published = true
+      item.image_is_placeholder = false
+    }
+    if (form.value.id === row.id) {
+      form.value.image = ossUrl
+    }
+  } catch (e) {
+    const msg = e?.response?.data?.error || e?.message || '采用仓库图片失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '采用仓库图片失败')
+  } finally {
+    applyingWmsImageId.value = null
+  }
 }
 
 function triggerDialogImageSelect() {
@@ -1322,11 +1433,15 @@ const fetchArtworks = async () => {
         sales: Number(item.sales) || 0,
         is_on_sale: Number(item.is_on_sale) || 0,
         is_public: Number(item.is_public) === 0 ? 0 : 1,
-        year: Number(item.year) || new Date().getFullYear()
+        year: Number(item.year) || new Date().getFullYear(),
+        wms_image_paths: Array.isArray(item.wms_image_paths) ? item.wms_image_paths : [],
+        has_wms_image: Boolean(item.has_wms_image) || (Array.isArray(item.wms_image_paths) && item.wms_image_paths.length > 0),
+        image_is_placeholder: Boolean(item.image_is_placeholder),
+        image_is_published: Boolean(item.image_is_published),
       }
 
-      // 处理图片URL
-      if (artwork.image && !artwork.image.startsWith('http')) {
+      // 处理图片URL（仓库图缩略走代理，不拼 API_BASE）
+      if (artwork.image && !artworkUsesWmsThumb(artwork) && !artwork.image.startsWith('http')) {
         artwork.image = `${API_BASE_URL}${artwork.image}`
       }
 
@@ -1391,6 +1506,7 @@ const editArtwork = async (row) => {
       id: detail.id,
       title: detail.title || '',
       image: detail.image || '',
+      wms_image_paths: Array.isArray(detail.wms_image_paths) ? detail.wms_image_paths : [],
       long_description: detail.long_description || '',
       artist_id: detail.artist?.id || '',
       year: Number(detail.year) || new Date().getFullYear(),

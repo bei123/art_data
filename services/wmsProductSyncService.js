@@ -4,27 +4,22 @@
  */
 const db = require('../db')
 const logger = require('../utils/logger')
-const { OSS_PUBLIC_ORIGIN, validatePublicImageUrl } = require('../config/publicEnv')
 const {
   wmsUserLoginFromEnv,
   wmsProductDataList,
   wmsProductViewModel,
   WMS_PRODUCT_DATA_LIST_DEFAULT_BODY,
 } = require('../utils/wmsHttpClient')
-const { WMS_SYNC_PLACEHOLDER_IMAGE } = require('../config/wmsHttp')
 const { resolveFinalArtistId, invalidateArtworksPublicCaches } = require('./artworksService')
 const { invalidateArtistsListCache } = require('./artistsService')
+const {
+  extractWmsImagePaths,
+  stringifyWmsImagePaths,
+  placeholderImageUrl,
+} = require('./wmsArtworkImageService')
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
-}
-
-function placeholderImageUrl() {
-  const fromEnv = String(WMS_SYNC_PLACEHOLDER_IMAGE || '').trim()
-  if (fromEnv && validatePublicImageUrl(fromEnv)) return fromEnv
-  const ossFallback = `${OSS_PUBLIC_ORIGIN}/wms-sync-placeholder.png`
-  if (validatePublicImageUrl(ossFallback)) return ossFallback
-  return '/uploads/wms-sync-placeholder.png'
 }
 
 function findElement(elements, field) {
@@ -223,6 +218,7 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
       ? Number(d.lastModified)
       : null
   const payload = mapElementsToSyncPayload(d.elements, listHint)
+  const wmsImagePathsJson = stringifyWmsImagePaths(extractWmsImagePaths(d.elements, listHint))
   if (!payload.title) {
     return { ok: false, status: 'skip', error: '无作品名称' }
   }
@@ -265,7 +261,7 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
     await db.query(
       `UPDATE original_artworks SET
         title = ?, artist_id = ?, year = ?, price = ?, original_price = ?,
-        collection_size = ?, collection_material = ?, wms_last_modified = ?
+        collection_size = ?, collection_material = ?, wms_image_paths = ?, wms_last_modified = ?
       WHERE id = ?`,
       [
         payload.title,
@@ -275,6 +271,7 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
         price,
         collection_size,
         collection_material,
+        wmsImagePathsJson,
         lastModified,
         existing.id,
       ]
@@ -288,8 +285,8 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
       title, image, artist_id, year, description, long_description,
       background, features, collection_location, collection_number,
       collection_size, collection_material, price, original_price, discount_price,
-      stock, sales, is_on_sale, wms_record_id, wms_last_modified
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      stock, sales, is_on_sale, wms_record_id, wms_last_modified, wms_image_paths
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.title,
       image,
@@ -311,6 +308,7 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
       0,
       recordId,
       lastModified,
+      wmsImagePathsJson,
     ]
   )
   const artworkId = ins.insertId

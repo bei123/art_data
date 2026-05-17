@@ -1,0 +1,329 @@
+/**
+ * WMS 原作图片：同步路径、管理端代理预览、采用后上传 OSS
+ */
+const axios = require('axios')
+const path = require('path')
+const db = require('../db')
+const logger = require('../utils/logger')
+const { uploadToOSS } = require('../config/oss')
+const { validatePublicImageUrl } = require('../config/publicEnv')
+const { WMS_HTTP_BASE_URL, WMS_HTTP_USER_AGENT, WMS_SYNC_PLACEHOLDER_IMAGE } = require('../config/wmsHttp')
+const { wmsUserLoginFromEnv, buildRbWebHeaders } = require('../utils/wmsHttpClient')
+
+const WMS_FILEX_IMG_PREFIX = String(process.env.WMS_HTTP_FILEX_IMG_PREFIX || '/filex/img/').trim() || '/filex/img/'
+
+function adminResult(status, body) {
+  return { ok: status >= 200 && status < 400, status, body }
+}
+
+function wmsOrigin() {
+  const base = String(WMS_HTTP_BASE_URL || '').trim()
+  if (!base) return ''
+  return base.startsWith('http') ? base.replace(/\/+$/, '') : `http://${base.replace(/\/+$/, '')}`
+}
+
+function normalizeWmsImagePath(raw) {
+  if (raw == null || raw === '') return ''
+  const s = String(raw).trim().replace(/^\/+/, '')
+  if (!s || s.includes('..') || /^https?:\/\//i.test(s)) return ''
+  return s
+}
+
+function parseWmsImagePathsColumn(raw) {
+  if (raw == null || raw === '') return []
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.map(normalizeWmsImagePath).filter(Boolean))]
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return [...new Set(parsed.map(normalizeWmsImagePath).filter(Boolean))]
+      }
+    } catch {
+      const one = normalizeWmsImagePath(raw)
+      return one ? [one] : []
+    }
+  }
+  return []
+}
+
+function stringifyWmsImagePaths(paths) {
+  const list = [...new Set((paths || []).map(normalizeWmsImagePath).filter(Boolean))]
+  return list.length ? JSON.stringify(list) : null
+}
+
+function placeholderImageUrl() {
+  const fromEnv = String(WMS_SYNC_PLACEHOLDER_IMAGE || '').trim()
+  if (fromEnv && validatePublicImageUrl(fromEnv)) return fromEnv
+  return '/uploads/wms-sync-placeholder.png'
+}
+
+function isWmsSyncPlaceholderImage(url) {
+  if (!url || typeof url !== 'string') return true
+  const u = url.trim()
+  if (!u) return true
+  const ph = placeholderImageUrl()
+  if (u === ph) return true
+  if (u.includes('wms-sync-placeholder')) return true
+  return false
+}
+
+/** 已发布到 OSS 的公开图（非 WMS 占位） */
+function isPublishedOssArtworkImage(url) {
+  if (!url || typeof url !== 'string') return false
+  if (isWmsSyncPlaceholderImage(url)) return false
+  return validatePublicImageUrl(url.trim())
+}
+
+function extractWmsImagePathsFromElement(el) {
+  if (!el) return []
+  const out = []
+  const v = el.value
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      if (typeof item === 'string') out.push(normalizeWmsImagePath(item))
+      else if (item && typeof item === 'object') {
+        if (typeof item.url === 'string') out.push(normalizeWmsImagePath(item.url))
+        else if (typeof item.path === 'string') out.push(normalizeWmsImagePath(item.path))
+        else if (typeof item.name === 'string') out.push(normalizeWmsImagePath(item.name))
+      }
+    }
+  } else if (typeof v === 'string' && v.trim()) {
+    out.push(normalizeWmsImagePath(v))
+  }
+  return [...new Set(out.filter(Boolean))]
+}
+
+function dataCellsFromListRow(row) {
+  if (!Array.isArray(row) || row.length === 0) return []
+  const last = row[row.length - 1]
+  if (last && typeof last === 'object' && last.entity === 'Product' && last.id) return row.slice(0, -1)
+  return row
+}
+
+function extractWmsImagePathsFromListRow(row, fields) {
+  if (!Array.isArray(fields) || fields.length === 0) return []
+  const idx = fields.indexOf('zuopintupian')
+  if (idx < 0) return []
+  const cells = dataCellsFromListRow(row)
+  if (idx >= cells.length) return []
+  const cell = cells[idx]
+  if (Array.isArray(cell)) {
+    return [...new Set(cell.map(normalizeWmsImagePath).filter(Boolean))]
+  }
+  if (typeof cell === 'string') {
+    const one = normalizeWmsImagePath(cell)
+    return one ? [one] : []
+  }
+  return []
+}
+
+/**
+ * @param {object[]} elements
+ * @param {{ row?: unknown[], fields?: string[] } | null | undefined} listHint
+ */
+function extractWmsImagePaths(elements, listHint) {
+  const fromEl = extractWmsImagePathsFromElement(
+    Array.isArray(elements) ? elements.find((e) => e && e.field === 'zuopintupian') : null
+  )
+  if (fromEl.length) return fromEl
+  if (listHint && Array.isArray(listHint.row) && Array.isArray(listHint.fields)) {
+    return extractWmsImagePathsFromListRow(listHint.row, listHint.fields)
+  }
+  return []
+}
+
+function buildWmsFileViewUrl(relativePath) {
+  const origin = wmsOrigin()
+  const rel = normalizeWmsImagePath(relativePath)
+  if (!origin || !rel) return ''
+  const prefix = WMS_FILEX_IMG_PREFIX.startsWith('/') ? WMS_FILEX_IMG_PREFIX : `/${WMS_FILEX_IMG_PREFIX}`
+  const encoded = rel.split('/').map((seg) => encodeURIComponent(seg)).join('/')
+  return `${origin}${prefix}${encoded}`
+}
+
+/**
+ * @param {string} cookie
+ * @param {string} relativePath
+ */
+async function fetchWmsImageBuffer(cookie, relativePath) {
+  const url = buildWmsFileViewUrl(relativePath)
+  if (!url) {
+    const err = new Error('无效的 WMS 图片路径')
+    err.code = 'WMS_IMAGE_BAD_PATH'
+    throw err
+  }
+  const headers = buildRbWebHeaders({
+    refererPath: '/app/Product/list',
+    cookie: String(cookie).trim(),
+    contentType: 'image/*',
+    userAgent: WMS_HTTP_USER_AGENT,
+  })
+  delete headers['Content-Type']
+  const res = await axios.get(url, {
+    headers,
+    responseType: 'arraybuffer',
+    timeout: 60000,
+    validateStatus: () => true,
+  })
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`拉取 WMS 图片失败 HTTP ${res.status}`)
+    err.code = 'WMS_IMAGE_HTTP'
+    err.status = res.status
+    throw err
+  }
+  const buffer = Buffer.from(res.data)
+  if (!buffer.length) {
+    const err = new Error('WMS 图片为空')
+    err.code = 'WMS_IMAGE_EMPTY'
+    throw err
+  }
+  const contentType = String(res.headers['content-type'] || 'image/jpeg').split(';')[0].trim()
+  return { buffer, contentType, url }
+}
+
+function extFromContentType(contentType, relativePath) {
+  const map = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/gif': '.gif',
+  }
+  if (contentType && map[contentType.toLowerCase()]) return map[contentType.toLowerCase()]
+  const ext = path.extname(relativePath || '').toLowerCase()
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) return ext === '.jpeg' ? '.jpg' : ext
+  return '.jpg'
+}
+
+/**
+ * 管理端：代理输出 WMS 图片（需 WMS 登录 Cookie）
+ */
+async function streamWmsArtworkImageAdmin(artworkId, query, res) {
+  const id = parseInt(String(artworkId), 10)
+  if (Number.isNaN(id) || id <= 0) {
+    return adminResult(400, { error: '无效的作品ID' })
+  }
+  const index = Math.max(0, parseInt(String(query?.index ?? 0), 10) || 0)
+
+  const [rows] = await db.query(
+    'SELECT id, wms_image_paths FROM original_artworks WHERE id = ? LIMIT 1',
+    [id]
+  )
+  if (!rows.length) return adminResult(404, { error: '作品不存在' })
+
+  const paths = parseWmsImagePathsColumn(rows[0].wms_image_paths)
+  if (!paths.length) return adminResult(404, { error: '无仓库图片' })
+  const rel = paths[index] || paths[0]
+
+  try {
+    const { sessionCookie } = await wmsUserLoginFromEnv()
+    const cookie = sessionCookie || ''
+    if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+
+    const { buffer, contentType } = await fetchWmsImageBuffer(cookie, rel)
+    res.setHeader('Content-Type', contentType || 'image/jpeg')
+    res.setHeader('Cache-Control', 'private, max-age=300')
+    res.send(buffer)
+    return null
+  } catch (e) {
+    logger.error('streamWmsArtworkImageAdmin_failed', { id, rel, err: e.message })
+    if (e.code === 'WMS_HTTP_NOT_CONFIGURED' || e.code === 'WMS_HTTP_BAD_REQUEST') {
+      return adminResult(400, { error: e.message })
+    }
+    return adminResult(502, { error: e.message || '拉取仓库图片失败' })
+  }
+}
+
+/**
+ * 管理端：将仓库图上传 OSS 并写入 original_artworks.image（对外展示）
+ */
+async function applyWmsImageToArtworkAdmin(artworkId, body) {
+  const id = parseInt(String(artworkId), 10)
+  if (Number.isNaN(id) || id <= 0) {
+    return adminResult(400, { error: '无效的作品ID' })
+  }
+  const index = Math.max(0, parseInt(String(body?.index ?? 0), 10) || 0)
+
+  const [rows] = await db.query(
+    'SELECT id, title, image, wms_image_paths FROM original_artworks WHERE id = ? LIMIT 1',
+    [id]
+  )
+  if (!rows.length) return adminResult(404, { error: '作品不存在' })
+
+  const paths = parseWmsImagePathsColumn(rows[0].wms_image_paths)
+  if (!paths.length) return adminResult(400, { error: '该作品无仓库图片，请先 WMS 同步' })
+
+  const rel = paths[index] || paths[0]
+
+  try {
+    const { sessionCookie } = await wmsUserLoginFromEnv()
+    const cookie = sessionCookie || ''
+    if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+
+    const { buffer, contentType } = await fetchWmsImageBuffer(cookie, rel)
+    const ext = extFromContentType(contentType, rel)
+    const upload = await uploadToOSS(
+      {
+        buffer,
+        originalname: `wms-${id}${ext}`,
+        size: buffer.length,
+      },
+      'original-artworks/'
+    )
+
+    if (!upload?.url || !validatePublicImageUrl(upload.url)) {
+      return adminResult(500, { error: '上传到 OSS 后 URL 无效' })
+    }
+
+    await db.query('UPDATE original_artworks SET image = ? WHERE id = ?', [upload.url, id])
+    const { invalidateArtworksPublicCaches } = require('./artworksService')
+    await invalidateArtworksPublicCaches({ artworkDetailIds: [id] })
+
+    return adminResult(200, {
+      message: '已采用仓库图片并发布到 OSS',
+      image: upload.url,
+      wms_path: rel,
+    })
+  } catch (e) {
+    logger.error('applyWmsImageToArtworkAdmin_failed', { id, rel, err: e.message })
+    if (e.code === 'WMS_HTTP_NOT_CONFIGURED' || e.code === 'WMS_HTTP_BAD_REQUEST') {
+      return adminResult(400, { error: e.message })
+    }
+    return adminResult(502, { error: e.message || '采用仓库图片失败' })
+  }
+}
+
+function attachAdminWmsImageFields(row) {
+  if (!row) return row
+  const wms_image_paths = parseWmsImagePathsColumn(row.wms_image_paths)
+  return {
+    ...row,
+    wms_image_paths,
+    has_wms_image: wms_image_paths.length > 0,
+    image_is_placeholder: isWmsSyncPlaceholderImage(row.image),
+    image_is_published: isPublishedOssArtworkImage(row.image),
+  }
+}
+
+function stripWmsFieldsForPublic(row) {
+  if (!row || typeof row !== 'object') return row
+  const { wms_image_paths, has_wms_image, image_is_placeholder, image_is_published, ...rest } = row
+  return rest
+}
+
+module.exports = {
+  normalizeWmsImagePath,
+  parseWmsImagePathsColumn,
+  stringifyWmsImagePaths,
+  placeholderImageUrl,
+  isWmsSyncPlaceholderImage,
+  isPublishedOssArtworkImage,
+  extractWmsImagePaths,
+  buildWmsFileViewUrl,
+  streamWmsArtworkImageAdmin,
+  applyWmsImageToArtworkAdmin,
+  attachAdminWmsImageFields,
+  stripWmsFieldsForPublic,
+}

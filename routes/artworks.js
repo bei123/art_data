@@ -4,6 +4,14 @@ const logger = require('../utils/logger');
 const { authenticateToken, checkRole, optionalAuthenticate } = require('../auth');
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
+const wmsArtworkImage = require('../services/wmsArtworkImageService');
+
+function authenticateTokenAllowQuery(req, res, next) {
+  if (!req.headers.authorization && req.query?.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  return authenticateToken(req, res, next);
+}
 
 router.get('/', optionalAuthenticate, async (req, res) => {
   try {
@@ -57,6 +65,38 @@ router.post(
     } catch (error) {
       logger.error('WMS 同步失败', { err: error });
       res.status(500).json({ error: 'WMS 同步失败' });
+    }
+  }
+);
+
+/** 管理端：代理预览 WMS 仓库图（img 标签可用 query.token 传 JWT） */
+router.get(
+  '/:id/admin/wms-image',
+  authenticateTokenAllowQuery,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const r = await wmsArtworkImage.streamWmsArtworkImageAdmin(req.params.id, req.query, res);
+      if (r) return res.status(r.status).json(r.body);
+    } catch (error) {
+      logger.error('WMS 仓库图预览失败', { err: error });
+      res.status(500).json({ error: '拉取仓库图片失败' });
+    }
+  }
+);
+
+/** 管理端：采用仓库图 → 上传 OSS → 写入 image 字段对外展示 */
+router.post(
+  '/:id/admin/apply-wms-image',
+  authenticateToken,
+  checkRole(['admin']),
+  async (req, res) => {
+    try {
+      const r = await wmsArtworkImage.applyWmsImageToArtworkAdmin(req.params.id, req.body || {});
+      return res.status(r.status).json(r.body);
+    } catch (error) {
+      logger.error('采用 WMS 仓库图失败', { err: error });
+      res.status(500).json({ error: '采用仓库图片失败' });
     }
   }
 );
