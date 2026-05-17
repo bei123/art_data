@@ -37,6 +37,12 @@ function getWmsHttpPasswordForLogin() {
 
 /** 可选：WMS 同步新建原作时的占位图 URL（须通过 validatePublicImageUrl） */
 const WMS_SYNC_PLACEHOLDER_IMAGE = String(process.env.WMS_SYNC_PLACEHOLDER_IMAGE || '').trim()
+/** REBUILD 附件 CDN 根（浏览器拉图域名，如 http://qn.2000gallery.art） */
+const WMS_IMAGE_CDN_ORIGIN = trimSlash(process.env.WMS_IMAGE_CDN_ORIGIN || 'http://qn.2000gallery.art')
+/** 可选：七牛缩略/质量参数（浏览器列表多为 w/100；后台采用原图可用 w/0） */
+const WMS_IMAGE_VIEW_PARAMS = String(
+  process.env.WMS_IMAGE_VIEW_PARAMS || 'imageView2/2/w/0/interlace/1/q/100'
+).trim()
 /** 可选：JSON 字符串，合并进请求头，如 {"X-Api-Key":"xxx"} */
 const WMS_HTTP_EXTRA_HEADERS_JSON = String(process.env.WMS_HTTP_EXTRA_HEADERS_JSON || '').trim()
 /** 可选：登录 POST 使用的 Cookie（如从 DevTools 复制，须含 RBSESSION）；若设置则跳过自动 GET /user/login 预热 */
@@ -68,6 +74,8 @@ module.exports = {
   WMS_HTTP_USER,
   getWmsHttpPasswordForLogin,
   WMS_SYNC_PLACEHOLDER_IMAGE,
+  WMS_IMAGE_CDN_ORIGIN,
+  WMS_IMAGE_VIEW_PARAMS,
   WMS_HTTP_EXTRA_HEADERS_JSON,
   WMS_HTTP_COOKIE,
   WMS_HTTP_VCODE,

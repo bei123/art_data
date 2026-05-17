@@ -7,8 +7,14 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const { uploadToOSS } = require('../config/oss')
 const { validatePublicImageUrl } = require('../config/publicEnv')
-const { WMS_HTTP_BASE_URL, WMS_HTTP_USER_AGENT, WMS_SYNC_PLACEHOLDER_IMAGE } = require('../config/wmsHttp')
-const { wmsUserLoginFromEnv, buildRbWebHeaders } = require('../utils/wmsHttpClient')
+const {
+  WMS_HTTP_BASE_URL,
+  WMS_HTTP_USER_AGENT,
+  WMS_SYNC_PLACEHOLDER_IMAGE,
+  WMS_IMAGE_CDN_ORIGIN,
+  WMS_IMAGE_VIEW_PARAMS,
+} = require('../config/wmsHttp')
+const { wmsUserLoginFromEnv, buildRbWebHeaders, wmsOrigin } = require('../utils/wmsHttpClient')
 
 const WMS_FILEX_IMG_PREFIX = String(process.env.WMS_HTTP_FILEX_IMG_PREFIX || '/filex/img/').trim() || '/filex/img/'
 
@@ -16,10 +22,22 @@ function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
 }
 
-function wmsOrigin() {
-  const base = String(WMS_HTTP_BASE_URL || '').trim()
+function cdnOrigin() {
+  const base = String(WMS_IMAGE_CDN_ORIGIN || '').trim()
   if (!base) return ''
   return base.startsWith('http') ? base.replace(/\/+$/, '') : `http://${base.replace(/\/+$/, '')}`
+}
+
+function isAbsoluteImageUrl(raw) {
+  return /^https?:\/\//i.test(String(raw || '').trim())
+}
+
+function resolveAbsoluteUrl(baseOrigin, location) {
+  const loc = String(location || '').trim()
+  if (!loc) return ''
+  if (/^https?:\/\//i.test(loc)) return loc
+  const base = String(baseOrigin || '').replace(/\/+$/, '')
+  return loc.startsWith('/') ? `${base}${loc}` : `${base}/${loc}`
 }
 
 function normalizeWmsImagePath(raw) {
@@ -29,19 +47,40 @@ function normalizeWmsImagePath(raw) {
   return s
 }
 
+/** 从绝对 URL 中提取 rb/ 相对路径（用于签名过期后重试） */
+function relativePathFromImageUrl(url) {
+  if (!isAbsoluteImageUrl(url)) return ''
+  try {
+    const u = new URL(url)
+    const p = u.pathname.replace(/^\/+/, '')
+    if (p.startsWith('rb/')) return normalizeWmsImagePath(p)
+  } catch {
+    /* ignore */
+  }
+  const m = String(url).match(/\b(rb\/[^\s"'?<>]+\.(?:jpg|jpeg|png|webp|gif))/i)
+  return m ? normalizeWmsImagePath(m[1]) : ''
+}
+
+function normalizeWmsImageRef(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  if (isAbsoluteImageUrl(s)) return s
+  return normalizeWmsImagePath(s)
+}
+
 function parseWmsImagePathsColumn(raw) {
   if (raw == null || raw === '') return []
   if (Array.isArray(raw)) {
-    return [...new Set(raw.map(normalizeWmsImagePath).filter(Boolean))]
+    return [...new Set(raw.map(normalizeWmsImageRef).filter(Boolean))]
   }
   if (typeof raw === 'string') {
     try {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed)) {
-        return [...new Set(parsed.map(normalizeWmsImagePath).filter(Boolean))]
+        return [...new Set(parsed.map(normalizeWmsImageRef).filter(Boolean))]
       }
     } catch {
-      const one = normalizeWmsImagePath(raw)
+      const one = normalizeWmsImageRef(raw)
       return one ? [one] : []
     }
   }
@@ -49,7 +88,7 @@ function parseWmsImagePathsColumn(raw) {
 }
 
 function stringifyWmsImagePaths(paths) {
-  const list = [...new Set((paths || []).map(normalizeWmsImagePath).filter(Boolean))]
+  const list = [...new Set((paths || []).map(normalizeWmsImageRef).filter(Boolean))]
   return list.length ? JSON.stringify(list) : null
 }
 
@@ -117,6 +156,14 @@ function pathsFromRawString(raw) {
   }
 
   const out = []
+  const urlRe = /(https?:\/\/[^\s"'<>]+\/rb\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)[^\s"'<>]*)/gi
+  let urlMatch = urlRe.exec(str)
+  while (urlMatch) {
+    const u = String(urlMatch[1]).trim()
+    if (u) out.push(u)
+    urlMatch = urlRe.exec(str)
+  }
+
   const re = /\b(rb\/[^\s"',<>]+\.(?:jpg|jpeg|png|webp|gif))\b/gi
   let match = re.exec(str)
   while (match) {
@@ -160,8 +207,16 @@ function extractWmsImagePathsFromListRow(row, fields) {
 }
 
 function wmsImagePathsEqual(a, b) {
-  const left = [...(a || [])].map(normalizeWmsImagePath).filter(Boolean).sort()
-  const right = [...(b || [])].map(normalizeWmsImagePath).filter(Boolean).sort()
+  const norm = (list) =>
+    [...(list || [])]
+      .map((item) => {
+        if (isAbsoluteImageUrl(item)) return relativePathFromImageUrl(item) || String(item)
+        return normalizeWmsImagePath(item)
+      })
+      .filter(Boolean)
+      .sort()
+  const left = norm(a)
+  const right = norm(b)
   if (left.length !== right.length) return false
   return left.every((p, i) => p === right[i])
 }
@@ -181,37 +236,48 @@ function extractWmsImagePaths(elements, listHint) {
   return []
 }
 
-function buildWmsFileViewUrl(relativePath) {
+/** REBUILD：带登录态访问 filex，通常会 302 到 qn 带 token 的地址 */
+function buildWmsFilexImgUrl(relativePath) {
   const origin = wmsOrigin()
   const rel = normalizeWmsImagePath(relativePath)
   if (!origin || !rel) return ''
   const prefix = WMS_FILEX_IMG_PREFIX.startsWith('/') ? WMS_FILEX_IMG_PREFIX : `/${WMS_FILEX_IMG_PREFIX}`
-  const encoded = rel.split('/').map((seg) => encodeURIComponent(seg)).join('/')
-  return `${origin}${prefix}${encoded}`
+  return `${origin}${prefix}${rel}`
 }
 
-/**
- * @param {string} cookie
- * @param {string} relativePath
- */
-async function fetchWmsImageBuffer(cookie, relativePath) {
-  const url = buildWmsFileViewUrl(relativePath)
-  if (!url) {
-    const err = new Error('无效的 WMS 图片路径')
-    err.code = 'WMS_IMAGE_BAD_PATH'
-    throw err
-  }
+function buildWmsFilexReadUrl(relativePath) {
+  const origin = wmsOrigin()
+  const rel = normalizeWmsImagePath(relativePath)
+  if (!origin || !rel) return ''
+  return `${origin}/filex/read/${rel}`
+}
+
+function buildCdnImageUrl(relativePath, withViewParams = true) {
+  const cdn = cdnOrigin()
+  const rel = normalizeWmsImagePath(relativePath)
+  if (!cdn || !rel) return ''
+  const base = `${cdn}/${rel}`
+  if (!withViewParams || !WMS_IMAGE_VIEW_PARAMS) return base
+  return `${base}?${WMS_IMAGE_VIEW_PARAMS}`
+}
+
+function imageGetHeaders(cookie, refererPath = '/app/Product/list') {
   const headers = buildRbWebHeaders({
-    refererPath: '/app/Product/list',
-    cookie: String(cookie).trim(),
-    contentType: 'image/*',
+    refererPath,
+    cookie: String(cookie || '').trim(),
     userAgent: WMS_HTTP_USER_AGENT,
   })
   delete headers['Content-Type']
+  headers.Accept = 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+  return headers
+}
+
+async function httpGetImageBuffer(url, headers) {
   const res = await axios.get(url, {
     headers,
     responseType: 'arraybuffer',
     timeout: 60000,
+    maxRedirects: 10,
     validateStatus: () => true,
   })
   if (res.status < 200 || res.status >= 300) {
@@ -227,10 +293,117 @@ async function fetchWmsImageBuffer(cookie, relativePath) {
     throw err
   }
   const contentType = String(res.headers['content-type'] || 'image/jpeg').split(';')[0].trim()
-  return { buffer, contentType, url }
+  return { buffer, contentType, url: res.request?.res?.responseUrl || url }
 }
 
-function extFromContentType(contentType, relativePath) {
+/** 先 HEAD/GET 不跟随重定向，拿到 qn 签名 URL */
+async function resolveSignedCdnUrlViaFilex(cookie, relativePath) {
+  const filexUrl = buildWmsFilexImgUrl(relativePath)
+  if (!filexUrl) return ''
+  const res = await axios.get(filexUrl, {
+    headers: imageGetHeaders(cookie),
+    maxRedirects: 0,
+    validateStatus: () => true,
+    timeout: 30000,
+  })
+  if ((res.status === 301 || res.status === 302 || res.status === 303) && res.headers.location) {
+    const loc = String(res.headers.location).trim()
+    if (/^https?:\/\//i.test(loc)) return loc
+    return resolveAbsoluteUrl(wmsOrigin(), loc)
+  }
+  if (res.status >= 200 && res.status < 300) return filexUrl
+  return ''
+}
+
+async function fetchViaWmsFilex(cookie, relativePath) {
+  const filexUrl = buildWmsFilexImgUrl(relativePath)
+  if (!filexUrl) {
+    const err = new Error('无效的 WMS 图片路径')
+    err.code = 'WMS_IMAGE_BAD_PATH'
+    throw err
+  }
+  return httpGetImageBuffer(filexUrl, imageGetHeaders(cookie))
+}
+
+async function fetchViaSignedCdn(cookie, relativePath) {
+  const signed = await resolveSignedCdnUrlViaFilex(cookie, relativePath)
+  if (!signed) {
+    const err = new Error('无法从 WMS 获取图片签名地址')
+    err.code = 'WMS_IMAGE_NO_SIGN'
+    throw err
+  }
+  const wms = wmsOrigin()
+  return httpGetImageBuffer(signed, {
+    Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    Referer: `${wms}/`,
+    'User-Agent': WMS_HTTP_USER_AGENT,
+  })
+}
+
+async function fetchViaWmsFilexRead(cookie, relativePath) {
+  const readUrl = buildWmsFilexReadUrl(relativePath)
+  if (!readUrl) {
+    const err = new Error('无效的 WMS 图片路径')
+    err.code = 'WMS_IMAGE_BAD_PATH'
+    throw err
+  }
+  return httpGetImageBuffer(readUrl, imageGetHeaders(cookie))
+}
+
+/**
+ * @param {string} cookie
+ * @param {string} imageRef 相对路径 rb/... 或完整 qn 签名 URL
+ */
+async function fetchWmsImageBuffer(cookie, imageRef) {
+  const ref = String(imageRef || '').trim()
+  if (!ref) {
+    const err = new Error('无效的 WMS 图片路径')
+    err.code = 'WMS_IMAGE_BAD_PATH'
+    throw err
+  }
+
+  if (isAbsoluteImageUrl(ref)) {
+    const wms = wmsOrigin()
+    try {
+      return await httpGetImageBuffer(ref, {
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        Referer: `${wms}/`,
+        'User-Agent': WMS_HTTP_USER_AGENT,
+      })
+    } catch (e) {
+      const rel = relativePathFromImageUrl(ref)
+      if (!rel) throw e
+      logger.warn('wms_image_signed_url_expired_retry_filex', { ref: rel })
+    }
+  }
+
+  const rel = isAbsoluteImageUrl(ref) ? relativePathFromImageUrl(ref) : normalizeWmsImagePath(ref)
+  if (!rel) {
+    const err = new Error('无效的 WMS 图片路径')
+    err.code = 'WMS_IMAGE_BAD_PATH'
+    throw err
+  }
+
+  const attempts = [
+    () => fetchViaWmsFilex(cookie, rel),
+    () => fetchViaSignedCdn(cookie, rel),
+    () => fetchViaWmsFilexRead(cookie, rel),
+  ]
+
+  let lastErr
+  for (const run of attempts) {
+    try {
+      return await run()
+    } catch (e) {
+      lastErr = e
+      logger.warn('wms_image_fetch_attempt_failed', { rel, code: e.code, err: e.message })
+    }
+  }
+
+  throw lastErr || new Error('拉取 WMS 图片失败')
+}
+
+function extFromContentType(contentType, imageRef) {
   const map = {
     'image/jpeg': '.jpg',
     'image/jpg': '.jpg',
@@ -239,7 +412,10 @@ function extFromContentType(contentType, relativePath) {
     'image/gif': '.gif',
   }
   if (contentType && map[contentType.toLowerCase()]) return map[contentType.toLowerCase()]
-  const ext = path.extname(relativePath || '').toLowerCase()
+  const pathForExt = isAbsoluteImageUrl(imageRef)
+    ? relativePathFromImageUrl(imageRef) || imageRef
+    : imageRef
+  const ext = path.extname(pathForExt || '').toLowerCase()
   if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) return ext === '.jpeg' ? '.jpg' : ext
   return '.jpg'
 }
@@ -366,11 +542,12 @@ module.exports = {
   stringifyWmsImagePaths,
   wmsImagePathsEqual,
   collectPathsFromValue,
+  buildCdnImageUrl,
   placeholderImageUrl,
   isWmsSyncPlaceholderImage,
   isPublishedOssArtworkImage,
   extractWmsImagePaths,
-  buildWmsFileViewUrl,
+  buildWmsFilexImgUrl,
   streamWmsArtworkImageAdmin,
   applyWmsImageToArtworkAdmin,
   attachAdminWmsImageFields,
