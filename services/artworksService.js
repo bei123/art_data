@@ -88,12 +88,62 @@ function normalizeArtistDisplayName(raw) {
 }
 
 /**
+ * 按姓名查库或插入（内部用；并发由 resolveFinalArtistId 的 inflight 串行化）
+ * @param {string} name 已 normalizeArtistDisplayName
+ */
+async function resolveFinalArtistIdByName(name, options = {}) {
+  const { cache, deferListCacheInvalidation = false } = options;
+
+  if (cache && cache.has(name)) {
+    const cachedId = cache.get(name);
+    if (cachedId) return cachedId;
+  }
+
+  const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name]);
+  if (existingArtists.length > 0) {
+    const id = existingArtists[0].id;
+    if (cache) cache.set(name, id);
+    return id;
+  }
+
+  try {
+    const [artistResult] = await db.query(
+      'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
+      [null, name, '', null]
+    );
+    if (!deferListCacheInvalidation) {
+      await invalidateArtistsListCache();
+    }
+    const id = artistResult.insertId;
+    if (cache) cache.set(name, id);
+    return id;
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      const [again] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name]);
+      if (again.length > 0) {
+        const id = again[0].id;
+        if (cache) cache.set(name, id);
+        return id;
+      }
+    }
+    logger.error('resolveFinalArtistId_insert_failed', { err: e.message, code: e.code, name });
+    throw e;
+  }
+}
+
+/**
  * 按 ID 或名称解析艺术家；表内无同名记录时插入 `artists`（与后台创建接口列一致），并清理公开艺术家列表缓存。
  * @param {unknown} artist_id
  * @param {unknown} artist_name
+ * @param {{ cache?: Map<string, number>, inflight?: Map<string, Promise<number|null>>, deferListCacheInvalidation?: boolean }} [options]
+ *   cache：批次内复用（如 WMS 同步），键为 normalizeArtistDisplayName 后的姓名
+ *   inflight：同进程内同名并发解析共用一个 Promise，避免重复 INSERT
+ *   deferListCacheInvalidation：为 true 时不逐条清艺术家列表缓存（由调用方在批次结束后统一失效）
  * @returns {Promise<number|null>}
  */
-async function resolveFinalArtistId(artist_id, artist_name) {
+async function resolveFinalArtistId(artist_id, artist_name, options = {}) {
+  const { cache, inflight, deferListCacheInvalidation = false } = options;
+
   const parsedId =
     artist_id != null && artist_id !== '' ? parsePositiveIntId(artist_id) : null;
   if (parsedId) return parsedId;
@@ -101,23 +151,36 @@ async function resolveFinalArtistId(artist_id, artist_name) {
   const name = normalizeArtistDisplayName(artist_name);
   if (!name) return null;
 
-  const [existingArtists] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name]);
-  if (existingArtists.length > 0) return existingArtists[0].id;
+  if (cache && cache.has(name)) {
+    const cachedId = cache.get(name);
+    if (cachedId) return cachedId;
+  }
+
+  if (!inflight) {
+    return resolveFinalArtistIdByName(name, { cache, deferListCacheInvalidation });
+  }
+
+  if (inflight.has(name)) {
+    return inflight.get(name);
+  }
+
+  let resolveDone;
+  let rejectDone;
+  const task = new Promise((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+  inflight.set(name, task);
 
   try {
-    const [artistResult] = await db.query(
-      'INSERT INTO artists (avatar, name, description, institution_id) VALUES (?, ?, ?, ?)',
-      [null, name, '', null]
-    );
-    await invalidateArtistsListCache();
-    return artistResult.insertId;
+    const id = await resolveFinalArtistIdByName(name, { cache, deferListCacheInvalidation });
+    resolveDone(id);
+    return id;
   } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') {
-      const [again] = await db.query('SELECT id FROM artists WHERE name = ? LIMIT 1', [name]);
-      if (again.length > 0) return again[0].id;
-    }
-    logger.error('resolveFinalArtistId_insert_failed', { err: e.message, code: e.code, name });
+    rejectDone(e);
     throw e;
+  } finally {
+    inflight.delete(name);
   }
 }
 

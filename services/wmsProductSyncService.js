@@ -198,9 +198,10 @@ function recordIdFromListRow(row) {
  * @param {string} cookie
  * @param {string} recordId
  * @param {{ row?: unknown[], fields?: string[] } | null | undefined} listHint 列表行里艺术家列常有可读文本
+ * @param {Map<string, number> | null | undefined} artistIdByName 同次同步批次内按艺术家姓名缓存 id，避免重复查库/插入
  * @returns {Promise<{ ok: boolean, status: string, artworkId?: number, error?: string }>}
  */
-async function upsertOneProductFromWms(cookie, recordId, listHint) {
+async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByName, artistResolveInflight) {
   const res = await wmsProductViewModel({ cookie, id: recordId })
   if (res.status < 200 || res.status >= 300) {
     return { ok: false, status: 'http_error', error: `HTTP ${res.status}` }
@@ -228,7 +229,15 @@ async function upsertOneProductFromWms(cookie, recordId, listHint) {
   if (!payload.artistName) {
     return { ok: false, status: 'skip', error: '无艺术家' }
   }
-  const artistId = await resolveFinalArtistId(null, payload.artistName)
+  const artistResolveOptions =
+    artistIdByName || artistResolveInflight
+      ? {
+          cache: artistIdByName || undefined,
+          inflight: artistResolveInflight || undefined,
+          deferListCacheInvalidation: Boolean(artistIdByName),
+        }
+      : undefined
+  const artistId = await resolveFinalArtistId(null, payload.artistName, artistResolveOptions)
   if (!artistId) {
     return { ok: false, status: 'skip', error: '无法解析艺术家' }
   }
@@ -335,9 +344,14 @@ async function syncFromWmsAdmin(body) {
     updated: 0,
     skipped_unchanged: 0,
     skipped_skip: 0,
+    artistsResolved: 0,
     errors: [],
   }
   const touchedArtworkIds = []
+  /** @type {Map<string, number>} 同批次多作品共用艺术家时只查库/插入一次 */
+  const artistIdByName = new Map()
+  /** @type {Map<string, Promise<number|null>>} 并发详情拉取时同名艺术家共用一个解析 Promise */
+  const artistResolveInflight = new Map()
 
   try {
     const { sessionCookie, response: loginRes } = await wmsUserLoginFromEnv()
@@ -409,7 +423,13 @@ async function syncFromWmsAdmin(body) {
         try {
           const row = idToListRow.get(recordId)
           const listHint = row ? { row, fields: listFields } : null
-          const r = await upsertOneProductFromWms(cookie, recordId, listHint)
+          const r = await upsertOneProductFromWms(
+            cookie,
+            recordId,
+            listHint,
+            artistIdByName,
+            artistResolveInflight
+          )
           return { recordId, ...r }
         } catch (e) {
           return { recordId, ok: false, status: 'exception', error: e.message }
@@ -440,6 +460,7 @@ async function syncFromWmsAdmin(body) {
     } else {
       await invalidateArtworksPublicCaches({ listOnly: true })
     }
+    stats.artistsResolved = artistIdByName.size
     await invalidateArtistsListCache()
 
     return adminResult(200, { message: '同步完成', stats })

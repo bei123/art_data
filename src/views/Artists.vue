@@ -23,17 +23,25 @@
             </SelectItem>
           </SelectContent>
         </Select>
-        <template v-if="selectedArtistCount > 0">
-          <span class="self-center text-sm text-muted-foreground tabular-nums">
-            已选 {{ selectedArtistCount }} 项
-          </span>
-          <Button type="button" variant="outline" size="sm" @click="clearArtistSelection">
-            取消选择
-          </Button>
-          <Button type="button" variant="destructive" size="sm" @click="openBulkDeleteArtistDialog">
-            批量删除
-          </Button>
-        </template>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          :disabled="selectedArtistCount === 0"
+          @click="clearArtistSelection"
+        >
+          取消选择
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          :disabled="selectedArtistCount === 0"
+          @click="openBulkDeleteArtistDialog"
+        >
+          批量删除
+          <span v-if="selectedArtistCount > 0" class="ml-1 tabular-nums">({{ selectedArtistCount }})</span>
+        </Button>
         <Button type="button" @click="handleAdd">
           添加艺术家
         </Button>
@@ -96,14 +104,28 @@
         <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
       <CardContent class="overflow-x-auto p-0 sm:p-6">
+        <div
+          v-if="selectedArtistCount > 0"
+          class="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2.5 sm:px-6"
+        >
+          <span class="text-sm text-muted-foreground tabular-nums">
+            已选 {{ selectedArtistCount }} 项
+          </span>
+          <Button type="button" variant="outline" size="sm" @click="clearArtistSelection">
+            取消选择
+          </Button>
+          <Button type="button" variant="destructive" size="sm" @click="openBulkDeleteArtistDialog">
+            批量删除
+          </Button>
+        </div>
         <table class="w-full min-w-[800px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
               <th class="h-10 w-10 px-2 text-left font-medium">
                 <Checkbox
-                  :checked="allFilteredArtistsSelected ? true : someFilteredArtistsSelected ? 'indeterminate' : false"
+                  :model-value="allFilteredArtistsSelected ? true : someFilteredArtistsSelected ? 'indeterminate' : false"
                   aria-label="全选当前页"
-                  @update:checked="toggleSelectAllFilteredArtists"
+                  @update:model-value="toggleSelectAllFilteredArtists"
                 />
               </th>
               <th class="h-10 w-16 px-3 text-left font-medium">头像</th>
@@ -124,9 +146,9 @@
             >
               <td class="px-2 py-2">
                 <Checkbox
-                  :checked="isArtistSelected(row.id)"
+                  :model-value="isArtistSelected(row.id)"
                   :aria-label="`选择 ${row.name || '艺术家'}`"
-                  @update:checked="(v) => toggleArtistSelect(row.id, v)"
+                  @update:model-value="(v) => toggleArtistSelect(row.id, v)"
                 />
               </td>
               <td class="px-3 py-2">

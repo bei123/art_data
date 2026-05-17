@@ -22,17 +22,23 @@
           />
           {{ wmsSyncing ? 'WMS 同步中…' : '从 WMS 同步' }}
         </Button>
-        <template v-if="selectedArtworkCount > 0">
-          <span class="self-center text-sm text-muted-foreground tabular-nums">
-            已选 {{ selectedArtworkCount }} 项
-          </span>
-          <Button variant="outline" size="sm" @click="clearArtworkSelection">
-            取消选择
-          </Button>
-          <Button variant="destructive" size="sm" @click="openBulkDeleteArtworkDialog">
-            批量删除
-          </Button>
-        </template>
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="selectedArtworkCount === 0"
+          @click="clearArtworkSelection"
+        >
+          取消选择
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          :disabled="selectedArtworkCount === 0"
+          @click="openBulkDeleteArtworkDialog"
+        >
+          批量删除
+          <span v-if="selectedArtworkCount > 0" class="ml-1 tabular-nums">({{ selectedArtworkCount }})</span>
+        </Button>
         <Button @click="showAddDialog">
           添加艺术品
         </Button>
@@ -90,14 +96,28 @@
         <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
       <CardContent class="overflow-x-auto p-0 sm:p-6">
+        <div
+          v-if="selectedArtworkCount > 0"
+          class="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2.5 sm:px-6"
+        >
+          <span class="text-sm text-muted-foreground tabular-nums">
+            已选 {{ selectedArtworkCount }} 项
+          </span>
+          <Button variant="outline" size="sm" @click="clearArtworkSelection">
+            取消选择
+          </Button>
+          <Button variant="destructive" size="sm" @click="openBulkDeleteArtworkDialog">
+            批量删除
+          </Button>
+        </div>
         <table class="w-full min-w-[1040px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
               <th class="h-10 w-10 px-2 text-left font-medium">
                 <Checkbox
-                  :checked="allPageArtworksSelected ? true : somePageArtworksSelected ? 'indeterminate' : false"
+                  :model-value="allPageArtworksSelected ? true : somePageArtworksSelected ? 'indeterminate' : false"
                   aria-label="全选当前页"
-                  @update:checked="toggleSelectAllPageArtworks"
+                  @update:model-value="toggleSelectAllPageArtworks"
                 />
               </th>
               <th class="h-10 px-3 text-left font-medium">标题</th>
@@ -120,9 +140,9 @@
             >
               <td class="px-2 py-2.5">
                 <Checkbox
-                  :checked="isArtworkSelected(row.id)"
+                  :model-value="isArtworkSelected(row.id)"
                   :aria-label="`选择 ${row.title || '艺术品'}`"
-                  @update:checked="(v) => toggleArtworkSelect(row.id, v)"
+                  @update:model-value="(v) => toggleArtworkSelect(row.id, v)"
                 />
               </td>
               <td class="max-w-[14rem] truncate px-3 py-2.5 font-medium" :title="row.title">{{ row.title }}</td>
@@ -1237,8 +1257,10 @@ const confirmSyncFromWms = async () => {
     const data = await axios.post('/original-artworks/admin/sync-from-wms', body)
     const s = data?.stats
     if (s) {
+      const artistHint =
+        s.artistsResolved != null ? `，涉及 ${s.artistsResolved} 位艺术家` : ''
       ElMessage.success(
-        `同步完成：新建 ${s.inserted}，更新 ${s.updated}，未变 ${s.skipped_unchanged}，跳过 ${s.skipped_skip}，列表 ${s.listRows} 行 / ${s.pages} 页`
+        `同步完成：新建 ${s.inserted}，更新 ${s.updated}，未变 ${s.skipped_unchanged}，跳过 ${s.skipped_skip}，列表 ${s.listRows} 行 / ${s.pages} 页${artistHint}`
       )
       if (Array.isArray(s.errors) && s.errors.length > 0) {
         console.warn('WMS 同步部分错误', s.errors)
