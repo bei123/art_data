@@ -40,6 +40,42 @@
       </div>
     </div>
 
+    <Card class="shadow-none ring-1">
+      <CardContent class="flex flex-col gap-4 pt-6">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:gap-4">
+          <div class="relative min-w-0 flex-1 lg:max-w-xl">
+            <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              v-model="searchKeyword"
+              class="pl-9"
+              placeholder="搜索姓名、简介、时代、历程或机构名称"
+              @keyup.enter="handleArtistSearch"
+            />
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <Button type="button" :disabled="listLoading" @click="handleArtistSearch">
+              搜索
+            </Button>
+            <Button
+              v-if="searchKeyword || isSearchMode"
+              type="button"
+              variant="outline"
+              @click="handleClearArtistSearch"
+            >
+              清除搜索
+            </Button>
+          </div>
+        </div>
+        <Alert v-if="isSearchMode && searchKeyword.trim() && !listLoading">
+          <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+          <AlertTitle>搜索结果</AlertTitle>
+          <AlertDescription>
+            搜索「{{ searchKeyword.trim() }}」共找到 {{ pagination.total }} 条记录
+          </AlertDescription>
+        </Alert>
+      </CardContent>
+    </Card>
+
     <Alert v-if="listError && !listLoading" variant="destructive">
       <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
       <AlertTitle>{{ listError }}</AlertTitle>
@@ -167,7 +203,10 @@
 
     <Card class="shadow-none ring-1">
       <CardContent class="flex flex-col gap-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <span class="text-sm text-muted-foreground">共 {{ pagination.total }} 条</span>
+        <span v-if="isSearchMode && searchKeyword.trim()" class="text-sm text-muted-foreground">
+          搜索结果：共 {{ pagination.total }} 条
+        </span>
+        <span v-else class="text-sm text-muted-foreground">共 {{ pagination.total }} 条</span>
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-sm text-muted-foreground">每页</span>
           <Select
@@ -708,7 +747,7 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Search, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -757,6 +796,8 @@ const pagination = ref({
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const selectedInstitutionId = ref(null)
+const searchKeyword = ref('')
+const isSearchMode = ref(false)
 const filteredArtists = ref([])
 const featuredAllArtworks = ref([])
 const featuredSelected = ref([])
@@ -825,7 +866,7 @@ async function confirmBulkDeleteArtists() {
     bulkDeleteArtistDialogOpen.value = false
     clearArtistSelection()
     pagination.value.page = 1
-    await fetchArtists()
+    loadArtistList()
   } catch (e) {
     const msg = e?.response?.data?.error || '批量删除失败'
     ElMessage.error(typeof msg === 'string' ? msg : '批量删除失败')
@@ -846,20 +887,48 @@ function onInstitutionSelectChange(v) {
   selectedInstitutionId.value = v === 'all' ? null : Number(v)
   pagination.value.page = 1
   clearArtistSelection()
-  fetchArtists()
+  loadArtistList()
+}
+
+function handleArtistSearch() {
+  const q = searchKeyword.value.trim()
+  if (!q) {
+    ElMessage.warning('请输入搜索关键词')
+    return
+  }
+  isSearchMode.value = true
+  pagination.value.page = 1
+  clearArtistSelection()
+  fetchArtistSearchResults()
+}
+
+function handleClearArtistSearch() {
+  searchKeyword.value = ''
+  isSearchMode.value = false
+  pagination.value.page = 1
+  clearArtistSelection()
+  fetchArtistsList()
 }
 
 function handleArtistPageSizeChange(newSize) {
   pagination.value.pageSize = newSize
   pagination.value.page = 1
   clearArtistSelection()
-  fetchArtists()
+  loadArtistList()
 }
 
 function handleArtistPageChange(newPage) {
   pagination.value.page = newPage
   clearArtistSelection()
-  fetchArtists()
+  loadArtistList()
+}
+
+function loadArtistList() {
+  if (isSearchMode.value && searchKeyword.value.trim()) {
+    fetchArtistSearchResults()
+    return
+  }
+  fetchArtistsList()
 }
 
 function onFormInstitutionChange(e) {
@@ -910,10 +979,54 @@ const removeBannerDialogOpen = ref(false)
 
 const retryFetchArtists = () => {
   listError.value = ''
-  fetchArtists()
+  loadArtistList()
 }
 
-const fetchArtists = async () => {
+function applyArtistPaginationFromSearch(paginationInfo) {
+  if (!paginationInfo) return
+  pagination.value.total = paginationInfo.total_count ?? 0
+  pagination.value.page = paginationInfo.current_page ?? pagination.value.page
+  pagination.value.pageSize = paginationInfo.page_size ?? pagination.value.pageSize
+}
+
+function applyArtistPaginationFromList(paginationInfo) {
+  if (!paginationInfo) return
+  pagination.value.total = paginationInfo.total ?? 0
+  pagination.value.page = paginationInfo.page ?? pagination.value.page
+  pagination.value.pageSize = paginationInfo.pageSize ?? pagination.value.pageSize
+}
+
+const fetchArtistSearchResults = async () => {
+  const keyword = searchKeyword.value.trim()
+  if (!keyword) return
+
+  listLoading.value = true
+  listError.value = ''
+  try {
+    const params = {
+      keyword,
+      type: 'artist',
+      page: pagination.value.page,
+      limit: pagination.value.pageSize,
+    }
+    if (selectedInstitutionId.value != null) {
+      params.institution_id = selectedInstitutionId.value
+    }
+    const response = await axios.get('/search', { params })
+    const data = response.data || []
+    filteredArtists.value = Array.isArray(data) ? data : []
+    applyArtistPaginationFromSearch(response.pagination)
+  } catch (error) {
+    console.error('搜索艺术家失败：', error)
+    filteredArtists.value = []
+    pagination.value.total = 0
+    listError.value = '搜索失败，请检查网络或稍后重试'
+  } finally {
+    listLoading.value = false
+  }
+}
+
+const fetchArtistsList = async () => {
   listLoading.value = true
   listError.value = ''
   try {
@@ -951,12 +1064,7 @@ const fetchArtists = async () => {
     }
 
     filteredArtists.value = Array.isArray(data) ? data : []
-
-    if (paginationInfo) {
-      pagination.value.total = paginationInfo.total ?? 0
-      pagination.value.page = paginationInfo.page ?? pagination.value.page
-      pagination.value.pageSize = paginationInfo.pageSize ?? pagination.value.pageSize
-    }
+    applyArtistPaginationFromList(paginationInfo)
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     filteredArtists.value = []
@@ -1059,7 +1167,7 @@ async function confirmDeleteArtist() {
     ElMessage.success('删除成功')
     deleteArtistDialogOpen.value = false
     deleteArtistTarget.value = null
-    await fetchArtists()
+    loadArtistList()
   } catch {
     ElMessage.error('删除失败')
   } finally {
@@ -1477,7 +1585,7 @@ const handleSubmit = async () => {
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
-    await fetchArtists()
+    loadArtistList()
   } catch (error) {
     ElMessage.error('保存失败')
   }
@@ -1486,6 +1594,6 @@ const handleSubmit = async () => {
 onMounted(() => {
   pagination.value = { page: 1, pageSize: 20, total: 0 }
   fetchInstitutions()
-  fetchArtists()
+  fetchArtistsList()
 })
 </script>

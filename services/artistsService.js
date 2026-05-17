@@ -55,6 +55,7 @@ async function invalidateArtistsListCache() {
  */
 async function getPublicArtistsList(query, includeHidden = false) {
   const { institution_id, page, pageSize } = query || {};
+
   const usePagination = wantsArtistsPagination(query);
   const pageNum = parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
   const sizeNum = Math.min(100, parseInt(pageSize, 10) > 0 ? parseInt(pageSize, 10) : 20);
