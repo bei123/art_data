@@ -8,7 +8,9 @@ const wmsArtworkImage = require('../services/wmsArtworkImageService');
 
 function authenticateTokenAllowQuery(req, res, next) {
   if (!req.headers.authorization && req.query?.token) {
-    req.headers.authorization = `Bearer ${req.query.token}`;
+    const raw = String(req.query.token).trim();
+    const token = raw.includes('%') ? decodeURIComponent(raw) : raw.replace(/ /g, '+');
+    req.headers.authorization = `Bearer ${token}`;
   }
   return authenticateToken(req, res, next);
 }

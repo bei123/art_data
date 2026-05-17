@@ -151,9 +151,16 @@
                   type="button"
                   class="relative size-20 overflow-hidden rounded-md border border-border bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring"
                   :aria-label="row.title ? `预览：${row.title}` : '预览图片'"
-                  @click="openImagePreview(displayArtworkImageUrl(row), row.title)"
+                  @click="handleArtworkThumbClick(row)"
                 >
+                  <WmsImageThumb
+                    v-if="artworkUsesWmsThumb(row)"
+                    :artwork-id="row.id"
+                    :alt="row.title ? `原作：${row.title}` : '原作缩略图'"
+                    @loaded="(url) => onWmsThumbLoaded(row.id, url)"
+                  />
                   <img
+                    v-else
                     :src="displayArtworkImageUrl(row)"
                     :alt="row.title ? `原作：${row.title}` : '原作缩略图'"
                     class="size-full object-cover"
@@ -365,12 +372,14 @@
               </p>
             </div>
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
-              <img
-                :src="wmsAdminImageUrl(form.id, 0)"
-                alt="仓库图片预览"
-                class="size-[178px] shrink-0 rounded-md border border-border object-cover"
-                loading="lazy"
-              >
+              <div class="size-[178px] shrink-0 overflow-hidden rounded-md border border-border">
+                <WmsImageThumb
+                  v-if="form.id"
+                  :artwork-id="form.id"
+                  alt="仓库图片预览"
+                  img-class="size-full object-cover"
+                />
+              </div>
               <div class="flex flex-col gap-2">
                 <p class="break-all text-xs text-muted-foreground">
                   {{ form.wms_image_paths[0] }}
@@ -719,6 +728,8 @@ import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
+import WmsImageThumb from '@/components/wms-image-thumb.vue'
+import { fetchWmsImageObjectUrl, revokeWmsImageObjectUrl } from '@/utils/wms-image-preview'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import {
@@ -885,7 +896,15 @@ const dialogImageInput = ref(null)
 const artistFilter = ref('')
 const previewOpen = ref(false)
 const previewSrc = ref('')
+const wmsThumbUrlById = ref({})
+let previewDialogBlobUrl = ''
 const previewTitle = ref('')
+
+watch(previewOpen, (open) => {
+  if (open) return
+  revokeWmsImageObjectUrl(previewDialogBlobUrl)
+  previewDialogBlobUrl = ''
+})
 
 // 拖拽上传相关状态
 const isDragOver = ref(false)
@@ -996,20 +1015,42 @@ function extractUploadImageUrl(response) {
   return ''
 }
 
+function onWmsThumbLoaded(artworkId, url) {
+  if (!artworkId || !url) return
+  wmsThumbUrlById.value = { ...wmsThumbUrlById.value, [artworkId]: url }
+}
+
 function openImagePreview(url, title) {
   if (!url) return
-  const full = typeof url === 'string' && url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  revokeWmsImageObjectUrl(previewDialogBlobUrl)
+  previewDialogBlobUrl = ''
+  const full =
+    typeof url === 'string' && (url.startsWith('http') || url.startsWith('blob:'))
+      ? url
+      : `${API_BASE_URL}${url}`
+  if (full.startsWith('blob:')) previewDialogBlobUrl = full
   previewSrc.value = full
   previewTitle.value = title || ''
   previewOpen.value = true
 }
 
-function wmsAdminImageUrl(artworkId, index = 0) {
-  if (!artworkId) return ''
-  const token = localStorage.getItem('token') || ''
-  const q = new URLSearchParams({ index: String(index) })
-  if (token) q.set('token', token)
-  return `${API_BASE_URL}/api/original-artworks/${artworkId}/admin/wms-image?${q}`
+async function handleArtworkThumbClick(row) {
+  if (!row) return
+  if (artworkUsesWmsThumb(row)) {
+    let url = wmsThumbUrlById.value[row.id]
+    if (!url) {
+      try {
+        url = await fetchWmsImageObjectUrl(row.id, 0)
+        onWmsThumbLoaded(row.id, url)
+      } catch (e) {
+        ElMessage.error(e?.message || '仓库图预览失败')
+        return
+      }
+    }
+    openImagePreview(url, row.title)
+    return
+  }
+  openImagePreview(displayArtworkImageUrl(row), row.title)
 }
 
 function artworkUsesWmsThumb(row) {
@@ -1936,5 +1977,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
+  revokeWmsImageObjectUrl(previewDialogBlobUrl)
+  Object.values(wmsThumbUrlById.value).forEach((url) => revokeWmsImageObjectUrl(url))
 })
 </script>

@@ -177,12 +177,37 @@ async function wmsUserLogin(creds) {
   }
 }
 
+const WMS_SESSION_CACHE_TTL_MS = 25 * 60 * 1000
+let wmsSessionCache = { cookie: '', expiresAt: 0 }
+let wmsLoginInflight = null
+
 /**
  * 使用环境变量 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD（或 WMS_HTTP_PASSWORD_B64）登录。
  * 默认先 GET /user/login 取 RBSESSION（与浏览器一致）；可设 WMS_HTTP_COOKIE 跳过预热；WMS_HTTP_VCODE 传验证码。
  * @returns {Promise<{ response: import('axios').AxiosResponse, sessionCookie: string }>}
  */
 async function wmsUserLoginFromEnv() {
+  const now = Date.now()
+  const cached = String(wmsSessionCache.cookie || '').trim()
+  if (cached && wmsSessionCache.expiresAt > now) {
+    return { response: null, sessionCookie: cached }
+  }
+
+  if (!wmsLoginInflight) {
+    wmsLoginInflight = wmsUserLoginFromEnvUncached().finally(() => {
+      wmsLoginInflight = null
+    })
+  }
+
+  const { response, sessionCookie } = await wmsLoginInflight
+  const merged = String(sessionCookie || '').trim()
+  if (merged) {
+    wmsSessionCache = { cookie: merged, expiresAt: Date.now() + WMS_SESSION_CACHE_TTL_MS }
+  }
+  return { response, sessionCookie: merged }
+}
+
+async function wmsUserLoginFromEnvUncached() {
   const passwd = getWmsHttpPasswordForLogin()
   if (!WMS_HTTP_USER || !passwd) {
     const err = new Error(

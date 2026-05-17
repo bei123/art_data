@@ -17,6 +17,8 @@ const {
 const { wmsUserLoginFromEnv, buildRbWebHeaders, wmsOrigin } = require('../utils/wmsHttpClient')
 
 const WMS_FILEX_IMG_PREFIX = String(process.env.WMS_HTTP_FILEX_IMG_PREFIX || '/filex/img/').trim() || '/filex/img/'
+const PREVIEW_IMAGE_CACHE_TTL_MS = 5 * 60 * 1000
+const previewImageCache = new Map()
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
@@ -403,6 +405,38 @@ async function fetchWmsImageBuffer(cookie, imageRef) {
   throw lastErr || new Error('拉取 WMS 图片失败')
 }
 
+function previewCacheKey(artworkId, index, imageRef) {
+  const rel = isAbsoluteImageUrl(imageRef)
+    ? relativePathFromImageUrl(imageRef) || imageRef
+    : normalizeWmsImagePath(imageRef)
+  return `${artworkId}:${index}:${rel}`
+}
+
+function getPreviewFromCache(key) {
+  const hit = previewImageCache.get(key)
+  if (!hit) return null
+  if (hit.expiresAt <= Date.now()) {
+    previewImageCache.delete(key)
+    return null
+  }
+  return hit
+}
+
+function setPreviewCache(key, buffer, contentType) {
+  previewImageCache.set(key, {
+    buffer,
+    contentType,
+    expiresAt: Date.now() + PREVIEW_IMAGE_CACHE_TTL_MS,
+  })
+}
+
+function clearPreviewCacheForArtwork(artworkId) {
+  const prefix = `${artworkId}:`
+  for (const key of previewImageCache.keys()) {
+    if (key.startsWith(prefix)) previewImageCache.delete(key)
+  }
+}
+
 function extFromContentType(contentType, imageRef) {
   const map = {
     'image/jpeg': '.jpg',
@@ -439,6 +473,14 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res) {
   const paths = parseWmsImagePathsColumn(rows[0].wms_image_paths)
   if (!paths.length) return adminResult(404, { error: '无仓库图片' })
   const rel = paths[index] || paths[0]
+  const cacheKey = previewCacheKey(id, index, rel)
+  const cached = getPreviewFromCache(cacheKey)
+  if (cached) {
+    res.setHeader('Content-Type', cached.contentType || 'image/jpeg')
+    res.setHeader('Cache-Control', 'private, max-age=300')
+    res.send(cached.buffer)
+    return null
+  }
 
   try {
     const { sessionCookie } = await wmsUserLoginFromEnv()
@@ -446,6 +488,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res) {
     if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
 
     const { buffer, contentType } = await fetchWmsImageBuffer(cookie, rel)
+    setPreviewCache(cacheKey, buffer, contentType)
     res.setHeader('Content-Type', contentType || 'image/jpeg')
     res.setHeader('Cache-Control', 'private, max-age=300')
     res.send(buffer)
@@ -501,6 +544,7 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
     }
 
     await db.query('UPDATE original_artworks SET image = ? WHERE id = ?', [upload.url, id])
+    clearPreviewCacheForArtwork(id)
     const { invalidateArtworksPublicCaches } = require('./artworksService')
     await invalidateArtworksPublicCaches({ artworkDetailIds: [id] })
 
