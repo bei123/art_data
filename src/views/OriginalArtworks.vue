@@ -22,6 +22,17 @@
           />
           {{ wmsSyncing ? 'WMS 同步中…' : '从 WMS 同步' }}
         </Button>
+        <template v-if="selectedArtworkCount > 0">
+          <span class="self-center text-sm text-muted-foreground tabular-nums">
+            已选 {{ selectedArtworkCount }} 项
+          </span>
+          <Button variant="outline" size="sm" @click="clearArtworkSelection">
+            取消选择
+          </Button>
+          <Button variant="destructive" size="sm" @click="openBulkDeleteArtworkDialog">
+            批量删除
+          </Button>
+        </template>
         <Button @click="showAddDialog">
           添加艺术品
         </Button>
@@ -82,6 +93,13 @@
         <table class="w-full min-w-[1040px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 w-10 px-2 text-left font-medium">
+                <Checkbox
+                  :checked="allPageArtworksSelected ? true : somePageArtworksSelected ? 'indeterminate' : false"
+                  aria-label="全选当前页"
+                  @update:checked="toggleSelectAllPageArtworks"
+                />
+              </th>
               <th class="h-10 px-3 text-left font-medium">标题</th>
               <th class="h-10 w-28 px-3 text-left font-medium">图片</th>
               <th class="h-10 px-3 text-left font-medium">艺术家</th>
@@ -98,7 +116,15 @@
               v-for="row in artworks"
               :key="row.id"
               class="border-b border-border transition-colors hover:bg-muted/30"
+              :class="{ 'bg-muted/50': isArtworkSelected(row.id) }"
             >
+              <td class="px-2 py-2.5">
+                <Checkbox
+                  :checked="isArtworkSelected(row.id)"
+                  :aria-label="`选择 ${row.title || '艺术品'}`"
+                  @update:checked="(v) => toggleArtworkSelect(row.id, v)"
+                />
+              </td>
               <td class="max-w-[14rem] truncate px-3 py-2.5 font-medium" :title="row.title">{{ row.title }}</td>
               <td class="px-3 py-2">
                 <button
@@ -175,7 +201,7 @@
               </td>
             </tr>
             <tr v-if="artworks.length === 0 && !loading">
-              <td colspan="9" class="px-3 py-12 text-center text-muted-foreground">
+              <td colspan="10" class="px-3 py-12 text-center text-muted-foreground">
                 暂无原作数据
               </td>
             </tr>
@@ -555,6 +581,31 @@
       </DialogContent>
     </Dialog>
 
+    <AlertDialog v-model:open="bulkDeleteArtworkDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>批量删除艺术品</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除已选的 {{ selectedArtworkCount }} 件艺术品吗？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="bulkDeletingArtworks"
+            @click="confirmBulkDeleteArtworks"
+          >
+            <Loader2 v-if="bulkDeletingArtworks" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <AlertDialog v-model:open="deleteOriginalArtworkDialogOpen">
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -627,6 +678,7 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -652,6 +704,78 @@ const deleteOriginalArtworkTarget = ref(null)
 const deletingOriginalArtwork = ref(false)
 
 const artworkIsPublicUpdatingId = ref(null)
+
+const selectedArtworkIds = ref([])
+const bulkDeleteArtworkDialogOpen = ref(false)
+const bulkDeletingArtworks = ref(false)
+
+const selectedArtworkCount = computed(() => selectedArtworkIds.value.length)
+
+const allPageArtworksSelected = computed(() => {
+  if (!artworks.value.length) return false
+  return artworks.value.every((r) => selectedArtworkIds.value.includes(r.id))
+})
+
+const somePageArtworksSelected = computed(() => {
+  const idSet = new Set(artworks.value.map((r) => r.id))
+  return selectedArtworkIds.value.some((id) => idSet.has(id))
+})
+
+function isArtworkSelected(id) {
+  return selectedArtworkIds.value.includes(id)
+}
+
+function toggleArtworkSelect(id, checked) {
+  if (checked === true || checked === 'indeterminate') {
+    if (!selectedArtworkIds.value.includes(id)) {
+      selectedArtworkIds.value = [...selectedArtworkIds.value, id]
+    }
+  } else {
+    selectedArtworkIds.value = selectedArtworkIds.value.filter((x) => x !== id)
+  }
+}
+
+function toggleSelectAllPageArtworks(checked) {
+  const pageIds = artworks.value.map((r) => r.id)
+  if (checked === true || checked === 'indeterminate') {
+    selectedArtworkIds.value = [...new Set([...selectedArtworkIds.value, ...pageIds])]
+  } else {
+    const pageSet = new Set(pageIds)
+    selectedArtworkIds.value = selectedArtworkIds.value.filter((id) => !pageSet.has(id))
+  }
+}
+
+function clearArtworkSelection() {
+  selectedArtworkIds.value = []
+}
+
+function openBulkDeleteArtworkDialog() {
+  if (!checkLoginStatus() || selectedArtworkCount.value === 0) return
+  bulkDeleteArtworkDialogOpen.value = true
+}
+
+async function confirmBulkDeleteArtworks() {
+  if (!checkLoginStatus() || selectedArtworkCount.value === 0) return
+  bulkDeletingArtworks.value = true
+  try {
+    const ids = [...selectedArtworkIds.value]
+    await axios.post('/original-artworks/bulk-delete', { ids })
+    ElMessage.success(`已删除 ${ids.length} 件艺术品`)
+    bulkDeleteArtworkDialogOpen.value = false
+    clearArtworkSelection()
+    pagination.value.page = 1
+    if (isSearchMode.value) {
+      await fetchSearchResults()
+    } else {
+      await fetchArtworks()
+    }
+  } catch (e) {
+    const msg = e?.response?.data?.error || e?.response?.data?.message || '批量删除失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '批量删除失败')
+  } finally {
+    bulkDeletingArtworks.value = false
+  }
+}
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil((pagination.value.total || 0) / (pagination.value.pageSize || 20)))

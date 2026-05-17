@@ -23,6 +23,17 @@
             </SelectItem>
           </SelectContent>
         </Select>
+        <template v-if="selectedArtistCount > 0">
+          <span class="self-center text-sm text-muted-foreground tabular-nums">
+            已选 {{ selectedArtistCount }} 项
+          </span>
+          <Button type="button" variant="outline" size="sm" @click="clearArtistSelection">
+            取消选择
+          </Button>
+          <Button type="button" variant="destructive" size="sm" @click="openBulkDeleteArtistDialog">
+            批量删除
+          </Button>
+        </template>
         <Button type="button" @click="handleAdd">
           添加艺术家
         </Button>
@@ -52,6 +63,13 @@
         <table class="w-full min-w-[800px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 w-10 px-2 text-left font-medium">
+                <Checkbox
+                  :checked="allFilteredArtistsSelected ? true : someFilteredArtistsSelected ? 'indeterminate' : false"
+                  aria-label="全选当前页"
+                  @update:checked="toggleSelectAllFilteredArtists"
+                />
+              </th>
               <th class="h-10 w-16 px-3 text-left font-medium">头像</th>
               <th class="h-10 px-3 text-left font-medium">姓名</th>
               <th class="h-10 px-3 text-left font-medium">时代</th>
@@ -66,7 +84,15 @@
               v-for="row in filteredArtists"
               :key="row.id"
               class="border-b border-border transition-colors hover:bg-muted/30"
+              :class="{ 'bg-muted/50': isArtistSelected(row.id) }"
             >
+              <td class="px-2 py-2">
+                <Checkbox
+                  :checked="isArtistSelected(row.id)"
+                  :aria-label="`选择 ${row.name || '艺术家'}`"
+                  @update:checked="(v) => toggleArtistSelect(row.id, v)"
+                />
+              </td>
               <td class="px-3 py-2">
                 <div class="size-12 overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
@@ -130,12 +156,54 @@
               </td>
             </tr>
             <tr v-if="filteredArtists.length === 0 && !listLoading">
-              <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">
+              <td colspan="8" class="px-3 py-12 text-center text-muted-foreground">
                 暂无艺术家数据
               </td>
             </tr>
           </tbody>
         </table>
+      </CardContent>
+    </Card>
+
+    <Card class="shadow-none ring-1">
+      <CardContent class="flex flex-col gap-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <span class="text-sm text-muted-foreground">共 {{ pagination.total }} 条</span>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-sm text-muted-foreground">每页</span>
+          <Select
+            :model-value="String(pagination.pageSize)"
+            @update:model-value="(v) => handleArtistPageSizeChange(Number(v))"
+          >
+            <SelectTrigger class="h-8 w-[88px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="pagination.page <= 1 || listLoading"
+            @click="handleArtistPageChange(pagination.page - 1)"
+          >
+            上一页
+          </Button>
+          <span class="min-w-[5rem] text-center text-sm tabular-nums">
+            {{ pagination.page }} / {{ artistTotalPages }}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="pagination.page >= artistTotalPages || listLoading"
+            @click="handleArtistPageChange(pagination.page + 1)"
+          >
+            下一页
+          </Button>
+        </div>
       </CardContent>
     </Card>
 
@@ -547,12 +615,37 @@
       </DialogContent>
     </Dialog>
 
+    <AlertDialog v-model:open="bulkDeleteArtistDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>批量删除艺术家</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除已选的 {{ selectedArtistCount }} 位艺术家吗？其名下原作将一并删除，此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="bulkDeletingArtists"
+            @click="confirmBulkDeleteArtists"
+          >
+            <Loader2 v-if="bulkDeletingArtists" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <AlertDialog v-model:open="deleteArtistDialogOpen">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除艺术家</AlertDialogTitle>
           <AlertDialogDescription>
-            确定删除「{{ deleteArtistName }}」吗？此操作不可撤销。
+            确定删除「{{ deleteArtistName }}」吗？其名下原作将一并删除，此操作不可撤销。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter class="gap-2 sm:justify-end">
@@ -651,11 +744,16 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 
 const listLoading = ref(false)
 const listError = ref('')
-const artists = ref([])
 const institutions = ref([])
+const pagination = ref({
+  page: 1,
+  pageSize: 20,
+  total: 0,
+})
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const selectedInstitutionId = ref(null)
@@ -667,13 +765,101 @@ const featuredSaving = ref(false)
 
 const artistIsPublicUpdatingId = ref(null)
 
+const selectedArtistIds = ref([])
+const bulkDeleteArtistDialogOpen = ref(false)
+const bulkDeletingArtists = ref(false)
+
+const selectedArtistCount = computed(() => selectedArtistIds.value.length)
+
+const allFilteredArtistsSelected = computed(() => {
+  const rows = filteredArtists.value
+  if (!rows.length) return false
+  return rows.every((r) => selectedArtistIds.value.includes(r.id))
+})
+
+const someFilteredArtistsSelected = computed(() => {
+  const idSet = new Set(filteredArtists.value.map((r) => r.id))
+  return selectedArtistIds.value.some((id) => idSet.has(id))
+})
+
+function isArtistSelected(id) {
+  return selectedArtistIds.value.includes(id)
+}
+
+function toggleArtistSelect(id, checked) {
+  if (checked === true || checked === 'indeterminate') {
+    if (!selectedArtistIds.value.includes(id)) {
+      selectedArtistIds.value = [...selectedArtistIds.value, id]
+    }
+  } else {
+    selectedArtistIds.value = selectedArtistIds.value.filter((x) => x !== id)
+  }
+}
+
+function toggleSelectAllFilteredArtists(checked) {
+  const pageIds = filteredArtists.value.map((r) => r.id)
+  if (checked === true || checked === 'indeterminate') {
+    selectedArtistIds.value = [...new Set([...selectedArtistIds.value, ...pageIds])]
+  } else {
+    const pageSet = new Set(pageIds)
+    selectedArtistIds.value = selectedArtistIds.value.filter((id) => !pageSet.has(id))
+  }
+}
+
+function clearArtistSelection() {
+  selectedArtistIds.value = []
+}
+
+function openBulkDeleteArtistDialog() {
+  if (selectedArtistCount.value === 0) return
+  bulkDeleteArtistDialogOpen.value = true
+}
+
+async function confirmBulkDeleteArtists() {
+  if (selectedArtistCount.value === 0) return
+  bulkDeletingArtists.value = true
+  try {
+    const ids = [...selectedArtistIds.value]
+    await axios.post('/artists/bulk-delete', { ids })
+    ElMessage.success(`已删除 ${ids.length} 位艺术家`)
+    bulkDeleteArtistDialogOpen.value = false
+    clearArtistSelection()
+    pagination.value.page = 1
+    await fetchArtists()
+  } catch (e) {
+    const msg = e?.response?.data?.error || '批量删除失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '批量删除失败')
+  } finally {
+    bulkDeletingArtists.value = false
+  }
+}
+
 const institutionSelectValue = computed(() =>
   selectedInstitutionId.value == null ? 'all' : String(selectedInstitutionId.value)
 )
 
+const artistTotalPages = computed(() =>
+  Math.max(1, Math.ceil((pagination.value.total || 0) / (pagination.value.pageSize || 20)))
+)
+
 function onInstitutionSelectChange(v) {
   selectedInstitutionId.value = v === 'all' ? null : Number(v)
-  handleInstitutionFilter()
+  pagination.value.page = 1
+  clearArtistSelection()
+  fetchArtists()
+}
+
+function handleArtistPageSizeChange(newSize) {
+  pagination.value.pageSize = newSize
+  pagination.value.page = 1
+  clearArtistSelection()
+  fetchArtists()
+}
+
+function handleArtistPageChange(newPage) {
+  pagination.value.page = newPage
+  clearArtistSelection()
+  fetchArtists()
 }
 
 function onFormInstitutionChange(e) {
@@ -731,55 +917,60 @@ const fetchArtists = async () => {
   listLoading.value = true
   listError.value = ''
   try {
-    const data = await axios.get('/artists')
-    if (Array.isArray(data)) {
-      artists.value = data
-      filteredArtists.value = data
-    } else {
-      artists.value = []
-      filteredArtists.value = []
-      listError.value = '接口返回格式异常，无法展示列表'
+    const params = {
+      page: pagination.value.page,
+      pageSize: pagination.value.pageSize,
+    }
+    if (selectedInstitutionId.value != null) {
+      params.institution_id = selectedInstitutionId.value
+    }
+    const response = await axios.get('/artists', { params })
+
+    let data = response.data ?? response
+    let paginationInfo = response.pagination
+
+    if (response.data && response.pagination) {
+      data = response.data
+      paginationInfo = response.pagination
+    } else if (Array.isArray(response)) {
+      data = response
+      paginationInfo = {
+        page: pagination.value.page,
+        pageSize: pagination.value.pageSize,
+        total: response.length,
+      }
+    } else if (response.artists && Array.isArray(response.artists)) {
+      data = response.artists
+      paginationInfo = {
+        page: 1,
+        pageSize: response.artists.length,
+        total: response.total ?? response.artists.length,
+      }
+    } else if (!Array.isArray(data)) {
+      throw new Error('无效的响应数据')
+    }
+
+    filteredArtists.value = Array.isArray(data) ? data : []
+
+    if (paginationInfo) {
+      pagination.value.total = paginationInfo.total ?? 0
+      pagination.value.page = paginationInfo.page ?? pagination.value.page
+      pagination.value.pageSize = paginationInfo.pageSize ?? pagination.value.pageSize
     }
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
-    artists.value = []
     filteredArtists.value = []
+    pagination.value.total = 0
     listError.value = '获取艺术家列表失败，请检查网络或稍后重试'
   } finally {
     listLoading.value = false
   }
 }
 
-const handleInstitutionFilter = async () => {
-  if (selectedInstitutionId.value == null) {
-    filteredArtists.value = artists.value
-    return
-  }
-
-  try {
-    const response = await axios.get(`/artists?institution_id=${selectedInstitutionId.value}`)
-    if (response && response.artists && Array.isArray(response.artists)) {
-      filteredArtists.value = response.artists
-    } else if (Array.isArray(response)) {
-      filteredArtists.value = response
-    } else {
-      filteredArtists.value = []
-    }
-  } catch (error) {
-    console.error('按机构筛选失败：', error)
-    ElMessage.error('按机构筛选失败')
-    filteredArtists.value = []
-  }
-}
-
 function syncArtistIsPublicInLists(artistId, isPublic) {
   const v = Number(isPublic) === 0 ? 0 : 1
-  const patchList = (arr) => {
-    const i = arr.findIndex((a) => a.id === artistId)
-    if (i >= 0) arr[i] = { ...arr[i], is_public: v }
-  }
-  patchList(artists.value)
-  patchList(filteredArtists.value)
+  const i = filteredArtists.value.findIndex((a) => a.id === artistId)
+  if (i >= 0) filteredArtists.value[i] = { ...filteredArtists.value[i], is_public: v }
 }
 
 const handleArtistListPublicChange = async (row, nextPublic) => {
@@ -868,8 +1059,7 @@ async function confirmDeleteArtist() {
     ElMessage.success('删除成功')
     deleteArtistDialogOpen.value = false
     deleteArtistTarget.value = null
-    fetchArtists()
-    handleInstitutionFilter()
+    await fetchArtists()
   } catch {
     ElMessage.error('删除失败')
   } finally {
@@ -1287,15 +1477,15 @@ const handleSubmit = async () => {
     }
     ElMessage.success('保存成功')
     dialogVisible.value = false
-    fetchArtists()
-    handleInstitutionFilter()
+    await fetchArtists()
   } catch (error) {
     ElMessage.error('保存失败')
   }
 }
 
 onMounted(() => {
-  fetchArtists()
+  pagination.value = { page: 1, pageSize: 20, total: 0 }
   fetchInstitutions()
+  fetchArtists()
 })
 </script>

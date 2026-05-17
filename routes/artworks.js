@@ -81,6 +81,16 @@ router.get('/:id', optionalAuthenticate, async (req, res) => {
   }
 });
 
+router.post('/bulk-delete', authenticateToken, async (req, res) => {
+  try {
+    const r = await svc.bulkDeleteOriginalArtworksAdmin(req.body);
+    return res.status(r.status).json(r.body);
+  } catch (error) {
+    logger.error('批量删除艺术品失败', { err: error });
+    res.status(500).json({ error: '批量删除失败' });
+  }
+});
+
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const r = await svc.createOriginalArtworkAdmin(req.body);

@@ -17,6 +17,29 @@ function parsePositiveIntId(raw) {
   return id;
 }
 
+function mapArtistRows(rows) {
+  return (rows || []).map((artist) => {
+    const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
+    return {
+      ...processedArtist,
+      achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
+      institution: artist.institution_id
+        ? {
+            id: artist.institution_id,
+            name: artist.institution_name,
+            logo: artist.institution_logo,
+            description: artist.institution_description,
+          }
+        : null,
+    };
+  });
+}
+
+function wantsArtistsPagination(query) {
+  if (!query) return false;
+  return query.page != null || query.pageSize != null;
+}
+
 /** 清除全量艺术家列表缓存（GET /api/artists 无 institution_id 时走 Redis `artists:list`） */
 async function invalidateArtistsListCache() {
   try {
@@ -31,7 +54,61 @@ async function invalidateArtistsListCache() {
  * @returns {{ ok: true, status: number, body: object|Array } | { ok: false, status: number, body: { error: string } }}
  */
 async function getPublicArtistsList(query, includeHidden = false) {
-  const { institution_id } = query || {};
+  const { institution_id, page, pageSize } = query || {};
+  const usePagination = wantsArtistsPagination(query);
+  const pageNum = parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
+  const sizeNum = Math.min(100, parseInt(pageSize, 10) > 0 ? parseInt(pageSize, 10) : 20);
+  const offset = (pageNum - 1) * sizeNum;
+
+  if (usePagination) {
+    const whereParts = [];
+    const whereParams = [];
+    if (!includeHidden) {
+      whereParts.push('COALESCE(a.is_public, 1) = 1');
+    }
+    let institutionMeta = null;
+    if (institution_id) {
+      const institutionId = parseInt(institution_id, 10);
+      if (Number.isNaN(institutionId) || institutionId <= 0) {
+        return adminResult(400, { error: '无效的机构ID' });
+      }
+      const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [institutionId]);
+      if (!institutionRows.length) {
+        return adminResult(404, { error: '机构不存在' });
+      }
+      institutionMeta = { id: institutionRows[0].id, name: institutionRows[0].name };
+      whereParts.push('a.institution_id = ?');
+      whereParams.push(institutionId);
+    }
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const [countRows] = await db.query(
+      `SELECT COUNT(*) as total FROM artists a ${whereSql}`,
+      whereParams
+    );
+    const total = countRows[0]?.total ?? 0;
+    const [rows] = await db.query(
+      `
+        SELECT 
+          a.*,
+          i.id as institution_id,
+          i.name as institution_name,
+          i.logo as institution_logo,
+          i.description as institution_description
+        FROM artists a
+        LEFT JOIN institutions i ON a.institution_id = i.id
+        ${whereSql}
+        ORDER BY a.created_at DESC
+        LIMIT ?, ?
+      `,
+      [...whereParams, offset, sizeNum]
+    );
+    const body = {
+      data: mapArtistRows(rows),
+      pagination: { page: pageNum, pageSize: sizeNum, total },
+    };
+    if (institutionMeta) body.institution = institutionMeta;
+    return adminResult(200, body);
+  }
 
   if (institution_id) {
     const institutionId = parseInt(institution_id, 10);
@@ -58,28 +135,13 @@ async function getPublicArtistsList(query, includeHidden = false) {
       `,
       [institutionId]
     );
-    const artistsWithProcessedImages = (rows || []).map((artist) => {
-      const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
-      return {
-        ...processedArtist,
-        achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
-        institution: artist.institution_id
-          ? {
-              id: artist.institution_id,
-              name: artist.institution_name,
-              logo: artist.institution_logo,
-              description: artist.institution_description,
-            }
-          : null,
-      };
-    });
     return adminResult(200, {
       institution: {
         id: institutionRows[0].id,
         name: institutionRows[0].name,
       },
-      artists: artistsWithProcessedImages,
-      total: artistsWithProcessedImages.length,
+      artists: mapArtistRows(rows),
+      total: rows.length,
     });
   }
 
@@ -109,21 +171,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
     ORDER BY a.created_at DESC
   `);
 
-  const artistsWithProcessedImages = (rows || []).map((artist) => {
-    const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
-    return {
-      ...processedArtist,
-      achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
-      institution: artist.institution_id
-        ? {
-            id: artist.institution_id,
-            name: artist.institution_name,
-            logo: artist.institution_logo,
-            description: artist.institution_description,
-          }
-        : null,
-    };
-  });
+  const artistsWithProcessedImages = mapArtistRows(rows);
 
   try {
     if (!includeHidden) {
@@ -374,6 +422,53 @@ async function updateArtistAdmin(rawId, body) {
   }
 }
 
+function parseBulkPositiveIds(raw) {
+  if (raw == null) return { error: '缺少 ids 参数' };
+  let list = raw;
+  if (typeof raw === 'string') list = raw.split(',');
+  if (!Array.isArray(list)) return { error: 'ids 必须为数组' };
+  const ids = [...new Set(list.map((x) => parsePositiveIntId(x)).filter((id) => id != null))];
+  if (ids.length === 0) return { error: 'ID 列表为空或无效' };
+  if (ids.length > 200) return { error: '一次最多删除 200 条' };
+  return { ids };
+}
+
+async function bulkDeleteArtistsAdmin(body) {
+  const parsed = parseBulkPositiveIds(body && body.ids);
+  if (parsed.error) return adminResult(400, { error: parsed.error });
+  const { ids } = parsed;
+  const placeholders = ids.map(() => '?').join(',');
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query(`DELETE FROM original_artworks WHERE artist_id IN (${placeholders})`, ids);
+    await connection.query(`DELETE FROM artist_featured_artworks WHERE artist_id IN (${placeholders})`, ids);
+    await connection.query(`DELETE FROM artists WHERE id IN (${placeholders})`, ids);
+    await connection.commit();
+    await invalidateArtistsListCache();
+    for (const id of ids) {
+      try {
+        await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + id);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      const { invalidateArtworksPublicCaches } = require('./artworksService');
+      await invalidateArtworksPublicCaches();
+    } catch (invErr) {
+      logger.error('invalidate_artworks_after_bulk_artist_delete_failed', { err: invErr });
+    }
+    return adminResult(200, { message: '批量删除成功', deleted: ids.length, ids });
+  } catch (e) {
+    await connection.rollback();
+    logger.error('bulkDeleteArtistsAdmin failed', { err: e });
+    return adminResult(500, { error: '批量删除失败' });
+  } finally {
+    connection.release();
+  }
+}
+
 async function deleteArtistAdmin(rawId) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的艺术家ID' });
@@ -519,6 +614,7 @@ module.exports = {
   createArtistAdmin,
   updateArtistAdmin,
   deleteArtistAdmin,
+  bulkDeleteArtistsAdmin,
   setFeaturedArtworksAdmin,
   getPublicFeaturedArtworks,
   invalidateArtistsListCache,

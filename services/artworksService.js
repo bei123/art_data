@@ -622,6 +622,39 @@ async function updateOriginalArtworkAdmin(rawId, body) {
   }
 }
 
+function parseBulkPositiveIds(raw) {
+  if (raw == null) return { error: '缺少 ids 参数' };
+  let list = raw;
+  if (typeof raw === 'string') list = raw.split(',');
+  if (!Array.isArray(list)) return { error: 'ids 必须为数组' };
+  const ids = [...new Set(list.map((x) => parsePositiveIntId(x)).filter((id) => id != null))];
+  if (ids.length === 0) return { error: 'ID 列表为空或无效' };
+  if (ids.length > 200) return { error: '一次最多删除 200 条' };
+  return { ids };
+}
+
+async function bulkDeleteOriginalArtworksAdmin(body) {
+  const parsed = parseBulkPositiveIds(body && body.ids);
+  if (parsed.error) return adminResult(400, { error: parsed.error });
+  const { ids } = parsed;
+  const placeholders = ids.map(() => '?').join(',');
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query(`DELETE FROM artist_featured_artworks WHERE artwork_id IN (${placeholders})`, ids);
+    await connection.query(`DELETE FROM original_artworks WHERE id IN (${placeholders})`, ids);
+    await connection.commit();
+    await invalidateArtworksPublicCaches({ artworkDetailIds: ids });
+    return adminResult(200, { message: '批量删除成功', deleted: ids.length, ids });
+  } catch (e) {
+    await connection.rollback();
+    logger.error('bulkDeleteOriginalArtworksAdmin failed', { err: e });
+    return adminResult(500, { error: '批量删除失败' });
+  } finally {
+    connection.release();
+  }
+}
+
 async function deleteOriginalArtworkAdmin(rawId) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的作品ID' });
@@ -728,6 +761,7 @@ module.exports = {
   createOriginalArtworkAdmin,
   updateOriginalArtworkAdmin,
   deleteOriginalArtworkAdmin,
+  bulkDeleteOriginalArtworksAdmin,
   getArtworksPerformanceMetrics,
   clearArtworksPerformanceCacheAdmin,
   resetArtworksPerformanceMetrics,
