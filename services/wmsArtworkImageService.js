@@ -76,23 +76,70 @@ function isPublishedOssArtworkImage(url) {
   return validatePublicImageUrl(url.trim())
 }
 
-function extractWmsImagePathsFromElement(el) {
-  if (!el) return []
+/** 从任意 WMS 原始值（字符串/数组/对象/HTML）收集 rb/... 图片相对路径 */
+function collectPathsFromValue(v) {
   const out = []
-  const v = el.value
+  if (v == null || v === '') return out
+
   if (Array.isArray(v)) {
     for (const item of v) {
-      if (typeof item === 'string') out.push(normalizeWmsImagePath(item))
-      else if (item && typeof item === 'object') {
-        if (typeof item.url === 'string') out.push(normalizeWmsImagePath(item.url))
-        else if (typeof item.path === 'string') out.push(normalizeWmsImagePath(item.path))
-        else if (typeof item.name === 'string') out.push(normalizeWmsImagePath(item.name))
-      }
+      out.push(...collectPathsFromValue(item))
     }
-  } else if (typeof v === 'string' && v.trim()) {
-    out.push(normalizeWmsImagePath(v))
+    return [...new Set(out.map(normalizeWmsImagePath).filter(Boolean))]
   }
-  return [...new Set(out.filter(Boolean))]
+
+  if (typeof v === 'object') {
+    for (const key of ['url', 'path', 'name', 'file', 'key', 'value', 'text']) {
+      if (typeof v[key] === 'string') out.push(...pathsFromRawString(v[key]))
+    }
+    return [...new Set(out.map(normalizeWmsImagePath).filter(Boolean))]
+  }
+
+  if (typeof v === 'string') {
+    return pathsFromRawString(v)
+  }
+
+  return out
+}
+
+function pathsFromRawString(raw) {
+  const str = String(raw ?? '').trim()
+  if (!str) return []
+
+  if (str.startsWith('[') || str.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(str)
+      const fromJson = collectPathsFromValue(parsed)
+      if (fromJson.length) return fromJson
+    } catch {
+      /* 非 JSON，继续按文本解析 */
+    }
+  }
+
+  const out = []
+  const re = /\b(rb\/[^\s"',<>]+\.(?:jpg|jpeg|png|webp|gif))\b/gi
+  let match = re.exec(str)
+  while (match) {
+    const p = normalizeWmsImagePath(match[1])
+    if (p) out.push(p)
+    match = re.exec(str)
+  }
+  if (out.length) return [...new Set(out)]
+
+  if (!str.includes('<') && !str.includes('>')) {
+    const one = normalizeWmsImagePath(str)
+    return one ? [one] : []
+  }
+
+  return out
+}
+
+function extractWmsImagePathsFromElement(el) {
+  if (!el) return []
+  let out = collectPathsFromValue(el.value)
+  if (!out.length && typeof el.text === 'string') out = pathsFromRawString(el.text)
+  if (!out.length && typeof el.html === 'string') out = pathsFromRawString(el.html)
+  return out
 }
 
 function dataCellsFromListRow(row) {
@@ -109,14 +156,14 @@ function extractWmsImagePathsFromListRow(row, fields) {
   const cells = dataCellsFromListRow(row)
   if (idx >= cells.length) return []
   const cell = cells[idx]
-  if (Array.isArray(cell)) {
-    return [...new Set(cell.map(normalizeWmsImagePath).filter(Boolean))]
-  }
-  if (typeof cell === 'string') {
-    const one = normalizeWmsImagePath(cell)
-    return one ? [one] : []
-  }
-  return []
+  return collectPathsFromValue(cell)
+}
+
+function wmsImagePathsEqual(a, b) {
+  const left = [...(a || [])].map(normalizeWmsImagePath).filter(Boolean).sort()
+  const right = [...(b || [])].map(normalizeWmsImagePath).filter(Boolean).sort()
+  if (left.length !== right.length) return false
+  return left.every((p, i) => p === right[i])
 }
 
 /**
@@ -317,6 +364,8 @@ module.exports = {
   normalizeWmsImagePath,
   parseWmsImagePathsColumn,
   stringifyWmsImagePaths,
+  wmsImagePathsEqual,
+  collectPathsFromValue,
   placeholderImageUrl,
   isWmsSyncPlaceholderImage,
   isPublishedOssArtworkImage,

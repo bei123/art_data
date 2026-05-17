@@ -16,6 +16,8 @@ const {
   extractWmsImagePaths,
   stringifyWmsImagePaths,
   placeholderImageUrl,
+  parseWmsImagePathsColumn,
+  wmsImagePathsEqual,
 } = require('./wmsArtworkImageService')
 
 function adminResult(status, body) {
@@ -218,7 +220,8 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
       ? Number(d.lastModified)
       : null
   const payload = mapElementsToSyncPayload(d.elements, listHint)
-  const wmsImagePathsJson = stringifyWmsImagePaths(extractWmsImagePaths(d.elements, listHint))
+  const wmsImagePaths = extractWmsImagePaths(d.elements, listHint)
+  const wmsImagePathsJson = stringifyWmsImagePaths(wmsImagePaths)
   if (!payload.title) {
     return { ok: false, status: 'skip', error: '无作品名称' }
   }
@@ -239,18 +242,29 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
   }
 
   const [rows] = await db.query(
-    'SELECT id, wms_last_modified FROM original_artworks WHERE wms_record_id = ? LIMIT 1',
+    'SELECT id, wms_last_modified, wms_image_paths FROM original_artworks WHERE wms_record_id = ? LIMIT 1',
     [recordId]
   )
   const existing = rows && rows[0] ? rows[0] : null
+  const currentWmsPaths = existing ? parseWmsImagePathsColumn(existing.wms_image_paths) : []
+  const wmsPathsChanged = !wmsImagePathsEqual(currentWmsPaths, wmsImagePaths)
 
-  if (
+  const isDataUnchanged =
     existing &&
     lastModified != null &&
     existing.wms_last_modified != null &&
     Number(existing.wms_last_modified) === lastModified
-  ) {
+
+  if (isDataUnchanged && !wmsPathsChanged) {
     return { ok: true, status: 'skipped_unchanged', artworkId: existing.id }
+  }
+
+  if (isDataUnchanged && wmsPathsChanged && existing) {
+    await db.query('UPDATE original_artworks SET wms_image_paths = ? WHERE id = ?', [
+      wmsImagePathsJson,
+      existing.id,
+    ])
+    return { ok: true, status: 'updated_wms_images', artworkId: existing.id }
   }
 
   const price = payload.price != null ? payload.price : 0
@@ -342,6 +356,7 @@ async function syncFromWmsAdmin(body) {
     updated: 0,
     skipped_unchanged: 0,
     skipped_skip: 0,
+    updated_wms_images: 0,
     artistsResolved: 0,
     errors: [],
   }
@@ -441,6 +456,7 @@ async function syncFromWmsAdmin(body) {
           continue
         }
         if (r.status === 'skipped_unchanged') stats.skipped_unchanged += 1
+        else if (r.status === 'updated_wms_images') stats.updated_wms_images += 1
         else if (r.status === 'inserted') {
           stats.inserted += 1
           if (r.artworkId) touchedArtworkIds.push(r.artworkId)

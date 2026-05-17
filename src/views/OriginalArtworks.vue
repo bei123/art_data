@@ -1370,8 +1370,10 @@ const confirmSyncFromWms = async () => {
     if (s) {
       const artistHint =
         s.artistsResolved != null ? `，涉及 ${s.artistsResolved} 位艺术家` : ''
+      const wmsImgHint =
+        s.updated_wms_images > 0 ? `，补全仓库图 ${s.updated_wms_images}` : ''
       ElMessage.success(
-        `同步完成：新建 ${s.inserted}，更新 ${s.updated}，未变 ${s.skipped_unchanged}，跳过 ${s.skipped_skip}，列表 ${s.listRows} 行 / ${s.pages} 页${artistHint}`
+        `同步完成：新建 ${s.inserted}，更新 ${s.updated}，补图 ${s.updated_wms_images || 0}，未变 ${s.skipped_unchanged}，跳过 ${s.skipped_skip}，列表 ${s.listRows} 行 / ${s.pages} 页${artistHint}${wmsImgHint}`
       )
       if (Array.isArray(s.errors) && s.errors.length > 0) {
         console.warn('WMS 同步部分错误', s.errors)
