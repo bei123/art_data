@@ -156,8 +156,8 @@
                   <WmsImageThumb
                     v-if="artworkUsesWmsThumb(row)"
                     :artwork-id="row.id"
+                    :lazy="true"
                     :alt="row.title ? `原作：${row.title}` : '原作缩略图'"
-                    @loaded="(url) => onWmsThumbLoaded(row.id, url)"
                   />
                   <img
                     v-else
@@ -791,7 +791,11 @@ import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
 import WmsImageThumb from '@/components/wms-image-thumb.vue'
 import WmsImageGallery from '@/components/wms-image-gallery.vue'
-import { fetchWmsImageObjectUrl, revokeWmsImageObjectUrl } from '@/utils/wms-image-preview'
+import {
+  buildWmsAdminImageUrl,
+  invalidateWmsImageCache,
+  revokeWmsImageObjectUrl,
+} from '@/utils/wms-image-preview'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import {
@@ -960,7 +964,6 @@ const previewOpen = ref(false)
 const previewSrc = ref('')
 const previewWmsGallery = ref([])
 const previewWmsSelectedIndex = ref(0)
-const wmsThumbUrlById = ref({})
 const formWmsSelectedIndex = ref(0)
 const wmsApplyPickerOpen = ref(false)
 const wmsApplyTarget = ref(null)
@@ -1102,11 +1105,6 @@ function extractUploadImageUrl(response) {
   return ''
 }
 
-function onWmsThumbLoaded(artworkId, url) {
-  if (!artworkId || !url) return
-  wmsThumbUrlById.value = { ...wmsThumbUrlById.value, [artworkId]: url }
-}
-
 function openImagePreview(url, title) {
   if (!url) return
   revokePreviewWmsGallery()
@@ -1122,50 +1120,24 @@ function openImagePreview(url, title) {
   previewOpen.value = true
 }
 
-async function openWmsGalleryPreview(row) {
-  const paths = row?.wms_image_paths || []
-  const count = paths.length || 1
+function openWmsGalleryPreview(row) {
+  const count = wmsImagePathCount(row)
   revokePreviewWmsGallery()
   previewSrc.value = ''
   previewTitle.value = row?.title || ''
   previewWmsSelectedIndex.value = 0
-
-  const urls = []
-  for (let i = 0; i < count; i += 1) {
-    try {
-      urls.push(await fetchWmsImageObjectUrl(row.id, i))
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn('wms preview load failed', row.id, i, e)
-    }
-  }
-
-  if (!urls.length) {
-    ElMessage.error('仓库图预览失败')
-    return
-  }
-
-  previewWmsGallery.value = urls
+  previewWmsGallery.value = Array.from({ length: count }, (_, i) => buildWmsAdminImageUrl(row.id, i))
   previewOpen.value = true
 }
 
-async function handleArtworkThumbClick(row) {
+function handleArtworkThumbClick(row) {
   if (!row) return
   if (artworkUsesWmsThumb(row)) {
     if (wmsImagePathCount(row) > 1) {
-      await openWmsGalleryPreview(row)
+      openWmsGalleryPreview(row)
       return
     }
-    let url = wmsThumbUrlById.value[row.id]
-    if (!url) {
-      try {
-        url = await fetchWmsImageObjectUrl(row.id, 0)
-        onWmsThumbLoaded(row.id, url)
-      } catch (e) {
-        ElMessage.error(e?.message || '仓库图预览失败')
-        return
-      }
-    }
-    openImagePreview(url, row.title)
+    openImagePreview(buildWmsAdminImageUrl(row.id, 0), row.title)
     return
   }
   openImagePreview(displayArtworkImageUrl(row), row.title)
@@ -1213,6 +1185,7 @@ async function handleApplyWmsImage(row, index = 0) {
     }
     ElMessage.success(data?.message || `已采用仓库图 ${pick + 1} 并发布`)
     wmsApplyPickerOpen.value = false
+    invalidateWmsImageCache(row.id)
     const item = artworks.value.find((a) => a.id === row.id)
     if (item) {
       item.image = ossUrl
@@ -2119,6 +2092,5 @@ onBeforeUnmount(() => {
   if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
   revokeWmsImageObjectUrl(previewDialogBlobUrl)
   revokePreviewWmsGallery()
-  Object.values(wmsThumbUrlById.value).forEach((url) => revokeWmsImageObjectUrl(url))
 })
 </script>

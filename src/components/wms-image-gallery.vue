@@ -45,6 +45,7 @@ function wmsPathLabel(raw) {
         v-if="artworkId && safePaths.length"
         :artwork-id="artworkId"
         :index="selected"
+        :lazy="false"
         :alt="`仓库图 ${selected + 1}`"
         img-class="size-full object-cover"
       />
@@ -73,6 +74,7 @@ function wmsPathLabel(raw) {
         <WmsImageThumb
           :artwork-id="artworkId"
           :index="i"
+          :lazy="true"
           :alt="`缩略图 ${i + 1}`"
           img-class="size-full object-cover"
         />

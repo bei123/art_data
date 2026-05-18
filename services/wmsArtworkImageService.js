@@ -725,7 +725,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
   if (cached) {
     if (isClientDisconnected(req, res) || clientGone) return null
     res.setHeader('Content-Type', cached.contentType || 'image/jpeg')
-    res.setHeader('Cache-Control', 'private, max-age=300')
+    res.setHeader('Cache-Control', 'private, max-age=600, stale-while-revalidate=120')
     res.send(cached.buffer)
     return null
   }
@@ -742,7 +742,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
     if (clientGone || isClientDisconnected(req, res)) return null
     setPreviewCache(cacheKey, buffer, contentType)
     res.setHeader('Content-Type', contentType || 'image/jpeg')
-    res.setHeader('Cache-Control', 'private, max-age=300')
+    res.setHeader('Cache-Control', 'private, max-age=600, stale-while-revalidate=120')
     res.send(buffer)
     return null
   } catch (e) {
