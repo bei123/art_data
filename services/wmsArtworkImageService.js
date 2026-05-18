@@ -14,7 +14,9 @@ const {
   WMS_SYNC_PLACEHOLDER_IMAGE,
   WMS_IMAGE_CDN_ORIGIN,
   WMS_IMAGE_VIEW_PARAMS,
+  WMS_IMAGE_PREVIEW_VIEW_PARAMS,
 } = require('../config/wmsHttp')
+const { isQiniuWmsConfigured, signQiniuPrivateImageUrl } = require('../config/qiniuWms')
 const {
   wmsUserLoginFromEnv,
   clearWmsSessionCache,
@@ -475,6 +477,19 @@ async function fetchViaWmsFilexRead(cookie, relativePath) {
   return httpGetImageBuffer(readUrl, imageGetHeaders(cookie))
 }
 
+/** 七牛 AK/SK 自签：先 imageView2 再 e/token（见七牛私有空间带样式授权文档） */
+async function fetchViaQiniuSigned(relativePath, variant) {
+  const viewParams =
+    variant === 'preview' ? WMS_IMAGE_PREVIEW_VIEW_PARAMS : WMS_IMAGE_VIEW_PARAMS
+  const signed = signQiniuPrivateImageUrl(relativePath, viewParams)
+  if (!signed) {
+    const err = new Error('七牛签名未配置或路径无效')
+    err.code = 'QINIU_SIGN_FAILED'
+    throw err
+  }
+  return httpGetImageBuffer(signed, cdnImageGetHeaders())
+}
+
 async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
   const ref = String(imageRef || '').trim()
   if (!ref) {
@@ -484,12 +499,27 @@ async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
   }
 
   if (isAbsoluteImageUrl(ref)) {
-    try {
-      return await httpGetImageBuffer(ref, cdnImageGetHeaders())
-    } catch (e) {
-      const rel = relativePathFromImageUrl(ref)
-      if (!rel) throw e
-      logger.warn('wms_image_signed_url_expired_retry_filex', { ref: rel })
+    const relFromAbs = relativePathFromImageUrl(ref)
+    if (relFromAbs && isQiniuWmsConfigured()) {
+      try {
+        return await fetchViaQiniuSigned(relFromAbs, variant)
+      } catch (e) {
+        logger.warn('wms_image_qiniu_from_absolute_failed', {
+          rel: relFromAbs,
+          variant,
+          err: e.message,
+        })
+      }
+    }
+    if (!isSignedQiniuUrl(ref)) {
+      try {
+        return await httpGetImageBuffer(ref, cdnImageGetHeaders())
+      } catch (e) {
+        if (!relFromAbs) throw e
+        logger.warn('wms_image_absolute_fetch_failed', { ref: relFromAbs, err: e.message })
+      }
+    } else if (relFromAbs) {
+      logger.info('wms_image_signed_absolute_use_rel', { ref: relFromAbs, variant })
     }
   }
 
@@ -500,12 +530,16 @@ async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
     throw err
   }
 
-  const attempts = [
+  const attempts = []
+  if (isQiniuWmsConfigured()) {
+    attempts.push(() => fetchViaQiniuSigned(rel, variant))
+  }
+  attempts.push(
     () => fetchViaFilexRedirectToCdn(cookie, rel),
     () => fetchViaWmsFilex(cookie, rel),
     () => fetchViaSignedCdn(cookie, rel),
-    () => fetchViaWmsFilexRead(cookie, rel),
-  ]
+    () => fetchViaWmsFilexRead(cookie, rel)
+  )
 
   let lastErr
   for (const run of attempts) {
@@ -697,9 +731,12 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
   }
 
   try {
-    const { sessionCookie } = await wmsUserLoginFromEnv()
-    const cookie = sessionCookie || ''
-    if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+    let cookie = ''
+    if (!isQiniuWmsConfigured()) {
+      const { sessionCookie } = await wmsUserLoginFromEnv()
+      cookie = sessionCookie || ''
+      if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+    }
 
     const { buffer, contentType } = await fetchPreviewImageBuffer(cookie, rel, cacheKey)
     if (clientGone || isClientDisconnected(req, res)) return null
@@ -745,9 +782,12 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
 
   try {
     return await withApplyConcurrency(async () => {
-      const { sessionCookie } = await wmsUserLoginFromEnv()
-      const cookie = sessionCookie || ''
-      if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+      let cookie = ''
+      if (!isQiniuWmsConfigured()) {
+        const { sessionCookie } = await wmsUserLoginFromEnv()
+        cookie = sessionCookie || ''
+        if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+      }
 
       const { buffer } = await fetchWmsImageBuffer(cookie, rel, { variant: 'full' })
       const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`)

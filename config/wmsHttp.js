@@ -39,6 +39,11 @@ function getWmsHttpPasswordForLogin() {
 const WMS_SYNC_PLACEHOLDER_IMAGE = String(process.env.WMS_SYNC_PLACEHOLDER_IMAGE || '').trim()
 /** REBUILD 附件 CDN 根（浏览器拉图域名，如 http://qn.2000gallery.art） */
 const WMS_IMAGE_CDN_ORIGIN = trimSlash(process.env.WMS_IMAGE_CDN_ORIGIN || 'http://qn.2000gallery.art')
+/**
+ * 七牛私有桶 AK/SK（与 WMS 仓库图同一桶时可自签 imageView2，无需改 WMS 302 URL）
+ * QINIU_ACCESS_KEY / QINIU_SECRET_KEY — 必填才启用自签
+ * QINIU_PRIVATE_URL_EXPIRES_SEC — 签名有效期秒数，默认 3600
+ */
 /** 采用仓库图：七牛原图/高质量（w/0） */
 const WMS_IMAGE_VIEW_PARAMS = String(
   process.env.WMS_IMAGE_VIEW_PARAMS || 'imageView2/2/w/0/interlace/1/q/100'
