@@ -37,12 +37,64 @@ const APPLY_MAX_CONCURRENT = Math.min(
   3,
   Math.max(1, parseInt(process.env.WMS_APPLY_MAX_CONCURRENT || '1', 10) || 1)
 )
+const OUTBOUND_IMAGE_MAX_CONCURRENT = Math.min(
+  8,
+  Math.max(2, parseInt(process.env.WMS_IMAGE_OUTBOUND_MAX_CONCURRENT || '4', 10) || 4)
+)
+const OUTBOUND_IMAGE_MAX_BYTES = Math.max(
+  8 * 1024 * 1024,
+  parseInt(process.env.WMS_IMAGE_OUTBOUND_MAX_BYTES || String(20 * 1024 * 1024), 10) ||
+    20 * 1024 * 1024
+)
 
 const previewImageCache = new Map()
 let previewCacheTotalBytes = 0
 const previewFetchInflight = new Map()
 let applyActiveCount = 0
 const applyWaitQueue = []
+let outboundImageActive = 0
+const outboundImageWaitQueue = []
+
+function encodeWmsPathForUrl(relativePath) {
+  const rel = normalizeWmsImagePath(relativePath)
+  if (!rel) return ''
+  return rel
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/')
+}
+
+function isRetryableNetworkError(err) {
+  const code = String(err?.code || '')
+  const msg = String(err?.message || '').toLowerCase()
+  if (
+    code === 'ECONNRESET' ||
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ERR_CANCELED' ||
+    code === 'ERR_BAD_RESPONSE' ||
+    code === 'EPIPE'
+  ) {
+    return true
+  }
+  return msg.includes('aborted') || msg.includes('socket hang up') || msg.includes('stream')
+}
+
+async function withOutboundImageSlot(run) {
+  if (outboundImageActive >= OUTBOUND_IMAGE_MAX_CONCURRENT) {
+    await new Promise((resolve) => {
+      outboundImageWaitQueue.push(resolve)
+    })
+  }
+  outboundImageActive += 1
+  try {
+    return await run()
+  } finally {
+    outboundImageActive -= 1
+    const next = outboundImageWaitQueue.shift()
+    if (next) next()
+  }
+}
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
@@ -265,7 +317,7 @@ function extractWmsImagePaths(elements, listHint) {
 /** REBUILD：带登录态访问 filex，通常会 302 到 qn 带 token 的地址 */
 function buildWmsFilexImgUrl(relativePath) {
   const origin = wmsOrigin()
-  const rel = normalizeWmsImagePath(relativePath)
+  const rel = encodeWmsPathForUrl(relativePath)
   if (!origin || !rel) return ''
   const prefix = WMS_FILEX_IMG_PREFIX.startsWith('/') ? WMS_FILEX_IMG_PREFIX : `/${WMS_FILEX_IMG_PREFIX}`
   return `${origin}${prefix}${rel}`
@@ -273,14 +325,14 @@ function buildWmsFilexImgUrl(relativePath) {
 
 function buildWmsFilexReadUrl(relativePath) {
   const origin = wmsOrigin()
-  const rel = normalizeWmsImagePath(relativePath)
+  const rel = encodeWmsPathForUrl(relativePath)
   if (!origin || !rel) return ''
   return `${origin}/filex/read/${rel}`
 }
 
 function buildCdnImageUrl(relativePath, withViewParams = true, viewParamsOverride) {
   const cdn = cdnOrigin()
-  const rel = normalizeWmsImagePath(relativePath)
+  const rel = encodeWmsPathForUrl(relativePath)
   if (!cdn || !rel) return ''
   const base = `${cdn}/${rel}`
   const params =
@@ -319,12 +371,15 @@ function imageGetHeaders(cookie, refererPath = '/app/Product/list') {
   return headers
 }
 
-async function httpGetImageBuffer(url, headers) {
+async function httpGetImageBufferOnce(url, headers) {
   const res = await axios.get(url, {
     headers,
     responseType: 'arraybuffer',
-    timeout: 60000,
+    timeout: 90000,
     maxRedirects: 10,
+    maxContentLength: OUTBOUND_IMAGE_MAX_BYTES,
+    maxBodyLength: OUTBOUND_IMAGE_MAX_BYTES,
+    decompress: true,
     validateStatus: () => true,
   })
   if (res.status < 200 || res.status >= 300) {
@@ -339,8 +394,25 @@ async function httpGetImageBuffer(url, headers) {
     err.code = 'WMS_IMAGE_EMPTY'
     throw err
   }
+  if (buffer.length > OUTBOUND_IMAGE_MAX_BYTES) {
+    const err = new Error('WMS 图片过大')
+    err.code = 'WMS_IMAGE_TOO_LARGE'
+    throw err
+  }
   const contentType = String(res.headers['content-type'] || 'image/jpeg').split(';')[0].trim()
   return { buffer, contentType, url: res.request?.res?.responseUrl || url }
+}
+
+async function httpGetImageBuffer(url, headers) {
+  return withOutboundImageSlot(async () => {
+    try {
+      return await httpGetImageBufferOnce(url, headers)
+    } catch (e) {
+      if (!isRetryableNetworkError(e)) throw e
+      await new Promise((r) => setTimeout(r, 400))
+      return await httpGetImageBufferOnce(url, headers)
+    }
+  })
 }
 
 /** 先 HEAD/GET 不跟随重定向，拿到 qn 签名 URL */
@@ -441,7 +513,8 @@ async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
       return await run()
     } catch (e) {
       lastErr = e
-      logger.warn('wms_image_fetch_attempt_failed', {
+      const level = isRetryableNetworkError(e) ? 'info' : 'warn'
+      logger[level]('wms_image_fetch_attempt_failed', {
         rel,
         variant,
         code: e.code,
@@ -586,12 +659,23 @@ function extFromContentType(contentType, imageRef) {
 /**
  * 管理端：代理输出 WMS 图片（需 WMS 登录 Cookie）
  */
-async function streamWmsArtworkImageAdmin(artworkId, query, res) {
+function isClientDisconnected(req, res) {
+  if (res?.writableEnded || res?.destroyed) return true
+  return Boolean(req?.aborted || req?.destroyed)
+}
+
+async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
   const id = parseInt(String(artworkId), 10)
   if (Number.isNaN(id) || id <= 0) {
     return adminResult(400, { error: '无效的作品ID' })
   }
   const index = Math.max(0, parseInt(String(query?.index ?? 0), 10) || 0)
+  let clientGone = false
+  if (req) {
+    req.on('close', () => {
+      clientGone = true
+    })
+  }
 
   const [rows] = await db.query(
     'SELECT id, wms_image_paths FROM original_artworks WHERE id = ? LIMIT 1',
@@ -605,6 +689,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res) {
   const cacheKey = previewCacheKey(id, index, rel)
   const cached = getPreviewFromCache(cacheKey)
   if (cached) {
+    if (isClientDisconnected(req, res) || clientGone) return null
     res.setHeader('Content-Type', cached.contentType || 'image/jpeg')
     res.setHeader('Cache-Control', 'private, max-age=300')
     res.send(cached.buffer)
@@ -617,13 +702,19 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res) {
     if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
 
     const { buffer, contentType } = await fetchPreviewImageBuffer(cookie, rel, cacheKey)
+    if (clientGone || isClientDisconnected(req, res)) return null
     setPreviewCache(cacheKey, buffer, contentType)
     res.setHeader('Content-Type', contentType || 'image/jpeg')
     res.setHeader('Cache-Control', 'private, max-age=300')
     res.send(buffer)
     return null
   } catch (e) {
-    logger.error('streamWmsArtworkImageAdmin_failed', { id, rel, err: e.message })
+    if (clientGone || isClientDisconnected(req, res)) return null
+    if (isRetryableNetworkError(e)) {
+      logger.info('streamWmsArtworkImageAdmin_network', { id, rel, err: e.message })
+    } else {
+      logger.error('streamWmsArtworkImageAdmin_failed', { id, rel, err: e.message })
+    }
     if (e.code === 'WMS_HTTP_NOT_CONFIGURED' || e.code === 'WMS_HTTP_BAD_REQUEST') {
       return adminResult(400, { error: e.message })
     }

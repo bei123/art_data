@@ -78,7 +78,7 @@ router.get(
   checkRole(['admin']),
   async (req, res) => {
     try {
-      const r = await wmsArtworkImage.streamWmsArtworkImageAdmin(req.params.id, req.query, res);
+      const r = await wmsArtworkImage.streamWmsArtworkImageAdmin(req.params.id, req.query, res, req);
       if (r) return res.status(r.status).json(r.body);
     } catch (error) {
       logger.error('WMS 仓库图预览失败', { err: error });

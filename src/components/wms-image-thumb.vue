@@ -16,28 +16,45 @@ const objectUrl = ref('')
 const isLoading = ref(true)
 const hasError = ref(false)
 let loadToken = 0
+let abortController = null
+
+function abortInflight() {
+  if (abortController) {
+    abortController.abort()
+    abortController = null
+  }
+}
 
 async function loadImage() {
   const token = ++loadToken
+  abortInflight()
   revokeWmsImageObjectUrl(objectUrl.value)
   objectUrl.value = ''
   isLoading.value = true
   hasError.value = false
 
+  abortController = new AbortController()
+
   try {
-    const url = await fetchWmsImageObjectUrl(props.artworkId, props.index)
+    const url = await fetchWmsImageObjectUrl(props.artworkId, props.index, {
+      signal: abortController.signal,
+    })
     if (token !== loadToken) {
       revokeWmsImageObjectUrl(url)
       return
     }
     objectUrl.value = url
     emit('loaded', url)
-  } catch {
+  } catch (e) {
     if (token !== loadToken) return
+    if (e?.name === 'AbortError') return
     hasError.value = true
     emit('error')
   } finally {
-    if (token === loadToken) isLoading.value = false
+    if (token === loadToken) {
+      isLoading.value = false
+      abortController = null
+    }
   }
 }
 
@@ -54,6 +71,7 @@ watch(
 
 onBeforeUnmount(() => {
   loadToken += 1
+  abortInflight()
   revokeWmsImageObjectUrl(objectUrl.value)
 })
 

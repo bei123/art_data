@@ -2,9 +2,12 @@ import { API_BASE_URL } from '../config'
 
 /**
  * 通过管理端代理拉取 WMS 仓库图（Authorization 头，避免 img?token= 鉴权失败）
+ * @param {number|string} artworkId
+ * @param {number} index
+ * @param {{ signal?: AbortSignal }} [options]
  * @returns {Promise<string>} blob object URL，用完后须 URL.revokeObjectURL
  */
-export async function fetchWmsImageObjectUrl(artworkId, index = 0) {
+export async function fetchWmsImageObjectUrl(artworkId, index = 0, options = {}) {
   const id = Number(artworkId)
   if (!id || id <= 0) throw new Error('无效的作品ID')
 
@@ -15,6 +18,7 @@ export async function fetchWmsImageObjectUrl(artworkId, index = 0) {
     method: 'GET',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     credentials: 'include',
+    signal: options.signal,
   })
 
   if (!res.ok) {
