@@ -117,184 +117,96 @@
     </Card>
 
     <Dialog v-model:open="dialogVisible">
-      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-3xl">
-        <DialogHeader>
+      <DialogContent class="flex max-h-[92vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader class="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{{ isEdit ? '编辑版权实物' : '添加版权实物' }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="isEdit">
+              正在编辑「{{ form.title || '未命名' }}」<span v-if="form.id" class="text-muted-foreground">（ID {{ form.id }}）</span>
+            </template>
+            <template v-else>
+              上传配图并填写权益信息；带 <span class="text-destructive">*</span> 为必填
+            </template>
+          </DialogDescription>
         </DialogHeader>
 
-        <div class="grid max-h-[75vh] gap-4 overflow-y-auto py-2 pr-1">
-          <div class="flex flex-col gap-2">
-            <Label for="r-title">标题</Label>
-            <Input id="r-title" v-model="form.title" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="r-status">状态</Label>
-            <select
-              id="r-status"
-              v-model="form.status"
-              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <option disabled value="">
-                请选择状态
-              </option>
-              <option value="onsale">在售</option>
-              <option value="soldout">已售罄</option>
-              <option value="upcoming">即将发售</option>
-            </select>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div class="flex flex-col gap-2">
-              <Label for="r-price">价格</Label>
-              <Input id="r-price" v-model.number="form.price" type="number" min="0" step="0.01" />
+        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(260px,320px)_1fr]">
+          <!-- 左侧：配图 -->
+          <div class="flex min-h-0 flex-col gap-3 border-border bg-muted/15 p-4 lg:border-r">
+            <div class="flex items-center justify-between gap-2">
+              <Label class="text-sm font-medium">
+                配图 <span class="text-destructive">*</span>
+              </Label>
+              <Badge variant="secondary" class="tabular-nums">
+                {{ form.images.length }} / 5
+              </Badge>
             </div>
-            <div class="flex flex-col gap-2">
-              <Label for="r-dp">优惠价</Label>
-              <Input id="r-dp" v-model.number="form.discount_price" type="number" min="0" step="0.01" />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="r-op">原价</Label>
-              <Input id="r-op" v-model.number="form.originalPrice" type="number" min="0" step="0.01" />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="r-da">可抵扣金额</Label>
-              <Input id="r-da" v-model.number="form.discountAmount" type="number" min="0" step="0.01" />
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>可享优惠的数字资产</Label>
-            <Input v-model="digitalFilter" placeholder="筛选标题…" class="max-w-md" />
             <p class="text-xs text-muted-foreground">
-              不选择则不限制，设置后仅拥有所选数字资产的用户可享受优惠价。
+              至少 1 张，最多 5 张，支持多选或拖拽
             </p>
-            <div class="max-h-48 overflow-y-auto rounded-lg border border-border p-2">
-              <ul class="space-y-2">
-                <li v-for="item in filteredDigitalOptions" :key="item.id" class="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    class="mt-1 size-4 shrink-0 rounded border border-input accent-primary"
-                    :checked="eligibleIdSet.has(Number(item.id))"
-                    @change="toggleEligibleDigital(Number(item.id), $event.target.checked)"
-                  >
-                  <span class="min-w-0 text-sm leading-snug">{{ item.title }}</span>
-                </li>
-              </ul>
-              <p v-if="filteredDigitalOptions.length === 0" class="py-4 text-center text-sm text-muted-foreground">
-                无匹配项
-              </p>
-            </div>
-          </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="r-period">期限</Label>
-            <Input id="r-period" v-model="form.period" />
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div class="flex flex-col gap-2">
-              <Label for="r-total">总数量</Label>
-              <Input id="r-total" v-model.number="form.totalCount" type="number" min="0" step="1" />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="r-rem">剩余数量</Label>
-              <Input
-                id="r-rem"
-                v-model.number="form.remainingCount"
-                type="number"
-                min="0"
-                :max="form.totalCount"
-                step="1"
-              />
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="r-cat">所属分类</Label>
-            <select
-              id="r-cat"
-              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              :value="form.category_id == null ? '' : String(form.category_id)"
-              @change="onCategoryChange"
-            >
-              <option disabled value="">
-                请选择分类
-              </option>
-              <option v-for="cat in categories" :key="cat.id" :value="String(cat.id)">
-                {{ cat.title }}
-              </option>
-            </select>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="r-artist">关联艺术家</Label>
-            <select
-              id="r-artist"
-              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              :value="form.artist_id == null ? '' : String(form.artist_id)"
-              @change="onArtistChange"
-            >
-              <option value="">（不关联）</option>
-              <option v-for="artist in artists" :key="artist.id" :value="String(artist.id)">
-                {{ artist.name }}
-              </option>
-            </select>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="r-desc">描述</Label>
-            <Textarea id="r-desc" v-model="form.description" class="min-h-24" rows="4" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>图片 <span class="text-destructive">*</span></Label>
-            <p class="text-xs text-muted-foreground">
-              最多 5 张，支持多选文件或拖拽到下方区域。
-            </p>
-            <div class="flex flex-wrap gap-3">
-              <div
-                v-for="(image, index) in form.images"
-                :key="index"
-                class="group relative size-[120px] shrink-0 overflow-hidden rounded-lg border border-border shadow-sm"
-              >
-                <img :src="getImageUrl(image)" alt="配图" class="size-full object-cover">
+            <ScrollArea class="min-h-0 flex-1 lg:max-h-[min(56vh,560px)]">
+              <div class="flex flex-wrap gap-2.5 pr-3">
                 <div
-                  class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+                  v-for="(image, index) in form.images"
+                  :key="`${image}-${index}`"
+                  class="group relative size-[100px] overflow-hidden rounded-lg border border-border bg-background shadow-sm"
                 >
-                  <Button type="button" size="icon" variant="destructive" @click="openRemoveRightsImageDialog(index)">
-                    <Trash2 class="size-4" />
+                  <img
+                    :src="getImageUrl(image)"
+                    :alt="`配图 ${index + 1}`"
+                    class="size-full object-cover"
+                    loading="lazy"
+                  >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="absolute right-1 top-1 size-7 opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
+                    :aria-label="`移除第 ${index + 1} 张`"
+                    @click="removeRightsImage(index)"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
                   </Button>
+                  <span class="absolute bottom-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">
+                    {{ index + 1 }}
+                  </span>
+                </div>
+
+                <div
+                  v-if="form.images.length < 5"
+                  class="relative flex size-[100px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
+                  :class="{
+                    'border-primary/50 bg-primary/5': isImageDragOver,
+                    'pointer-events-none opacity-70': isImageUploading || isImageProcessing,
+                  }"
+                  role="button"
+                  tabindex="0"
+                  @click="triggerImageInput"
+                  @keydown.enter.prevent="triggerImageInput"
+                  @keydown.space.prevent="triggerImageInput"
+                  @dragenter="handleImageDragEnter"
+                  @dragleave="handleImageDragLeave"
+                  @dragover="handleImageDragOver"
+                  @drop="handleImageDrop"
+                >
+                  <Loader2
+                    v-if="isImageUploading || isImageProcessing"
+                    class="mb-1 size-7 animate-spin text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <Plus v-else class="mb-1 size-7 text-muted-foreground" aria-hidden="true" />
+                  <span class="text-[11px] font-medium">添加</span>
+                  <div
+                    v-if="isImageDragOver"
+                    class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/10 text-[10px] font-medium text-primary"
+                  >
+                    释放上传
+                  </div>
                 </div>
               </div>
+            </ScrollArea>
 
-              <div
-                v-if="form.images.length < 5"
-                class="flex size-[120px] shrink-0 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
-                :class="{
-                  'border-primary/50 bg-primary/5': isImageDragOver,
-                  'pointer-events-none opacity-70': isImageUploading || isImageProcessing,
-                }"
-                role="button"
-                tabindex="0"
-                @click="triggerImageInput"
-                @keydown.enter.prevent="triggerImageInput"
-                @keydown.space.prevent="triggerImageInput"
-                @dragenter="handleImageDragEnter"
-                @dragleave="handleImageDragLeave"
-                @dragover="handleImageDragOver"
-                @drop="handleImageDrop"
-              >
-                <Loader2
-                  v-if="isImageUploading || isImageProcessing"
-                  class="mb-1 size-8 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Plus v-else class="mb-1 size-8 text-muted-foreground" aria-hidden="true" />
-                <span class="text-xs font-medium">添加图片</span>
-                <span class="mt-0.5 text-[10px] text-muted-foreground">还可 {{ 5 - form.images.length }} 张</span>
-              </div>
-            </div>
             <input
               ref="imageInput"
               type="file"
@@ -304,59 +216,237 @@
               @change="handleImageFileSelect"
             >
 
-            <div v-if="isImageProcessing" class="max-w-md rounded-lg border border-border bg-muted/40 p-3 text-sm">
-              <div class="mb-2 flex justify-between text-muted-foreground">
-                <span>图片处理中</span>
-                <span>处理中…</span>
-              </div>
-              <Progress :model-value="40" class="h-2" />
-              <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
-                <span>{{ formatFileSize(imageFileSize) }}</span>
-              </div>
-            </div>
             <div
-              v-if="imageUploadProgress > 0 && imageUploadProgress < 100 && !isImageProcessing"
-              class="max-w-md rounded-lg border border-border bg-muted/40 p-3 text-sm"
+              v-if="isImageProcessing || (imageUploadProgress > 0 && imageUploadProgress < 100)"
+              class="rounded-lg border border-border bg-background p-2 text-xs text-muted-foreground"
             >
-              <div class="mb-2 flex justify-between">
-                <span class="font-medium">上传进度</span>
-                <span class="font-semibold text-primary tabular-nums">{{ imageUploadProgress }}%</span>
-              </div>
-              <Progress :model-value="imageUploadProgress" class="h-2" />
-              <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
-                <span>{{ formatFileSize(imageFileSize) }}</span>
-              </div>
+              <Progress :model-value="isImageProcessing ? 40 : imageUploadProgress" class="h-1.5" />
+              <p class="mt-1.5 text-center">
+                {{ isImageProcessing ? '处理中…' : `上传中 ${imageUploadProgress}%` }}
+              </p>
             </div>
-            <Alert v-if="imageUploadProgress === 100" class="max-w-md border-primary/30">
-              <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-              <AlertTitle>图片上传成功</AlertTitle>
-            </Alert>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label>富文本内容</Label>
-            <div class="overflow-hidden rounded-lg border border-border">
-              <Toolbar :editor="editorRef" class="w-full border-b border-border" />
-              <Editor
-                v-model="richTextHtml"
-                :default-config="{ placeholder: '请输入富文本内容...', ...editorConfig }"
-                mode="default"
-                class="min-h-[300px] w-full min-w-0"
-                style="min-height: 300px"
-                @onCreated="handleEditorCreated"
-              />
-            </div>
+          <!-- 右侧：Tab -->
+          <div class="flex min-h-0 flex-col">
+            <Tabs v-model="rightFormTab" class="flex min-h-0 flex-1 flex-col">
+              <div class="shrink-0 border-b border-border px-4 pt-3">
+                <TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+                  <TabsTrigger value="basic" class="text-xs sm:text-sm">
+                    基本信息
+                  </TabsTrigger>
+                  <TabsTrigger value="pricing" class="text-xs sm:text-sm">
+                    价格库存
+                  </TabsTrigger>
+                  <TabsTrigger value="discount" class="text-xs sm:text-sm">
+                    优惠条件
+                  </TabsTrigger>
+                  <TabsTrigger value="content" class="text-xs sm:text-sm">
+                    详情内容
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              <ScrollArea class="min-h-[320px] flex-1 lg:max-h-[min(56vh,560px)]">
+                <TabsContent value="basic" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="r-title">标题 <span class="text-destructive">*</span></Label>
+                    <Input id="r-title" v-model="form.title" autocomplete="off" placeholder="版权实物标题" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="r-status">状态 <span class="text-destructive">*</span></Label>
+                    <Select :model-value="statusSelectValue" @update:model-value="onStatusSelectChange">
+                      <SelectTrigger id="r-status" class="max-w-md">
+                        <SelectValue placeholder="请选择状态" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem :value="SELECT_NONE" disabled>
+                          请选择状态
+                        </SelectItem>
+                        <SelectItem value="onsale">在售</SelectItem>
+                        <SelectItem value="soldout">已售罄</SelectItem>
+                        <SelectItem value="upcoming">即将发售</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="r-cat">所属分类</Label>
+                    <Select :model-value="categorySelectValue" @update:model-value="onCategorySelectChange">
+                      <SelectTrigger id="r-cat" class="max-w-md">
+                        <SelectValue placeholder="请选择分类" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem :value="SELECT_NONE" disabled>
+                          请选择分类
+                        </SelectItem>
+                        <SelectItem
+                          v-for="cat in categories"
+                          :key="cat.id"
+                          :value="String(cat.id)"
+                        >
+                          {{ cat.title }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <Label for="r-artist-filter">关联艺术家</Label>
+                      <Button
+                        v-if="form.artist_id"
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 px-2 text-xs text-muted-foreground"
+                        @click="clearArtistAssociation"
+                      >
+                        取消关联
+                      </Button>
+                    </div>
+                    <p v-if="form.artist_id && selectedArtistName" class="text-xs text-muted-foreground">
+                      已选：<span class="font-medium text-foreground">{{ selectedArtistName }}</span>
+                    </p>
+                    <Input
+                      id="r-artist-filter"
+                      v-model="artistFilter"
+                      placeholder="输入姓名搜索艺术家"
+                      autocomplete="off"
+                    />
+                    <ScrollArea class="h-36 rounded-lg border border-border">
+                      <div class="p-1">
+                        <button
+                          v-for="artist in filteredArtists"
+                          :key="artist.id"
+                          type="button"
+                          class="flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+                          :class="form.artist_id === artist.id ? 'bg-primary/10 font-medium text-primary' : ''"
+                          @click="selectArtist(artist.id)"
+                        >
+                          {{ artist.name }}
+                        </button>
+                        <p
+                          v-if="!filteredArtists.length"
+                          class="px-3 py-6 text-center text-xs text-muted-foreground"
+                        >
+                          未找到艺术家
+                        </p>
+                      </div>
+                    </ScrollArea>
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="r-period">期限</Label>
+                    <Input id="r-period" v-model="form.period" placeholder="如：永久 / 1年" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="r-desc">简介</Label>
+                    <Textarea id="r-desc" v-model="form.description" class="min-h-[120px]" rows="4" placeholder="简短描述" />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="pricing" class="mt-0 space-y-4 p-4">
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-2">
+                      <Label for="r-price">价格</Label>
+                      <Input id="r-price" v-model.number="form.price" type="number" min="0" step="0.01" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="r-dp">优惠价</Label>
+                      <Input id="r-dp" v-model.number="form.discount_price" type="number" min="0" step="0.01" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="r-op">原价</Label>
+                      <Input id="r-op" v-model.number="form.originalPrice" type="number" min="0" step="0.01" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="r-da">可抵扣金额</Label>
+                      <Input id="r-da" v-model.number="form.discountAmount" type="number" min="0" step="0.01" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-2">
+                      <Label for="r-total">总数量</Label>
+                      <Input id="r-total" v-model.number="form.totalCount" type="number" min="0" step="1" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="r-rem">剩余数量</Label>
+                      <Input
+                        id="r-rem"
+                        v-model.number="form.remainingCount"
+                        type="number"
+                        min="0"
+                        :max="form.totalCount"
+                        step="1"
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="discount" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label>可享优惠的数字资产</Label>
+                    <Input v-model="digitalFilter" placeholder="筛选标题…" class="max-w-md" />
+                    <p class="text-xs text-muted-foreground">
+                      不选择则不限制；设置后仅拥有所选数字资产的用户可享受优惠价。
+                    </p>
+                  </div>
+                  <ScrollArea class="h-[min(320px,40vh)] rounded-lg border border-border">
+                    <ul class="space-y-2 p-3">
+                      <li
+                        v-for="item in filteredDigitalOptions"
+                        :key="item.id"
+                        class="flex items-start gap-2 rounded-md px-1 py-0.5 hover:bg-muted/50"
+                      >
+                        <Checkbox
+                          :id="`digital-eligible-${item.id}`"
+                          :model-value="eligibleIdSet.has(Number(item.id))"
+                          class="mt-0.5"
+                          @update:model-value="(checked) => toggleEligibleDigital(Number(item.id), checked === true)"
+                        />
+                        <label
+                          :for="`digital-eligible-${item.id}`"
+                          class="min-w-0 flex-1 cursor-pointer text-sm leading-snug"
+                        >
+                          {{ item.title }}
+                        </label>
+                      </li>
+                    </ul>
+                    <p
+                      v-if="filteredDigitalOptions.length === 0"
+                      class="py-8 text-center text-sm text-muted-foreground"
+                    >
+                      无匹配项
+                    </p>
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="content" class="mt-0 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label>富文本详情</Label>
+                    <div class="overflow-hidden rounded-lg border border-border">
+                      <Toolbar :editor="editorRef" class="w-full border-b border-border" />
+                      <Editor
+                        v-model="richTextHtml"
+                        :default-config="{ placeholder: '请输入富文本内容...', ...editorConfig }"
+                        mode="default"
+                        class="min-h-[min(320px,40vh)] w-full min-w-0"
+                        style="min-height: min(320px, 40vh)"
+                        @onCreated="handleEditorCreated"
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+              </ScrollArea>
+            </Tabs>
           </div>
         </div>
 
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="dialogVisible = false">
+        <DialogFooter class="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="savingForm" @click="dialogVisible = false">
             取消
           </Button>
-          <Button type="button" @click="handleSubmit">
-            确定
+          <Button type="button" :disabled="savingForm" @click="handleSubmit">
+            <Loader2 v-if="savingForm" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            {{ isEdit ? '保存' : '添加' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -424,31 +514,14 @@
       </AlertDialogContent>
     </AlertDialog>
 
-    <AlertDialog v-model:open="removeRightsImageDialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除图片</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除这张图片吗？
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
-            取消
-          </AlertDialogCancel>
-          <Button type="button" variant="destructive" @click="confirmRemoveRightsImage">
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Plus, Trash2 } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Plus, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -467,10 +540,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -478,7 +553,23 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+
+const route = useRoute()
+const router = useRouter()
+
+const SELECT_NONE = '_none'
+const rightFormTab = ref('basic')
+const savingForm = ref(false)
 
 const listLoading = ref(false)
 const listError = ref('')
@@ -487,15 +578,13 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const categories = ref([])
 const artists = ref([])
+const artistFilter = ref('')
 const digitalOptions = ref([])
 const digitalFilter = ref('')
 
 const deleteRightDialogOpen = ref(false)
 const deleteRightTarget = ref(null)
 const deletingRight = ref(false)
-
-const removeRightsImageDialogOpen = ref(false)
-const removeRightsImageIndex = ref(null)
 
 const filteredDigitalOptions = computed(() => {
   const q = digitalFilter.value.trim().toLowerCase()
@@ -525,6 +614,32 @@ const form = ref({
 })
 
 const eligibleIdSet = computed(() => new Set(form.value.eligible_digital_artwork_ids || []))
+
+const statusSelectValue = computed(() => {
+  if (!form.value.status) return SELECT_NONE
+  return form.value.status
+})
+
+const categorySelectValue = computed(() => {
+  if (form.value.category_id == null) return SELECT_NONE
+  return String(form.value.category_id)
+})
+
+const filteredArtists = computed(() => {
+  const q = artistFilter.value.trim().toLowerCase()
+  if (!q) return artists.value
+  return artists.value.filter((a) =>
+    String(a.name ?? '')
+      .toLowerCase()
+      .includes(q)
+  )
+})
+
+const selectedArtistName = computed(() => {
+  if (!form.value.artist_id) return ''
+  const artist = artists.value.find((a) => a.id === form.value.artist_id)
+  return artist?.name ?? ''
+})
 
 const editorRef = ref(null)
 const richTextHtml = ref('')
@@ -583,14 +698,20 @@ watch(dialogVisible, (val) => {
   }
 })
 
-function onCategoryChange(e) {
-  const v = e.target.value
-  form.value.category_id = v === '' ? null : Number(v)
+function onStatusSelectChange(v) {
+  form.value.status = v === SELECT_NONE ? '' : v
 }
 
-function onArtistChange(e) {
-  const v = e.target.value
-  form.value.artist_id = v === '' ? null : Number(v)
+function onCategorySelectChange(v) {
+  form.value.category_id = v === SELECT_NONE ? null : Number(v)
+}
+
+function selectArtist(id) {
+  form.value.artist_id = id
+}
+
+function clearArtistAssociation() {
+  form.value.artist_id = null
 }
 
 function toggleEligibleDigital(id, checked) {
@@ -722,7 +843,9 @@ const handleAdd = () => {
     eligible_digital_artwork_ids: []
   }
   digitalFilter.value = ''
+  artistFilter.value = ''
   resetImageUploadState()
+  rightFormTab.value = 'basic'
   dialogVisible.value = true
   richTextHtml.value = ''
   nextTick(() => {
@@ -752,7 +875,9 @@ const handleEdit = (row) => {
     eligible_digital_artwork_ids: []
   }
   digitalFilter.value = ''
+  artistFilter.value = ''
   resetImageUploadState()
+  rightFormTab.value = 'basic'
   dialogVisible.value = true
   richTextHtml.value = row.rich_text || ''
   fetchDigitalOptions()
@@ -785,21 +910,9 @@ async function confirmDeleteRight() {
   }
 }
 
-function openRemoveRightsImageDialog(index) {
-  removeRightsImageIndex.value = index
-  removeRightsImageDialogOpen.value = true
-}
-
-function confirmRemoveRightsImage() {
-  const index = removeRightsImageIndex.value
-  if (index == null || index < 0) {
-    removeRightsImageDialogOpen.value = false
-    return
-  }
+function removeRightsImage(index) {
+  if (index < 0 || index >= form.value.images.length) return
   form.value.images.splice(index, 1)
-  ElMessage.success('图片已删除')
-  removeRightsImageDialogOpen.value = false
-  removeRightsImageIndex.value = null
 }
 
 const triggerImageInput = () => {
@@ -953,14 +1066,6 @@ const handleImageDrop = (e) => {
   }
 }
 
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
 const getImageUrl = (url) => {
   if (!url) return ''
   if (isOssPublicUrl(url)) {
@@ -976,10 +1081,12 @@ const handleEditorCreated = (editor) => {
 const handleSubmit = async () => {
   if (!form.value.title.trim()) {
     ElMessage.warning('请输入标题')
+    rightFormTab.value = 'basic'
     return
   }
   if (!form.value.status) {
     ElMessage.warning('请选择状态')
+    rightFormTab.value = 'basic'
     return
   }
   if (form.value.images.length === 0) {
@@ -987,6 +1094,7 @@ const handleSubmit = async () => {
     return
   }
 
+  savingForm.value = true
   try {
     const submitData = {
       ...form.value,
@@ -1032,13 +1140,34 @@ const handleSubmit = async () => {
   } catch (error) {
     console.error('保存失败:', error)
     ElMessage.error('保存失败')
+  } finally {
+    savingForm.value = false
   }
 }
 
-onMounted(() => {
-  fetchRights()
+async function openEditFromRouteQuery() {
+  const raw = route.query.edit
+  if (!raw) return
+  const id = Number(raw)
+  if (!id) return
+
+  const row = rights.value.find((r) => r.id === id)
+  if (row) {
+    handleEdit(row)
+  } else {
+    ElMessage.error('未找到该版权实物')
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  router.replace({ path: route.path, query: nextQuery })
+}
+
+onMounted(async () => {
+  await fetchRights()
   fetchCategories()
   fetchArtists()
+  await openEditFromRouteQuery()
 })
 
 onBeforeUnmount(() => {

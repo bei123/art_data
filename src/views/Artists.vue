@@ -269,65 +269,33 @@
     </Card>
 
     <Dialog v-model:open="dialogVisible">
-      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent class="flex max-h-[92vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader class="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{{ isEdit ? '编辑艺术家' : '添加艺术家' }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="isEdit">
+              正在编辑「{{ form.name || '未命名' }}」<span v-if="form.id" class="text-muted-foreground">（ID {{ form.id }}）</span>
+            </template>
+            <template v-else>
+              上传头像与背景图，并填写基本信息；带 <span class="text-destructive">*</span> 为必填
+            </template>
+          </DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="artist-name">艺术家姓名</Label>
-            <Input id="artist-name" v-model="form.name" autocomplete="name" />
-          </div>
-          <div class="flex flex-col gap-2">
-            <Label for="artist-era">所属时代</Label>
-            <Input id="artist-era" v-model="form.era" />
-          </div>
-          <div class="flex flex-col gap-2">
-            <Label for="artist-inst">所属机构</Label>
-            <select
-              id="artist-inst"
-              class="flex h-10 w-full rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              :value="form.institution_id == null ? '' : String(form.institution_id)"
-              @change="onFormInstitutionChange"
-            >
-              <option value="">独立艺术家</option>
-              <option
-                v-for="institution in institutions"
-                :key="institution.id"
-                :value="String(institution.id)"
+        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(240px,280px)_1fr]">
+          <!-- 左侧：形象图 -->
+          <div class="flex flex-col gap-5 border-border bg-muted/15 p-4 lg:border-r">
+            <div class="flex flex-col gap-2">
+              <Label>头像 <span class="text-destructive">*</span></Label>
+              <input
+                ref="avatarInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleAvatarFileSelect"
               >
-                {{ institution.name }}
-              </option>
-            </select>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>头像 <span class="text-destructive">*</span></Label>
-            <div class="max-w-[400px] space-y-3">
               <div
-                v-if="form.avatar"
-                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
-              >
-                <img
-                  :src="getImageUrl(form.avatar)"
-                  alt="头像"
-                  class="size-full object-cover"
-                >
-                <div
-                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <Button type="button" size="icon" variant="destructive" @click="openRemoveAvatarDialog">
-                    <Trash2 class="size-4" />
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" @click="triggerAvatarInput">
-                    更换头像
-                  </Button>
-                </div>
-              </div>
-              <div
-                v-else
-                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                class="relative aspect-square w-full max-w-[280px] cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
                 :class="{
                   'border-primary/50 bg-primary/5': isAvatarDragOver,
                   'pointer-events-none opacity-70': isAvatarUploading || isAvatarProcessing,
@@ -342,94 +310,74 @@
                 @dragover="handleAvatarDragOver"
                 @drop="handleAvatarDrop"
               >
-                <Loader2
-                  v-if="isAvatarUploading || isAvatarProcessing"
-                  class="mb-2 size-10 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
-                <p class="px-2 text-center text-sm font-medium text-foreground">
-                  {{ isAvatarProcessing ? '正在处理图片…' : isAvatarUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
-                </p>
-                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
-                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
-                </p>
-                <div
-                  v-if="isAvatarDragOver && !form.avatar"
-                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                <img
+                  v-if="form.avatar"
+                  :src="getImageUrl(form.avatar)"
+                  alt="头像"
+                  class="size-full object-cover"
+                  loading="lazy"
                 >
-                  <Upload class="mb-2 size-10" aria-hidden="true" />
-                  <span>释放鼠标上传图片</span>
+                <div v-else class="flex size-full flex-col items-center justify-center gap-2 p-4 text-center">
+                  <Upload class="size-9 text-muted-foreground" aria-hidden="true" />
+                  <p class="text-sm font-medium">上传头像</p>
+                </div>
+                <div
+                  v-if="isAvatarDragOver"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 text-sm font-medium text-primary"
+                >
+                  释放以上传
+                </div>
+                <div
+                  v-if="form.avatar && !isAvatarUploading && !isAvatarProcessing"
+                  class="absolute right-2 top-2 flex gap-1"
+                >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    class="size-8 bg-background/90 shadow-sm"
+                    aria-label="更换头像"
+                    @click.stop="triggerAvatarInput"
+                  >
+                    <Upload class="size-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="size-8 shadow-sm"
+                    aria-label="移除头像"
+                    @click.stop="clearAvatar"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
+                  </Button>
                 </div>
               </div>
+              <div
+                v-if="isAvatarProcessing || (avatarUploadProgress > 0 && avatarUploadProgress < 100)"
+                class="max-w-[280px] rounded-lg border border-border bg-background p-2 text-xs text-muted-foreground"
+              >
+                <Progress
+                  :model-value="isAvatarProcessing ? 40 : avatarUploadProgress"
+                  class="h-1.5"
+                />
+                <p class="mt-1.5 text-center">
+                  {{ isAvatarProcessing ? '处理中…' : `上传中 ${avatarUploadProgress}%` }}
+                </p>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <Label>背景图 <span class="text-destructive">*</span></Label>
               <input
-                ref="avatarInput"
+                ref="bannerInput"
                 type="file"
                 accept="image/*"
                 class="hidden"
-                @change="handleAvatarFileSelect"
+                @change="handleBannerFileSelect"
               >
-              <div v-if="isAvatarProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div class="mb-2 flex justify-between text-muted-foreground">
-                  <span>图片处理中</span>
-                  <span>处理中…</span>
-                </div>
-                <Progress :model-value="40" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ avatarFileName }}</span>
-                  <span>{{ formatFileSize(avatarFileSize) }}</span>
-                </div>
-                <p class="mt-2 text-center text-xs italic text-muted-foreground">
-                  正在将图片转换为 WebP 并压缩…
-                </p>
-              </div>
               <div
-                v-if="avatarUploadProgress > 0 && avatarUploadProgress < 100 && !isAvatarProcessing"
-                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
-              >
-                <div class="mb-2 flex justify-between">
-                  <span class="font-medium">上传进度</span>
-                  <span class="font-semibold text-primary tabular-nums">{{ avatarUploadProgress }}%</span>
-                </div>
-                <Progress :model-value="avatarUploadProgress" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ avatarFileName }}</span>
-                  <span>{{ formatFileSize(avatarFileSize) }}</span>
-                </div>
-              </div>
-              <Alert v-if="avatarUploadProgress === 100" class="border-primary/30">
-                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <AlertTitle>头像上传成功</AlertTitle>
-              </Alert>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>背景图 <span class="text-destructive">*</span></Label>
-            <div class="max-w-[400px] space-y-3">
-              <div
-                v-if="form.banner"
-                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
-              >
-                <img
-                  :src="getImageUrl(form.banner)"
-                  alt="背景图"
-                  class="size-full object-cover"
-                >
-                <div
-                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <Button type="button" size="icon" variant="destructive" @click="openRemoveBannerDialog">
-                    <Trash2 class="size-4" />
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" @click="triggerBannerInput">
-                    更换背景图
-                  </Button>
-                </div>
-              </div>
-              <div
-                v-else
-                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                class="relative aspect-[5/3] w-full max-w-[280px] cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
                 :class="{
                   'border-primary/50 bg-primary/5': isBannerDragOver,
                   'pointer-events-none opacity-70': isBannerUploading || isBannerProcessing,
@@ -444,233 +392,337 @@
                 @dragover="handleBannerDragOver"
                 @drop="handleBannerDrop"
               >
-                <Loader2
-                  v-if="isBannerUploading || isBannerProcessing"
-                  class="mb-2 size-10 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
-                <p class="px-2 text-center text-sm font-medium text-foreground">
-                  {{ isBannerProcessing ? '正在处理图片…' : isBannerUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
-                </p>
-                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
-                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
-                </p>
-                <div
-                  v-if="isBannerDragOver && !form.banner"
-                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                <img
+                  v-if="form.banner"
+                  :src="getImageUrl(form.banner)"
+                  alt="背景图"
+                  class="size-full object-cover"
+                  loading="lazy"
                 >
-                  <Upload class="mb-2 size-10" aria-hidden="true" />
-                  <span>释放鼠标上传图片</span>
+                <div v-else class="flex size-full flex-col items-center justify-center gap-2 p-4 text-center">
+                  <Upload class="size-9 text-muted-foreground" aria-hidden="true" />
+                  <p class="text-sm font-medium">上传背景图</p>
                 </div>
-              </div>
-              <input
-                ref="bannerInput"
-                type="file"
-                accept="image/*"
-                class="hidden"
-                @change="handleBannerFileSelect"
-              >
-              <div v-if="isBannerProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div class="mb-2 flex justify-between text-muted-foreground">
-                  <span>图片处理中</span>
-                  <span>处理中…</span>
+                <div
+                  v-if="isBannerDragOver"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 text-sm font-medium text-primary"
+                >
+                  释放以上传
                 </div>
-                <Progress :model-value="40" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ bannerFileName }}</span>
-                  <span>{{ formatFileSize(bannerFileSize) }}</span>
+                <div
+                  v-if="form.banner && !isBannerUploading && !isBannerProcessing"
+                  class="absolute right-2 top-2 flex gap-1"
+                >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    class="size-8 bg-background/90 shadow-sm"
+                    aria-label="更换背景图"
+                    @click.stop="triggerBannerInput"
+                  >
+                    <Upload class="size-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="size-8 shadow-sm"
+                    aria-label="移除背景图"
+                    @click.stop="clearBanner"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
+                  </Button>
                 </div>
-                <p class="mt-2 text-center text-xs italic text-muted-foreground">
-                  正在将图片转换为 WebP 并压缩…
-                </p>
               </div>
               <div
-                v-if="bannerUploadProgress > 0 && bannerUploadProgress < 100 && !isBannerProcessing"
-                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+                v-if="isBannerProcessing || (bannerUploadProgress > 0 && bannerUploadProgress < 100)"
+                class="max-w-[280px] rounded-lg border border-border bg-background p-2 text-xs text-muted-foreground"
               >
-                <div class="mb-2 flex justify-between">
-                  <span class="font-medium">上传进度</span>
-                  <span class="font-semibold text-primary tabular-nums">{{ bannerUploadProgress }}%</span>
-                </div>
-                <Progress :model-value="bannerUploadProgress" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ bannerFileName }}</span>
-                  <span>{{ formatFileSize(bannerFileSize) }}</span>
-                </div>
-              </div>
-              <Alert v-if="bannerUploadProgress === 100" class="border-primary/30">
-                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <AlertTitle>背景图上传成功</AlertTitle>
-              </Alert>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>公开接口展示</Label>
-            <p class="text-xs text-muted-foreground">
-              关闭后未登录访客无法在列表、详情与搜索中看到该艺术家；管理员登录后台后仍可管理。
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                :variant="form.is_public === 1 ? 'default' : 'outline'"
-                @click="form.is_public = 1"
-              >
-                展示
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                :variant="form.is_public === 0 ? 'default' : 'outline'"
-                @click="form.is_public = 0"
-              >
-                不展示
-              </Button>
-            </div>
-
-            <Label for="artist-desc">简介</Label>
-            <Textarea id="artist-desc" v-model="form.description" class="min-h-24" rows="4" />
-          </div>
-          <div class="flex flex-col gap-2">
-            <Label for="artist-journey">艺术历程</Label>
-            <Textarea
-              id="artist-journey"
-              v-model="form.journey"
-              class="min-h-32"
-              rows="6"
-              placeholder="请按时间顺序记录艺术家的重要创作时期、重大作品、获奖经历等"
-            />
-          </div>
-
-          <div class="flex items-center gap-4 py-1">
-            <Separator class="flex-1" />
-            <span class="shrink-0 text-sm text-muted-foreground">代表作品</span>
-            <Separator class="flex-1" />
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card class="shadow-none ring-1">
-              <CardHeader class="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle class="text-sm font-medium">
-                  该艺术家全部作品（{{ filteredFeaturedAllArtworks.length }}）
-                </CardTitle>
-                <Input
-                  v-model="featuredSearch"
-                  class="h-8 max-w-full sm:max-w-[220px]"
-                  placeholder="搜索标题/ID/年份"
+                <Progress
+                  :model-value="isBannerProcessing ? 40 : bannerUploadProgress"
+                  class="h-1.5"
                 />
-              </CardHeader>
-              <CardContent class="p-0">
-                <div class="max-h-[260px] overflow-y-auto p-3">
-                  <p
-                    v-if="filteredFeaturedAllArtworks.length === 0"
-                    class="py-8 text-center text-sm text-muted-foreground"
-                  >
-                    暂无作品或未匹配
-                  </p>
-                  <ul v-else class="divide-y divide-border">
-                    <li
-                      v-for="item in filteredFeaturedAllArtworks"
-                      :key="item.id"
-                      class="flex items-center justify-between gap-2 py-2.5 text-sm"
-                    >
-                      <span class="min-w-0 flex-1 truncate font-medium" :title="item.title">{{ item.title }}</span>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        type="button"
-                        :disabled="featuredSelected.some((i) => i.id === item.id)"
-                        @click="featuredAdd(item)"
-                      >
-                        {{ featuredSelected.some((i) => i.id === item.id) ? '已添加' : '添加' }}
-                      </Button>
-                    </li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
+                <p class="mt-1.5 text-center">
+                  {{ isBannerProcessing ? '处理中…' : `上传中 ${bannerUploadProgress}%` }}
+                </p>
+              </div>
+            </div>
+          </div>
 
-            <Card class="shadow-none ring-1">
-              <CardHeader class="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle class="text-sm font-medium">
-                  已选代表作品（可排序，{{ featuredSelected.length }}）
-                </CardTitle>
-                <div class="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    type="button"
-                    :disabled="featuredSelected.length === 0"
-                    @click="featuredClear"
-                  >
-                    清空
-                  </Button>
-                  <Button
-                    size="sm"
-                    type="button"
-                    :disabled="!isEdit || featuredSaving"
-                    @click="featuredSave"
-                  >
-                    <Loader2
-                      v-if="featuredSaving"
-                      class="mr-1.5 inline size-3.5 animate-spin align-middle"
-                      aria-hidden="true"
+          <!-- 右侧：Tab 表单 -->
+          <div class="flex min-h-0 flex-col">
+            <Tabs v-model="artistFormTab" class="flex min-h-0 flex-1 flex-col">
+              <div class="shrink-0 border-b border-border px-4 pt-3">
+                <TabsList class="grid h-auto w-full grid-cols-3 gap-1">
+                  <TabsTrigger value="basic" class="text-xs sm:text-sm">
+                    基本信息
+                  </TabsTrigger>
+                  <TabsTrigger value="bio" class="text-xs sm:text-sm">
+                    简介与历程
+                  </TabsTrigger>
+                  <TabsTrigger value="featured" class="text-xs sm:text-sm">
+                    代表作品
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              <ScrollArea class="min-h-[320px] flex-1 lg:max-h-[min(56vh,560px)]">
+                <TabsContent value="basic" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="artist-name">艺术家姓名 <span class="text-destructive">*</span></Label>
+                    <Input id="artist-name" v-model="form.name" autocomplete="name" />
+                  </div>
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-2">
+                      <Label for="artist-era">所属时代</Label>
+                      <Input id="artist-era" v-model="form.era" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label>所属机构</Label>
+                      <Select
+                        :model-value="form.institution_id == null ? 'none' : String(form.institution_id)"
+                        @update:model-value="onInstitutionSelect"
+                      >
+                        <SelectTrigger class="w-full">
+                          <SelectValue placeholder="选择机构" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            独立艺术家
+                          </SelectItem>
+                          <SelectItem
+                            v-for="institution in institutions"
+                            :key="institution.id"
+                            :value="String(institution.id)"
+                          >
+                            {{ institution.name }}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label>公开接口展示</Label>
+                    <p class="text-xs text-muted-foreground">
+                      关闭后未登录访客无法在列表、详情与搜索中看到该艺术家
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        :variant="form.is_public === 1 ? 'default' : 'outline'"
+                        @click="form.is_public = 1"
+                      >
+                        展示
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        :variant="form.is_public === 0 ? 'default' : 'outline'"
+                        @click="form.is_public = 0"
+                      >
+                        不展示
+                      </Button>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="bio" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="artist-desc">简介</Label>
+                    <Textarea id="artist-desc" v-model="form.description" class="min-h-28" rows="5" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="artist-journey">艺术历程</Label>
+                    <Textarea
+                      id="artist-journey"
+                      v-model="form.journey"
+                      class="min-h-36"
+                      rows="8"
+                      placeholder="按时间顺序记录重要创作时期、代表作、获奖经历等"
                     />
-                    {{ featuredSaving ? '保存中…' : '保存' }}
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent class="p-0">
-                <div class="max-h-[260px] overflow-y-auto p-3">
-                  <p v-if="featuredSelected.length === 0" class="py-8 text-center text-sm text-muted-foreground">
-                    未选择
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="featured" class="mt-0 p-4">
+                  <p v-if="!isEdit" class="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-10 text-center text-sm text-muted-foreground">
+                    请先保存艺术家，再在编辑中配置代表作品
                   </p>
-                  <ul v-else class="divide-y divide-border">
-                    <li
-                      v-for="(item, index) in featuredSelected"
-                      :key="item.id"
-                      class="flex flex-col gap-2 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <span class="min-w-0 flex-1 truncate font-medium" :title="item.title">{{ item.title }}</span>
-                      <div class="flex shrink-0 flex-wrap gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          type="button"
-                          :disabled="index === 0"
-                          @click="featuredMoveUp(index)"
-                        >
-                          上移
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          type="button"
-                          :disabled="index === featuredSelected.length - 1"
-                          @click="featuredMoveDown(index)"
-                        >
-                          下移
-                        </Button>
-                        <Button size="sm" variant="destructive" type="button" @click="featuredRemove(index)">
-                          移除
-                        </Button>
-                      </div>
-                    </li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
+                  <div v-else class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    <Card class="shadow-none ring-1">
+                      <CardHeader class="flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+                        <CardTitle class="text-sm font-medium">
+                          全部作品（{{ filteredFeaturedAllArtworks.length }}）
+                        </CardTitle>
+                        <Input
+                          v-model="featuredSearch"
+                          class="h-8 max-w-full sm:max-w-[200px]"
+                          placeholder="搜索标题 / ID / 年份"
+                        />
+                      </CardHeader>
+                      <CardContent class="p-0">
+                        <ScrollArea class="h-[280px]">
+                          <div class="p-3">
+                            <p
+                              v-if="filteredFeaturedAllArtworks.length === 0"
+                              class="py-10 text-center text-sm text-muted-foreground"
+                            >
+                              暂无作品或未匹配
+                            </p>
+                            <ul v-else class="divide-y divide-border">
+                              <li
+                                v-for="item in filteredFeaturedAllArtworks"
+                                :key="item.id"
+                                class="flex items-center gap-2 py-2.5"
+                              >
+                                <div
+                                  v-if="item.image"
+                                  class="size-10 shrink-0 overflow-hidden rounded-md border border-border bg-muted/40"
+                                >
+                                  <img
+                                    :src="getImageUrl(item.image)"
+                                    :alt="item.title"
+                                    class="size-full object-cover"
+                                    loading="lazy"
+                                  >
+                                </div>
+                                <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="item.title">
+                                  {{ item.title || '未命名' }}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  type="button"
+                                  class="shrink-0"
+                                  :disabled="featuredSelected.some((i) => i.id === item.id)"
+                                  @click="featuredAdd(item)"
+                                >
+                                  {{ featuredSelected.some((i) => i.id === item.id) ? '已添加' : '添加' }}
+                                </Button>
+                              </li>
+                            </ul>
+                          </div>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+
+                    <Card class="shadow-none ring-1">
+                      <CardHeader class="flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+                        <CardTitle class="text-sm font-medium">
+                          已选（{{ featuredSelected.length }}）
+                        </CardTitle>
+                        <div class="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            type="button"
+                            :disabled="featuredSelected.length === 0"
+                            @click="featuredClear"
+                          >
+                            清空
+                          </Button>
+                          <Button
+                            size="sm"
+                            type="button"
+                            :disabled="featuredSaving"
+                            @click="featuredSave"
+                          >
+                            <Loader2
+                              v-if="featuredSaving"
+                              class="mr-1.5 size-3.5 animate-spin"
+                              aria-hidden="true"
+                            />
+                            {{ featuredSaving ? '保存中…' : '保存代表作品' }}
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent class="p-0">
+                        <ScrollArea class="h-[280px]">
+                          <div class="p-3">
+                            <p
+                              v-if="featuredSelected.length === 0"
+                              class="py-10 text-center text-sm text-muted-foreground"
+                            >
+                              从左侧添加代表作品
+                            </p>
+                            <ul v-else class="divide-y divide-border">
+                              <li
+                                v-for="(item, index) in featuredSelected"
+                                :key="item.id"
+                                class="flex items-center gap-2 py-2.5"
+                              >
+                                <span class="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
+                                  {{ index + 1 }}
+                                </span>
+                                <div
+                                  v-if="item.image"
+                                  class="size-10 shrink-0 overflow-hidden rounded-md border border-border bg-muted/40"
+                                >
+                                  <img
+                                    :src="getImageUrl(item.image)"
+                                    :alt="item.title"
+                                    class="size-full object-cover"
+                                    loading="lazy"
+                                  >
+                                </div>
+                                <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="item.title">
+                                  {{ item.title || '未命名' }}
+                                </span>
+                                <div class="flex shrink-0 gap-0.5">
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    type="button"
+                                    class="size-7"
+                                    :disabled="index === 0"
+                                    aria-label="上移"
+                                    @click="featuredMoveUp(index)"
+                                  >
+                                    <ChevronUp class="size-3.5" aria-hidden="true" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    type="button"
+                                    class="size-7"
+                                    :disabled="index === featuredSelected.length - 1"
+                                    aria-label="下移"
+                                    @click="featuredMoveDown(index)"
+                                  >
+                                    <ChevronDown class="size-3.5" aria-hidden="true" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    type="button"
+                                    class="size-7 text-destructive hover:text-destructive"
+                                    aria-label="移除"
+                                    @click="featuredRemove(index)"
+                                  >
+                                    <X class="size-3.5" aria-hidden="true" />
+                                  </Button>
+                                </div>
+                              </li>
+                            </ul>
+                          </div>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </TabsContent>
+              </ScrollArea>
+            </Tabs>
           </div>
         </div>
 
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="dialogVisible = false">
+        <DialogFooter class="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="savingForm" @click="dialogVisible = false">
             取消
           </Button>
-          <Button type="button" @click="handleSubmit">
-            确定
+          <Button type="button" :disabled="savingForm" @click="handleSubmit">
+            <Loader2 v-if="savingForm" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            {{ isEdit ? '保存' : '添加' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -768,8 +820,9 @@
 
 <script setup>
 import { computed, ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Search, Trash2, Upload } from 'lucide-vue-next'
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -789,6 +842,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -806,6 +860,11 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+const route = useRoute()
+const router = useRouter()
 
 const listLoading = ref(false)
 const listError = ref('')
@@ -817,6 +876,8 @@ const pagination = ref({
 })
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const artistFormTab = ref('basic')
+const savingForm = ref(false)
 const selectedInstitutionId = ref(null)
 const searchKeyword = ref('')
 const isSearchMode = ref(false)
@@ -953,9 +1014,16 @@ function loadArtistList() {
   fetchArtistsList()
 }
 
-function onFormInstitutionChange(e) {
-  const v = e.target.value
-  form.value.institution_id = v === '' ? null : Number(v)
+function onInstitutionSelect(value) {
+  form.value.institution_id = value === 'none' || value === '' ? null : Number(value)
+}
+
+function clearAvatar() {
+  form.value.avatar = ''
+}
+
+function clearBanner() {
+  form.value.banner = ''
 }
 
 // 头像上传相关状态
@@ -1150,6 +1218,7 @@ const handleAdd = () => {
   featuredSelected.value = []
   resetAvatarUploadState()
   resetBannerUploadState()
+  artistFormTab.value = 'basic'
   dialogVisible.value = true
 }
 
@@ -1170,6 +1239,7 @@ const handleEdit = (row) => {
   featuredAllArtworks.value = []
   resetAvatarUploadState()
   resetBannerUploadState()
+  artistFormTab.value = 'basic'
   dialogVisible.value = true
   fetchFeaturedAll(row.id)
   fetchFeaturedSelected(row.id)
@@ -1437,7 +1507,7 @@ function confirmRemoveBanner() {
 const handleAvatarDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
-  if (!isAvatarUploading.value && !isAvatarProcessing.value && !form.value.avatar) {
+  if (!isAvatarUploading.value && !isAvatarProcessing.value) {
     isAvatarDragOver.value = true
   }
 }
@@ -1460,7 +1530,7 @@ const handleAvatarDrop = (e) => {
   e.stopPropagation()
   isAvatarDragOver.value = false
 
-  if (isAvatarUploading.value || isAvatarProcessing.value || form.value.avatar) return
+  if (isAvatarUploading.value || isAvatarProcessing.value) return
 
   const files = e.dataTransfer.files
   if (files.length > 0) {
@@ -1471,7 +1541,7 @@ const handleAvatarDrop = (e) => {
 const handleBannerDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
-  if (!isBannerUploading.value && !isBannerProcessing.value && !form.value.banner) {
+  if (!isBannerUploading.value && !isBannerProcessing.value) {
     isBannerDragOver.value = true
   }
 }
@@ -1494,7 +1564,7 @@ const handleBannerDrop = (e) => {
   e.stopPropagation()
   isBannerDragOver.value = false
 
-  if (isBannerUploading.value || isBannerProcessing.value || form.value.banner) return
+  if (isBannerUploading.value || isBannerProcessing.value) return
 
   const files = e.dataTransfer.files
   if (files.length > 0) {
@@ -1593,6 +1663,7 @@ const handleSubmit = async () => {
     return
   }
 
+  savingForm.value = true
   try {
     const submitData = {
       ...form.value,
@@ -1610,12 +1681,38 @@ const handleSubmit = async () => {
     loadArtistList()
   } catch (error) {
     ElMessage.error('保存失败')
+  } finally {
+    savingForm.value = false
   }
 }
 
-onMounted(() => {
+async function openEditFromRouteQuery() {
+  const raw = route.query.edit
+  if (!raw) return
+  const id = Number(raw)
+  if (!id) return
+  await fetchArtistsList()
+  const row = filteredArtists.value.find((a) => a.id === id)
+  if (row) {
+    handleEdit(row)
+  } else {
+    try {
+      const detail = await axios.get(`/artists/${id}`)
+      const data = detail?.data ?? detail
+      if (data?.id) handleEdit(data)
+    } catch {
+      ElMessage.error('未找到该艺术家')
+    }
+  }
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  router.replace({ query: nextQuery })
+}
+
+onMounted(async () => {
   pagination.value = { page: 1, pageSize: 20, total: 0 }
   fetchInstitutions()
-  fetchArtistsList()
+  await fetchArtistsList()
+  await openEditFromRouteQuery()
 })
 </script>

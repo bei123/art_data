@@ -187,49 +187,33 @@
     </Card>
 
     <Dialog v-model:open="dialogVisible">
-      <DialogContent class="max-h-[92vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent class="flex max-h-[92vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader class="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{{ dialogType === 'add' ? '添加商家' : '编辑商家' }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="dialogType === 'edit'">
+              正在编辑「{{ form.name || '未命名' }}」<span v-if="form.id" class="text-muted-foreground">（ID {{ form.id }}）</span>
+            </template>
+            <template v-else>
+              上传 Logo 并填写商家信息；带 <span class="text-destructive">*</span> 为必填
+            </template>
+          </DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="m-name">商家名称 <span class="text-destructive">*</span></Label>
-            <Input id="m-name" v-model="form.name" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="m-address">地址 <span class="text-destructive">*</span></Label>
-            <Input id="m-address" v-model="form.address" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="m-phone">电话 <span class="text-destructive">*</span></Label>
-            <Input id="m-phone" v-model="form.phone" type="tel" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>Logo <span class="text-destructive">*</span></Label>
-            <div class="max-w-[400px] space-y-3">
-              <div
-                v-if="form.logo"
-                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
+        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(240px,280px)_1fr]">
+          <!-- 左侧：Logo -->
+          <div class="flex flex-col gap-3 border-border bg-muted/15 p-4 lg:border-r">
+            <div class="flex flex-col gap-2">
+              <Label>Logo <span class="text-destructive">*</span></Label>
+              <input
+                ref="logoInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleLogoFileSelect"
               >
-                <img :src="getImageUrl(form.logo)" alt="Logo" class="size-full object-cover">
-                <div
-                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <Button type="button" size="icon" variant="destructive" @click="openRemoveLogoDialog">
-                    <Trash2 class="size-4" />
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" @click="triggerLogoInput">
-                    更换 Logo
-                  </Button>
-                </div>
-              </div>
               <div
-                v-else
-                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                class="relative aspect-square w-full max-w-[280px] cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
                 :class="{
                   'border-primary/50 bg-primary/5': isLogoDragOver,
                   'pointer-events-none opacity-70': isLogoUploading || isLogoProcessing,
@@ -244,183 +228,217 @@
                 @dragover="handleLogoDragOver"
                 @drop="handleLogoDrop"
               >
-                <Loader2
-                  v-if="isLogoUploading || isLogoProcessing"
-                  class="mb-2 size-10 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
-                <p class="px-2 text-center text-sm font-medium text-foreground">
-                  {{ isLogoProcessing ? '正在处理图片…' : isLogoUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
-                </p>
-                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
-                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
-                </p>
-                <div
-                  v-if="isLogoDragOver && !form.logo"
-                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                <img
+                  v-if="form.logo"
+                  :src="getImageUrl(form.logo)"
+                  alt="Logo"
+                  class="size-full object-cover"
+                  loading="lazy"
                 >
-                  <Upload class="mb-2 size-10" aria-hidden="true" />
-                  <span>释放鼠标上传图片</span>
+                <div v-else class="flex size-full flex-col items-center justify-center gap-2 p-4 text-center">
+                  <Upload class="size-10 text-muted-foreground" aria-hidden="true" />
+                  <p class="text-sm font-medium">上传 Logo</p>
+                  <p class="text-xs text-muted-foreground">JPG / PNG / GIF，≤5MB</p>
                 </div>
-              </div>
-              <input
-                ref="logoInput"
-                type="file"
-                accept="image/*"
-                class="hidden"
-                @change="handleLogoFileSelect"
-              >
-
-              <div v-if="isLogoProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div class="mb-2 flex justify-between text-muted-foreground">
-                  <span>图片处理中</span>
-                  <span>处理中…</span>
-                </div>
-                <Progress :model-value="40" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ logoFileName }}</span>
-                  <span>{{ formatFileSize(logoFileSize) }}</span>
-                </div>
-                <p class="mt-2 text-center text-xs italic text-muted-foreground">
-                  正在将图片转换为 WebP 并压缩…
-                </p>
-              </div>
-
-              <div
-                v-if="logoUploadProgress > 0 && logoUploadProgress < 100 && !isLogoProcessing"
-                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
-              >
-                <div class="mb-2 flex justify-between">
-                  <span class="font-medium">上传进度</span>
-                  <span class="font-semibold text-primary tabular-nums">{{ logoUploadProgress }}%</span>
-                </div>
-                <Progress :model-value="logoUploadProgress" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ logoFileName }}</span>
-                  <span>{{ formatFileSize(logoFileSize) }}</span>
-                </div>
-              </div>
-
-              <Alert v-if="logoUploadProgress === 100 && !isLogoProcessing" class="border-primary/30">
-                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <AlertTitle>图片上传成功</AlertTitle>
-              </Alert>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>商家图片 <span class="text-destructive">*</span></Label>
-            <div class="w-full space-y-4">
-              <div v-if="form.images.length > 0" class="flex flex-wrap gap-4">
                 <div
-                  v-for="(image, index) in form.images"
-                  :key="`${image}-${index}`"
-                  class="group relative size-[120px] overflow-hidden rounded-lg border border-border shadow-sm"
+                  v-if="isLogoDragOver"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 text-sm font-medium text-primary"
                 >
-                  <img :src="getImageUrl(image)" class="size-full object-cover" alt="商家图片">
-                  <div
-                    class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
+                  释放以上传
+                </div>
+                <div
+                  v-if="form.logo && !isLogoUploading && !isLogoProcessing"
+                  class="absolute right-2 top-2 flex gap-1"
+                >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    class="size-8 bg-background/90 shadow-sm"
+                    aria-label="更换 Logo"
+                    @click.stop="triggerLogoInput"
                   >
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="destructive"
-                      class="size-8"
-                      @click="openRemoveGalleryImageDialog(index)"
-                    >
-                      <Trash2 class="size-4" aria-hidden="true" />
-                    </Button>
-                  </div>
+                    <Upload class="size-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="size-8 shadow-sm"
+                    aria-label="移除 Logo"
+                    @click.stop="clearLogo"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
+                  </Button>
                 </div>
               </div>
-
               <div
-                v-if="form.images.length < 5"
-                class="relative flex size-[120px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
-                :class="{
-                  'border-primary/50 bg-primary/5': isImagesDragOver,
-                  'pointer-events-none opacity-70': isImagesUploading || isImagesProcessing,
-                }"
-                role="button"
-                tabindex="0"
-                @click="triggerImagesInput"
-                @keydown.enter.prevent="triggerImagesInput"
-                @keydown.space.prevent="triggerImagesInput"
-                @dragenter="handleImagesDragEnter"
-                @dragleave="handleImagesDragLeave"
-                @dragover="handleImagesDragOver"
-                @drop="handleImagesDrop"
+                v-if="isLogoProcessing || (logoUploadProgress > 0 && logoUploadProgress < 100)"
+                class="max-w-[280px] rounded-lg border border-border bg-background p-2 text-xs text-muted-foreground"
               >
-                <Loader2
-                  v-if="isImagesUploading || isImagesProcessing"
-                  class="mb-1 size-8 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Plus v-else class="mb-1 size-8 text-muted-foreground" aria-hidden="true" />
-                <p class="px-1 text-center text-xs font-medium text-foreground">添加图片</p>
-                <p class="mt-0.5 px-1 text-center text-[10px] text-muted-foreground">最多 5 张，支持拖拽</p>
-              </div>
-
-              <input
-                ref="imagesInput"
-                type="file"
-                accept="image/*"
-                multiple
-                class="hidden"
-                @change="handleImagesFileSelect"
-              >
-
-              <div v-if="isImagesProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div class="mb-2 flex justify-between text-muted-foreground">
-                  <span>图片处理中</span>
-                  <span>处理中…</span>
-                </div>
-                <Progress :model-value="40" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ imagesFileName }}</span>
-                  <span>{{ formatFileSize(imagesFileSize) }}</span>
-                </div>
-                <p class="mt-2 text-center text-xs italic text-muted-foreground">
-                  正在将图片转换为 WebP 并压缩…
+                <Progress :model-value="isLogoProcessing ? 40 : logoUploadProgress" class="h-1.5" />
+                <p class="mt-1.5 text-center">
+                  {{ isLogoProcessing ? '处理中…' : `上传中 ${logoUploadProgress}%` }}
                 </p>
               </div>
-
-              <div
-                v-if="imagesUploadProgress > 0 && imagesUploadProgress < 100 && !isImagesProcessing"
-                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
-              >
-                <div class="mb-2 flex justify-between">
-                  <span class="font-medium">上传进度</span>
-                  <span class="font-semibold text-primary tabular-nums">{{ imagesUploadProgress }}%</span>
-                </div>
-                <Progress :model-value="imagesUploadProgress" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ imagesFileName }}</span>
-                  <span>{{ formatFileSize(imagesFileSize) }}</span>
-                </div>
-              </div>
-
-              <Alert v-if="imagesUploadProgress === 100 && !isImagesProcessing" class="border-primary/30">
-                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <AlertTitle>图片上传成功</AlertTitle>
-              </Alert>
             </div>
+            <p class="max-w-[280px] text-xs text-muted-foreground">
+              展示图片在右侧「展示图片」Tab 中管理，最多 5 张。
+            </p>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="m-desc">描述 <span class="text-destructive">*</span></Label>
-            <Textarea id="m-desc" v-model="form.description" class="min-h-28" rows="4" />
+          <!-- 右侧：Tab -->
+          <div class="flex min-h-0 flex-col">
+            <Tabs v-model="merchantFormTab" class="flex min-h-0 flex-1 flex-col">
+              <div class="shrink-0 border-b border-border px-4 pt-3">
+                <TabsList class="grid h-auto w-full grid-cols-3 gap-1">
+                  <TabsTrigger value="basic" class="text-xs sm:text-sm">
+                    基本信息
+                  </TabsTrigger>
+                  <TabsTrigger value="intro" class="text-xs sm:text-sm">
+                    介绍
+                  </TabsTrigger>
+                  <TabsTrigger value="gallery" class="text-xs sm:text-sm">
+                    展示图片
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              <ScrollArea class="min-h-[320px] flex-1 lg:max-h-[min(56vh,560px)]">
+                <TabsContent value="basic" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="m-name">商家名称 <span class="text-destructive">*</span></Label>
+                    <Input id="m-name" v-model="form.name" autocomplete="organization" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="m-address">地址 <span class="text-destructive">*</span></Label>
+                    <Input id="m-address" v-model="form.address" autocomplete="street-address" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="m-phone">联系电话 <span class="text-destructive">*</span></Label>
+                    <Input id="m-phone" v-model="form.phone" type="tel" autocomplete="tel" placeholder="11 位手机号" />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="intro" class="mt-0 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="m-desc">商家描述 <span class="text-destructive">*</span></Label>
+                    <Textarea
+                      id="m-desc"
+                      v-model="form.description"
+                      class="min-h-[min(280px,40vh)]"
+                      rows="10"
+                      placeholder="介绍商家特色、营业时间、服务等"
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="gallery" class="mt-0 space-y-4 p-4">
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <p class="text-sm font-medium">
+                        展示图片 <span class="text-destructive">*</span>
+                      </p>
+                      <p class="text-xs text-muted-foreground">
+                        至少 1 张，最多 5 张，支持拖拽上传
+                      </p>
+                    </div>
+                    <Badge variant="secondary" class="tabular-nums">
+                      {{ form.images.length }} / 5
+                    </Badge>
+                  </div>
+
+                  <div class="flex flex-wrap gap-3">
+                    <div
+                      v-for="(image, index) in form.images"
+                      :key="`${image}-${index}`"
+                      class="group relative size-[120px] overflow-hidden rounded-lg border border-border bg-muted/30 shadow-sm"
+                    >
+                      <img
+                        :src="getImageUrl(image)"
+                        :alt="`展示图 ${index + 1}`"
+                        class="size-full object-cover"
+                        loading="lazy"
+                      >
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="destructive"
+                        class="absolute right-1 top-1 size-7 opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
+                        :aria-label="`移除第 ${index + 1} 张图片`"
+                        @click="removeGalleryImage(index)"
+                      >
+                        <X class="size-3.5" aria-hidden="true" />
+                      </Button>
+                      <span class="absolute bottom-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">
+                        {{ index + 1 }}
+                      </span>
+                    </div>
+
+                    <div
+                      v-if="form.images.length < 5"
+                      class="relative flex size-[120px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                      :class="{
+                        'border-primary/50 bg-primary/5': isImagesDragOver,
+                        'pointer-events-none opacity-70': isImagesUploading || isImagesProcessing,
+                      }"
+                      role="button"
+                      tabindex="0"
+                      @click="triggerImagesInput"
+                      @keydown.enter.prevent="triggerImagesInput"
+                      @keydown.space.prevent="triggerImagesInput"
+                      @dragenter="handleImagesDragEnter"
+                      @dragleave="handleImagesDragLeave"
+                      @dragover="handleImagesDragOver"
+                      @drop="handleImagesDrop"
+                    >
+                      <Loader2
+                        v-if="isImagesUploading || isImagesProcessing"
+                        class="mb-1 size-8 animate-spin text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      <Plus v-else class="mb-1 size-8 text-muted-foreground" aria-hidden="true" />
+                      <p class="px-1 text-center text-xs font-medium">添加</p>
+                      <div
+                        v-if="isImagesDragOver"
+                        class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/10 text-xs font-medium text-primary"
+                      >
+                        释放上传
+                      </div>
+                    </div>
+                  </div>
+
+                  <input
+                    ref="imagesInput"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    class="hidden"
+                    @change="handleImagesFileSelect"
+                  >
+
+                  <div
+                    v-if="isImagesProcessing || (imagesUploadProgress > 0 && imagesUploadProgress < 100)"
+                    class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+                  >
+                    <Progress :model-value="isImagesProcessing ? 40 : imagesUploadProgress" class="h-2" />
+                    <p class="mt-2 text-center text-xs text-muted-foreground">
+                      {{ isImagesProcessing ? '处理中…' : `上传中 ${imagesUploadProgress}%` }}
+                    </p>
+                  </div>
+                </TabsContent>
+              </ScrollArea>
+            </Tabs>
           </div>
         </div>
 
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="dialogVisible = false">
+        <DialogFooter class="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="submitting" @click="dialogVisible = false">
             取消
           </Button>
           <Button type="button" :disabled="submitting" @click="handleSubmit">
             <Loader2 v-if="submitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
-            确定
+            {{ dialogType === 'add' ? '添加' : '保存' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -451,51 +469,15 @@
       </AlertDialogContent>
     </AlertDialog>
 
-    <AlertDialog v-model:open="removeLogoDialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>移除 Logo</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定移除当前 Logo 吗？保存前仍可重新上传。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
-            取消
-          </AlertDialogCancel>
-          <Button type="button" variant="destructive" @click="confirmRemoveLogo">
-            移除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <AlertDialog v-model:open="removeGalleryImageDialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>移除商家图片</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定移除这张商家图片吗？
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
-            取消
-          </AlertDialogCancel>
-          <Button type="button" variant="destructive" @click="confirmRemoveGalleryImage">
-            移除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
-import { AlertCircle, Loader2, Plus, Search, Trash2, Upload } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Plus, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
 import {
@@ -508,11 +490,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -527,7 +511,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+
+const route = useRoute()
+const router = useRouter()
+
+const merchantFormTab = ref('basic')
 
 const logoInput = ref(null)
 const isLogoDragOver = ref(false)
@@ -601,11 +592,6 @@ const total = ref(0)
 const deleteMerchantDialogOpen = ref(false)
 const deleteMerchantTarget = ref(null)
 const deletingMerchant = ref(false)
-
-const removeLogoDialogOpen = ref(false)
-
-const removeGalleryImageDialogOpen = ref(false)
-const removeGalleryImageIndex = ref(null)
 
 const deleteMerchantName = computed(() => {
   const row = deleteMerchantTarget.value
@@ -810,14 +796,13 @@ const resetLogoUploadState = () => {
   logoFileSize.value = 0
 }
 
-function openRemoveLogoDialog() {
-  removeLogoDialogOpen.value = true
+function clearLogo() {
+  form.value.logo = ''
 }
 
-function confirmRemoveLogo() {
-  form.value.logo = ''
-  removeLogoDialogOpen.value = false
-  ElMessage.success('Logo已删除')
+function removeGalleryImage(index) {
+  if (index < 0 || index >= form.value.images.length) return
+  form.value.images.splice(index, 1)
 }
 
 const triggerImagesInput = () => {
@@ -905,24 +890,10 @@ const resetImagesUploadState = () => {
   imagesFileSize.value = 0
 }
 
-function openRemoveGalleryImageDialog(index) {
-  removeGalleryImageIndex.value = index
-  removeGalleryImageDialogOpen.value = true
-}
-
-function confirmRemoveGalleryImage() {
-  const index = removeGalleryImageIndex.value
-  if (index == null || index < 0) return
-  form.value.images.splice(index, 1)
-  removeGalleryImageDialogOpen.value = false
-  removeGalleryImageIndex.value = null
-  ElMessage.success('图片已删除')
-}
-
 const handleLogoDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
-  if (!isLogoUploading.value && !isLogoProcessing.value && !form.value.logo) {
+  if (!isLogoUploading.value && !isLogoProcessing.value) {
     isLogoDragOver.value = true
   }
 }
@@ -945,7 +916,7 @@ const handleLogoDrop = (e) => {
   e.stopPropagation()
   isLogoDragOver.value = false
 
-  if (isLogoUploading.value || isLogoProcessing.value || form.value.logo) return
+  if (isLogoUploading.value || isLogoProcessing.value) return
 
   const files = e.dataTransfer.files
   if (files.length > 0) uploadLogoFile(files[0])
@@ -1003,6 +974,7 @@ const showAddDialog = () => {
   }
   resetLogoUploadState()
   resetImagesUploadState()
+  merchantFormTab.value = 'basic'
   dialogVisible.value = true
 }
 
@@ -1019,6 +991,7 @@ const handleEdit = (row) => {
   }
   resetLogoUploadState()
   resetImagesUploadState()
+  merchantFormTab.value = 'basic'
   dialogVisible.value = true
 }
 
@@ -1029,10 +1002,12 @@ function validateForm() {
   }
   if (!form.value.logo) {
     ElMessage.warning('请上传Logo')
+    merchantFormTab.value = 'basic'
     return false
   }
   if (!form.value.description?.trim()) {
     ElMessage.warning('请输入商家描述')
+    merchantFormTab.value = 'intro'
     return false
   }
   if (!form.value.address?.trim()) {
@@ -1049,6 +1024,7 @@ function validateForm() {
   }
   if (!form.value.images?.length) {
     ElMessage.warning('请上传商家图片')
+    merchantFormTab.value = 'gallery'
     return false
   }
   return true
@@ -1075,7 +1051,30 @@ const handleSubmit = async () => {
   }
 }
 
-onMounted(() => {
-  fetchMerchants()
+async function openEditFromRouteQuery() {
+  const raw = route.query.edit
+  if (!raw) return
+  const id = Number(raw)
+  if (!id) return
+
+  let row = merchants.value.find((m) => m.id === id)
+  if (!row) {
+    try {
+      const response = await request.get(`/api/merchants/${id}`)
+      row = response.data?.data ?? response.data
+    } catch {
+      ElMessage.error('未找到该商家')
+    }
+  }
+  if (row?.id) handleEdit(row)
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  router.replace({ path: route.path, query: nextQuery })
+}
+
+onMounted(async () => {
+  await fetchMerchants()
+  await openEditFromRouteQuery()
 })
 </script>

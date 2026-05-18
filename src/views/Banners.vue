@@ -89,39 +89,32 @@
     </Card>
 
     <Dialog v-model:open="dialogVisible">
-      <DialogContent class="max-h-[92vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent class="flex max-h-[92vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader class="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{{ isEdit ? '编辑轮播图' : '添加轮播图' }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="isEdit">
+              正在编辑「{{ form.title || '未命名' }}」<span v-if="form.id" class="text-muted-foreground">（ID {{ form.id }}）</span>
+            </template>
+            <template v-else>
+              上传轮播图并填写信息；带 <span class="text-destructive">*</span> 为必填
+            </template>
+          </DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="bn-title">标题</Label>
-            <Input id="bn-title" v-model="form.title" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>图片 <span class="text-destructive">*</span></Label>
-            <div class="max-w-[400px] space-y-3">
-              <div
-                v-if="form.image_url"
-                class="group relative h-[180px] w-full max-w-[300px] overflow-hidden rounded-lg border border-border shadow-sm"
+        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(280px,360px)_1fr]">
+          <div class="flex flex-col gap-3 border-border bg-muted/15 p-4 lg:border-r">
+            <div class="flex flex-col gap-2">
+              <Label>轮播图片 <span class="text-destructive">*</span></Label>
+              <input
+                ref="imageInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleImageFileSelect"
               >
-                <img :src="getImageUrl(form.image_url)" alt="轮播图" class="size-full object-cover">
-                <div
-                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <Button type="button" size="icon" variant="destructive" @click="openRemoveImageDialog">
-                    <Trash2 class="size-4" />
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" @click="triggerImageInput">
-                    更换图片
-                  </Button>
-                </div>
-              </div>
               <div
-                v-else
-                class="relative flex h-[180px] w-full max-w-[300px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                class="relative aspect-[2/1] w-full cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
                 :class="{
                   'border-primary/50 bg-primary/5': isImageDragOver,
                   'pointer-events-none opacity-70': isImageUploading || isImageProcessing,
@@ -136,161 +129,221 @@
                 @dragover="handleImageDragOver"
                 @drop="handleImageDrop"
               >
-                <Loader2
-                  v-if="isImageUploading || isImageProcessing"
-                  class="mb-2 size-10 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
-                <p class="px-2 text-center text-sm font-medium text-foreground">
-                  {{ isImageProcessing ? '正在处理图片…' : isImageUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
-                </p>
-                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
-                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
-                </p>
+                <img
+                  v-if="form.image_url"
+                  :src="getImageUrl(form.image_url)"
+                  alt="轮播图预览"
+                  class="size-full object-cover"
+                  loading="lazy"
+                >
+                <div v-else class="flex size-full flex-col items-center justify-center gap-2 p-4 text-center">
+                  <Upload class="size-10 text-muted-foreground" aria-hidden="true" />
+                  <p class="text-sm font-medium">上传轮播图</p>
+                  <p class="text-xs text-muted-foreground">建议 2:1 横图，JPG / PNG / GIF，≤5MB</p>
+                </div>
                 <div
-                  v-if="isImageDragOver && !form.image_url"
-                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                  v-if="isImageDragOver"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 text-sm font-medium text-primary"
                 >
-                  <Upload class="mb-2 size-10" aria-hidden="true" />
-                  <span>释放鼠标上传图片</span>
+                  释放以上传
+                </div>
+                <div
+                  v-if="form.image_url && !isImageUploading && !isImageProcessing"
+                  class="absolute right-2 top-2 flex gap-1"
+                >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    class="size-8 bg-background/90 shadow-sm"
+                    aria-label="更换图片"
+                    @click.stop="triggerImageInput"
+                  >
+                    <Upload class="size-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="size-8 shadow-sm"
+                    aria-label="移除图片"
+                    @click.stop="clearBannerImage"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
+                  </Button>
                 </div>
               </div>
-              <input
-                ref="imageInput"
-                type="file"
-                accept="image/*"
-                class="hidden"
-                @change="handleImageFileSelect"
+              <div
+                v-if="isImageProcessing || (imageUploadProgress > 0 && imageUploadProgress < 100)"
+                class="rounded-lg border border-border bg-background p-2 text-xs text-muted-foreground"
               >
-
-              <div v-if="isImageProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div class="mb-2 flex justify-between text-muted-foreground">
-                  <span>图片处理中</span>
-                  <span>处理中…</span>
-                </div>
-                <Progress :model-value="40" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
-                  <span>{{ formatFileSize(imageFileSize) }}</span>
-                </div>
-                <p class="mt-2 text-center text-xs italic text-muted-foreground">
-                  正在将图片转换为 WebP 并压缩…
+                <Progress :model-value="isImageProcessing ? 40 : imageUploadProgress" class="h-1.5" />
+                <p class="mt-1.5 text-center">
+                  {{ isImageProcessing ? '处理中…' : `上传中 ${imageUploadProgress}%` }}
                 </p>
               </div>
-
-              <div
-                v-if="imageUploadProgress > 0 && imageUploadProgress < 100 && !isImageProcessing"
-                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
-              >
-                <div class="mb-2 flex justify-between">
-                  <span class="font-medium">上传进度</span>
-                  <span class="font-semibold text-primary tabular-nums">{{ imageUploadProgress }}%</span>
-                </div>
-                <Progress :model-value="imageUploadProgress" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
-                  <span>{{ formatFileSize(imageFileSize) }}</span>
-                </div>
-              </div>
-
-              <Alert v-if="imageUploadProgress === 100 && !isImageProcessing" class="border-primary/30">
-                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <AlertTitle>图片上传成功</AlertTitle>
-              </Alert>
             </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="bn-link">链接</Label>
-            <Input
-              id="bn-link"
-              v-model="form.link_url"
-              placeholder="请输入点击轮播图后跳转的链接"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>链接快捷选择</Label>
-            <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-              <div class="flex min-w-[10rem] flex-1 flex-col gap-1.5">
-                <span class="text-xs text-muted-foreground">类型</span>
-                <select
-                  v-model="form.link_type"
-                  class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  @change="handleLinkTypeChange"
-                >
-                  <option value="">选择类型</option>
-                  <option v-for="opt in linkTypeOptions" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                </select>
-              </div>
-              <div
-                v-if="form.link_type === 'original'"
-                class="flex min-w-[12rem] flex-1 flex-col gap-1.5"
-              >
-                <span class="text-xs text-muted-foreground">艺术家</span>
-                <select
-                  :value="form.original_artist_id != null ? String(form.original_artist_id) : ''"
-                  class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="artistOptionsLoading"
-                  @focus="onArtistSelectFocus"
-                  @change="onArtistSelectChange"
-                >
-                  <option value="">{{ artistOptionsLoading ? '加载中…' : '选择艺术家' }}</option>
-                  <option v-for="a in artistOptions" :key="a.value" :value="String(a.value)">
-                    {{ a.label }}
-                  </option>
-                </select>
-              </div>
-              <div class="flex min-w-[14rem] flex-[2] flex-col gap-1.5">
-                <span class="text-xs text-muted-foreground">具体项</span>
-                <select
-                  :value="form.link_id != null ? String(form.link_id) : ''"
-                  class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="!form.link_type || (form.link_type === 'original' && !form.original_artist_id) || linkOptionsLoading"
-                  @focus="onLinkSelectFocus"
-                  @change="onLinkIdSelectChange"
-                >
-                  <option value="">{{ linkOptionsLoading ? '加载中…' : '选择具体项' }}</option>
-                  <option v-for="item in linkOptions" :key="item.value" :value="String(item.value)">
-                    {{ item.label }}
-                  </option>
-                </select>
-              </div>
-            </div>
-            <p v-if="form.link_type && form.link_id" class="text-xs text-muted-foreground">
-              将生成：{{ composedLinkPreview }}
+            <p class="text-xs text-muted-foreground">
+              跳转链接与排序在右侧 Tab 中设置。
             </p>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="bn-sort">排序</Label>
-            <Input id="bn-sort" v-model.number="form.sort_order" type="number" min="0" step="1" class="max-w-xs" />
-          </div>
+          <div class="flex min-h-0 flex-col">
+            <Tabs v-model="bannerFormTab" class="flex min-h-0 flex-1 flex-col">
+              <div class="shrink-0 border-b border-border px-4 pt-3">
+                <TabsList class="grid h-auto w-full grid-cols-2 gap-1">
+                  <TabsTrigger value="basic" class="text-xs sm:text-sm">
+                    基本信息
+                  </TabsTrigger>
+                  <TabsTrigger value="link" class="text-xs sm:text-sm">
+                    跳转链接
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="bn-status">状态</Label>
-            <select
-              id="bn-status"
-              v-model="form.status"
-              class="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="active">启用</option>
-              <option value="inactive">禁用</option>
-            </select>
+              <ScrollArea class="min-h-[320px] flex-1 lg:max-h-[min(56vh,560px)]">
+                <TabsContent value="basic" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="bn-title">标题 <span class="text-destructive">*</span></Label>
+                    <Input id="bn-title" v-model="form.title" autocomplete="off" placeholder="轮播图标题" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="bn-sort">排序</Label>
+                    <Input
+                      id="bn-sort"
+                      v-model.number="form.sort_order"
+                      type="number"
+                      min="0"
+                      step="1"
+                      class="max-w-[160px]"
+                    />
+                    <p class="text-xs text-muted-foreground">数值越小越靠前</p>
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="bn-status">状态</Label>
+                    <Select
+                      :model-value="form.status"
+                      @update:model-value="(v) => { form.status = v }"
+                    >
+                      <SelectTrigger id="bn-status" class="max-w-[200px]">
+                        <SelectValue placeholder="选择状态" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">启用</SelectItem>
+                        <SelectItem value="inactive">禁用</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="link" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="bn-link">跳转链接</Label>
+                    <Input
+                      id="bn-link"
+                      v-model="form.link_url"
+                      placeholder="小程序页面路径，如 /pages/artwork/detail?id=1"
+                      autocomplete="off"
+                    />
+                    <p class="text-xs text-muted-foreground">
+                      可手动填写，或通过下方快捷选择自动生成
+                    </p>
+                  </div>
+
+                  <div class="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+                    <p class="text-sm font-medium">链接快捷选择</p>
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <div class="flex flex-col gap-2">
+                        <Label class="text-xs text-muted-foreground">类型</Label>
+                        <Select
+                          :model-value="form.link_type || LINK_TYPE_NONE"
+                          @update:model-value="onLinkTypeSelectChange"
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择类型" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem :value="LINK_TYPE_NONE">选择类型</SelectItem>
+                            <SelectItem
+                              v-for="opt in linkTypeOptions"
+                              :key="opt.value"
+                              :value="opt.value"
+                            >
+                              {{ opt.label }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div
+                        v-if="form.link_type === 'original'"
+                        class="flex flex-col gap-2"
+                      >
+                        <Label class="text-xs text-muted-foreground">艺术家</Label>
+                        <Select
+                          :model-value="artistSelectValue"
+                          :disabled="artistOptionsLoading"
+                          @update:model-value="onArtistSelectChange"
+                          @update:open="(open) => open && onArtistSelectFocus()"
+                        >
+                          <SelectTrigger>
+                            <SelectValue :placeholder="artistOptionsLoading ? '加载中…' : '选择艺术家'" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem :value="LINK_TYPE_NONE">选择艺术家</SelectItem>
+                            <SelectItem
+                              v-for="a in artistOptions"
+                              :key="a.value"
+                              :value="String(a.value)"
+                            >
+                              {{ a.label }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div
+                        class="flex flex-col gap-2"
+                        :class="form.link_type === 'original' ? 'sm:col-span-2' : ''"
+                      >
+                        <Label class="text-xs text-muted-foreground">具体项</Label>
+                        <Select
+                          :model-value="linkIdSelectValue"
+                          :disabled="!form.link_type || (form.link_type === 'original' && !form.original_artist_id) || linkOptionsLoading"
+                          @update:model-value="onLinkIdSelectChange"
+                          @update:open="(open) => open && onLinkSelectFocus()"
+                        >
+                          <SelectTrigger>
+                            <SelectValue :placeholder="linkOptionsLoading ? '加载中…' : '选择具体项'" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem :value="LINK_TYPE_NONE">选择具体项</SelectItem>
+                            <SelectItem
+                              v-for="item in linkOptions"
+                              :key="item.value"
+                              :value="String(item.value)"
+                            >
+                              {{ item.label }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <p v-if="form.link_type && form.link_id" class="text-xs text-muted-foreground">
+                      将生成：<code class="rounded bg-muted px-1 py-0.5 text-[11px]">{{ composedLinkPreview }}</code>
+                    </p>
+                  </div>
+                </TabsContent>
+              </ScrollArea>
+            </Tabs>
           </div>
         </div>
 
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="dialogVisible = false">
+        <DialogFooter class="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="submitting" @click="dialogVisible = false">
             取消
           </Button>
           <Button type="button" :disabled="submitting" @click="handleSubmit">
             <Loader2 v-if="submitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
-            确定
+            {{ isEdit ? '保存' : '添加' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -322,32 +375,14 @@
       </AlertDialogContent>
     </AlertDialog>
 
-    <!-- 移除已选图片 -->
-    <AlertDialog v-model:open="removeImageDialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>移除图片</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定移除当前轮播图图片吗？保存前仍可重新上传。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
-            取消
-          </AlertDialogCancel>
-          <Button type="button" variant="destructive" @click="confirmRemoveImage">
-            移除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -367,6 +402,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -374,6 +410,21 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+const route = useRoute()
+const router = useRouter()
+
+const LINK_TYPE_NONE = '_none'
+const bannerFormTab = ref('basic')
 
 const banners = ref([])
 const listLoading = ref(false)
@@ -393,8 +444,6 @@ const imageFileSize = ref(0)
 const deleteBannerDialogOpen = ref(false)
 const deleteBannerTarget = ref(null)
 const deletingBanner = ref(false)
-
-const removeImageDialogOpen = ref(false)
 
 const deleteBannerTitle = computed(() => {
   const row = deleteBannerTarget.value
@@ -439,6 +488,16 @@ const composedLinkPreview = computed(() => {
   return `${base}?id=${form.value.link_id}`
 })
 
+const artistSelectValue = computed(() => {
+  if (form.value.original_artist_id == null) return LINK_TYPE_NONE
+  return String(form.value.original_artist_id)
+})
+
+const linkIdSelectValue = computed(() => {
+  if (form.value.link_id == null) return LINK_TYPE_NONE
+  return String(form.value.link_id)
+})
+
 const retryFetchBanners = () => {
   listError.value = ''
   fetchBanners()
@@ -476,6 +535,7 @@ const handleAdd = () => {
     original_artist_id: null,
   }
   resetImageUploadState()
+  bannerFormTab.value = 'basic'
   dialogVisible.value = true
 }
 
@@ -484,6 +544,7 @@ const handleEdit = (row) => {
   form.value = { ...row }
   tryParseExistingLink(row.link_url)
   resetImageUploadState()
+  bannerFormTab.value = 'basic'
   dialogVisible.value = true
 }
 
@@ -612,20 +673,14 @@ const resetImageUploadState = () => {
   imageFileSize.value = 0
 }
 
-function openRemoveImageDialog() {
-  removeImageDialogOpen.value = true
-}
-
-function confirmRemoveImage() {
+function clearBannerImage() {
   form.value.image_url = ''
-  removeImageDialogOpen.value = false
-  ElMessage.success('图片已删除')
 }
 
 const handleImageDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
-  if (!isImageUploading.value && !isImageProcessing.value && !form.value.image_url) {
+  if (!isImageUploading.value && !isImageProcessing.value) {
     isImageDragOver.value = true
   }
 }
@@ -648,18 +703,10 @@ const handleImageDrop = (e) => {
   e.stopPropagation()
   isImageDragOver.value = false
 
-  if (isImageUploading.value || isImageProcessing.value || form.value.image_url) return
+  if (isImageUploading.value || isImageProcessing.value) return
 
   const files = e.dataTransfer.files
   if (files.length > 0) uploadImageFile(files[0])
-}
-
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const getImageUrl = (url) => {
@@ -670,6 +717,7 @@ const getImageUrl = (url) => {
 const handleSubmit = async () => {
   if (!form.value.title.trim()) {
     ElMessage.warning('请输入轮播图标题')
+    bannerFormTab.value = 'basic'
     return
   }
   if (!form.value.image_url) {
@@ -698,9 +746,33 @@ const handleSubmit = async () => {
   }
 }
 
-onMounted(() => {
-  fetchBanners()
+async function openEditFromRouteQuery() {
+  const raw = route.query.edit
+  if (!raw) return
+  const id = Number(raw)
+  if (!id) return
+
+  const row = banners.value.find((b) => b.id === id)
+  if (row) {
+    handleEdit(row)
+  } else {
+    ElMessage.error('未找到该轮播图')
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  router.replace({ path: route.path, query: nextQuery })
+}
+
+onMounted(async () => {
+  await fetchBanners()
+  await openEditFromRouteQuery()
 })
+
+function onLinkTypeSelectChange(v) {
+  form.value.link_type = v === LINK_TYPE_NONE ? '' : v
+  handleLinkTypeChange()
+}
 
 function handleLinkTypeChange() {
   form.value.link_id = null
@@ -789,9 +861,8 @@ async function loadArtistOptions() {
   }
 }
 
-async function onArtistSelectChange(e) {
-  const v = e.target.value
-  form.value.original_artist_id = v === '' ? null : Number(v)
+async function onArtistSelectChange(v) {
+  form.value.original_artist_id = v === LINK_TYPE_NONE ? null : Number(v)
   form.value.link_id = null
   linkOptions.value = []
   if (form.value.original_artist_id) {
@@ -799,9 +870,8 @@ async function onArtistSelectChange(e) {
   }
 }
 
-function onLinkIdSelectChange(e) {
-  const v = e.target.value
-  form.value.link_id = v === '' ? null : Number(v)
+function onLinkIdSelectChange(v) {
+  form.value.link_id = v === LINK_TYPE_NONE ? null : Number(v)
   applyComposedLink()
 }
 

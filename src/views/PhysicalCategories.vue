@@ -83,39 +83,33 @@
     </Card>
 
     <Dialog v-model:open="dialogVisible">
-      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent class="flex max-h-[92vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader class="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{{ isEdit ? '编辑分类' : '添加分类' }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="isEdit">
+              正在编辑「{{ form.title || '未命名' }}」<span v-if="form.id" class="text-muted-foreground">（ID {{ form.id }}）</span>
+            </template>
+            <template v-else>
+              上传分类配图并填写信息；带 <span class="text-destructive">*</span> 为必填
+            </template>
+          </DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="pc-title">标题</Label>
-            <Input id="pc-title" v-model="form.title" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>图片 <span class="text-destructive">*</span></Label>
-            <div class="max-w-[400px] space-y-3">
-              <div
-                v-if="form.image"
-                class="group relative size-[200px] overflow-hidden rounded-lg border border-border shadow-sm"
+        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(240px,280px)_1fr]">
+          <!-- 左侧：配图 -->
+          <div class="flex flex-col gap-3 border-border bg-muted/15 p-4 lg:border-r">
+            <div class="flex flex-col gap-2">
+              <Label>分类配图 <span class="text-destructive">*</span></Label>
+              <input
+                ref="imageInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleImageFileSelect"
               >
-                <img :src="getImageUrl(form.image)" alt="分类配图" class="size-full object-cover">
-                <div
-                  class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <Button type="button" size="icon" variant="destructive" @click="openRemoveCategoryImageDialog">
-                    <Trash2 class="size-4" />
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" @click="triggerImageInput">
-                    更换图片
-                  </Button>
-                </div>
-              </div>
               <div
-                v-else
-                class="relative flex size-[200px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
+                class="relative aspect-square w-full max-w-[280px] cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
                 :class="{
                   'border-primary/50 bg-primary/5': isImageDragOver,
                   'pointer-events-none opacity-70': isImageUploading || isImageProcessing,
@@ -130,80 +124,99 @@
                 @dragover="handleImageDragOver"
                 @drop="handleImageDrop"
               >
-                <Loader2
-                  v-if="isImageUploading || isImageProcessing"
-                  class="mb-2 size-10 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Upload v-else class="mb-2 size-10 text-muted-foreground" aria-hidden="true" />
-                <p class="px-2 text-center text-sm font-medium text-foreground">
-                  {{ isImageProcessing ? '正在处理图片…' : isImageUploading ? '正在上传…' : '点击或拖拽图片到此处上传' }}
-                </p>
-                <p class="mt-1 px-2 text-center text-xs text-muted-foreground">
-                  支持 JPG、PNG、GIF，自动转 WebP 并压缩至 5MB 以内
-                </p>
-                <div
-                  v-if="isImageDragOver && !form.image"
-                  class="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary"
+                <img
+                  v-if="form.image"
+                  :src="getImageUrl(form.image)"
+                  alt="分类配图"
+                  class="size-full object-cover"
+                  loading="lazy"
                 >
-                  <Upload class="mb-2 size-10" aria-hidden="true" />
-                  <span>释放鼠标上传图片</span>
+                <div v-else class="flex size-full flex-col items-center justify-center gap-2 p-4 text-center">
+                  <Upload class="size-10 text-muted-foreground" aria-hidden="true" />
+                  <p class="text-sm font-medium">上传配图</p>
+                  <p class="text-xs text-muted-foreground">JPG / PNG / GIF，≤5MB</p>
                 </div>
-              </div>
-              <input
-                ref="imageInput"
-                type="file"
-                accept="image/*"
-                class="hidden"
-                @change="handleImageFileSelect"
-              >
-              <div v-if="isImageProcessing" class="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div class="mb-2 flex justify-between text-muted-foreground">
-                  <span>图片处理中</span>
-                  <span>处理中…</span>
+                <div
+                  v-if="isImageDragOver"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 text-sm font-medium text-primary"
+                >
+                  释放以上传
                 </div>
-                <Progress :model-value="40" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
-                  <span>{{ formatFileSize(imageFileSize) }}</span>
+                <div
+                  v-if="form.image && !isImageUploading && !isImageProcessing"
+                  class="absolute right-2 top-2 flex gap-1"
+                >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    class="size-8 bg-background/90 shadow-sm"
+                    aria-label="更换图片"
+                    @click.stop="triggerImageInput"
+                  >
+                    <Upload class="size-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="size-8 shadow-sm"
+                    aria-label="移除图片"
+                    @click.stop="clearCategoryImage"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
+                  </Button>
                 </div>
-                <p class="mt-2 text-center text-xs italic text-muted-foreground">
-                  正在将图片转换为 WebP 并压缩…
-                </p>
               </div>
               <div
-                v-if="imageUploadProgress > 0 && imageUploadProgress < 100 && !isImageProcessing"
-                class="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+                v-if="isImageProcessing || (imageUploadProgress > 0 && imageUploadProgress < 100)"
+                class="max-w-[280px] rounded-lg border border-border bg-background p-2 text-xs text-muted-foreground"
               >
-                <div class="mb-2 flex justify-between">
-                  <span class="font-medium">上传进度</span>
-                  <span class="font-semibold text-primary tabular-nums">{{ imageUploadProgress }}%</span>
-                </div>
-                <Progress :model-value="imageUploadProgress" class="h-2" />
-                <div class="mt-2 flex justify-between text-xs text-muted-foreground">
-                  <span class="max-w-[150px] truncate">{{ imageFileName }}</span>
-                  <span>{{ formatFileSize(imageFileSize) }}</span>
-                </div>
+                <Progress :model-value="isImageProcessing ? 40 : imageUploadProgress" class="h-1.5" />
+                <p class="mt-1.5 text-center">
+                  {{ isImageProcessing ? '处理中…' : `上传中 ${imageUploadProgress}%` }}
+                </p>
               </div>
-              <Alert v-if="imageUploadProgress === 100" class="border-primary/30">
-                <AlertCircle class="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <AlertTitle>图片上传成功</AlertTitle>
-              </Alert>
             </div>
+            <p class="max-w-[280px] text-xs text-muted-foreground">
+              标题与描述在右侧填写。
+            </p>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="pc-desc">描述</Label>
-            <Textarea id="pc-desc" v-model="form.description" class="min-h-24" rows="4" />
-          </div>
+          <!-- 右侧：基本信息 -->
+          <ScrollArea class="min-h-[320px] flex-1 lg:max-h-[min(56vh,560px)]">
+            <div class="space-y-4 p-4">
+              <div class="flex flex-col gap-2">
+                <Label for="pc-title">标题 <span class="text-destructive">*</span></Label>
+                <Input id="pc-title" v-model="form.title" autocomplete="off" placeholder="分类名称" />
+              </div>
+              <div class="flex flex-col gap-2">
+                <Label for="pc-desc">描述</Label>
+                <Textarea
+                  id="pc-desc"
+                  v-model="form.description"
+                  class="min-h-[min(280px,40vh)]"
+                  rows="10"
+                  placeholder="分类说明，将展示给用户"
+                />
+              </div>
+              <p
+                v-if="isEdit && editCategoryCount != null"
+                class="text-xs text-muted-foreground"
+              >
+                该分类下共有 <span class="font-medium tabular-nums text-foreground">{{ editCategoryCount }}</span> 件版权实物（仅展示，不可在此修改）
+              </p>
+            </div>
+          </ScrollArea>
         </div>
 
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="dialogVisible = false">
+        <DialogFooter class="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="savingForm" @click="dialogVisible = false">
             取消
           </Button>
-          <Button type="button" @click="handleSubmit">
-            确定
+          <Button type="button" :disabled="savingForm" @click="handleSubmit">
+            <Loader2 v-if="savingForm" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            {{ isEdit ? '保存' : '添加' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -234,31 +247,14 @@
       </AlertDialogContent>
     </AlertDialog>
 
-    <AlertDialog v-model:open="removeCategoryImageDialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除图片</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除这张图片吗？保存前仍可重新上传。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
-            取消
-          </AlertDialogCancel>
-          <Button type="button" variant="destructive" @click="confirmRemoveCategoryImage">
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -277,6 +273,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -284,7 +281,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+
+const route = useRoute()
+const router = useRouter()
+
+const savingForm = ref(false)
+const editCategoryCount = ref(null)
 
 const categories = ref([])
 const listLoading = ref(false)
@@ -309,8 +313,6 @@ const form = ref({
 const deleteCategoryDialogOpen = ref(false)
 const deleteCategoryTarget = ref(null)
 const deletingCategory = ref(false)
-
-const removeCategoryImageDialogOpen = ref(false)
 
 const retryFetchCategories = () => {
   listError.value = ''
@@ -353,6 +355,7 @@ const handleAdd = () => {
     image: '',
     description: ''
   }
+  editCategoryCount.value = null
   resetImageUploadState()
   dialogVisible.value = true
 }
@@ -360,6 +363,7 @@ const handleAdd = () => {
 const handleEdit = (row) => {
   isEdit.value = true
   form.value = { ...row }
+  editCategoryCount.value = row.count ?? null
   resetImageUploadState()
   dialogVisible.value = true
 }
@@ -493,20 +497,14 @@ const resetImageUploadState = () => {
   imageFileSize.value = 0
 }
 
-function openRemoveCategoryImageDialog() {
-  removeCategoryImageDialogOpen.value = true
-}
-
-function confirmRemoveCategoryImage() {
+function clearCategoryImage() {
   form.value.image = ''
-  ElMessage.success('图片已删除')
-  removeCategoryImageDialogOpen.value = false
 }
 
 const handleImageDragEnter = (e) => {
   e.preventDefault()
   e.stopPropagation()
-  if (!isImageUploading.value && !isImageProcessing.value && !form.value.image) {
+  if (!isImageUploading.value && !isImageProcessing.value) {
     isImageDragOver.value = true
   }
 }
@@ -529,20 +527,12 @@ const handleImageDrop = (e) => {
   e.stopPropagation()
   isImageDragOver.value = false
 
-  if (isImageUploading.value || isImageProcessing.value || form.value.image) return
+  if (isImageUploading.value || isImageProcessing.value) return
 
   const files = e.dataTransfer.files
   if (files.length > 0) {
     uploadImageFile(files[0])
   }
-}
-
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const getImageUrl = (url) => {
@@ -560,6 +550,7 @@ const handleSubmit = async () => {
     return
   }
 
+  savingForm.value = true
   try {
     const submitData = {
       ...form.value,
@@ -576,10 +567,31 @@ const handleSubmit = async () => {
     fetchCategories()
   } catch (error) {
     ElMessage.error('保存失败')
+  } finally {
+    savingForm.value = false
   }
 }
 
-onMounted(() => {
-  fetchCategories()
+async function openEditFromRouteQuery() {
+  const raw = route.query.edit
+  if (!raw) return
+  const id = Number(raw)
+  if (!id) return
+
+  const row = categories.value.find((c) => c.id === id)
+  if (row) {
+    handleEdit(row)
+  } else {
+    ElMessage.error('未找到该分类')
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  router.replace({ path: route.path, query: nextQuery })
+}
+
+onMounted(async () => {
+  await fetchCategories()
+  await openEditFromRouteQuery()
 })
 </script>

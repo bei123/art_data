@@ -299,96 +299,143 @@
     </Card>
 
     <Dialog v-model:open="dialogVisible">
-      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl">
-        <DialogHeader>
+      <DialogContent class="flex max-h-[92vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader class="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{{ dialogType === 'add' ? '添加艺术品' : '编辑艺术品' }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="dialogType === 'add'">
+              上传封面并填写各模块信息，带 <span class="text-destructive">*</span> 为必填
+            </template>
+            <template v-else>
+              正在编辑「{{ form.title || '未命名' }}」<span v-if="form.id" class="text-muted-foreground">（ID {{ form.id }}）</span>
+            </template>
+          </DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="oa-title">标题 <span class="text-destructive">*</span></Label>
-            <Input id="oa-title" v-model="form.title" autocomplete="off" />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>图片 <span class="text-destructive">*</span></Label>
-            <input
-              ref="dialogImageInput"
-              type="file"
-              accept="image/*"
-              class="hidden"
-              @change="onDialogImageInputChange"
-            >
-            <div
-              class="relative max-w-[200px] cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-muted/30 transition hover:border-primary/40"
-              :class="{ 'border-primary/50 bg-primary/5': isDragOver, 'pointer-events-none opacity-70': isUploading }"
-              role="button"
-              tabindex="0"
-              @click="triggerDialogImageSelect"
-              @keydown.enter.prevent="triggerDialogImageSelect"
-              @keydown.space.prevent="triggerDialogImageSelect"
-              @dragenter="handleDragEnter"
-              @dragleave="handleDragLeave"
-              @dragover="handleDragOver"
-              @drop="handleDrop"
-            >
-              <img
-                v-if="form.image"
-                :src="form.image"
-                alt="预览"
-                class="block size-[178px] object-cover"
-                loading="lazy"
+        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(240px,280px)_1fr]">
+          <!-- 左侧：封面与仓库图（可滚动 + 底部固定操作） -->
+          <div class="flex min-h-0 flex-col border-border bg-muted/15 lg:max-h-[min(56vh,560px)] lg:border-r">
+            <ScrollArea class="min-h-0 flex-1">
+              <div class="flex flex-col gap-4 p-4">
+            <div class="flex flex-col gap-2">
+              <Label>封面图 <span class="text-destructive">*</span></Label>
+              <input
+                ref="dialogImageInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="onDialogImageInputChange"
               >
-              <div v-else class="flex min-h-[178px] flex-col items-center justify-center gap-2 p-4 text-center">
-                <Plus class="size-8 text-muted-foreground" aria-hidden="true" />
-                <p class="text-sm font-medium text-foreground">点击或拖拽图片到此处上传</p>
-                <p class="text-xs text-muted-foreground">支持 JPG、PNG、GIF，不超过 50MB</p>
-              </div>
               <div
-                v-if="isDragOver"
-                class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 font-semibold text-primary"
+                class="relative aspect-square w-full max-w-[280px] cursor-pointer overflow-hidden rounded-lg border-2 border-dashed border-border bg-background transition hover:border-primary/40"
+                :class="{ 'border-primary/50 bg-primary/5': isDragOver, 'pointer-events-none opacity-70': isUploading }"
+                role="button"
+                tabindex="0"
+                @click="triggerDialogImageSelect"
+                @keydown.enter.prevent="triggerDialogImageSelect"
+                @keydown.space.prevent="triggerDialogImageSelect"
+                @dragenter="handleDragEnter"
+                @dragleave="handleDragLeave"
+                @dragover="handleDragOver"
+                @drop="handleDrop"
               >
-                <Upload class="mb-2 size-10" aria-hidden="true" />
-                <p>释放鼠标上传图片</p>
+                <img
+                  v-if="form.image"
+                  :src="form.image"
+                  alt="封面预览"
+                  class="size-full object-cover"
+                  loading="lazy"
+                >
+                <div v-else class="flex size-full flex-col items-center justify-center gap-2 p-4 text-center">
+                  <Upload class="size-10 text-muted-foreground" aria-hidden="true" />
+                  <p class="text-sm font-medium">点击或拖拽上传</p>
+                  <p class="text-xs text-muted-foreground">JPG / PNG / GIF，≤50MB</p>
+                </div>
+                <div
+                  v-if="isDragOver"
+                  class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary/10 font-medium text-primary"
+                >
+                  <Upload class="mb-2 size-10" aria-hidden="true" />
+                  释放以上传
+                </div>
+                <div
+                  v-if="form.image && !isUploading"
+                  class="absolute right-2 top-2 flex gap-1"
+                >
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    class="size-8 bg-background/90 shadow-sm"
+                    aria-label="更换封面"
+                    @click.stop="triggerDialogImageSelect"
+                  >
+                    <Upload class="size-3.5" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive"
+                    class="size-8 shadow-sm"
+                    aria-label="移除封面"
+                    @click.stop="clearDialogImage"
+                  >
+                    <X class="size-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+              <div v-if="uploadProgress > 0" class="max-w-[280px] rounded-lg border border-border bg-background p-3">
+                <Progress :model-value="uploadProgress" class="h-2" />
+                <p class="mt-2 text-center text-xs text-muted-foreground">
+                  {{ uploadProgress < 100 ? `上传中 ${uploadProgress}%` : '上传完成' }}
+                </p>
               </div>
             </div>
-            <div v-if="uploadProgress > 0" class="max-w-md rounded-lg border border-border bg-muted/40 p-3">
-              <Progress :model-value="uploadProgress" class="h-2" />
-              <p class="mt-2 text-center text-sm text-muted-foreground">
-                <span v-if="uploadProgress < 100">正在上传图片... {{ uploadProgress }}%</span>
-                <span v-else class="font-medium text-primary">上传完成！</span>
-              </p>
-            </div>
-          </div>
 
-          <div
-            v-if="form.id && form.wms_image_paths?.length"
-            class="flex flex-col gap-3 rounded-lg border border-amber-200/80 bg-amber-50/50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20"
-          >
-            <div class="flex flex-col gap-1">
-              <p class="text-sm font-medium text-foreground">仓库图片</p>
-              <p class="text-xs text-muted-foreground">
-                仅管理后台可见。采用后将上传至 OSS，前台才会展示该图。
-              </p>
-            </div>
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
-              <WmsImageGallery
-                  v-if="form.id"
-                  :artwork-id="form.id"
-                  :paths="form.wms_image_paths"
-                  v-model:selected-index="formWmsSelectedIndex"
-                  preview-size-class="size-[178px]"
-                  thumb-size-class="size-12"
-                />
-              <div class="flex flex-col gap-2 sm:pt-1">
-                <p class="text-xs text-muted-foreground">
-                  共 {{ form.wms_image_paths.length }} 张仓库图，选中后采用并发布到 OSS。
+            <div
+              v-if="form.id && form.wms_image_paths?.length"
+              class="rounded-lg border border-amber-200/80 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20"
+            >
+              <div>
+                <p class="text-sm font-medium">仓库图片</p>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  仅后台可见；采用后发布到 OSS 作为前台封面
                 </p>
+              </div>
+              <WmsImageGallery
+                v-if="form.id"
+                class="mt-3"
+                :artwork-id="form.id"
+                :paths="form.wms_image_paths"
+                v-model:selected-index="formWmsSelectedIndex"
+                preview-size-class="aspect-square w-full max-w-[280px]"
+                thumb-size-class="size-12"
+                thumbs-scrollable
+                previewable
+                @preview="handleFormWmsPreview"
+              />
+            </div>
+              </div>
+            </ScrollArea>
+            <div
+              v-if="form.id && form.wms_image_paths?.length"
+              class="shrink-0 border-t border-amber-200/80 bg-amber-50/95 p-3 dark:border-amber-900/50 dark:bg-amber-950/90"
+            >
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="flex-1"
+                  @click="handleFormWmsPreview(formWmsSelectedIndex)"
+                >
+                  预览大图
+                </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  class="w-fit"
+                  class="flex-1"
                   :disabled="applyingWmsImageId === form.id"
                   @click="handleApplyWmsImage({ id: form.id, wms_image_paths: form.wms_image_paths }, formWmsSelectedIndex)"
                 >
@@ -397,186 +444,225 @@
                     class="mr-1.5 size-3.5 animate-spin"
                     aria-hidden="true"
                   />
-                  采用所选仓库图并发布
+                  采用所选仓库图
                 </Button>
               </div>
             </div>
           </div>
 
-          <div class="flex flex-col gap-2">
-            <Label>详情富文本</Label>
-            <div class="overflow-hidden rounded-lg border border-border">
-              <Toolbar :editor="editorRef" class="w-full border-b border-border" />
-              <Editor
-                v-model="longDescriptionHtml"
-                :defaultConfig="{ 
-               placeholder: '请输入内容...', 
-               ...editorConfig,
-               // 优化图片显示
-               EXTEND_CONF: {
-                 ...editorConfig.EXTEND_CONF,
-                 // 图片懒加载配置
-                 imageLazyLoad: true,
-                 imageLazyLoadPlaceholder: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5Zu+54mHPC90ZXh0Pjwvc3ZnPg==',
-                 // 图片加载失败处理
-                 imageLoadError: (img) => {
-                   img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2ZlZjBmMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjZjU2YzZjIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5Zu+54mH5aSx6KSlPC90ZXh0Pjwvc3ZnPg==';
-                   img.alt = '图片加载失败';
-                 }
-               }
-             }"
-                mode="default"
-                class="min-h-[300px] w-full min-w-0"
-                style="min-height: 300px"
-                @onCreated="handleEditorCreated"
-              />
-            </div>
-          </div>
+          <!-- 右侧：分 Tab 表单 -->
+          <div class="flex min-h-0 flex-col">
+            <Tabs v-model="artworkFormTab" class="flex min-h-0 flex-1 flex-col">
+              <div class="shrink-0 border-b border-border px-4 pt-3">
+                <TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+                  <TabsTrigger value="basic" class="text-xs sm:text-sm">
+                    基本信息
+                  </TabsTrigger>
+                  <TabsTrigger value="sale" class="text-xs sm:text-sm">
+                    销售
+                  </TabsTrigger>
+                  <TabsTrigger value="content" class="text-xs sm:text-sm">
+                    内容
+                  </TabsTrigger>
+                  <TabsTrigger value="collection" class="text-xs sm:text-sm">
+                    收藏
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="oa-artist-filter">艺术家 <span class="text-destructive">*</span></Label>
-            <Input
-              id="oa-artist-filter"
-              v-model="artistFilter"
-              placeholder="输入关键字筛选艺术家"
-              class="max-w-md"
-            />
-            <select
-              id="oa-artist"
-              v-model="form.artist_id"
-              class="flex h-10 w-full max-w-md rounded-lg border border-input bg-transparent px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <option disabled value="">
-                请选择艺术家
-              </option>
-              <option v-for="a in filteredArtistOptions" :key="a.id" :value="a.id">
-                {{ a.name }}
-              </option>
-            </select>
-          </div>
+              <ScrollArea class="min-h-[320px] flex-1 lg:max-h-[min(56vh,560px)]">
+                <TabsContent value="basic" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="oa-title">标题 <span class="text-destructive">*</span></Label>
+                    <Input id="oa-title" v-model="form.title" autocomplete="off" />
+                  </div>
 
-          <div class="flex flex-col gap-2">
-            <Label for="oa-year">年份</Label>
-            <Input id="oa-year" v-model="form.year" type="number" class="max-w-xs" />
-          </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="oa-artist-filter">艺术家 <span class="text-destructive">*</span></Label>
+                    <Input
+                      id="oa-artist-filter"
+                      v-model="artistFilter"
+                      placeholder="输入姓名筛选"
+                      autocomplete="off"
+                    />
+                    <ScrollArea class="h-36 rounded-lg border border-border">
+                      <div class="p-1">
+                        <button
+                          v-for="a in filteredArtistOptions"
+                          :key="a.id"
+                          type="button"
+                          class="flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+                          :class="String(form.artist_id) === String(a.id) ? 'bg-primary/10 font-medium text-primary' : ''"
+                          @click="form.artist_id = a.id"
+                        >
+                          {{ a.name }}
+                        </button>
+                        <p
+                          v-if="!filteredArtistOptions.length"
+                          class="px-3 py-6 text-center text-xs text-muted-foreground"
+                        >
+                          未找到艺术家
+                        </p>
+                      </div>
+                    </ScrollArea>
+                  </div>
 
-          <div class="flex items-center gap-4 py-1">
-            <Separator class="flex-1" />
-            <span class="shrink-0 text-sm text-muted-foreground">价格和库存信息</span>
-            <Separator class="flex-1" />
-          </div>
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-year">创作年份</Label>
+                      <Input id="oa-year" v-model.number="form.year" type="number" min="1900" max="2100" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label>上架状态</Label>
+                      <div class="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          :variant="form.is_on_sale === 1 ? 'default' : 'outline'"
+                          @click="form.is_on_sale = 1"
+                        >
+                          在售
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          :variant="form.is_on_sale === 0 ? 'default' : 'outline'"
+                          @click="form.is_on_sale = 0"
+                        >
+                          下架
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
 
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div class="flex flex-col gap-2">
-              <Label for="oa-price">原价</Label>
-              <Input
-                id="oa-price"
-                v-model.number="form.original_price"
-                type="number"
-                min="0"
-                step="0.01"
-              />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="oa-discount">折扣价</Label>
-              <Input
-                id="oa-discount"
-                v-model.number="form.discount_price"
-                type="number"
-                min="0"
-                step="0.01"
-              />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="oa-stock">库存</Label>
-              <Input id="oa-stock" v-model.number="form.stock" type="number" min="0" step="1" />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="oa-sales">销量</Label>
-              <Input id="oa-sales" v-model.number="form.sales" type="number" disabled class="opacity-70" />
-            </div>
-          </div>
+                  <div class="flex flex-col gap-2">
+                    <Label>公开接口展示</Label>
+                    <p class="text-xs text-muted-foreground">
+                      关闭后未登录访客无法在列表、详情与搜索中看到该作品
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        :variant="form.is_public === 1 ? 'default' : 'outline'"
+                        @click="form.is_public = 1"
+                      >
+                        展示
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        :variant="form.is_public === 0 ? 'default' : 'outline'"
+                        @click="form.is_public = 0"
+                      >
+                        不展示
+                      </Button>
+                    </div>
+                  </div>
+                </TabsContent>
 
-          <div class="flex flex-col gap-2">
-            <Label>状态</Label>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                :variant="form.is_on_sale === 1 ? 'default' : 'outline'"
-                @click="form.is_on_sale = 1"
-              >
-                在售
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                :variant="form.is_on_sale === 0 ? 'default' : 'outline'"
-                @click="form.is_on_sale = 0"
-              >
-                下架
-              </Button>
-            </div>
-          </div>
+                <TabsContent value="sale" class="mt-0 space-y-4 p-4">
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-price">原价</Label>
+                      <Input
+                        id="oa-price"
+                        v-model.number="form.original_price"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-discount">折扣价</Label>
+                      <Input
+                        id="oa-discount"
+                        v-model.number="form.discount_price"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-stock">库存</Label>
+                      <Input id="oa-stock" v-model.number="form.stock" type="number" min="0" step="1" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-sales">销量</Label>
+                      <Input id="oa-sales" v-model.number="form.sales" type="number" disabled class="opacity-70" />
+                    </div>
+                  </div>
+                </TabsContent>
 
-          <div class="flex flex-col gap-2">
-            <Label>公开接口展示</Label>
-            <p class="text-xs text-muted-foreground">
-              关闭后未登录访客无法在列表、详情与搜索中看到该作品；若艺术家为「不展示」，作品也不会出现在公开接口。
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                :variant="form.is_public === 1 ? 'default' : 'outline'"
-                @click="form.is_public = 1"
-              >
-                展示
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                :variant="form.is_public === 0 ? 'default' : 'outline'"
-                @click="form.is_public = 0"
-              >
-                不展示
-              </Button>
-            </div>
-          </div>
+                <TabsContent value="content" class="mt-0 space-y-4 p-4">
+                  <div class="flex flex-col gap-2">
+                    <Label for="oa-desc">简短描述</Label>
+                    <Textarea id="oa-desc" v-model="form.description" class="min-h-20" rows="3" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="oa-bg">创作背景</Label>
+                    <Textarea id="oa-bg" v-model="form.background" class="min-h-20" rows="3" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label for="oa-features">作品特点</Label>
+                    <Textarea id="oa-features" v-model="form.features" class="min-h-20" rows="3" />
+                  </div>
+                  <div class="flex flex-col gap-2">
+                    <Label>详情富文本</Label>
+                    <div class="overflow-hidden rounded-lg border border-border">
+                      <Toolbar :editor="editorRef" class="w-full border-b border-border" />
+                      <Editor
+                        v-model="longDescriptionHtml"
+                        :defaultConfig="{
+                          placeholder: '请输入详情内容…',
+                          ...editorConfig,
+                          EXTEND_CONF: {
+                            ...editorConfig.EXTEND_CONF,
+                            imageLazyLoad: true,
+                            imageLazyLoadPlaceholder: editorConfig.EXTEND_CONF?.imageLazyLoadPlaceholder,
+                            imageLoadError: (img) => {
+                              img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2ZlZjBmMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjZjU2YzZjIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5Zu+54mH5aSx6KSlPC90ZXh0Pjwvc3ZnPg=='
+                              img.alt = '图片加载失败'
+                            },
+                          },
+                        }"
+                        mode="default"
+                        class="min-h-[280px] w-full min-w-0"
+                        style="min-height: 280px"
+                        @onCreated="handleEditorCreated"
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
 
-          <div class="flex flex-col gap-2">
-            <Label for="oa-desc">描述</Label>
-            <Textarea id="oa-desc" v-model="form.description" class="min-h-24" rows="4" />
-          </div>
-
-          <div class="flex items-center gap-4 py-1">
-            <Separator class="flex-1" />
-            <span class="shrink-0 text-sm text-muted-foreground">收藏信息</span>
-            <Separator class="flex-1" />
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div class="flex flex-col gap-2">
-              <Label for="oa-cert">证书编号</Label>
-              <Input id="oa-cert" v-model="form.collection_number" />
-            </div>
-            <div class="flex flex-col gap-2">
-              <Label for="oa-size">作品尺寸</Label>
-              <Input id="oa-size" v-model="form.collection_size" />
-            </div>
-            <div class="flex flex-col gap-2 md:col-span-2">
-              <Label for="oa-material">作品材质</Label>
-              <Input id="oa-material" v-model="form.collection_material" />
-            </div>
+                <TabsContent value="collection" class="mt-0 space-y-4 p-4">
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-cert">证书编号</Label>
+                      <Input id="oa-cert" v-model="form.collection_number" />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <Label for="oa-size">作品尺寸</Label>
+                      <Input id="oa-size" v-model="form.collection_size" />
+                    </div>
+                    <div class="flex flex-col gap-2 sm:col-span-2">
+                      <Label for="oa-material">作品材质</Label>
+                      <Input id="oa-material" v-model="form.collection_material" />
+                    </div>
+                  </div>
+                </TabsContent>
+              </ScrollArea>
+            </Tabs>
           </div>
         </div>
 
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="dialogVisible = false">
+        <DialogFooter class="shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" :disabled="savingForm" @click="dialogVisible = false">
             取消
           </Button>
-          <Button type="button" @click="submitForm">
-            确定
+          <Button type="button" :disabled="savingForm" @click="submitForm">
+            <Loader2 v-if="savingForm" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            {{ dialogType === 'add' ? '添加' : '保存' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -670,7 +756,7 @@
         <div v-else-if="previewWmsGallery.length" class="flex flex-col gap-3">
           <img
             v-if="previewWmsGallery[previewWmsSelectedIndex]"
-            :key="`wms-preview-main-${previewWmsSelectedIndex}`"
+            :key="`wms-preview-main-${previewWmsSelectedIndex}-${previewWmsGallery[previewWmsSelectedIndex]}`"
             :src="previewWmsGallery[previewWmsSelectedIndex]"
             :alt="previewTitle || '预览'"
             class="max-h-[70vh] w-full object-contain"
@@ -725,6 +811,8 @@
           :artwork-id="wmsApplyTarget.id"
           :paths="wmsApplyTarget.wms_image_paths || []"
           v-model:selected-index="wmsApplySelectedIndex"
+          previewable
+          @preview="(idx) => openWmsGalleryPreview(wmsApplyTarget, idx)"
         />
         <DialogFooter class="gap-2 sm:justify-end">
           <Button type="button" variant="outline" @click="wmsApplyPickerOpen = false">
@@ -801,9 +889,9 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Plus, RefreshCw, Search, Upload } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Plus, RefreshCw, Search, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'  // 使用封装的axios实例
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -813,7 +901,6 @@ import WmsImageGallery from '@/components/wms-image-gallery.vue'
 import {
   fetchWmsImageObjectUrl,
   invalidateWmsImageCache,
-  revokeWmsImageObjectUrl,
 } from '@/utils/wms-image-preview'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
@@ -851,13 +938,18 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const isAdmin = computed(() => userMatchesRole(userStore.userInfo, 'admin'))
 const artworks = ref([])
 const dialogVisible = ref(false)
 const dialogType = ref('add')
+const artworkFormTab = ref('basic')
+const savingForm = ref(false)
 const loading = ref(false)
 const wmsSyncing = ref(false)
 const wmsSyncDialogOpen = ref(false)
@@ -971,6 +1063,8 @@ const form = ref({
   sales: 0,
   is_on_sale: 1,
   description: '',
+  background: '',
+  features: '',
   collection_number: '',
   collection_size: '',
   collection_material: '',
@@ -988,8 +1082,9 @@ const formWmsSelectedIndex = ref(0)
 const wmsApplyPickerOpen = ref(false)
 const wmsApplyTarget = ref(null)
 const wmsApplySelectedIndex = ref(0)
-let previewDialogBlobUrl = ''
 const previewTitle = ref('')
+/** 递增以丢弃过期的异步预览加载 */
+let previewWmsLoadGeneration = 0
 
 function wmsImagePathCount(row) {
   const paths = row?.wms_image_paths
@@ -1002,18 +1097,17 @@ function wmsImageBadgeLabel(row) {
   return '仓库图'
 }
 
-function revokePreviewWmsGallery() {
-  for (const url of previewWmsGallery.value) revokeWmsImageObjectUrl(url)
+function resetPreviewWmsGalleryState() {
   previewWmsGallery.value = []
   previewWmsSelectedIndex.value = 0
 }
 
 watch(previewOpen, (open) => {
   if (open) return
-  revokeWmsImageObjectUrl(previewDialogBlobUrl)
-  previewDialogBlobUrl = ''
-  revokePreviewWmsGallery()
+  previewWmsLoadGeneration += 1
+  resetPreviewWmsGalleryState()
   previewWmsGalleryLoading.value = false
+  previewSrc.value = ''
 })
 
 // 拖拽上传相关状态
@@ -1070,6 +1164,7 @@ const resetForm = () => {
   isUploading.value = false
   artistFilter.value = ''
   formWmsSelectedIndex.value = 0
+  artworkFormTab.value = 'basic'
 
   // 确保富文本编辑器内容被清空
   nextTick(() => {
@@ -1128,36 +1223,54 @@ function extractUploadImageUrl(response) {
 
 function openImagePreview(url, title) {
   if (!url) return
-  revokePreviewWmsGallery()
-  revokeWmsImageObjectUrl(previewDialogBlobUrl)
-  previewDialogBlobUrl = ''
+  previewWmsLoadGeneration += 1
+  resetPreviewWmsGalleryState()
   const full =
     typeof url === 'string' && (url.startsWith('http') || url.startsWith('blob:'))
       ? url
       : `${API_BASE_URL}${url}`
-  if (full.startsWith('blob:')) previewDialogBlobUrl = full
   previewSrc.value = full
   previewTitle.value = title || ''
+  previewWmsGalleryLoading.value = false
   previewOpen.value = true
 }
 
-async function openWmsGalleryPreview(row) {
+function handleFormWmsPreview(index = formWmsSelectedIndex.value) {
+  if (!form.value?.id || !wmsImagePathCount(form.value)) return
+  openWmsGalleryPreview(
+    {
+      id: form.value.id,
+      title: form.value.title,
+      wms_image_paths: form.value.wms_image_paths,
+    },
+    index
+  )
+}
+
+async function openWmsGalleryPreview(row, startIndex = 0) {
   const count = wmsImagePathCount(row)
-  revokePreviewWmsGallery()
+  if (!count) return
+
+  const generation = ++previewWmsLoadGeneration
+  resetPreviewWmsGalleryState()
   previewSrc.value = ''
   previewTitle.value = row?.title || ''
-  previewWmsSelectedIndex.value = 0
+  const start = Math.min(Math.max(0, startIndex), count - 1)
+  previewWmsSelectedIndex.value = start
   previewWmsGalleryLoading.value = true
   previewOpen.value = true
 
   const urls = []
   for (let i = 0; i < count; i += 1) {
+    if (generation !== previewWmsLoadGeneration) return
     try {
       urls.push(await fetchWmsImageObjectUrl(row.id, i))
     } catch (e) {
       if (import.meta.env.DEV) console.warn('wms preview load failed', row.id, i, e)
     }
   }
+  if (generation !== previewWmsLoadGeneration) return
+
   previewWmsGalleryLoading.value = false
   if (!urls.length) {
     previewOpen.value = false
@@ -1264,6 +1377,10 @@ async function handleApplyWmsImage(row, index = 0) {
 
 function triggerDialogImageSelect() {
   dialogImageInput.value?.click?.()
+}
+
+function clearDialogImage() {
+  form.value.image = ''
 }
 
 function onDialogImageInputChange(e) {
@@ -1697,6 +1814,7 @@ const showAddDialog = () => {
   if (!checkLoginStatus()) return
   dialogType.value = 'add'
   resetForm()
+  artworkFormTab.value = 'basic'
   dialogVisible.value = true
 }
 
@@ -1743,6 +1861,7 @@ const editArtwork = async (row) => {
     isUploading.value = false
     artistFilter.value = ''
   formWmsSelectedIndex.value = 0
+  artworkFormTab.value = 'basic'
     dialogVisible.value = true
   } catch (error) {
     console.error('获取详细信息失败:', error)
@@ -1791,6 +1910,7 @@ const submitForm = async () => {
   if (!checkLoginStatus()) return
   if (!validateArtworkForm()) return
 
+  savingForm.value = true
   try {
     const submitData = {
       title: form.value.title,
@@ -1843,6 +1963,8 @@ const submitForm = async () => {
     } else {
       ElMessage.error(error.message || '操作失败')
     }
+  } finally {
+    savingForm.value = false
   }
 }
 
@@ -2136,20 +2258,34 @@ watch(dialogVisible, (newVal) => {
   }
 })
 
-onMounted(() => {
+async function openEditFromRouteQuery() {
+  const raw = route.query.edit
+  if (!raw) return
+  const id = Number(raw)
+  if (!id) return
+  await fetchArtworks()
+  await editArtwork({ id })
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  router.replace({ query: nextQuery })
+}
+
+onMounted(async () => {
   fetchArtists()
-  // 初始化分页参数
   pagination.value = {
     page: 1,
     pageSize: 20,
-    total: 0
+    total: 0,
   }
-  checkLoginStatus() && fetchArtworks()
+  if (checkLoginStatus()) {
+    await fetchArtworks()
+    await openEditFromRouteQuery()
+  }
 })
 
 onBeforeUnmount(() => {
   if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
-  revokeWmsImageObjectUrl(previewDialogBlobUrl)
-  revokePreviewWmsGallery()
+  previewWmsLoadGeneration += 1
+  resetPreviewWmsGalleryState()
 })
 </script>
