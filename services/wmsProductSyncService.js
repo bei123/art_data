@@ -5,6 +5,11 @@
 const db = require('../db')
 const logger = require('../utils/logger')
 const {
+  isWmsHttpConfigured,
+  getWmsHttpPasswordForLogin,
+  WMS_HTTP_USER,
+} = require('../config/wmsHttp')
+const {
   wmsUserLoginFromEnv,
   wmsProductDataList,
   wmsProductViewModel,
@@ -487,8 +492,115 @@ async function syncFromWmsAdmin(body) {
   }
 }
 
+function parseEnvBool(raw, defaultValue) {
+  const s = String(raw ?? '').trim().toLowerCase()
+  if (!s) return defaultValue
+  if (['1', 'true', 'yes', 'on'].includes(s)) return true
+  if (['0', 'false', 'no', 'off'].includes(s)) return false
+  return defaultValue
+}
+
+function isWmsSyncScheduleEnabled() {
+  return parseEnvBool(process.env.WMS_SYNC_SCHEDULE_ENABLED, isWmsHttpConfigured())
+}
+
+/** 定时任务默认拉取更多页（管理端手动同步默认 20 页） */
+function getScheduledWmsSyncBody() {
+  return {
+    maxPages: Math.min(500, Math.max(1, parseInt(process.env.WMS_SYNC_MAX_PAGES || '100', 10) || 100)),
+    pageSize: Math.min(100, Math.max(1, parseInt(process.env.WMS_SYNC_PAGE_SIZE || '20', 10) || 20)),
+    detailConcurrency: Math.min(
+      10,
+      Math.max(1, parseInt(process.env.WMS_SYNC_DETAIL_CONCURRENCY || '3', 10) || 3)
+    ),
+  }
+}
+
+/**
+ * 执行一次 WMS 同步（供定时任务或脚本调用，无需 JWT）
+ */
+async function syncFromWmsOnce() {
+  return syncFromWmsAdmin(getScheduledWmsSyncBody())
+}
+
+let wmsSyncScheduleTimer = null
+let wmsSyncScheduleRunning = false
+
+/**
+ * 启动 WMS 定期同步（服务进程内 setInterval，与 digitalArtworksSync 相同模式）
+ * 需配置 WMS_HTTP_BASE_URL、WMS_HTTP_USER、WMS_HTTP_PASSWORD（或 B64）
+ */
+function startWmsProductSyncSchedule() {
+  if (!isWmsSyncScheduleEnabled()) {
+    logger.info('wms_sync_schedule_disabled')
+    return
+  }
+  if (!isWmsHttpConfigured()) {
+    logger.warn('wms_sync_schedule_skip_not_configured')
+    return
+  }
+  if (!WMS_HTTP_USER || !getWmsHttpPasswordForLogin()) {
+    logger.warn('wms_sync_schedule_skip_missing_credentials')
+    return
+  }
+
+  const intervalMs = Math.max(
+    60_000,
+    parseInt(process.env.WMS_SYNC_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10) ||
+      6 * 60 * 60 * 1000
+  )
+  const runOnStart = parseEnvBool(process.env.WMS_SYNC_RUN_ON_START, true)
+  const startDelayMs = Math.max(0, parseInt(process.env.WMS_SYNC_START_DELAY_MS || '30000', 10) || 30000)
+
+  async function tick(source) {
+    if (wmsSyncScheduleRunning) {
+      logger.warn('wms_sync_schedule_skip_overlap', { source })
+      return
+    }
+    wmsSyncScheduleRunning = true
+    try {
+      const r = await syncFromWmsOnce()
+      if (r.ok) {
+        logger.info('wms_sync_schedule_done', { source, stats: r.body?.stats })
+      } else {
+        logger.warn('wms_sync_schedule_failed', {
+          source,
+          status: r.status,
+          error: r.body?.error,
+        })
+      }
+    } catch (e) {
+      logger.error('wms_sync_schedule_exception', { source, err: e.message })
+    } finally {
+      wmsSyncScheduleRunning = false
+    }
+  }
+
+  if (wmsSyncScheduleTimer) clearInterval(wmsSyncScheduleTimer)
+
+  logger.info('wms_sync_schedule_started', { intervalMs, runOnStart, startDelayMs })
+
+  setTimeout(() => {
+    if (runOnStart) tick('startup').catch(() => {})
+    wmsSyncScheduleTimer = setInterval(() => {
+      tick('interval').catch(() => {})
+    }, intervalMs)
+  }, startDelayMs)
+}
+
+function stopWmsProductSyncSchedule() {
+  if (wmsSyncScheduleTimer) {
+    clearInterval(wmsSyncScheduleTimer)
+    wmsSyncScheduleTimer = null
+  }
+}
+
 module.exports = {
   syncFromWmsAdmin,
+  syncFromWmsOnce,
   upsertOneProductFromWms,
   mapElementsToSyncPayload,
+  startWmsProductSyncSchedule,
+  stopWmsProductSyncSchedule,
+  isWmsSyncScheduleEnabled,
 }

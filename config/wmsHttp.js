@@ -54,6 +54,15 @@ const WMS_HTTP_USER_AGENT =
   String(process.env.WMS_HTTP_USER_AGENT || '').trim() ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
+/**
+ * 定期同步（见 services/wmsProductSyncService.startWmsProductSyncSchedule）
+ * WMS_SYNC_SCHEDULE_ENABLED — 默认随 WMS_HTTP_BASE_URL 是否配置而启用；设为 false 关闭
+ * WMS_SYNC_INTERVAL_MS — 默认 21600000（6 小时）
+ * WMS_SYNC_START_DELAY_MS — 进程启动后首次同步延迟，默认 30000
+ * WMS_SYNC_RUN_ON_START — 是否在启动后执行一次，默认 true
+ * WMS_SYNC_MAX_PAGES / WMS_SYNC_PAGE_SIZE / WMS_SYNC_DETAIL_CONCURRENCY — 定时任务分页参数
+ */
+
 function isWmsHttpConfigured() {
   return Boolean(WMS_HTTP_BASE_URL)
 }

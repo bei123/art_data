@@ -39,6 +39,7 @@ const homeTitlesRouter = require('./routes/home-titles');
 const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
+const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 
 const app = express();
 
@@ -343,6 +344,8 @@ app.use('/api/digital-artworks', digitalArtworksRouter);
 
 // 定时同步外部数字艺术品到缓存表（用于列表/影藏展示）
 startDigitalArtworksSync();
+// 定时从 WMS 同步原作主档（价格、艺术家、仓库图路径等）
+startWmsProductSyncSchedule();
 
 // 使用实物分类路由
 app.use('/api/physical-categories', physicalCategoriesRouter);
