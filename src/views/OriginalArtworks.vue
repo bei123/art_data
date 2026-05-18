@@ -656,13 +656,25 @@
       <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{{ previewTitle || '图片预览' }}</DialogTitle>
+          <DialogDescription class="sr-only">
+            查看仓库图片大图；多张时可点击下方缩略图切换。
+          </DialogDescription>
         </DialogHeader>
-        <div v-if="previewWmsGallery.length" class="flex flex-col gap-3">
+        <div
+          v-if="previewWmsGalleryLoading"
+          class="flex min-h-[200px] items-center justify-center gap-2 text-sm text-muted-foreground"
+        >
+          <Loader2 class="size-5 animate-spin" aria-hidden="true" />
+          正在加载仓库图…
+        </div>
+        <div v-else-if="previewWmsGallery.length" class="flex flex-col gap-3">
           <img
             v-if="previewWmsGallery[previewWmsSelectedIndex]"
+            :key="`wms-preview-main-${previewWmsSelectedIndex}`"
             :src="previewWmsGallery[previewWmsSelectedIndex]"
             :alt="previewTitle || '预览'"
             class="max-h-[70vh] w-full object-contain"
+            decoding="async"
           >
           <div
             v-if="previewWmsGallery.length > 1"
@@ -680,7 +692,14 @@
               :class="previewWmsSelectedIndex === i ? 'ring-2 ring-primary ring-offset-1' : 'opacity-80'"
               @click="previewWmsSelectedIndex = i"
             >
-              <img :src="url" :alt="`图 ${i + 1}`" class="size-full object-cover">
+              <img
+                :key="`wms-preview-thumb-${i}`"
+                :src="url"
+                :alt="`图 ${i + 1}`"
+                class="size-full object-cover"
+                loading="lazy"
+                decoding="async"
+              >
             </button>
           </div>
         </div>
@@ -792,7 +811,7 @@ import { API_BASE_URL } from '../config'
 import WmsImageThumb from '@/components/wms-image-thumb.vue'
 import WmsImageGallery from '@/components/wms-image-gallery.vue'
 import {
-  buildWmsAdminImageUrl,
+  fetchWmsImageObjectUrl,
   invalidateWmsImageCache,
   revokeWmsImageObjectUrl,
 } from '@/utils/wms-image-preview'
@@ -963,6 +982,7 @@ const artistFilter = ref('')
 const previewOpen = ref(false)
 const previewSrc = ref('')
 const previewWmsGallery = ref([])
+const previewWmsGalleryLoading = ref(false)
 const previewWmsSelectedIndex = ref(0)
 const formWmsSelectedIndex = ref(0)
 const wmsApplyPickerOpen = ref(false)
@@ -993,6 +1013,7 @@ watch(previewOpen, (open) => {
   revokeWmsImageObjectUrl(previewDialogBlobUrl)
   previewDialogBlobUrl = ''
   revokePreviewWmsGallery()
+  previewWmsGalleryLoading.value = false
 })
 
 // 拖拽上传相关状态
@@ -1120,24 +1141,45 @@ function openImagePreview(url, title) {
   previewOpen.value = true
 }
 
-function openWmsGalleryPreview(row) {
+async function openWmsGalleryPreview(row) {
   const count = wmsImagePathCount(row)
   revokePreviewWmsGallery()
   previewSrc.value = ''
   previewTitle.value = row?.title || ''
   previewWmsSelectedIndex.value = 0
-  previewWmsGallery.value = Array.from({ length: count }, (_, i) => buildWmsAdminImageUrl(row.id, i))
+  previewWmsGalleryLoading.value = true
   previewOpen.value = true
+
+  const urls = []
+  for (let i = 0; i < count; i += 1) {
+    try {
+      urls.push(await fetchWmsImageObjectUrl(row.id, i))
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('wms preview load failed', row.id, i, e)
+    }
+  }
+  previewWmsGalleryLoading.value = false
+  if (!urls.length) {
+    previewOpen.value = false
+    ElMessage.error('仓库图预览失败')
+    return
+  }
+  previewWmsGallery.value = urls
 }
 
-function handleArtworkThumbClick(row) {
+async function handleArtworkThumbClick(row) {
   if (!row) return
   if (artworkUsesWmsThumb(row)) {
     if (wmsImagePathCount(row) > 1) {
-      openWmsGalleryPreview(row)
+      await openWmsGalleryPreview(row)
       return
     }
-    openImagePreview(buildWmsAdminImageUrl(row.id, 0), row.title)
+    try {
+      const url = await fetchWmsImageObjectUrl(row.id, 0)
+      openImagePreview(url, row.title)
+    } catch (e) {
+      ElMessage.error(e?.message || '仓库图预览失败')
+    }
     return
   }
   openImagePreview(displayArtworkImageUrl(row), row.title)
@@ -1172,12 +1214,25 @@ function displayArtworkImageUrl(row) {
   return row.image || ''
 }
 
+/** 采用仓库图：拉图 + WebP + OSS，耗时可能超过默认 30s */
+const APPLY_WMS_IMAGE_TIMEOUT_MS = 300000
+
 async function handleApplyWmsImage(row, index = 0) {
   if (!checkLoginStatus() || !row?.id) return
   const pick = Math.max(0, Number(index) || 0)
   applyingWmsImageId.value = row.id
+  const loadingToast = ElMessage({
+    message: '正在采用仓库图（下载、压缩并上传 OSS），大图约需 1–3 分钟…',
+    type: 'info',
+    duration: 0,
+    showClose: true,
+  })
   try {
-    const data = await axios.post(`/original-artworks/${row.id}/admin/apply-wms-image`, { index: pick })
+    const data = await axios.post(
+      `/original-artworks/${row.id}/admin/apply-wms-image`,
+      { index: pick },
+      { timeout: APPLY_WMS_IMAGE_TIMEOUT_MS, skipGlobalError: true }
+    )
     const ossUrl = data?.image
     if (!ossUrl) {
       ElMessage.error('采用失败：未返回图片地址')
@@ -1196,9 +1251,13 @@ async function handleApplyWmsImage(row, index = 0) {
       form.value.image = ossUrl
     }
   } catch (e) {
-    const msg = e?.response?.data?.error || e?.message || '采用仓库图片失败'
+    let msg = e?.response?.data?.error || e?.message || '采用仓库图片失败'
+    if (e?.code === 'ECONNABORTED') {
+      msg = '采用仓库图超时，请稍后刷新列表查看是否已成功；若未成功请重试'
+    }
     ElMessage.error(typeof msg === 'string' ? msg : '采用仓库图片失败')
   } finally {
+    loadingToast?.close?.()
     applyingWmsImageId.value = null
   }
 }

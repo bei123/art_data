@@ -43,6 +43,7 @@ function wmsPathLabel(raw) {
     >
       <WmsImageThumb
         v-if="artworkId && safePaths.length"
+        :key="`wms-main-${artworkId}-${selected}`"
         :artwork-id="artworkId"
         :index="selected"
         :lazy="false"

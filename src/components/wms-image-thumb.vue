@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   buildWmsAdminImageUrl,
   fetchWmsImageObjectUrl,
-  revokeWmsImageObjectUrl,
 } from '@/utils/wms-image-preview'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -25,10 +24,12 @@ const isLoading = ref(true)
 const hasError = ref(false)
 const useBlobFallback = ref(false)
 
+/** 切换 index 时用于强制 img 重新挂载 */
+const imgMountKey = computed(() => `${props.artworkId}:${props.index}`)
+
 let loadToken = 0
 let abortController = null
 let observer = null
-let ownsBlobUrl = false
 
 function abortInflight() {
   if (abortController) {
@@ -37,24 +38,21 @@ function abortInflight() {
   }
 }
 
-function resetDisplay() {
-  if (ownsBlobUrl) {
-    revokeWmsImageObjectUrl(displayUrl.value)
-    ownsBlobUrl = false
-  }
+function clearDisplay() {
   displayUrl.value = ''
 }
 
 function finishLoaded(url) {
   displayUrl.value = url
   isLoading.value = false
+  hasError.value = false
   emit('loaded', url)
 }
 
 async function loadBlobFallback() {
   const token = ++loadToken
   abortInflight()
-  resetDisplay()
+  clearDisplay()
   isLoading.value = true
   hasError.value = false
   useBlobFallback.value = true
@@ -65,7 +63,6 @@ async function loadBlobFallback() {
       signal: abortController.signal,
     })
     if (token !== loadToken) return
-    ownsBlobUrl = true
     finishLoaded(url)
   } catch (e) {
     if (token !== loadToken) return
@@ -81,7 +78,7 @@ async function loadBlobFallback() {
 function startDirectLoad() {
   const token = ++loadToken
   abortInflight()
-  resetDisplay()
+  clearDisplay()
   useBlobFallback.value = false
   isLoading.value = true
   hasError.value = false
@@ -153,7 +150,7 @@ onBeforeUnmount(() => {
   loadToken += 1
   abortInflight()
   disconnectObserver()
-  resetDisplay()
+  clearDisplay()
 })
 
 defineExpose({ reload: scheduleLoad, displayUrl })
@@ -164,11 +161,12 @@ defineExpose({ reload: scheduleLoad, displayUrl })
     <Skeleton v-if="isLoading" class="absolute inset-0 rounded-md" />
     <img
       v-else-if="displayUrl && !hasError"
+      :key="imgMountKey"
       :src="displayUrl"
       :alt="alt"
       :class="imgClass"
       decoding="async"
-      loading="lazy"
+      loading="eager"
       @error="handleImgError"
     >
     <div

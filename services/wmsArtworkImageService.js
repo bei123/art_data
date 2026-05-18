@@ -531,15 +531,27 @@ async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
   }
 
   const attempts = []
-  if (isQiniuWmsConfigured()) {
-    attempts.push(() => fetchViaQiniuSigned(rel, variant))
+  if (variant === 'full') {
+    if (isQiniuWmsConfigured()) {
+      attempts.push(() => fetchViaQiniuSigned(rel, variant))
+    }
+    if (cookie) {
+      attempts.push(() => fetchViaFilexRedirectToCdn(cookie, rel))
+    }
+    if (!attempts.length) {
+      attempts.push(() => fetchViaWmsFilex(cookie, rel))
+    }
+  } else {
+    if (isQiniuWmsConfigured()) {
+      attempts.push(() => fetchViaQiniuSigned(rel, variant))
+    }
+    attempts.push(
+      () => fetchViaFilexRedirectToCdn(cookie, rel),
+      () => fetchViaWmsFilex(cookie, rel),
+      () => fetchViaSignedCdn(cookie, rel),
+      () => fetchViaWmsFilexRead(cookie, rel)
+    )
   }
-  attempts.push(
-    () => fetchViaFilexRedirectToCdn(cookie, rel),
-    () => fetchViaWmsFilex(cookie, rel),
-    () => fetchViaSignedCdn(cookie, rel),
-    () => fetchViaWmsFilexRead(cookie, rel)
-  )
 
   let lastErr
   for (const run of attempts) {
@@ -698,6 +710,13 @@ function isClientDisconnected(req, res) {
   return Boolean(req?.aborted || req?.destroyed)
 }
 
+/** 允许管理端站点跨域嵌入 img（避免 helmet 默认 same-origin CORP 导致预览空白） */
+function setWmsImageProxyHeaders(res, contentType) {
+  res.setHeader('Content-Type', contentType || 'image/jpeg')
+  res.setHeader('Cache-Control', 'private, max-age=600, stale-while-revalidate=120')
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+}
+
 async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
   const id = parseInt(String(artworkId), 10)
   if (Number.isNaN(id) || id <= 0) {
@@ -724,8 +743,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
   const cached = getPreviewFromCache(cacheKey)
   if (cached) {
     if (isClientDisconnected(req, res) || clientGone) return null
-    res.setHeader('Content-Type', cached.contentType || 'image/jpeg')
-    res.setHeader('Cache-Control', 'private, max-age=600, stale-while-revalidate=120')
+    setWmsImageProxyHeaders(res, cached.contentType)
     res.send(cached.buffer)
     return null
   }
@@ -741,8 +759,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res, req) {
     const { buffer, contentType } = await fetchPreviewImageBuffer(cookie, rel, cacheKey)
     if (clientGone || isClientDisconnected(req, res)) return null
     setPreviewCache(cacheKey, buffer, contentType)
-    res.setHeader('Content-Type', contentType || 'image/jpeg')
-    res.setHeader('Cache-Control', 'private, max-age=600, stale-while-revalidate=120')
+    setWmsImageProxyHeaders(res, contentType)
     res.send(buffer)
     return null
   } catch (e) {
@@ -782,6 +799,7 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
 
   try {
     return await withApplyConcurrency(async () => {
+      const startedAt = Date.now()
       let cookie = ''
       if (!isQiniuWmsConfigured()) {
         const { sessionCookie } = await wmsUserLoginFromEnv()
@@ -789,9 +807,27 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
         if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
       }
 
+      const fetchStarted = Date.now()
       const { buffer } = await fetchWmsImageBuffer(cookie, rel, { variant: 'full' })
+      logger.info('apply_wms_image_fetched', {
+        id,
+        index,
+        rel,
+        bytes: buffer?.length,
+        ms: Date.now() - fetchStarted,
+      })
+
+      const webpStarted = Date.now()
       const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`)
+      logger.info('apply_wms_image_webp_done', {
+        id,
+        bytes: webpFile?.size,
+        ms: Date.now() - webpStarted,
+      })
+
+      const uploadStarted = Date.now()
       const upload = await uploadToOSS(webpFile, 'original-artworks/')
+      logger.info('apply_wms_image_oss_done', { id, ms: Date.now() - uploadStarted })
 
       if (!upload?.url || !validatePublicImageUrl(upload.url)) {
         return adminResult(500, { error: '上传到 OSS 后 URL 无效' })
@@ -802,6 +838,8 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
       const { invalidateArtworksPublicCaches } = require('./artworksService')
       await invalidateArtworksPublicCaches({ artworkDetailIds: [id] })
 
+      logger.info('apply_wms_image_done', { id, index, rel, total_ms: Date.now() - startedAt })
+
       return adminResult(200, {
         message: '已采用仓库图片（WebP 压缩）并发布到 OSS',
         image: upload.url,
@@ -809,7 +847,12 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
       })
     })
   } catch (e) {
-    logger.error('applyWmsImageToArtworkAdmin_failed', { id, rel, err: e.message })
+    logger.error('applyWmsImageToArtworkAdmin_failed', {
+      id,
+      rel,
+      err: e.message,
+      code: e.code,
+    })
     if (e.code === 'WMS_HTTP_NOT_CONFIGURED' || e.code === 'WMS_HTTP_BAD_REQUEST') {
       return adminResult(400, { error: e.message })
     }

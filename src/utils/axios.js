@@ -104,18 +104,26 @@ instance.interceptors.response.use(
       console.error('[api]', method, url, status ?? error.message);
     }
 
+    const skipGlobalError = Boolean(error.config?.skipGlobalError)
+
     if (error.response) {
       const { status, data } = error.response;
       if (status === 401 || status === 403) {
-        // 使用新的token管理工具
         clearUserDataAndRedirect();
-      } else {
+      } else if (!skipGlobalError) {
         ElMessage.error(data?.error || '操作失败');
       }
     } else if (error.request) {
       if (logHttpDebug) console.error('请求未收到响应:', error.request);
-      ElMessage.error('网络请求失败，请检查网络连接');
-    } else {
+      if (!skipGlobalError) {
+        const isTimeout = error.code === 'ECONNABORTED'
+        ElMessage.error(
+          isTimeout
+            ? '请求超时，服务器仍在处理时请稍后刷新列表查看结果'
+            : '网络请求失败，请检查网络连接'
+        )
+      }
+    } else if (!skipGlobalError) {
       if (logHttpDebug) console.error('请求配置错误:', error.message);
       ElMessage.error('请求配置错误');
     }
