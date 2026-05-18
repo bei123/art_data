@@ -2,12 +2,11 @@ const db = require('../db');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { PUBLIC_API_BASE_URL: BASE_URL } = require('../config/publicEnv');
+const { attachAdminWmsImageFields } = require('./wmsArtworkImageService');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const DIGITAL_PUBLIC_WHERE = `(dae.is_hidden = 0 OR dae.is_hidden IS NULL)`;
 const ARTIST_PUBLIC_WHERE = 'COALESCE(a.is_public, 1) = 1';
-const OA_ARTIST_ALIAS = 'oa_pub_a';
-
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
 }
@@ -82,6 +81,62 @@ function buildArtistSearchClause(includeHidden, institutionId, keyword) {
     whereSql: `WHERE ${whereParts.join(' AND ')}`,
     params,
   };
+}
+
+/** 原作搜索：管理员 includeHidden 时不限 is_public，并扩展藏品号/年份等字段 */
+function buildOriginalArtworkSearchClause(includeHidden, keyword) {
+  const whereParts = [];
+  const params = [];
+  if (!includeHidden) {
+    whereParts.push('COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1');
+  }
+  const searchTerm = `%${keyword}%`;
+  const matchSql = [
+    'oa.title LIKE ?',
+    'oa.description LIKE ?',
+    'oa.long_description LIKE ?',
+    'oa.collection_number LIKE ?',
+    'CAST(oa.year AS CHAR) LIKE ?',
+    'a.name LIKE ?',
+  ];
+  const matchParams = [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm];
+  if (includeHidden) {
+    matchSql.push('CAST(oa.wms_record_id AS CHAR) LIKE ?');
+    matchParams.push(searchTerm);
+  }
+  whereParts.push(`(${matchSql.join(' OR ')})`);
+  params.push(...matchParams);
+  return {
+    whereSql: `WHERE ${whereParts.join(' AND ')}`,
+    params,
+  };
+}
+
+const ORIGINAL_ARTWORK_SEARCH_SELECT = `
+  SELECT
+    oa.id, oa.title, oa.year, oa.image, oa.price, oa.original_price, oa.discount_price,
+    oa.is_on_sale, oa.stock, oa.sales, oa.created_at, oa.is_public, oa.wms_image_paths,
+    oa.description, oa.long_description, oa.collection_number,
+    a.id as artist_id, a.name as artist_name, a.avatar as artist_avatar,
+    'original_artwork' as type
+  FROM original_artworks oa
+  LEFT JOIN artists a ON oa.artist_id = a.id
+`;
+
+function mapOriginalArtworkSearchRows(rows, includeHidden) {
+  return (rows || []).map((row) => {
+    let item = {
+      ...row,
+      image: row.image ? (row.image.startsWith('http') ? row.image : `${BASE_URL}${row.image}`) : '',
+      artist_avatar: row.artist_avatar
+        ? row.artist_avatar.startsWith('http')
+          ? row.artist_avatar
+          : `${BASE_URL}${row.artist_avatar}`
+        : '',
+    };
+    if (includeHidden) item = attachAdminWmsImageFields(item);
+    return item;
+  });
 }
 
 /**
@@ -166,19 +221,27 @@ async function getSearchResults(query, includeHidden = false) {
     }
 
     if (!type || type === 'all') {
+      const { whereSql: artistWhere, params: artistParams } = buildArtistSearchClause(
+        includeHidden,
+        null,
+        keyword
+      );
+      const { whereSql: oaWhere, params: oaParams } = buildOriginalArtworkSearchClause(
+        includeHidden,
+        keyword
+      );
+
       const [artistCount] = await db.query(
         `SELECT COUNT(*) as count FROM artists a
            LEFT JOIN institutions i ON a.institution_id = i.id
-           WHERE (a.name LIKE ? OR a.description LIKE ? OR a.era LIKE ? OR a.journey LIKE ? OR a.biography LIKE ? OR i.name LIKE ?)
-             AND ${ARTIST_PUBLIC_WHERE}`,
-        [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm]
+           ${artistWhere}`,
+        artistParams
       );
       const [artworkCount] = await db.query(
         `SELECT COUNT(*) as count FROM original_artworks oa
-           LEFT JOIN artists ${OA_ARTIST_ALIAS} ON ${OA_ARTIST_ALIAS}.id = oa.artist_id
-           WHERE (oa.title LIKE ? OR oa.description LIKE ?)
-             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(${OA_ARTIST_ALIAS}.is_public, 1) = 1`,
-        [searchTerm, searchTerm]
+           LEFT JOIN artists a ON a.id = oa.artist_id
+           ${oaWhere}`,
+        oaParams
       );
       const [digitalCount] = await db.query(
         `SELECT COUNT(*) as count
@@ -194,19 +257,16 @@ async function getSearchResults(query, includeHidden = false) {
         `SELECT a.id, a.name, a.avatar, a.description, 'artist' as type
            FROM artists a
            LEFT JOIN institutions i ON a.institution_id = i.id
-           WHERE (a.name LIKE ? OR a.description LIKE ? OR a.era LIKE ? OR a.journey LIKE ? OR a.biography LIKE ? OR i.name LIKE ?)
-             AND ${ARTIST_PUBLIC_WHERE}
+           ${artistWhere}
            LIMIT ? OFFSET ?`,
-        [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, limitNum, offset]
+        [...artistParams, limitNum, offset]
       );
       const [artworkRows] = await db.query(
-        `SELECT oa.id, oa.title, oa.image, oa.description, 'original_artwork' as type
-           FROM original_artworks oa
-           LEFT JOIN artists ${OA_ARTIST_ALIAS} ON ${OA_ARTIST_ALIAS}.id = oa.artist_id
-           WHERE (oa.title LIKE ? OR oa.description LIKE ?)
-             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(${OA_ARTIST_ALIAS}.is_public, 1) = 1
+        `${ORIGINAL_ARTWORK_SEARCH_SELECT}
+           ${oaWhere}
+           ORDER BY oa.created_at DESC
            LIMIT ? OFFSET ?`,
-        [searchTerm, searchTerm, limitNum, offset]
+        [...oaParams, limitNum, offset]
       );
       const [digitalRows] = await db.query(
         `SELECT dae.id, dae.title, dae.image_url as image, dae.description, 'digital_artwork' as type
@@ -222,44 +282,35 @@ async function getSearchResults(query, includeHidden = false) {
           ...item,
           avatar: item.avatar ? (item.avatar.startsWith('http') ? item.avatar : `${BASE_URL}${item.avatar}`) : '',
         })),
-        ...artworkRows.map((item) => ({
-          ...item,
-          image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
-        })),
+        ...mapOriginalArtworkSearchRows(artworkRows, includeHidden),
         ...digitalRows.map((item) => ({
           ...item,
           image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
         })),
       ];
     } else if (type === 'original_artwork') {
+      const { whereSql: oaWhere, params: oaParams } = buildOriginalArtworkSearchClause(
+        includeHidden,
+        keyword
+      );
+
       const [countResult] = await db.query(
         `SELECT COUNT(*) as count
            FROM original_artworks oa
            LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE (oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?)
-             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
-        [searchTerm, searchTerm, searchTerm]
+           ${oaWhere}`,
+        oaParams
       );
       totalCount = countResult[0].count;
 
       const [artworkRows] = await db.query(
-        `SELECT oa.id, oa.title, oa.image, oa.description, oa.artist_id, a.name as artist_name, a.avatar as artist_avatar, 'original_artwork' as type
-           FROM original_artworks oa
-           LEFT JOIN artists a ON oa.artist_id = a.id
-           WHERE (oa.title LIKE ? OR oa.description LIKE ? OR a.name LIKE ?)
-             AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1
+        `${ORIGINAL_ARTWORK_SEARCH_SELECT}
+           ${oaWhere}
+           ORDER BY oa.created_at DESC
            LIMIT ? OFFSET ?`,
-        [searchTerm, searchTerm, searchTerm, limitNum, offset]
+        [...oaParams, limitNum, offset]
       );
-      results = artworkRows.map((item) => ({
-        ...item,
-        image: item.image ? (item.image.startsWith('http') ? item.image : `${BASE_URL}${item.image}`) : '',
-        artist_avatar: item.artist_avatar
-          ? item.artist_avatar.startsWith('http')
-            ? item.artist_avatar
-            : `${BASE_URL}${item.artist_avatar}`
-          : '',
-      }));
+      results = mapOriginalArtworkSearchRows(artworkRows, includeHidden);
     } else if (type === 'digital_artwork') {
       const [countResult] = await db.query(
         `SELECT COUNT(*) as count
@@ -317,4 +368,5 @@ async function getSearchResults(query, includeHidden = false) {
 module.exports = {
   getSearchResults,
   searchArtists,
+  buildOriginalArtworkSearchClause,
 };

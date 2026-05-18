@@ -2008,7 +2008,11 @@ const fetchSearchResults = async () => {
         is_on_sale: Number(item.is_on_sale) || 0,
         is_public: Number(item.is_public) === 0 ? 0 : 1,
         year: Number(item.year) || new Date().getFullYear(),
-        artist_name: item.artist_name || ''
+        artist_name: item.artist_name || '',
+        wms_image_paths: Array.isArray(item.wms_image_paths) ? item.wms_image_paths : [],
+        has_wms_image: Boolean(item.has_wms_image) || (Array.isArray(item.wms_image_paths) && item.wms_image_paths.length > 0),
+        image_is_placeholder: Boolean(item.image_is_placeholder),
+        image_is_published: Boolean(item.image_is_published),
       }
 
       // 处理图片URL
