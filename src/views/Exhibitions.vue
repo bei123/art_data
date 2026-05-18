@@ -216,15 +216,35 @@
               （{{ exhibitionDetail.live_photos?.length || 0 }} / {{ MAX_LIVE_PHOTOS }}）
             </span>
           </CardTitle>
+          <CardDescription v-if="(exhibitionDetail.live_photos || []).length > 1">
+            拖拽图片可调整展示顺序
+          </CardDescription>
         </CardHeader>
         <CardContent class="space-y-4">
           <div v-if="(exhibitionDetail.live_photos || []).length" class="flex flex-wrap gap-4">
             <div
-              v-for="p in exhibitionDetail.live_photos"
+              v-for="(p, photoIndex) in exhibitionDetail.live_photos"
               :key="p.id"
-              class="group relative size-[120px] overflow-hidden rounded-lg border border-border shadow-sm"
+              draggable="true"
+              class="group relative size-[120px] cursor-grab overflow-hidden rounded-lg border border-border shadow-sm active:cursor-grabbing"
+              :class="{
+                'opacity-50 ring-2 ring-primary': livePhotoDragFromIndex === photoIndex,
+                'ring-2 ring-primary/60': livePhotoDragOverIndex === photoIndex && livePhotoDragFromIndex !== photoIndex,
+                'pointer-events-none opacity-60': isSavingLivePhotosOrder,
+              }"
+              @dragstart="handleLivePhotoSortDragStart(photoIndex, $event)"
+              @dragend="handleLivePhotoSortDragEnd"
+              @dragover="handleLivePhotoSortDragOver(photoIndex, $event)"
+              @dragleave="handleLivePhotoSortDragLeave(photoIndex, $event)"
+              @drop="handleLivePhotoSortDrop(photoIndex, $event)"
             >
-              <img :src="getImageUrl(p.image_url)" class="size-full object-cover" alt="现场图">
+              <img :src="getImageUrl(p.image_url)" class="size-full object-cover" alt="现场图" draggable="false">
+              <div
+                class="absolute left-1 top-1 flex size-6 items-center justify-center rounded bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                aria-hidden="true"
+              >
+                <GripVertical class="size-3.5" />
+              </div>
               <div
                 class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100"
               >
@@ -233,7 +253,7 @@
                   size="icon"
                   variant="destructive"
                   class="size-8"
-                  @click="openDeleteLivePhotoDialog(p)"
+                  @click.stop="openDeleteLivePhotoDialog(p)"
                 >
                   <Trash2 class="size-4" aria-hidden="true" />
                 </Button>
@@ -333,7 +353,7 @@
                 <th class="h-10 w-20 px-3 text-left font-medium">排序</th>
                 <th class="h-10 w-28 px-3 text-left font-medium">类型</th>
                 <th class="h-10 w-28 px-3 text-left font-medium">图片</th>
-                <th class="h-10 min-w-[12rem] px-3 text-left font-medium">标题 / ID</th>
+                <th class="h-10 min-w-[12rem] px-3 text-left font-medium">标题</th>
                 <th class="h-10 min-w-[10rem] px-3 text-left font-medium">关联艺术家</th>
                 <th class="h-10 w-52 px-3 text-left font-medium">操作</th>
               </tr>
@@ -373,9 +393,6 @@
                 </td>
                 <td class="px-3 py-2.5">
                   <div class="font-medium">{{ row.artwork?.title || '未知作品' }}</div>
-                  <div class="mt-1 text-xs text-muted-foreground">
-                    item_id: {{ row.id }} / artwork_id: {{ row.artwork?.id || '—' }}
-                  </div>
                 </td>
                 <td class="px-3 py-2.5">
                   <div class="flex flex-wrap gap-1">
@@ -392,9 +409,6 @@
                 </td>
                 <td class="px-3 py-2.5">
                   <div class="flex flex-wrap gap-1.5">
-                    <Button size="sm" variant="secondary" type="button" @click="openEditArtistsDialog(row)">
-                      编辑艺术家
-                    </Button>
                     <Button size="sm" variant="destructive" type="button" @click="openRemoveItemDialog(row)">
                       移除
                     </Button>
@@ -551,197 +565,12 @@
     </Dialog>
 
     <!-- 追加展览作品 -->
-    <Dialog v-model:open="itemsDialogVisible">
-      <DialogContent class="max-h-[92vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>追加展览作品</DialogTitle>
-        </DialogHeader>
-
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="item-type">作品类型</Label>
-            <select
-              id="item-type"
-              v-model="itemDraft.artwork_type"
-              class="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              @change="handleArtworkTypeChange"
-            >
-              <option value="original">原作</option>
-              <option value="digital">数字</option>
-            </select>
-          </div>
-
-          <template v-if="itemDraft.artwork_type === 'original'">
-            <div class="flex flex-col gap-2">
-              <Label>选择作品（原作）</Label>
-              <Input v-model="originalArtworkFilter" placeholder="筛选标题或 ID" class="max-w-xl" autocomplete="off" />
-              <select
-                v-model.number="itemDraft.artwork_id"
-                class="flex h-36 w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                size="8"
-              >
-                <option :value="0" disabled>
-                  请选择 original_artworks
-                </option>
-                <option v-for="a in filteredOriginalArtworks" :key="a.id" :value="a.id">
-                  {{ a.title }} ({{ a.id }})
-                </option>
-              </select>
-            </div>
-          </template>
-          <template v-else>
-            <div class="flex flex-col gap-2">
-              <Label>选择作品（数字）</Label>
-              <Input v-model="digitalArtworkFilter" placeholder="筛选标题或 ID" class="max-w-xl" autocomplete="off" />
-              <select
-                v-model.number="itemDraft.artwork_id"
-                class="flex h-36 w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                size="8"
-              >
-                <option :value="0" disabled>
-                  请选择 digital_artworks_external
-                </option>
-                <option v-for="a in filteredDigitalArtworks" :key="a.id" :value="a.id">
-                  {{ a.title }} ({{ a.id }})
-                </option>
-              </select>
-            </div>
-          </template>
-
-          <div class="flex flex-col gap-2">
-            <Label for="item-sort">排序 sort_order</Label>
-            <Input
-              id="item-sort"
-              v-model.number="itemDraft.sort_order"
-              type="number"
-              min="1"
-              step="1"
-              class="max-w-xs"
-            />
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <Label>关联艺术家（可选）</Label>
-            <Input v-model="itemsArtistFilter" placeholder="筛选艺术家" class="max-w-xl" autocomplete="off" />
-            <p class="text-xs text-muted-foreground">
-              不选则自动使用该作品自带 artist_id；按住 Ctrl/Cmd 多选。
-            </p>
-            <select
-              v-model="itemDraft.artists"
-              multiple
-              class="min-h-[140px] w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              size="8"
-            >
-              <option v-for="a in filteredArtistsForItems" :key="a.id" :value="a.id">
-                {{ a.name }}
-              </option>
-            </select>
-          </div>
-
-          <Button type="button" :disabled="!itemDraft.artwork_id" @click="addDraftItem">
-            加入待提交列表
-          </Button>
-        </div>
-
-        <div class="mt-2 border-t border-border pt-4">
-          <p class="mb-2 text-sm text-muted-foreground">待提交 items（将作为一次请求提交）</p>
-          <div class="overflow-x-auto rounded-md border border-border">
-            <table class="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr class="border-b border-border bg-muted/40">
-                  <th class="h-9 px-2 text-left font-medium">排序</th>
-                  <th class="h-9 w-24 px-2 text-left font-medium">类型</th>
-                  <th class="h-9 min-w-[12rem] px-2 text-left font-medium">作品</th>
-                  <th class="h-9 min-w-[10rem] px-2 text-left font-medium">关联艺术家</th>
-                  <th class="h-9 w-24 px-2 text-left font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, idx) in pendingItems" :key="idx" class="border-b border-border">
-                  <td class="px-2 py-2">
-                    <Input v-model.number="row.sort_order" type="number" min="1" step="1" class="h-8 w-24" />
-                  </td>
-                  <td class="px-2 py-2">
-                    <Badge :variant="row.artwork_type === 'digital' ? 'outline' : 'secondary'">
-                      {{ row.artwork_type === 'digital' ? '数字' : '原作' }}
-                    </Badge>
-                  </td>
-                  <td class="px-2 py-2">
-                    <div class="font-medium">{{ getPendingArtworkTitle(row) }}</div>
-                    <div class="mt-0.5 text-xs text-muted-foreground">artwork_id: {{ row.artwork_id }}</div>
-                  </td>
-                  <td class="px-2 py-2 text-muted-foreground">
-                    <span v-if="row.artists && row.artists.length">{{ getPendingArtistNames(row.artists).join(', ') }}</span>
-                    <span v-else>自动匹配</span>
-                  </td>
-                  <td class="px-2 py-2">
-                    <Button size="sm" variant="destructive" type="button" @click="removePendingItem(idx)">
-                      移除
-                    </Button>
-                  </td>
-                </tr>
-                <tr v-if="pendingItems.length === 0">
-                  <td colspan="5" class="px-3 py-10 text-center text-muted-foreground">
-                    暂无待提交项，请在上方选择作品后加入
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="itemsDialogVisible = false">
-            取消
-          </Button>
-          <Button
-            type="button"
-            :disabled="pendingItems.length === 0 || savingItems"
-            @click="submitItems"
-          >
-            <Loader2 v-if="savingItems" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
-            提交
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <!-- 编辑作品-艺术家 -->
-    <Dialog v-model:open="editArtistsDialogVisible">
-      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>编辑作品-艺术家关联</DialogTitle>
-        </DialogHeader>
-
-        <div class="grid gap-3 py-2">
-          <p class="text-sm text-muted-foreground">item_id: {{ editArtistsItemId }}</p>
-          <div class="flex flex-col gap-2">
-            <Label>艺术家</Label>
-            <Input v-model="editArtistFilter" placeholder="筛选艺术家" autocomplete="off" />
-            <select
-              v-model="editArtistsDraftArtistIds"
-              multiple
-              class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              size="10"
-            >
-              <option v-for="a in filteredArtistsForEdit" :key="a.id" :value="a.id">
-                {{ a.name }}
-              </option>
-            </select>
-          </div>
-        </div>
-
-        <DialogFooter class="gap-2 sm:justify-end">
-          <Button type="button" variant="outline" @click="editArtistsDialogVisible = false">
-            取消
-          </Button>
-          <Button type="button" :disabled="savingArtists" @click="submitArtists">
-            <Loader2 v-if="savingArtists" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
-            保存
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ExhibitionAddItemsDialog
+      v-model:open="itemsDialogVisible"
+      :exhibition-id="exhibitionId"
+      :existing-items="exhibitionDetail?.items ?? []"
+      @success="handleItemsAdded"
+    />
 
     <!-- 移除展览作品确认 -->
     <AlertDialog v-model:open="removeItemDialogOpen">
@@ -803,7 +632,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { AlertCircle, GripVertical, Loader2, Plus, Trash2, Upload } from 'lucide-vue-next'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import {
   AlertDialog,
@@ -829,6 +658,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
+import ExhibitionAddItemsDialog from '@/components/exhibition-add-items-dialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -841,11 +671,11 @@ const exhibitions = ref([])
 const exhibitionDetail = ref(null)
 
 const savingExhibition = ref(false)
-const savingItems = ref(false)
-const savingArtists = ref(false)
-
 const livePhotosInput = ref(null)
 const isLivePhotosDragOver = ref(false)
+const livePhotoDragFromIndex = ref(null)
+const livePhotoDragOverIndex = ref(null)
+const isSavingLivePhotosOrder = ref(false)
 const livePhotosUploadProgress = ref(0)
 const isLivePhotosUploading = ref(false)
 const isLivePhotosProcessing = ref(false)
@@ -857,11 +687,6 @@ const isCoverUploading = ref(false)
 const isCoverProcessing = ref(false)
 const coverUploadProgress = ref(0)
 const isCoverDragOver = ref(false)
-
-const originalArtworkFilter = ref('')
-const digitalArtworkFilter = ref('')
-const itemsArtistFilter = ref('')
-const editArtistFilter = ref('')
 
 const getImageUrl = (url) => {
   if (!url) return ''
@@ -1165,6 +990,69 @@ function handleLivePhotosDrop(e) {
   if (dropped.length > 0) uploadLivePhotosFiles(dropped)
 }
 
+function handleLivePhotoSortDragStart(index, event) {
+  if (isSavingLivePhotosOrder.value || isLivePhotosUploading.value || isLivePhotosProcessing.value) {
+    event.preventDefault()
+    return
+  }
+  livePhotoDragFromIndex.value = index
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(index))
+}
+
+function handleLivePhotoSortDragEnd() {
+  livePhotoDragFromIndex.value = null
+  livePhotoDragOverIndex.value = null
+}
+
+function handleLivePhotoSortDragOver(index, event) {
+  if (livePhotoDragFromIndex.value === null) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  livePhotoDragOverIndex.value = index
+}
+
+function handleLivePhotoSortDragLeave(index, event) {
+  if (livePhotoDragOverIndex.value === index && !event.currentTarget.contains(event.relatedTarget)) {
+    livePhotoDragOverIndex.value = null
+  }
+}
+
+async function handleLivePhotoSortDrop(toIndex, event) {
+  event.preventDefault()
+  const fromIndex = livePhotoDragFromIndex.value
+  livePhotoDragFromIndex.value = null
+  livePhotoDragOverIndex.value = null
+  if (fromIndex === null || fromIndex === toIndex) return
+  await moveLivePhoto(fromIndex, toIndex)
+}
+
+async function moveLivePhoto(fromIndex, toIndex) {
+  if (!exhibitionId.value || !exhibitionDetail.value) return
+  const photos = [...(exhibitionDetail.value.live_photos || [])]
+  if (fromIndex < 0 || fromIndex >= photos.length || toIndex < 0 || toIndex >= photos.length) return
+
+  const [item] = photos.splice(fromIndex, 1)
+  photos.splice(toIndex, 0, item)
+
+  const previousPhotos = exhibitionDetail.value.live_photos
+  exhibitionDetail.value.live_photos = photos
+
+  isSavingLivePhotosOrder.value = true
+  try {
+    const res = await axios.put(`/exhibitions/${exhibitionId.value}/live-photos`, {
+      images: photos.map((p) => p.image_url),
+    })
+    if (res?.live_photos) exhibitionDetail.value.live_photos = res.live_photos
+    ElMessage.success('排序已保存')
+  } catch (e) {
+    exhibitionDetail.value.live_photos = previousPhotos
+    ElMessage.error(e?.response?.data?.error || e?.error || '保存排序失败')
+  } finally {
+    isSavingLivePhotosOrder.value = false
+  }
+}
+
 function openDeleteLivePhotoDialog(p) {
   if (!exhibitionId.value || !p?.id) return
   deleteLivePhotoTarget.value = p
@@ -1288,110 +1176,6 @@ function retryFetchDetail() {
   fetchDetail(exhibitionId.value)
 }
 
-const artistsOptions = ref([])
-const originalArtworkOptions = ref([])
-const digitalArtworkOptions = ref([])
-
-const filteredOriginalArtworks = computed(() => {
-  const q = originalArtworkFilter.value.trim().toLowerCase()
-  const list = originalArtworkOptions.value || []
-  if (!q) return list
-  return list.filter(
-    (a) =>
-      String(a.id).includes(q) ||
-      (a.title && String(a.title).toLowerCase().includes(q)),
-  )
-})
-
-const filteredDigitalArtworks = computed(() => {
-  const q = digitalArtworkFilter.value.trim().toLowerCase()
-  const list = digitalArtworkOptions.value || []
-  if (!q) return list
-  return list.filter(
-    (a) =>
-      String(a.id).includes(q) ||
-      (a.title && String(a.title).toLowerCase().includes(q)),
-  )
-})
-
-const filteredArtistsForItems = computed(() => {
-  const q = itemsArtistFilter.value.trim().toLowerCase()
-  const list = artistsOptions.value || []
-  if (!q) return list
-  return list.filter((a) => a.name && String(a.name).toLowerCase().includes(q))
-})
-
-const filteredArtistsForEdit = computed(() => {
-  const q = editArtistFilter.value.trim().toLowerCase()
-  const list = artistsOptions.value || []
-  if (!q) return list
-  return list.filter((a) => a.name && String(a.name).toLowerCase().includes(q))
-})
-
-async function fetchArtists() {
-  const res = await axios.get('/artists')
-  if (Array.isArray(res)) artistsOptions.value = res
-}
-
-async function fetchOriginalArtworksOptions() {
-  const res = await axios.get('/original-artworks?page=1&pageSize=1000')
-  const list = res?.data && Array.isArray(res.data) ? res.data : []
-  originalArtworkOptions.value = list.map((a) => ({
-    id: a.id,
-    title: a.title,
-    image: a.image,
-    artist_name: a.artist_name,
-  }))
-}
-
-async function fetchDigitalArtworksOptions() {
-  const res = await axios.get('/digital-artworks?page=1&pageSize=1000')
-  const list = res?.data && Array.isArray(res.data) ? res.data : []
-  digitalArtworkOptions.value = list.map((a) => ({
-    id: a.id,
-    title: a.title,
-    image_url: a.image_url,
-    artist_name: a.artist?.name || a.artist_name,
-  }))
-}
-
-function getArtistNameById(artistId) {
-  if (!artistId) return ''
-  const sid = String(artistId)
-  const found = (artistsOptions.value || []).find((a) => String(a.id) === sid)
-  return found?.name || ''
-}
-
-function getPendingArtistNames(artistIds) {
-  if (!Array.isArray(artistIds) || artistIds.length === 0) return []
-  return artistIds.map((id) => {
-    const name = getArtistNameById(id)
-    return name || String(id)
-  })
-}
-
-function getPendingArtworkTitle(row) {
-  if (!row) return '-'
-  const aid = row.artwork_id
-  const type = row.artwork_type
-  if (type === 'original') {
-    const sid = String(aid)
-    const found = (originalArtworkOptions.value || []).find((a) => String(a.id) === sid)
-    return found?.title || sid
-  }
-  if (type === 'digital') {
-    const sid = String(aid)
-    const found = (digitalArtworkOptions.value || []).find((a) => String(a.id) === sid)
-    return found?.title || sid
-  }
-  return String(aid || '-')
-}
-
-async function ensureOptionsLoaded() {
-  if (artistsOptions.value.length && originalArtworkOptions.value.length && digitalArtworkOptions.value.length) return
-  await Promise.all([fetchArtists(), fetchOriginalArtworksOptions(), fetchDigitalArtworksOptions()])
-}
-
 async function fetchDetail(id) {
   if (!id) return
   loadingDetail.value = true
@@ -1421,7 +1205,6 @@ watch(
     if (newVal) {
       const id = Number(newVal)
       await fetchDetail(id)
-      await ensureOptionsLoaded()
     } else {
       exhibitionDetail.value = null
       await fetchExhibitions()
@@ -1433,7 +1216,6 @@ watch(
 onMounted(async () => {
   if (isDetailMode.value) {
     await fetchDetail(exhibitionId.value)
-    await ensureOptionsLoaded()
   } else {
     await fetchExhibitions()
   }
@@ -1441,87 +1223,12 @@ onMounted(async () => {
 
 const itemsDialogVisible = ref(false)
 
-const itemDraft = reactive({
-  artwork_type: 'original',
-  artwork_id: 0,
-  sort_order: 1,
-  artists: [],
-})
-
-const pendingItems = ref([])
-
-function handleArtworkTypeChange() {
-  itemDraft.artwork_id = 0
-  const existingLen = exhibitionDetail.value?.items?.length || 0
-  const base = existingLen
-  itemDraft.sort_order = base + pendingItems.value.length + 1
-}
-
 function openItemsDialog() {
   itemsDialogVisible.value = true
-  pendingItems.value = []
-  itemDraft.artwork_type = 'original'
-  itemDraft.artwork_id = 0
-  itemDraft.artists = []
-  originalArtworkFilter.value = ''
-  digitalArtworkFilter.value = ''
-  itemsArtistFilter.value = ''
-  const existingLen = exhibitionDetail.value?.items?.length || 0
-  itemDraft.sort_order = existingLen + 1
 }
 
-function addDraftItem() {
-  const artworkId = itemDraft.artwork_id
-  if (!artworkId) {
-    ElMessage.error('请选择 artwork_id')
-    return
-  }
-  const artists = Array.isArray(itemDraft.artists) ? itemDraft.artists.map((id) => Number(id)) : []
-
-  pendingItems.value.push({
-    artwork_type: itemDraft.artwork_type,
-    artwork_id: artworkId,
-    sort_order: itemDraft.sort_order,
-    artists,
-  })
-
-  const existingLen = exhibitionDetail.value?.items?.length || 0
-  itemDraft.sort_order = existingLen + pendingItems.value.length + 1
-  itemDraft.artwork_id = 0
-  itemDraft.artists = []
-}
-
-function removePendingItem(index) {
-  pendingItems.value.splice(index, 1)
-}
-
-async function submitItems() {
-  if (!exhibitionId.value) return
-  if (!pendingItems.value.length) return
-
-  savingItems.value = true
-  try {
-    const payload = { items: pendingItems.value }
-    await axios.post(`/exhibitions/${exhibitionId.value}/items`, payload)
-    ElMessage.success('追加成功')
-    itemsDialogVisible.value = false
-    await fetchDetail(exhibitionId.value)
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '提交 items 失败')
-  } finally {
-    savingItems.value = false
-  }
-}
-
-const editArtistsDialogVisible = ref(false)
-const editArtistsItemId = ref(null)
-const editArtistsDraftArtistIds = ref([])
-
-function openEditArtistsDialog(row) {
-  editArtistsItemId.value = row.id
-  editArtistsDraftArtistIds.value = (row.artists || []).map((a) => a.id)
-  editArtistFilter.value = ''
-  editArtistsDialogVisible.value = true
+async function handleItemsAdded() {
+  if (exhibitionId.value) await fetchDetail(exhibitionId.value)
 }
 
 function openRemoveItemDialog(row) {
@@ -1546,22 +1253,4 @@ async function confirmRemoveItem() {
   }
 }
 
-async function submitArtists() {
-  if (!exhibitionId.value || !editArtistsItemId.value) return
-  savingArtists.value = true
-  try {
-    const artist_ids = (editArtistsDraftArtistIds.value || []).map((id) => Number(id))
-    await axios.put(
-      `/exhibitions/${exhibitionId.value}/items/${editArtistsItemId.value}/artists`,
-      { artist_ids },
-    )
-    ElMessage.success('艺术家关联已更新')
-    editArtistsDialogVisible.value = false
-    await fetchDetail(exhibitionId.value)
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '保存失败')
-  } finally {
-    savingArtists.value = false
-  }
-}
 </script>
