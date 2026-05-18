@@ -183,13 +183,13 @@ router.beforeEach((to, from, next) => {
     localStorage.removeItem('tokenExpiry')
     localStorage.removeItem('user')
     if (to.path !== '/login') {
-      next('/login')
+      next({ path: '/login', query: { reason: 'session_expired' } })
       return
     }
   }
 
   if (requiresAuth && !localStorage.getItem('token')) {
-    next('/login')
+    next({ path: '/login', query: { reason: 'auth_required' } })
     return
   }
 

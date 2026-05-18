@@ -105,12 +105,15 @@ instance.interceptors.response.use(
     }
 
     const skipGlobalError = Boolean(error.config?.skipGlobalError)
+    const url = String(error.config?.url || '')
+    const isAuthEndpoint =
+      url.includes('/auth/login') || url.includes('/auth/register')
 
     if (error.response) {
       const { status, data } = error.response;
-      if (status === 401 || status === 403) {
+      if ((status === 401 || status === 403) && !isAuthEndpoint) {
         clearUserDataAndRedirect();
-      } else if (!skipGlobalError) {
+      } else if (!skipGlobalError && !isAuthEndpoint) {
         ElMessage.error(data?.error || '操作失败');
       }
     } else if (error.request) {

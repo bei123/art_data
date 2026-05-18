@@ -9,6 +9,7 @@
           艺术数据管理系统
         </h1>
       </header>
+      <SessionExpiryBanner />
       <main class="min-h-0 flex-1 overflow-auto">
         <router-view />
       </main>
@@ -18,4 +19,5 @@
 
 <script setup>
 import Sidebar from '../layout/components/Sidebar.vue'
+import SessionExpiryBanner from '@/components/session-expiry-banner.vue'
 </script>

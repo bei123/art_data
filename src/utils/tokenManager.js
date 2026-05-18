@@ -30,8 +30,7 @@ export const clearUserDataAndRedirect = () => {
   
   // 如果当前不在登录页，则跳转
   if (router.currentRoute.value.path !== '/login') {
-    router.push('/login')
-    ElMessage.error('登录已过期，请重新登录')
+    router.push({ path: '/login', query: { reason: 'session_expired' } })
   }
 }
 

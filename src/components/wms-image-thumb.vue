@@ -4,7 +4,10 @@ import {
   buildWmsAdminImageUrl,
   fetchWmsImageObjectUrl,
 } from '@/utils/wms-image-preview'
+import { isSafariWebKit } from '@/utils/browser'
 import { Skeleton } from '@/components/ui/skeleton'
+
+const preferBlobOnThisBrowser = isSafariWebKit()
 
 const props = defineProps({
   artworkId: { type: [Number, String], required: true },
@@ -93,6 +96,11 @@ function startDirectLoad() {
   finishLoaded(url)
 }
 
+function startLoadForBrowser() {
+  if (preferBlobOnThisBrowser) loadBlobFallback()
+  else startDirectLoad()
+}
+
 function handleImgError() {
   if (useBlobFallback.value || hasError.value) return
   loadBlobFallback()
@@ -109,18 +117,18 @@ function connectObserver() {
   disconnectObserver()
   const el = rootRef.value
   if (!el) {
-    startDirectLoad()
+    startLoadForBrowser()
     return
   }
   if (!props.lazy || typeof IntersectionObserver === 'undefined') {
-    startDirectLoad()
+    startLoadForBrowser()
     return
   }
   observer = new IntersectionObserver(
     (entries) => {
       if (!entries[0]?.isIntersecting) return
       disconnectObserver()
-      startDirectLoad()
+      startLoadForBrowser()
     },
     { root: null, rootMargin: '120px', threshold: 0.01 }
   )

@@ -1,23 +1,48 @@
 <template>
   <nav
-    class="flex h-full w-52 shrink-0 flex-col gap-0.5 border-r border-sidebar-border bg-sidebar p-2 text-sidebar-foreground"
+    class="flex h-full w-52 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-2 text-sidebar-foreground"
     aria-label="主导航"
   >
-    <RouterLink
-      v-for="item in visibleNavItems"
-      :key="item.path"
-      :to="item.path"
-      :class="navLinkClass(item.path)"
-    >
-      <component :is="item.icon" class="size-4 shrink-0 opacity-80" aria-hidden="true" />
-      <span class="truncate">{{ item.label }}</span>
-    </RouterLink>
+    <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+      <RouterLink
+        v-for="item in visibleNavItems"
+        :key="item.path"
+        :to="item.path"
+        :class="navLinkClass(item.path)"
+      >
+        <component :is="item.icon" class="size-4 shrink-0 opacity-80" aria-hidden="true" />
+        <span class="truncate">{{ item.label }}</span>
+      </RouterLink>
+    </div>
+
+    <div class="mt-2 shrink-0 border-t border-sidebar-border pt-2">
+      <p
+        v-if="displayName"
+        class="mb-2 truncate px-2.5 text-xs text-sidebar-foreground/70"
+        :title="displayName"
+      >
+        {{ displayName }}
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        class="w-full justify-start gap-2 border-sidebar-border bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        :disabled="isLoggingOut"
+        aria-label="退出登录"
+        @click="handleLogout"
+      >
+        <Loader2 v-if="isLoggingOut" class="size-4 shrink-0 animate-spin" aria-hidden="true" />
+        <LogOut v-else class="size-4 shrink-0" aria-hidden="true" />
+        {{ isLoggingOut ? '退出中…' : '退出登录' }}
+      </Button>
+    </div>
   </nav>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import {
   Building2,
   FileText,
@@ -25,16 +50,27 @@ import {
   Image,
   Images,
   LayoutDashboard,
+  Loader2,
+  LogOut,
   Store,
   User,
   Wallet,
 } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
 import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
+import { logoutCurrentUser } from '@/utils/sessionLogout'
 import { cn } from '@/lib/utils'
 
 const route = useRoute()
 const userStore = useUserStore()
+const isLoggingOut = ref(false)
+
+const displayName = computed(() => {
+  const u = userStore.userInfo
+  if (!u || typeof u !== 'object') return ''
+  return String(u.username || u.name || u.nickname || u.email || '').trim()
+})
 
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
@@ -74,5 +110,16 @@ function navLinkClass(path) {
       ? 'bg-sidebar-accent text-sidebar-accent-foreground'
       : 'text-sidebar-foreground/90',
   )
+}
+
+async function handleLogout() {
+  if (isLoggingOut.value) return
+  isLoggingOut.value = true
+  try {
+    await logoutCurrentUser()
+    ElMessage.success('已退出登录')
+  } finally {
+    isLoggingOut.value = false
+  }
 }
 </script>

@@ -8,12 +8,11 @@
 import { onMounted, onUnmounted } from 'vue'
 import RouteErrorBoundary from '@/components/route-error-boundary.vue'
 import { useUserStore } from '@/stores/user'
-import { checkAndHandleTokenExpiry, getTokenExpiryRemaining } from '@/utils/tokenManager'
-import { ElMessage } from 'element-plus'
+import { checkAndHandleTokenExpiry } from '@/utils/tokenManager'
+import { checkAndNotifyTokenExpiryToast } from '@/utils/tokenExpiryReminder'
 import { CONFIG } from '@/config'
 
 let tokenCheckInterval = null
-let tokenWarningInterval = null
 
 onMounted(() => {
   const userStore = useUserStore()
@@ -26,7 +25,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (tokenCheckInterval) clearInterval(tokenCheckInterval)
-  if (tokenWarningInterval) clearInterval(tokenWarningInterval)
 })
 
 const startTokenExpiryCheck = () => {
@@ -34,25 +32,11 @@ const startTokenExpiryCheck = () => {
 
   const checkIntervalMs = CONFIG.token.checkIntervalSeconds * 1000
   tokenCheckInterval = setInterval(() => {
-    checkAndHandleTokenExpiry()
+    if (checkAndHandleTokenExpiry()) return
+    checkAndNotifyTokenExpiryToast()
   }, checkIntervalMs)
 
-  const checkExpiryWarning = () => {
-    const remainingTime = getTokenExpiryRemaining()
-    const warningTime = CONFIG.token.warningMinutes * 60 * 1000
-
-    if (
-      remainingTime > 0 &&
-      remainingTime <= warningTime &&
-      remainingTime > warningTime - checkIntervalMs
-    ) {
-      const minutes = Math.ceil(remainingTime / 60000)
-      ElMessage.warning(`您的登录将在${minutes}分钟后过期，请及时保存工作`)
-    }
-  }
-
-  const warningCheckIntervalMs = CONFIG.token.warningCheckIntervalSeconds * 1000
-  tokenWarningInterval = setInterval(checkExpiryWarning, warningCheckIntervalMs)
+  checkAndNotifyTokenExpiryToast()
 }
 </script>
 

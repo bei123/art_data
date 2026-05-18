@@ -1,7 +1,9 @@
 import { API_BASE_URL } from '../config'
+import { isSafariWebKit } from './browser'
 
 const CACHE_MAX_ENTRIES = 80
-const MAX_CONCURRENT_FETCHES = 3
+/** Safari 对同域并发更敏感，略降低并发 */
+const MAX_CONCURRENT_FETCHES = isSafariWebKit() ? 2 : 3
 
 /** @type {Map<string, string>} */
 const blobUrlCache = new Map()
@@ -104,7 +106,8 @@ export async function fetchWmsImageObjectUrl(artworkId, index = 0, options = {})
 
     const blob = await res.blob()
     if (!blob.size) throw new Error('仓库图为空')
-    if (blob.type && blob.type.includes('json')) {
+    const blobType = String(blob.type || '').toLowerCase()
+    if (blobType.includes('json') || blobType.includes('text/html')) {
       throw new Error('仓库图加载失败')
     }
 
