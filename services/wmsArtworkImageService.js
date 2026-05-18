@@ -14,12 +14,31 @@ const {
   WMS_SYNC_PLACEHOLDER_IMAGE,
   WMS_IMAGE_CDN_ORIGIN,
   WMS_IMAGE_VIEW_PARAMS,
+  WMS_IMAGE_PREVIEW_VIEW_PARAMS,
 } = require('../config/wmsHttp')
 const { wmsUserLoginFromEnv, buildRbWebHeaders, wmsOrigin } = require('../utils/wmsHttpClient')
 
 const WMS_FILEX_IMG_PREFIX = String(process.env.WMS_HTTP_FILEX_IMG_PREFIX || '/filex/img/').trim() || '/filex/img/'
 const PREVIEW_IMAGE_CACHE_TTL_MS = 5 * 60 * 1000
+const PREVIEW_CACHE_MAX_ENTRIES = Math.max(
+  10,
+  parseInt(process.env.WMS_PREVIEW_CACHE_MAX_ENTRIES || '80', 10) || 80
+)
+const PREVIEW_CACHE_MAX_BYTES = Math.max(
+  4 * 1024 * 1024,
+  parseInt(process.env.WMS_PREVIEW_CACHE_MAX_BYTES || String(48 * 1024 * 1024), 10) ||
+    48 * 1024 * 1024
+)
+const APPLY_MAX_CONCURRENT = Math.min(
+  3,
+  Math.max(1, parseInt(process.env.WMS_APPLY_MAX_CONCURRENT || '1', 10) || 1)
+)
+
 const previewImageCache = new Map()
+let previewCacheTotalBytes = 0
+const previewFetchInflight = new Map()
+let applyActiveCount = 0
+const applyWaitQueue = []
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
@@ -255,13 +274,38 @@ function buildWmsFilexReadUrl(relativePath) {
   return `${origin}/filex/read/${rel}`
 }
 
-function buildCdnImageUrl(relativePath, withViewParams = true) {
+function buildCdnImageUrl(relativePath, withViewParams = true, viewParamsOverride) {
   const cdn = cdnOrigin()
   const rel = normalizeWmsImagePath(relativePath)
   if (!cdn || !rel) return ''
   const base = `${cdn}/${rel}`
-  if (!withViewParams || !WMS_IMAGE_VIEW_PARAMS) return base
-  return `${base}?${WMS_IMAGE_VIEW_PARAMS}`
+  const params =
+    viewParamsOverride !== undefined
+      ? viewParamsOverride
+      : withViewParams
+        ? WMS_IMAGE_VIEW_PARAMS
+        : ''
+  if (!params) return base
+  return `${base}?${params}`
+}
+
+/** 在七牛签名 URL 上合并 imageView 参数（保留 e、token 等） */
+function appendQiniuViewParams(url, viewParams) {
+  if (!url || !viewParams) return url
+  const vp = String(viewParams).trim()
+  if (!vp) return url
+  try {
+    const u = new URL(url)
+    const raw = u.search.replace(/^\?/, '')
+    const rest = raw
+      ? raw.split('&').filter((seg) => seg && !String(seg).startsWith('imageView2/'))
+      : []
+    u.search = `?${[vp, ...rest].filter(Boolean).join('&')}`
+    return u.toString()
+  } catch {
+    if (url.includes('imageView2/')) return url
+    return url.includes('?') ? `${url}&${vp}` : `${url}?${vp}`
+  }
 }
 
 function imageGetHeaders(cookie, refererPath = '/app/Product/list') {
@@ -328,15 +372,16 @@ async function fetchViaWmsFilex(cookie, relativePath) {
   return httpGetImageBuffer(filexUrl, imageGetHeaders(cookie))
 }
 
-async function fetchViaSignedCdn(cookie, relativePath) {
+async function fetchViaSignedCdn(cookie, relativePath, viewParams) {
   const signed = await resolveSignedCdnUrlViaFilex(cookie, relativePath)
   if (!signed) {
     const err = new Error('无法从 WMS 获取图片签名地址')
     err.code = 'WMS_IMAGE_NO_SIGN'
     throw err
   }
+  const fetchUrl = viewParams ? appendQiniuViewParams(signed, viewParams) : signed
   const wms = wmsOrigin()
-  return httpGetImageBuffer(signed, {
+  return httpGetImageBuffer(fetchUrl, {
     Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     Referer: `${wms}/`,
     'User-Agent': WMS_HTTP_USER_AGENT,
@@ -356,19 +401,26 @@ async function fetchViaWmsFilexRead(cookie, relativePath) {
 /**
  * @param {string} cookie
  * @param {string} imageRef 相对路径 rb/... 或完整 qn 签名 URL
+ * @param {{ variant?: 'preview' | 'full' }} [options] preview 优先拉 CDN 缩略图
  */
-async function fetchWmsImageBuffer(cookie, imageRef) {
+async function fetchWmsImageBuffer(cookie, imageRef, options = {}) {
   const ref = String(imageRef || '').trim()
+  const variant = options.variant === 'preview' ? 'preview' : 'full'
   if (!ref) {
     const err = new Error('无效的 WMS 图片路径')
     err.code = 'WMS_IMAGE_BAD_PATH'
     throw err
   }
 
+  const previewParams = WMS_IMAGE_PREVIEW_VIEW_PARAMS
+  const fullParams = WMS_IMAGE_VIEW_PARAMS
+
   if (isAbsoluteImageUrl(ref)) {
     const wms = wmsOrigin()
+    const fetchUrl =
+      variant === 'preview' && previewParams ? appendQiniuViewParams(ref, previewParams) : ref
     try {
-      return await httpGetImageBuffer(ref, {
+      return await httpGetImageBuffer(fetchUrl, {
         Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
         Referer: `${wms}/`,
         'User-Agent': WMS_HTTP_USER_AGENT,
@@ -387,11 +439,18 @@ async function fetchWmsImageBuffer(cookie, imageRef) {
     throw err
   }
 
-  const attempts = [
-    () => fetchViaWmsFilex(cookie, rel),
-    () => fetchViaSignedCdn(cookie, rel),
-    () => fetchViaWmsFilexRead(cookie, rel),
-  ]
+  const attempts =
+    variant === 'preview'
+      ? [
+          () => fetchViaSignedCdn(cookie, rel, previewParams),
+          () => fetchViaWmsFilex(cookie, rel),
+          () => fetchViaWmsFilexRead(cookie, rel),
+        ]
+      : [
+          () => fetchViaWmsFilex(cookie, rel),
+          () => fetchViaSignedCdn(cookie, rel, fullParams),
+          () => fetchViaWmsFilexRead(cookie, rel),
+        ]
 
   let lastErr
   for (const run of attempts) {
@@ -399,7 +458,12 @@ async function fetchWmsImageBuffer(cookie, imageRef) {
       return await run()
     } catch (e) {
       lastErr = e
-      logger.warn('wms_image_fetch_attempt_failed', { rel, code: e.code, err: e.message })
+      logger.warn('wms_image_fetch_attempt_failed', {
+        rel,
+        variant,
+        code: e.code,
+        err: e.message,
+      })
     }
   }
 
@@ -413,29 +477,89 @@ function previewCacheKey(artworkId, index, imageRef) {
   return `${artworkId}:${index}:${rel}`
 }
 
+function evictPreviewCacheEntry(key) {
+  const hit = previewImageCache.get(key)
+  if (!hit) return
+  previewImageCache.delete(key)
+  previewCacheTotalBytes = Math.max(0, previewCacheTotalBytes - (hit.byteSize || 0))
+}
+
+function pruneExpiredPreviewCache() {
+  const now = Date.now()
+  for (const [key, hit] of previewImageCache.entries()) {
+    if (hit.expiresAt <= now) evictPreviewCacheEntry(key)
+  }
+}
+
+function enforcePreviewCacheLimits() {
+  pruneExpiredPreviewCache()
+  while (
+    previewImageCache.size > PREVIEW_CACHE_MAX_ENTRIES ||
+    previewCacheTotalBytes > PREVIEW_CACHE_MAX_BYTES
+  ) {
+    const oldest = previewImageCache.keys().next().value
+    if (oldest === undefined) break
+    evictPreviewCacheEntry(oldest)
+  }
+}
+
 function getPreviewFromCache(key) {
+  pruneExpiredPreviewCache()
   const hit = previewImageCache.get(key)
   if (!hit) return null
   if (hit.expiresAt <= Date.now()) {
-    previewImageCache.delete(key)
+    evictPreviewCacheEntry(key)
     return null
   }
+  previewImageCache.delete(key)
+  previewImageCache.set(key, hit)
   return hit
 }
 
 function setPreviewCache(key, buffer, contentType) {
+  const byteSize = buffer?.length || 0
+  if (previewImageCache.has(key)) evictPreviewCacheEntry(key)
   previewImageCache.set(key, {
     buffer,
     contentType,
+    byteSize,
     expiresAt: Date.now() + PREVIEW_IMAGE_CACHE_TTL_MS,
   })
+  previewCacheTotalBytes += byteSize
+  enforcePreviewCacheLimits()
 }
 
 function clearPreviewCacheForArtwork(artworkId) {
   const prefix = `${artworkId}:`
-  for (const key of previewImageCache.keys()) {
-    if (key.startsWith(prefix)) previewImageCache.delete(key)
+  for (const key of [...previewImageCache.keys()]) {
+    if (key.startsWith(prefix)) evictPreviewCacheEntry(key)
   }
+}
+
+async function withApplyConcurrency(run) {
+  if (applyActiveCount >= APPLY_MAX_CONCURRENT) {
+    await new Promise((resolve) => {
+      applyWaitQueue.push(resolve)
+    })
+  }
+  applyActiveCount += 1
+  try {
+    return await run()
+  } finally {
+    applyActiveCount -= 1
+    const next = applyWaitQueue.shift()
+    if (next) next()
+  }
+}
+
+async function fetchPreviewImageBuffer(cookie, rel, cacheKey) {
+  if (previewFetchInflight.has(cacheKey)) return previewFetchInflight.get(cacheKey)
+
+  const task = fetchWmsImageBuffer(cookie, rel, { variant: 'preview' }).finally(() => {
+    previewFetchInflight.delete(cacheKey)
+  })
+  previewFetchInflight.set(cacheKey, task)
+  return task
 }
 
 function extFromContentType(contentType, imageRef) {
@@ -488,7 +612,7 @@ async function streamWmsArtworkImageAdmin(artworkId, query, res) {
     const cookie = sessionCookie || ''
     if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
 
-    const { buffer, contentType } = await fetchWmsImageBuffer(cookie, rel)
+    const { buffer, contentType } = await fetchPreviewImageBuffer(cookie, rel, cacheKey)
     setPreviewCache(cacheKey, buffer, contentType)
     res.setHeader('Content-Type', contentType || 'image/jpeg')
     res.setHeader('Cache-Control', 'private, max-age=300')
@@ -525,27 +649,29 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
   const rel = paths[index] || paths[0]
 
   try {
-    const { sessionCookie } = await wmsUserLoginFromEnv()
-    const cookie = sessionCookie || ''
-    if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
+    return await withApplyConcurrency(async () => {
+      const { sessionCookie } = await wmsUserLoginFromEnv()
+      const cookie = sessionCookie || ''
+      if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
 
-    const { buffer } = await fetchWmsImageBuffer(cookie, rel)
-    const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`)
-    const upload = await uploadToOSS(webpFile, 'original-artworks/')
+      const { buffer } = await fetchWmsImageBuffer(cookie, rel, { variant: 'full' })
+      const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`)
+      const upload = await uploadToOSS(webpFile, 'original-artworks/')
 
-    if (!upload?.url || !validatePublicImageUrl(upload.url)) {
-      return adminResult(500, { error: '上传到 OSS 后 URL 无效' })
-    }
+      if (!upload?.url || !validatePublicImageUrl(upload.url)) {
+        return adminResult(500, { error: '上传到 OSS 后 URL 无效' })
+      }
 
-    await db.query('UPDATE original_artworks SET image = ? WHERE id = ?', [upload.url, id])
-    clearPreviewCacheForArtwork(id)
-    const { invalidateArtworksPublicCaches } = require('./artworksService')
-    await invalidateArtworksPublicCaches({ artworkDetailIds: [id] })
+      await db.query('UPDATE original_artworks SET image = ? WHERE id = ?', [upload.url, id])
+      clearPreviewCacheForArtwork(id)
+      const { invalidateArtworksPublicCaches } = require('./artworksService')
+      await invalidateArtworksPublicCaches({ artworkDetailIds: [id] })
 
-    return adminResult(200, {
-      message: '已采用仓库图片（WebP 压缩）并发布到 OSS',
-      image: upload.url,
-      wms_path: rel,
+      return adminResult(200, {
+        message: '已采用仓库图片（WebP 压缩）并发布到 OSS',
+        image: upload.url,
+        wms_path: rel,
+      })
     })
   } catch (e) {
     logger.error('applyWmsImageToArtworkAdmin_failed', { id, rel, err: e.message })

@@ -39,9 +39,13 @@ function getWmsHttpPasswordForLogin() {
 const WMS_SYNC_PLACEHOLDER_IMAGE = String(process.env.WMS_SYNC_PLACEHOLDER_IMAGE || '').trim()
 /** REBUILD 附件 CDN 根（浏览器拉图域名，如 http://qn.2000gallery.art） */
 const WMS_IMAGE_CDN_ORIGIN = trimSlash(process.env.WMS_IMAGE_CDN_ORIGIN || 'http://qn.2000gallery.art')
-/** 可选：七牛缩略/质量参数（浏览器列表多为 w/100；后台采用原图可用 w/0） */
+/** 采用仓库图：七牛原图/高质量（w/0） */
 const WMS_IMAGE_VIEW_PARAMS = String(
   process.env.WMS_IMAGE_VIEW_PARAMS || 'imageView2/2/w/0/interlace/1/q/100'
+).trim()
+/** 管理端预览代理：缩略图，减轻带宽与内存（与 WMS 列表 w/100 接近，略大以便辨认） */
+const WMS_IMAGE_PREVIEW_VIEW_PARAMS = String(
+  process.env.WMS_IMAGE_PREVIEW_VIEW_PARAMS || 'imageView2/2/w/400/interlace/1/q/85'
 ).trim()
 /** 可选：JSON 字符串，合并进请求头，如 {"X-Api-Key":"xxx"} */
 const WMS_HTTP_EXTRA_HEADERS_JSON = String(process.env.WMS_HTTP_EXTRA_HEADERS_JSON || '').trim()
@@ -85,6 +89,7 @@ module.exports = {
   WMS_SYNC_PLACEHOLDER_IMAGE,
   WMS_IMAGE_CDN_ORIGIN,
   WMS_IMAGE_VIEW_PARAMS,
+  WMS_IMAGE_PREVIEW_VIEW_PARAMS,
   WMS_HTTP_EXTRA_HEADERS_JSON,
   WMS_HTTP_COOKIE,
   WMS_HTTP_VCODE,
