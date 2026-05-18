@@ -207,6 +207,10 @@ async function wmsUserLoginFromEnv() {
   return { response, sessionCookie: merged }
 }
 
+function clearWmsSessionCache() {
+  wmsSessionCache = { cookie: '', expiresAt: 0 }
+}
+
 async function wmsUserLoginFromEnvUncached() {
   const passwd = getWmsHttpPasswordForLogin()
   if (!WMS_HTTP_USER || !passwd) {
@@ -429,6 +433,7 @@ module.exports = {
   wmsRequest,
   wmsUserLogin,
   wmsUserLoginFromEnv,
+  clearWmsSessionCache,
   wmsWarmLoginSessionCookie,
   wmsRbWebJsonPost,
   wmsRbWebGet,

@@ -14,9 +14,13 @@ const {
   WMS_SYNC_PLACEHOLDER_IMAGE,
   WMS_IMAGE_CDN_ORIGIN,
   WMS_IMAGE_VIEW_PARAMS,
-  WMS_IMAGE_PREVIEW_VIEW_PARAMS,
 } = require('../config/wmsHttp')
-const { wmsUserLoginFromEnv, buildRbWebHeaders, wmsOrigin } = require('../utils/wmsHttpClient')
+const {
+  wmsUserLoginFromEnv,
+  clearWmsSessionCache,
+  buildRbWebHeaders,
+  wmsOrigin,
+} = require('../utils/wmsHttpClient')
 
 const WMS_FILEX_IMG_PREFIX = String(process.env.WMS_HTTP_FILEX_IMG_PREFIX || '/filex/img/').trim() || '/filex/img/'
 const PREVIEW_IMAGE_CACHE_TTL_MS = 5 * 60 * 1000
@@ -289,23 +293,19 @@ function buildCdnImageUrl(relativePath, withViewParams = true, viewParamsOverrid
   return `${base}?${params}`
 }
 
-/** 在七牛签名 URL 上合并 imageView 参数（保留 e、token 等） */
-function appendQiniuViewParams(url, viewParams) {
-  if (!url || !viewParams) return url
-  const vp = String(viewParams).trim()
-  if (!vp) return url
-  try {
-    const u = new URL(url)
-    const raw = u.search.replace(/^\?/, '')
-    const rest = raw
-      ? raw.split('&').filter((seg) => seg && !String(seg).startsWith('imageView2/'))
-      : []
-    u.search = `?${[vp, ...rest].filter(Boolean).join('&')}`
-    return u.toString()
-  } catch {
-    if (url.includes('imageView2/')) return url
-    return url.includes('?') ? `${url}&${vp}` : `${url}?${vp}`
+function cdnImageGetHeaders() {
+  const wms = wmsOrigin()
+  return {
+    Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    Referer: `${wms}/`,
+    'User-Agent': WMS_HTTP_USER_AGENT,
   }
+}
+
+/** 七牛私有桶签名 URL 不可随意改 query，否则 token 失效 → 401 */
+function isSignedQiniuUrl(url) {
+  const s = String(url || '')
+  return /[?&]token=/i.test(s) || /[?&]e=\d+/i.test(s)
 }
 
 function imageGetHeaders(cookie, refererPath = '/app/Product/list') {
@@ -372,20 +372,25 @@ async function fetchViaWmsFilex(cookie, relativePath) {
   return httpGetImageBuffer(filexUrl, imageGetHeaders(cookie))
 }
 
-async function fetchViaSignedCdn(cookie, relativePath, viewParams) {
+async function fetchViaSignedCdn(cookie, relativePath) {
   const signed = await resolveSignedCdnUrlViaFilex(cookie, relativePath)
   if (!signed) {
     const err = new Error('无法从 WMS 获取图片签名地址')
     err.code = 'WMS_IMAGE_NO_SIGN'
     throw err
   }
-  const fetchUrl = viewParams ? appendQiniuViewParams(signed, viewParams) : signed
-  const wms = wmsOrigin()
-  return httpGetImageBuffer(fetchUrl, {
-    Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-    Referer: `${wms}/`,
-    'User-Agent': WMS_HTTP_USER_AGENT,
-  })
+  return httpGetImageBuffer(signed, cdnImageGetHeaders())
+}
+
+/** filex 302 到 CDN 后带 WMS Referer 拉取（不破坏签名） */
+async function fetchViaFilexRedirectToCdn(cookie, relativePath) {
+  const signed = await resolveSignedCdnUrlViaFilex(cookie, relativePath)
+  if (!signed || !/^https?:\/\//i.test(signed)) {
+    const err = new Error('无法从 WMS 获取图片签名地址')
+    err.code = 'WMS_IMAGE_NO_SIGN'
+    throw err
+  }
+  return httpGetImageBuffer(signed, cdnImageGetHeaders())
 }
 
 async function fetchViaWmsFilexRead(cookie, relativePath) {
@@ -398,33 +403,17 @@ async function fetchViaWmsFilexRead(cookie, relativePath) {
   return httpGetImageBuffer(readUrl, imageGetHeaders(cookie))
 }
 
-/**
- * @param {string} cookie
- * @param {string} imageRef 相对路径 rb/... 或完整 qn 签名 URL
- * @param {{ variant?: 'preview' | 'full' }} [options] preview 优先拉 CDN 缩略图
- */
-async function fetchWmsImageBuffer(cookie, imageRef, options = {}) {
+async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
   const ref = String(imageRef || '').trim()
-  const variant = options.variant === 'preview' ? 'preview' : 'full'
   if (!ref) {
     const err = new Error('无效的 WMS 图片路径')
     err.code = 'WMS_IMAGE_BAD_PATH'
     throw err
   }
 
-  const previewParams = WMS_IMAGE_PREVIEW_VIEW_PARAMS
-  const fullParams = WMS_IMAGE_VIEW_PARAMS
-
   if (isAbsoluteImageUrl(ref)) {
-    const wms = wmsOrigin()
-    const fetchUrl =
-      variant === 'preview' && previewParams ? appendQiniuViewParams(ref, previewParams) : ref
     try {
-      return await httpGetImageBuffer(fetchUrl, {
-        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        Referer: `${wms}/`,
-        'User-Agent': WMS_HTTP_USER_AGENT,
-      })
+      return await httpGetImageBuffer(ref, cdnImageGetHeaders())
     } catch (e) {
       const rel = relativePathFromImageUrl(ref)
       if (!rel) throw e
@@ -439,18 +428,12 @@ async function fetchWmsImageBuffer(cookie, imageRef, options = {}) {
     throw err
   }
 
-  const attempts =
-    variant === 'preview'
-      ? [
-          () => fetchViaSignedCdn(cookie, rel, previewParams),
-          () => fetchViaWmsFilex(cookie, rel),
-          () => fetchViaWmsFilexRead(cookie, rel),
-        ]
-      : [
-          () => fetchViaWmsFilex(cookie, rel),
-          () => fetchViaSignedCdn(cookie, rel, fullParams),
-          () => fetchViaWmsFilexRead(cookie, rel),
-        ]
+  const attempts = [
+    () => fetchViaFilexRedirectToCdn(cookie, rel),
+    () => fetchViaWmsFilex(cookie, rel),
+    () => fetchViaSignedCdn(cookie, rel),
+    () => fetchViaWmsFilexRead(cookie, rel),
+  ]
 
   let lastErr
   for (const run of attempts) {
@@ -462,12 +445,33 @@ async function fetchWmsImageBuffer(cookie, imageRef, options = {}) {
         rel,
         variant,
         code: e.code,
+        status: e.status,
         err: e.message,
       })
     }
   }
 
   throw lastErr || new Error('拉取 WMS 图片失败')
+}
+
+/**
+ * @param {string} cookie
+ * @param {string} imageRef 相对路径 rb/... 或完整 qn 签名 URL
+ * @param {{ variant?: 'preview' | 'full' }} [options]
+ */
+async function fetchWmsImageBuffer(cookie, imageRef, options = {}) {
+  const variant = options.variant === 'preview' ? 'preview' : 'full'
+  try {
+    return await fetchWmsImageBufferOnce(cookie, imageRef, variant)
+  } catch (e) {
+    if (e.status !== 401 && e.status !== 403) throw e
+    logger.warn('wms_image_auth_retry', { status: e.status, variant })
+    clearWmsSessionCache()
+    const { sessionCookie } = await wmsUserLoginFromEnv()
+    const fresh = sessionCookie || ''
+    if (!fresh) throw e
+    return fetchWmsImageBufferOnce(fresh, imageRef, variant)
+  }
 }
 
 function previewCacheKey(artworkId, index, imageRef) {
