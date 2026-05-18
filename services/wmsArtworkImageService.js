@@ -6,6 +6,7 @@ const path = require('path')
 const db = require('../db')
 const logger = require('../utils/logger')
 const { uploadToOSS } = require('../config/oss')
+const { bufferToWebpLimit5MB } = require('../utils/imageWebp')
 const { validatePublicImageUrl } = require('../config/publicEnv')
 const {
   WMS_HTTP_BASE_URL,
@@ -528,16 +529,9 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
     const cookie = sessionCookie || ''
     if (!cookie) return adminResult(502, { error: 'WMS 登录未返回会话' })
 
-    const { buffer, contentType } = await fetchWmsImageBuffer(cookie, rel)
-    const ext = extFromContentType(contentType, rel)
-    const upload = await uploadToOSS(
-      {
-        buffer,
-        originalname: `wms-${id}${ext}`,
-        size: buffer.length,
-      },
-      'original-artworks/'
-    )
+    const { buffer } = await fetchWmsImageBuffer(cookie, rel)
+    const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`)
+    const upload = await uploadToOSS(webpFile, 'original-artworks/')
 
     if (!upload?.url || !validatePublicImageUrl(upload.url)) {
       return adminResult(500, { error: '上传到 OSS 后 URL 无效' })
@@ -549,13 +543,16 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
     await invalidateArtworksPublicCaches({ artworkDetailIds: [id] })
 
     return adminResult(200, {
-      message: '已采用仓库图片并发布到 OSS',
+      message: '已采用仓库图片（WebP 压缩）并发布到 OSS',
       image: upload.url,
       wms_path: rel,
     })
   } catch (e) {
     logger.error('applyWmsImageToArtworkAdmin_failed', { id, rel, err: e.message })
     if (e.code === 'WMS_HTTP_NOT_CONFIGURED' || e.code === 'WMS_HTTP_BAD_REQUEST') {
+      return adminResult(400, { error: e.message })
+    }
+    if (e.code === 'IMAGE_TOO_LARGE' || e.code === 'IMAGE_EMPTY') {
       return adminResult(400, { error: e.message })
     }
     return adminResult(502, { error: e.message || '采用仓库图片失败' })

@@ -170,9 +170,9 @@
                   <Badge
                     v-if="artworkUsesWmsThumb(row)"
                     variant="secondary"
-                    class="absolute bottom-0.5 left-0.5 max-w-[4.5rem] truncate px-1 text-[10px]"
+                    class="absolute bottom-0.5 left-0.5 max-w-[5rem] truncate px-1 text-[10px]"
                   >
-                    仓库图
+                    {{ wmsImageBadgeLabel(row) }}
                   </Badge>
                 </button>
               </td>
@@ -230,9 +230,9 @@
                     size="sm"
                     variant="outline"
                     :disabled="applyingWmsImageId === row.id"
-                    @click="handleApplyWmsImage(row)"
+                    @click="startApplyWmsImage(row)"
                   >
-                    采用仓库图
+                    {{ wmsImagePathCount(row) > 1 ? '选用仓库图' : '采用仓库图' }}
                   </Button>
                   <Button size="sm" variant="secondary" @click="editArtwork(row)">
                     编辑
@@ -372,17 +372,17 @@
               </p>
             </div>
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
-              <div class="size-[178px] shrink-0 overflow-hidden rounded-md border border-border">
-                <WmsImageThumb
+              <WmsImageGallery
                   v-if="form.id"
                   :artwork-id="form.id"
-                  alt="仓库图片预览"
-                  img-class="size-full object-cover"
+                  :paths="form.wms_image_paths"
+                  v-model:selected-index="formWmsSelectedIndex"
+                  preview-size-class="size-[178px]"
+                  thumb-size-class="size-12"
                 />
-              </div>
-              <div class="flex flex-col gap-2">
-                <p class="break-all text-xs text-muted-foreground">
-                  {{ form.wms_image_paths[0] }}
+              <div class="flex flex-col gap-2 sm:pt-1">
+                <p class="text-xs text-muted-foreground">
+                  共 {{ form.wms_image_paths.length }} 张仓库图，选中后采用并发布到 OSS。
                 </p>
                 <Button
                   type="button"
@@ -390,14 +390,14 @@
                   size="sm"
                   class="w-fit"
                   :disabled="applyingWmsImageId === form.id"
-                  @click="handleApplyWmsImage({ id: form.id })"
+                  @click="handleApplyWmsImage({ id: form.id, wms_image_paths: form.wms_image_paths }, formWmsSelectedIndex)"
                 >
                   <Loader2
                     v-if="applyingWmsImageId === form.id"
                     class="mr-1.5 size-3.5 animate-spin"
                     aria-hidden="true"
                   />
-                  采用仓库图片并发布
+                  采用所选仓库图并发布
                 </Button>
               </div>
             </div>
@@ -657,12 +657,73 @@
         <DialogHeader>
           <DialogTitle>{{ previewTitle || '图片预览' }}</DialogTitle>
         </DialogHeader>
+        <div v-if="previewWmsGallery.length" class="flex flex-col gap-3">
+          <img
+            v-if="previewWmsGallery[previewWmsSelectedIndex]"
+            :src="previewWmsGallery[previewWmsSelectedIndex]"
+            :alt="previewTitle || '预览'"
+            class="max-h-[70vh] w-full object-contain"
+          >
+          <div
+            v-if="previewWmsGallery.length > 1"
+            class="flex flex-wrap justify-center gap-2"
+            role="listbox"
+            aria-label="切换仓库图片"
+          >
+            <button
+              v-for="(url, i) in previewWmsGallery"
+              :key="`preview-wms-${i}`"
+              type="button"
+              role="option"
+              :aria-selected="previewWmsSelectedIndex === i"
+              class="size-14 overflow-hidden rounded-md border border-border"
+              :class="previewWmsSelectedIndex === i ? 'ring-2 ring-primary ring-offset-1' : 'opacity-80'"
+              @click="previewWmsSelectedIndex = i"
+            >
+              <img :src="url" :alt="`图 ${i + 1}`" class="size-full object-cover">
+            </button>
+          </div>
+        </div>
         <img
-          v-if="previewSrc"
+          v-else-if="previewSrc"
           :src="previewSrc"
           :alt="previewTitle || '预览'"
           class="max-h-[75vh] w-full object-contain"
         >
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="wmsApplyPickerOpen">
+      <DialogContent class="max-w-md sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>选择要采用的仓库图</DialogTitle>
+          <DialogDescription>
+            该作品共有 {{ wmsApplyTarget?.wms_image_paths?.length || 0 }} 张仓库图，选中后将上传至 OSS 并作为对外展示图。
+          </DialogDescription>
+        </DialogHeader>
+        <WmsImageGallery
+          v-if="wmsApplyTarget?.id"
+          :artwork-id="wmsApplyTarget.id"
+          :paths="wmsApplyTarget.wms_image_paths || []"
+          v-model:selected-index="wmsApplySelectedIndex"
+        />
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="wmsApplyPickerOpen = false">
+            取消
+          </Button>
+          <Button
+            type="button"
+            :disabled="applyingWmsImageId === wmsApplyTarget?.id"
+            @click="confirmApplyWmsImagePick"
+          >
+            <Loader2
+              v-if="applyingWmsImageId === wmsApplyTarget?.id"
+              class="mr-2 size-4 animate-spin"
+              aria-hidden="true"
+            />
+            采用并发布
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 
@@ -729,6 +790,7 @@ import { userMatchesRole } from '@/utils/roles'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
 import WmsImageThumb from '@/components/wms-image-thumb.vue'
+import WmsImageGallery from '@/components/wms-image-gallery.vue'
 import { fetchWmsImageObjectUrl, revokeWmsImageObjectUrl } from '@/utils/wms-image-preview'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
@@ -896,14 +958,38 @@ const dialogImageInput = ref(null)
 const artistFilter = ref('')
 const previewOpen = ref(false)
 const previewSrc = ref('')
+const previewWmsGallery = ref([])
+const previewWmsSelectedIndex = ref(0)
 const wmsThumbUrlById = ref({})
+const formWmsSelectedIndex = ref(0)
+const wmsApplyPickerOpen = ref(false)
+const wmsApplyTarget = ref(null)
+const wmsApplySelectedIndex = ref(0)
 let previewDialogBlobUrl = ''
 const previewTitle = ref('')
+
+function wmsImagePathCount(row) {
+  const paths = row?.wms_image_paths
+  return Array.isArray(paths) ? paths.length : 0
+}
+
+function wmsImageBadgeLabel(row) {
+  const n = wmsImagePathCount(row)
+  if (n > 1) return `仓库×${n}`
+  return '仓库图'
+}
+
+function revokePreviewWmsGallery() {
+  for (const url of previewWmsGallery.value) revokeWmsImageObjectUrl(url)
+  previewWmsGallery.value = []
+  previewWmsSelectedIndex.value = 0
+}
 
 watch(previewOpen, (open) => {
   if (open) return
   revokeWmsImageObjectUrl(previewDialogBlobUrl)
   previewDialogBlobUrl = ''
+  revokePreviewWmsGallery()
 })
 
 // 拖拽上传相关状态
@@ -959,6 +1045,7 @@ const resetForm = () => {
   uploadProgress.value = 0
   isUploading.value = false
   artistFilter.value = ''
+  formWmsSelectedIndex.value = 0
 
   // 确保富文本编辑器内容被清空
   nextTick(() => {
@@ -1022,6 +1109,7 @@ function onWmsThumbLoaded(artworkId, url) {
 
 function openImagePreview(url, title) {
   if (!url) return
+  revokePreviewWmsGallery()
   revokeWmsImageObjectUrl(previewDialogBlobUrl)
   previewDialogBlobUrl = ''
   const full =
@@ -1034,9 +1122,39 @@ function openImagePreview(url, title) {
   previewOpen.value = true
 }
 
+async function openWmsGalleryPreview(row) {
+  const paths = row?.wms_image_paths || []
+  const count = paths.length || 1
+  revokePreviewWmsGallery()
+  previewSrc.value = ''
+  previewTitle.value = row?.title || ''
+  previewWmsSelectedIndex.value = 0
+
+  const urls = []
+  for (let i = 0; i < count; i += 1) {
+    try {
+      urls.push(await fetchWmsImageObjectUrl(row.id, i))
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('wms preview load failed', row.id, i, e)
+    }
+  }
+
+  if (!urls.length) {
+    ElMessage.error('仓库图预览失败')
+    return
+  }
+
+  previewWmsGallery.value = urls
+  previewOpen.value = true
+}
+
 async function handleArtworkThumbClick(row) {
   if (!row) return
   if (artworkUsesWmsThumb(row)) {
+    if (wmsImagePathCount(row) > 1) {
+      await openWmsGalleryPreview(row)
+      return
+    }
     let url = wmsThumbUrlById.value[row.id]
     if (!url) {
       try {
@@ -1053,6 +1171,22 @@ async function handleArtworkThumbClick(row) {
   openImagePreview(displayArtworkImageUrl(row), row.title)
 }
 
+function startApplyWmsImage(row) {
+  if (!checkLoginStatus() || !row?.id) return
+  if (wmsImagePathCount(row) > 1) {
+    wmsApplyTarget.value = row
+    wmsApplySelectedIndex.value = 0
+    wmsApplyPickerOpen.value = true
+    return
+  }
+  handleApplyWmsImage(row, 0)
+}
+
+function confirmApplyWmsImagePick() {
+  if (!wmsApplyTarget.value?.id) return
+  handleApplyWmsImage(wmsApplyTarget.value, wmsApplySelectedIndex.value)
+}
+
 function artworkUsesWmsThumb(row) {
   if (!row?.has_wms_image && !(row?.wms_image_paths?.length > 0)) return false
   if (row.image_is_placeholder === true) return true
@@ -1062,22 +1196,23 @@ function artworkUsesWmsThumb(row) {
 
 function displayArtworkImageUrl(row) {
   if (!row) return ''
-  if (artworkUsesWmsThumb(row)) return wmsAdminImageUrl(row.id, 0)
   if (row.image && !row.image.startsWith('http')) return `${API_BASE_URL}${row.image}`
   return row.image || ''
 }
 
-async function handleApplyWmsImage(row) {
+async function handleApplyWmsImage(row, index = 0) {
   if (!checkLoginStatus() || !row?.id) return
+  const pick = Math.max(0, Number(index) || 0)
   applyingWmsImageId.value = row.id
   try {
-    const data = await axios.post(`/original-artworks/${row.id}/admin/apply-wms-image`, { index: 0 })
+    const data = await axios.post(`/original-artworks/${row.id}/admin/apply-wms-image`, { index: pick })
     const ossUrl = data?.image
     if (!ossUrl) {
       ElMessage.error('采用失败：未返回图片地址')
       return
     }
-    ElMessage.success(data?.message || '已采用仓库图片')
+    ElMessage.success(data?.message || `已采用仓库图 ${pick + 1} 并发布`)
+    wmsApplyPickerOpen.value = false
     const item = artworks.value.find((a) => a.id === row.id)
     if (item) {
       item.image = ossUrl
@@ -1575,6 +1710,7 @@ const editArtwork = async (row) => {
     uploadProgress.value = 0
     isUploading.value = false
     artistFilter.value = ''
+  formWmsSelectedIndex.value = 0
     dialogVisible.value = true
   } catch (error) {
     console.error('获取详细信息失败:', error)
@@ -1978,6 +2114,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (editorRef.value && editorRef.value.destroy) editorRef.value.destroy()
   revokeWmsImageObjectUrl(previewDialogBlobUrl)
+  revokePreviewWmsGallery()
   Object.values(wmsThumbUrlById.value).forEach((url) => revokeWmsImageObjectUrl(url))
 })
 </script>
