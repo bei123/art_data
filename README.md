@@ -116,12 +116,31 @@ server: {
 
 ## 部署
 
-1. 构建前端
+1. 构建前端（独立 API 域名）
+
 ```bash
+# 复制 .env.production.example 为 .env.production
 npm run build
 ```
 
-2. 部署后端
+`.env.production` 示例：
+
+```env
+VITE_PUBLIC_API_BASE_URL=https://api.wx.2000gallery.art
+```
+
+2. 配置 CDN 回源与 OPTIONS（必做，否则管理台 CORS 失败）
+
+见 [deploy/CDN-API-CORS.md](deploy/CDN-API-CORS.md)。验收：
+
+```powershell
+powershell -File deploy/verify-api-cors.ps1
+```
+
+源站 Nginx 示例：[deploy/nginx-api-origin.example.conf](deploy/nginx-api-origin.example.conf)
+
+3. 部署后端
+
 ```bash
 npm start
 ```

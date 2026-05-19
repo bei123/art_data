@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { API_BASE_URL, CONFIG } from '../config';
+import { getApiClientBaseUrl, CONFIG } from '../config';
 import { ElMessage } from 'element-plus';
 import { checkAndHandleTokenExpiry, clearUserDataAndRedirect } from './tokenManager';
 
@@ -12,7 +12,7 @@ const logHttpDebug =
  * 在组件中推荐：`const { api } = useApi()`（@/composables/use-api.js）或 `import api from '@/utils/axios'`。
  */
 const instance = axios.create({
-  baseURL: `${API_BASE_URL}/api`,
+  baseURL: getApiClientBaseUrl(),
   timeout: CONFIG.api.timeout,
   headers: {
     'Content-Type': 'application/json'

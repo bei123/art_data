@@ -4,12 +4,25 @@ function trimTrailingSlash(s) {
 
 const env = import.meta.env;
 
-/** 浏览器访问的后端 API 根（无尾斜杠），与 axios baseURL 拼接 /api 使用 */
-const API_BASE_URL = trimTrailingSlash(
-  env.VITE_PUBLIC_API_BASE_URL ||
-    env.VITE_API_BASE_URL ||
-    (env.MODE === 'development' ? 'http://localhost:2000' : 'https://api.wx.2000gallery.art:2000')
-);
+/**
+ * 解析浏览器访问的后端 API 根（无尾斜杠）。
+ * - `same-origin` / `/` / 空字符串：与当前页面同源，请求走 `/api`（需 Nginx 反代到 Node）
+ * - 未配置时：开发用 localhost:2000，生产默认 https://api.wx.2000gallery.art
+ */
+function resolveApiBaseUrl() {
+  const raw = env.VITE_PUBLIC_API_BASE_URL ?? env.VITE_API_BASE_URL;
+  if (raw === 'same-origin' || raw === '/' || raw === '.') return '';
+  if (raw != null && String(raw).trim() !== '') return trimTrailingSlash(raw);
+  if (env.MODE === 'development') return 'http://localhost:2000';
+  return 'https://api.wx.2000gallery.art';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
+
+/** axios baseURL：同源时为 `/api`，否则为 `{API_BASE_URL}/api` */
+export function getApiClientBaseUrl() {
+  return API_BASE_URL ? `${API_BASE_URL}/api` : '/api';
+}
 
 /** OSS 自定义域名根（无尾斜杠），用于判断展示用绝对图链 */
 const OSS_PUBLIC_ORIGIN = trimTrailingSlash(env.VITE_OSS_PUBLIC_ORIGIN || 'https://wx.oss.2000gallery.art');
@@ -17,6 +30,14 @@ const OSS_PUBLIC_ORIGIN = trimTrailingSlash(env.VITE_OSS_PUBLIC_ORIGIN || 'https
 export function isOssPublicUrl(url) {
   if (!url || typeof url !== 'string') return false;
   return url.startsWith(`${OSS_PUBLIC_ORIGIN}/`);
+}
+
+/** 相对路径或 OSS 外链 → 可展示的绝对/根相对 URL */
+export function resolvePublicAssetUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (url.startsWith('http')) return url;
+  const path = url.startsWith('/') ? url : `/${url}`;
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
 // 导出配置
@@ -41,6 +62,7 @@ export const CONFIG = {
   // API相关配置
   api: {
     baseURL: API_BASE_URL,
+    clientBaseURL: getApiClientBaseUrl(),
     timeout: 30000,
     withCredentials: true,
     headers: {

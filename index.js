@@ -40,12 +40,27 @@ const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
+const {
+  applyCorsHeaders,
+  corsPreflightMiddleware,
+  corsPolicyOrigin,
+} = require('./middleware/corsPolicy');
 
 const app = express();
 
 // 微信支付回调接口必须用原始body字符串
 app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/pay/refund/notify', express.raw({ type: 'application/json' }));
+
+// CORS 与 OPTIONS 预检必须在 helmet、限流之前，否则 CDN/限流响应无 ACAO
+app.use(corsPreflightMiddleware);
+app.use(cors({
+  origin: corsPolicyOrigin,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization'],
+  exposedHeaders: ['Authorization', 'X-Request-Id'],
+}));
 
 // 安全中间件配置
 // 注意：webview 代理路由需要更宽松的 CSP，所以在该路由上会单独处理
@@ -73,41 +88,6 @@ app.use(helmet({
 
 app.use(requestContextMiddleware);
 
-function parseExtraCorsOrigins() {
-  const raw = process.env.CORS_ORIGINS || ''
-  return raw.split(',').map(s => s.trim()).filter(Boolean)
-}
-
-function getAllowedCorsOrigins() {
-  const base = [
-    'http://localhost:5173',
-    'https://wx.ht.2000gallery.art',
-    'http://wx.ht.2000gallery.art',
-    'https://www.wx.ht.2000gallery.art',
-    'http://www.wx.ht.2000gallery.art',
-    'https://m.wespace.cn',
-    'http://m.wespace.cn',
-  ]
-  return [...new Set([...base, ...parseExtraCorsOrigins()])]
-}
-
-// CORS 必须在限流、登录限流之前：否则 OPTIONS 预检若被限流直接响应，将不带 ACAO，浏览器报 CORS
-app.use(cors({
-  origin(origin, callback) {
-    const allowedOrigins = getAllowedCorsOrigins()
-    if (!origin)
-      return callback(null, true)
-    if (allowedOrigins.includes(origin))
-      return callback(null, origin)
-    logger.warn('cors_rejected', { origin })
-    callback(new Error('CORS not allowed'))
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization'],
-  exposedHeaders: ['Authorization', 'X-Request-Id'],
-}))
-
 // 速率限制配置
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1分钟
@@ -119,6 +99,7 @@ const limiter = rateLimit({
     (req.method === 'GET' &&
       (req.path === '/api/health' || req.path === '/api/health/live')),
   handler: (req, res) => {
+    applyCorsHeaders(req, res);
     res.status(429).json({
       error: '请求过于频繁，请稍后再试',
       code: 'RATE_LIMIT',
@@ -138,6 +119,7 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => req.method === 'OPTIONS',
   handler: (req, res) => {
+    applyCorsHeaders(req, res);
     res.status(429).json({
       error: '登录尝试过于频繁，请稍后再试',
       code: 'LOGIN_RATE_LIMIT',
@@ -394,12 +376,14 @@ app.use((err, req, res, next) => {
   if (res.headersSent) {
     return next(err);
   }
+  applyCorsHeaders(req, res);
   logger.error('unhandled_error', { err, request_id: req.requestId });
   return sendErrorResponse(res, err, req);
 });
 
 // 404处理
 app.use('*', (req, res) => {
+  applyCorsHeaders(req, res);
   res.status(404).json({
     error: '接口不存在',
     code: 'NOT_FOUND',
