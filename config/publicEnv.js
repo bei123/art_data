@@ -17,7 +17,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 const defaultPublicApi =
   NODE_ENV === 'production'
-    ? 'https://api.wx.2000gallery.art:2000'
+    ? 'https://api.wx.2000gallery.art'
     : 'http://localhost:2000';
 
 /** 对外 API 根（无尾斜杠），用于拼接 /uploads、支付回调、搜索响应里的绝对地址等 */

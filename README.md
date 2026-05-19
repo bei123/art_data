@@ -139,6 +139,10 @@ powershell -File deploy/verify-api-cors.ps1
 
 源站 Nginx 示例：[deploy/nginx-api-origin.example.conf](deploy/nginx-api-origin.example.conf)
 
+管理台 502 / 打不开：[deploy/ADMIN-SITE-RECOVERY.md](deploy/ADMIN-SITE-RECOVERY.md)
+
+微信小程序请求失败：[deploy/WECHAT-MINIPROGRAM.md](deploy/WECHAT-MINIPROGRAM.md)
+
 3. 部署后端
 
 ```bash
