@@ -67,7 +67,7 @@
               <td class="px-3 py-2">
                 <div class="size-20 overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
-                    :src="getImageUrl(row.image_url)"
+                    :src="getListThumbnailUrl(getImageUrl(row.image_url))"
                     :alt="row.title ? `数字艺术品：${row.title}` : '数字艺术品'"
                     class="size-full object-cover"
                     loading="lazy"
@@ -95,7 +95,7 @@
                 <div class="flex min-w-0 items-center gap-2">
                   <Avatar class="size-9 shrink-0 border border-border">
                     <AvatarImage
-                      :src="getImageUrl(row.artist?.avatar)"
+                      :src="getListThumbnailUrl(getImageUrl(row.artist?.avatar))"
                       :alt="(row.artist?.name || row.artist_name) ? `${row.artist?.name || row.artist_name} 头像` : ''"
                     />
                     <AvatarFallback class="text-xs">
@@ -473,6 +473,7 @@ import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import {
   AlertDialog,

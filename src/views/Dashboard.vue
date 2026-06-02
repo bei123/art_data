@@ -76,7 +76,7 @@
                     <div class="flex min-w-0 items-center gap-2">
                       <Avatar class="size-7 shrink-0">
                         <AvatarImage
-                          :src="getImageUrl(row.artist?.avatar)"
+                          :src="getListThumbnailUrl(getImageUrl(row.artist?.avatar))"
                           :alt="row.artist?.name ? `${row.artist.name} 头像` : ''"
                         />
                         <AvatarFallback>{{ (row.artist?.name || '?').charAt(0) }}</AvatarFallback>
@@ -132,7 +132,7 @@
                     <div class="flex min-w-0 items-center gap-2">
                       <Avatar class="size-7 shrink-0">
                         <AvatarImage
-                          :src="getImageUrl(row.artist?.avatar)"
+                          :src="getListThumbnailUrl(getImageUrl(row.artist?.avatar))"
                           :alt="row.artist?.name ? `${row.artist.name} 头像` : ''"
                         />
                         <AvatarFallback>{{ (row.artist?.name || '?').charAt(0) }}</AvatarFallback>
@@ -164,6 +164,7 @@ import { useRouter } from 'vue-router'
 import { AlertCircle, Loader2 } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'

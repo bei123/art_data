@@ -27,9 +27,24 @@ export function getApiClientBaseUrl() {
 /** OSS 自定义域名根（无尾斜杠），用于判断展示用绝对图链 */
 const OSS_PUBLIC_ORIGIN = trimTrailingSlash(env.VITE_OSS_PUBLIC_ORIGIN || 'https://wx.oss.2000gallery.art');
 
+let OSS_PUBLIC_HOST = 'wx.oss.2000gallery.art';
+try {
+  const withScheme = OSS_PUBLIC_ORIGIN.startsWith('http')
+    ? OSS_PUBLIC_ORIGIN
+    : `https://${OSS_PUBLIC_ORIGIN}`;
+  OSS_PUBLIC_HOST = new URL(withScheme).hostname;
+} catch {
+  OSS_PUBLIC_HOST = 'wx.oss.2000gallery.art';
+}
+
 export function isOssPublicUrl(url) {
   if (!url || typeof url !== 'string') return false;
-  return url.startsWith(`${OSS_PUBLIC_ORIGIN}/`);
+  if (url.startsWith(`${OSS_PUBLIC_ORIGIN}/`)) return true;
+  try {
+    return new URL(url).hostname === OSS_PUBLIC_HOST;
+  } catch {
+    return false;
+  }
 }
 
 /** 相对路径或 OSS 外链 → 可展示的绝对/根相对 URL */
@@ -72,4 +87,4 @@ export const CONFIG = {
   }
 };
 
-export { API_BASE_URL, OSS_PUBLIC_ORIGIN };
+export { API_BASE_URL, OSS_PUBLIC_ORIGIN, OSS_PUBLIC_HOST };

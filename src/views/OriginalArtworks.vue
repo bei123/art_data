@@ -161,7 +161,7 @@
                   />
                   <img
                     v-else
-                    :src="displayArtworkImageUrl(row)"
+                    :src="displayArtworkListThumbUrl(row)"
                     :alt="row.title ? `原作：${row.title}` : '原作缩略图'"
                     class="size-full object-cover"
                     loading="lazy"
@@ -896,6 +896,7 @@ import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import WmsImageThumb from '@/components/wms-image-thumb.vue'
 import WmsImageGallery from '@/components/wms-image-gallery.vue'
 import {
@@ -1325,6 +1326,10 @@ function displayArtworkImageUrl(row) {
   if (!row) return ''
   if (row.image && !row.image.startsWith('http')) return `${API_BASE_URL}${row.image}`
   return row.image || ''
+}
+
+function displayArtworkListThumbUrl(row) {
+  return getListThumbnailUrl(displayArtworkImageUrl(row))
 }
 
 /** 采用仓库图：拉图 + WebP + OSS，耗时可能超过默认 30s */

@@ -1,0 +1,3460 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Art Data API",
+    "description": "ESA API schema validation",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.wx.2000gallery.art",
+      "description": "production"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "AuthRegister": {
+        "type": "object",
+        "required": [
+          "username",
+          "email",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthLogin": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "WxCodeBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        }
+      },
+      "CartAddItem": {
+        "type": "object",
+        "required": [
+          "type",
+          "quantity"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "right_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "digital_artwork_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "artwork_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "CartUpdateQuantity": {
+        "type": "object",
+        "required": [
+          "quantity"
+        ],
+        "properties": {
+          "quantity": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "FavoriteAdd": {
+        "type": "object",
+        "required": [
+          "item_type",
+          "item_id"
+        ],
+        "properties": {
+          "item_type": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          }
+        }
+      },
+      "PayOrderBody": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": {
+            "type": "string"
+          },
+          "total_fee": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "GET /api/health",
+        "tags": [
+          "system"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/health/live": {
+      "get": {
+        "operationId": "getHealthLive",
+        "summary": "GET /api/health/live",
+        "tags": [
+          "system"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/upload": {
+      "post": {
+        "operationId": "postUpload",
+        "summary": "POST /api/upload",
+        "tags": [
+          "upload"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "operationId": "postAuthRegister",
+        "summary": "POST /api/auth/register",
+        "tags": [
+          "auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthRegister"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "postAuthLogin",
+        "summary": "POST /api/auth/login",
+        "tags": [
+          "auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthLogin"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "getAuthMe",
+        "summary": "GET /api/auth/me",
+        "tags": [
+          "auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "postAuthLogout",
+        "summary": "POST /api/auth/logout",
+        "tags": [
+          "auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-identity/purchases/{user_id}": {
+      "get": {
+        "operationId": "getDigitalIdentityPurchases",
+        "summary": "GET /api/digital-identity/purchases/{user_id}",
+        "tags": [
+          "digital-identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/artists": {
+      "get": {
+        "operationId": "get_artists",
+        "summary": "GET /api/artists",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_artists",
+        "summary": "POST /api/artists",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/artists/{id}/featured-artworks": {
+      "get": {
+        "operationId": "get_artists_id_featured_artworks",
+        "summary": "GET /api/artists/{id}/featured-artworks",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_artists_id_featured_artworks",
+        "summary": "PUT /api/artists/{id}/featured-artworks",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/artists/{id}": {
+      "get": {
+        "operationId": "get_artists_id",
+        "summary": "GET /api/artists/{id}",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_artists_id",
+        "summary": "PUT /api/artists/{id}",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_artists_id",
+        "summary": "DELETE /api/artists/{id}",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/artists/bulk-delete": {
+      "post": {
+        "operationId": "post_artists_bulk_delete",
+        "summary": "POST /api/artists/bulk-delete",
+        "tags": [
+          "artists"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/original-artworks": {
+      "get": {
+        "operationId": "get_original_artworks",
+        "summary": "GET /api/original-artworks",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_original_artworks",
+        "summary": "POST /api/original-artworks",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/original-artworks/performance/metrics": {
+      "get": {
+        "operationId": "get_original_artworks_performance_metrics",
+        "summary": "GET /api/original-artworks/performance/metrics",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/original-artworks/performance/clear-cache": {
+      "post": {
+        "operationId": "post_original_artworks_performance_clear_cache",
+        "summary": "POST /api/original-artworks/performance/clear-cache",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/original-artworks/performance/reset": {
+      "post": {
+        "operationId": "post_original_artworks_performance_reset",
+        "summary": "POST /api/original-artworks/performance/reset",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/original-artworks/admin/sync-from-wms": {
+      "post": {
+        "operationId": "post_original_artworks_admin_sync_from_wms",
+        "summary": "POST /api/original-artworks/admin/sync-from-wms",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/original-artworks/{id}/admin/wms-image": {
+      "get": {
+        "operationId": "get_original_artworks_id_admin_wms_image",
+        "summary": "GET /api/original-artworks/{id}/admin/wms-image",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/original-artworks/{id}/admin/apply-wms-image": {
+      "post": {
+        "operationId": "post_original_artworks_id_admin_apply_wms_image",
+        "summary": "POST /api/original-artworks/{id}/admin/apply-wms-image",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/original-artworks/{id}/is-public": {
+      "patch": {
+        "operationId": "patch_original_artworks_id_is_public",
+        "summary": "PATCH /api/original-artworks/{id}/is-public",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/original-artworks/{id}": {
+      "get": {
+        "operationId": "get_original_artworks_id",
+        "summary": "GET /api/original-artworks/{id}",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_original_artworks_id",
+        "summary": "PUT /api/original-artworks/{id}",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_original_artworks_id",
+        "summary": "DELETE /api/original-artworks/{id}",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/original-artworks/bulk-delete": {
+      "post": {
+        "operationId": "post_original_artworks_bulk_delete",
+        "summary": "POST /api/original-artworks/bulk-delete",
+        "tags": [
+          "artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-transfer/transfer": {
+      "post": {
+        "operationId": "post_asset_transfer_transfer",
+        "summary": "POST /api/asset-transfer/transfer",
+        "tags": [
+          "asset-transfer"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-transfer/callback": {
+      "post": {
+        "operationId": "post_asset_transfer_callback",
+        "summary": "POST /api/asset-transfer/callback",
+        "tags": [
+          "asset-transfer"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-transfer/status/{id}": {
+      "get": {
+        "operationId": "get_asset_transfer_status_id",
+        "summary": "GET /api/asset-transfer/status/{id}",
+        "tags": [
+          "asset-transfer"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/asset-transfer/details": {
+      "post": {
+        "operationId": "post_asset_transfer_details",
+        "summary": "POST /api/asset-transfer/details",
+        "tags": [
+          "asset-transfer"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-transfer/currencies": {
+      "get": {
+        "operationId": "get_asset_transfer_currencies",
+        "summary": "GET /api/asset-transfer/currencies",
+        "tags": [
+          "asset-transfer"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-verify/scan": {
+      "get": {
+        "operationId": "get_asset_verify_scan",
+        "summary": "GET /api/asset-verify/scan",
+        "tags": [
+          "asset-verify"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-verify/generate-info": {
+      "post": {
+        "operationId": "post_asset_verify_generate_info",
+        "summary": "POST /api/asset-verify/generate-info",
+        "tags": [
+          "asset-verify"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-verify/batch-scan": {
+      "post": {
+        "operationId": "post_asset_verify_batch_scan",
+        "summary": "POST /api/asset-verify/batch-scan",
+        "tags": [
+          "asset-verify"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/asset-verify/history": {
+      "get": {
+        "operationId": "get_asset_verify_history",
+        "summary": "GET /api/asset-verify/history",
+        "tags": [
+          "asset-verify"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/banners": {
+      "get": {
+        "operationId": "get_banners",
+        "summary": "GET /api/banners",
+        "tags": [
+          "banners"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_banners",
+        "summary": "POST /api/banners",
+        "tags": [
+          "banners"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/banners/all": {
+      "get": {
+        "operationId": "get_banners_all",
+        "summary": "GET /api/banners/all",
+        "tags": [
+          "banners"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/banners/{id}": {
+      "put": {
+        "operationId": "put_banners_id",
+        "summary": "PUT /api/banners/{id}",
+        "tags": [
+          "banners"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_banners_id",
+        "summary": "DELETE /api/banners/{id}",
+        "tags": [
+          "banners"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/cart": {
+      "get": {
+        "operationId": "get_cart",
+        "summary": "GET /api/cart",
+        "tags": [
+          "cart"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_cart",
+        "summary": "POST /api/cart",
+        "tags": [
+          "cart"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartAddItem"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_cart",
+        "summary": "DELETE /api/cart",
+        "tags": [
+          "cart"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/cart/{id}": {
+      "put": {
+        "operationId": "put_cart_id",
+        "summary": "PUT /api/cart/{id}",
+        "tags": [
+          "cart"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartUpdateQuantity"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_cart_id",
+        "summary": "DELETE /api/cart/{id}",
+        "tags": [
+          "cart"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/digital-artworks/health": {
+      "get": {
+        "operationId": "get_digital_artworks_health",
+        "summary": "GET /api/digital-artworks/health",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/admin": {
+      "get": {
+        "operationId": "get_digital_artworks_admin",
+        "summary": "GET /api/digital-artworks/admin",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/admin/{id}/wespace-details": {
+      "get": {
+        "operationId": "get_digital_artworks_admin_id_wespace_details",
+        "summary": "GET /api/digital-artworks/admin/{id}/wespace-details",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/digital-artworks": {
+      "get": {
+        "operationId": "get_digital_artworks",
+        "summary": "GET /api/digital-artworks",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_digital_artworks",
+        "summary": "POST /api/digital-artworks",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/public": {
+      "get": {
+        "operationId": "get_digital_artworks_public",
+        "summary": "GET /api/digital-artworks/public",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/{id}": {
+      "get": {
+        "operationId": "get_digital_artworks_id",
+        "summary": "GET /api/digital-artworks/{id}",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_digital_artworks_id",
+        "summary": "PUT /api/digital-artworks/{id}",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_digital_artworks_id",
+        "summary": "DELETE /api/digital-artworks/{id}",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/digital-artworks/{id}/hide": {
+      "patch": {
+        "operationId": "patch_digital_artworks_id_hide",
+        "summary": "PATCH /api/digital-artworks/{id}/hide",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/digital-artworks/{id}/purchase-link": {
+      "patch": {
+        "operationId": "patch_digital_artworks_id_purchase_link",
+        "summary": "PATCH /api/digital-artworks/{id}/purchase-link",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/digital-artworks/{id}/artist": {
+      "patch": {
+        "operationId": "patch_digital_artworks_id_artist",
+        "summary": "PATCH /api/digital-artworks/{id}/artist",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/digital-artworks/order/product-list": {
+      "get": {
+        "operationId": "get_digital_artworks_order_product_list",
+        "summary": "GET /api/digital-artworks/order/product-list",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/goods/ver/list/v3": {
+      "post": {
+        "operationId": "post_digital_artworks_goods_ver_list_v3",
+        "summary": "POST /api/digital-artworks/goods/ver/list/v3",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/order/purchase": {
+      "post": {
+        "operationId": "post_digital_artworks_order_purchase",
+        "summary": "POST /api/digital-artworks/order/purchase",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/digital-artworks/goods/ver/details": {
+      "post": {
+        "operationId": "post_digital_artworks_goods_ver_details",
+        "summary": "POST /api/digital-artworks/goods/ver/details",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/exhibitions": {
+      "get": {
+        "operationId": "get_exhibitions",
+        "summary": "GET /api/exhibitions",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_exhibitions",
+        "summary": "POST /api/exhibitions",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/exhibitions/{id}": {
+      "get": {
+        "operationId": "get_exhibitions_id",
+        "summary": "GET /api/exhibitions/{id}",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_exhibitions_id",
+        "summary": "PUT /api/exhibitions/{id}",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/exhibitions/{id}/items": {
+      "get": {
+        "operationId": "get_exhibitions_id_items",
+        "summary": "GET /api/exhibitions/{id}/items",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_exhibitions_id_items",
+        "summary": "POST /api/exhibitions/{id}/items",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_exhibitions_id_items",
+        "summary": "PUT /api/exhibitions/{id}/items",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/exhibitions/{id}/live-photos": {
+      "get": {
+        "operationId": "get_exhibitions_id_live_photos",
+        "summary": "GET /api/exhibitions/{id}/live-photos",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_exhibitions_id_live_photos",
+        "summary": "PUT /api/exhibitions/{id}/live-photos",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_exhibitions_id_live_photos",
+        "summary": "POST /api/exhibitions/{id}/live-photos",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/exhibitions/{exhibitionId}/live-photos/{photoId}": {
+      "delete": {
+        "operationId": "delete_exhibitions_exhibitionId_live_photos_photoId",
+        "summary": "DELETE /api/exhibitions/{exhibitionId}/live-photos/{photoId}",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "exhibitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "photoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/exhibitions/{exhibitionId}/items/{itemId}/artists": {
+      "put": {
+        "operationId": "put_exhibitions_exhibitionId_items_itemId_artists",
+        "summary": "PUT /api/exhibitions/{exhibitionId}/items/{itemId}/artists",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "exhibitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/exhibitions/{exhibitionId}/items/{itemId}": {
+      "delete": {
+        "operationId": "delete_exhibitions_exhibitionId_items_itemId",
+        "summary": "DELETE /api/exhibitions/{exhibitionId}/items/{itemId}",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "exhibitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/external/user/generate-app-info": {
+      "post": {
+        "operationId": "post_external_user_generate_app_info",
+        "summary": "POST /api/external/user/generate-app-info",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/user/get-token": {
+      "post": {
+        "operationId": "post_external_user_get_token",
+        "summary": "POST /api/external/user/get-token",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/user/get-mobile-verification-code": {
+      "get": {
+        "operationId": "get_external_user_get_mobile_verification_code",
+        "summary": "GET /api/external/user/get-mobile-verification-code",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/user/login": {
+      "post": {
+        "operationId": "post_external_user_login",
+        "summary": "POST /api/external/user/login",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/user/register": {
+      "post": {
+        "operationId": "post_external_user_register",
+        "summary": "POST /api/external/user/register",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/asset-types/save": {
+      "post": {
+        "operationId": "post_external_asset_types_save",
+        "summary": "POST /api/external/asset-types/save",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/assets/list": {
+      "get": {
+        "operationId": "get_external_assets_list",
+        "summary": "GET /api/external/assets/list",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/asset-types/list": {
+      "get": {
+        "operationId": "get_external_asset_types_list",
+        "summary": "GET /api/external/asset-types/list",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/asset-types/{id}": {
+      "put": {
+        "operationId": "put_external_asset_types_id",
+        "summary": "PUT /api/external/asset-types/{id}",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_external_asset_types_id",
+        "summary": "DELETE /api/external/asset-types/{id}",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/external/order/list": {
+      "post": {
+        "operationId": "post_external_order_list",
+        "summary": "POST /api/external/order/list",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/order/detail": {
+      "post": {
+        "operationId": "post_external_order_detail",
+        "summary": "POST /api/external/order/detail",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/external/order/cancel": {
+      "post": {
+        "operationId": "post_external_order_cancel",
+        "summary": "POST /api/external/order/cancel",
+        "tags": [
+          "external"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/favorites": {
+      "get": {
+        "operationId": "get_favorites",
+        "summary": "GET /api/favorites",
+        "tags": [
+          "favorites"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_favorites",
+        "summary": "POST /api/favorites",
+        "tags": [
+          "favorites"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteAdd"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/favorites/{itemType}/{itemId}": {
+      "delete": {
+        "operationId": "delete_favorites_itemType_itemId",
+        "summary": "DELETE /api/favorites/{itemType}/{itemId}",
+        "tags": [
+          "favorites"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "itemType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/home-titles": {
+      "get": {
+        "operationId": "get_home_titles",
+        "summary": "GET /api/home-titles",
+        "tags": [
+          "home-titles"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_home_titles",
+        "summary": "PUT /api/home-titles",
+        "tags": [
+          "home-titles"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/institutions": {
+      "get": {
+        "operationId": "get_institutions",
+        "summary": "GET /api/institutions",
+        "tags": [
+          "institutions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_institutions",
+        "summary": "POST /api/institutions",
+        "tags": [
+          "institutions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/institutions/{id}/artists": {
+      "get": {
+        "operationId": "get_institutions_id_artists",
+        "summary": "GET /api/institutions/{id}/artists",
+        "tags": [
+          "institutions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/institutions/{id}": {
+      "get": {
+        "operationId": "get_institutions_id",
+        "summary": "GET /api/institutions/{id}",
+        "tags": [
+          "institutions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_institutions_id",
+        "summary": "PUT /api/institutions/{id}",
+        "tags": [
+          "institutions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_institutions_id",
+        "summary": "DELETE /api/institutions/{id}",
+        "tags": [
+          "institutions"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/issuance/create": {
+      "post": {
+        "operationId": "post_issuance_create",
+        "summary": "POST /api/issuance/create",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/issuance/update/{id}": {
+      "put": {
+        "operationId": "put_issuance_update_id",
+        "summary": "PUT /api/issuance/update/{id}",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/issuance/delete/{id}": {
+      "delete": {
+        "operationId": "delete_issuance_delete_id",
+        "summary": "DELETE /api/issuance/delete/{id}",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/issuance/list": {
+      "get": {
+        "operationId": "get_issuance_list",
+        "summary": "GET /api/issuance/list",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/issuance/product/insert": {
+      "post": {
+        "operationId": "post_issuance_product_insert",
+        "summary": "POST /api/issuance/product/insert",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/issuance/assets/list": {
+      "post": {
+        "operationId": "post_issuance_assets_list",
+        "summary": "POST /api/issuance/assets/list",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/issuance/product/details": {
+      "post": {
+        "operationId": "post_issuance_product_details",
+        "summary": "POST /api/issuance/product/details",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/issuance/detail/{id}": {
+      "get": {
+        "operationId": "get_issuance_detail_id",
+        "summary": "GET /api/issuance/detail/{id}",
+        "tags": [
+          "issuance"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/merchants": {
+      "get": {
+        "operationId": "get_merchants",
+        "summary": "GET /api/merchants",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_merchants",
+        "summary": "POST /api/merchants",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/merchants/upload-logo": {
+      "post": {
+        "operationId": "post_merchants_upload_logo",
+        "summary": "POST /api/merchants/upload-logo",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/merchants/upload-images": {
+      "post": {
+        "operationId": "post_merchants_upload_images",
+        "summary": "POST /api/merchants/upload-images",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/merchants/{id}/status": {
+      "patch": {
+        "operationId": "patch_merchants_id_status",
+        "summary": "PATCH /api/merchants/{id}/status",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/merchants/{id}/sort": {
+      "patch": {
+        "operationId": "patch_merchants_id_sort",
+        "summary": "PATCH /api/merchants/{id}/sort",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/merchants/{id}": {
+      "get": {
+        "operationId": "get_merchants_id",
+        "summary": "GET /api/merchants/{id}",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_merchants_id",
+        "summary": "PUT /api/merchants/{id}",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_merchants_id",
+        "summary": "DELETE /api/merchants/{id}",
+        "tags": [
+          "merchants"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/pay/unifiedorder": {
+      "post": {
+        "operationId": "post_wx_pay_unifiedorder",
+        "summary": "POST /api/wx/pay/unifiedorder",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayOrderBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wx/pay/singleorder": {
+      "post": {
+        "operationId": "post_wx_pay_singleorder",
+        "summary": "POST /api/wx/pay/singleorder",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayOrderBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wx/pay/notify": {
+      "post": {
+        "operationId": "post_wx_pay_notify",
+        "summary": "POST /api/wx/pay/notify",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/close": {
+      "post": {
+        "operationId": "post_wx_pay_close",
+        "summary": "POST /api/wx/pay/close",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/refund": {
+      "post": {
+        "operationId": "post_wx_pay_refund",
+        "summary": "POST /api/wx/pay/refund",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/refund/approve": {
+      "post": {
+        "operationId": "post_wx_pay_refund_approve",
+        "summary": "POST /api/wx/pay/refund/approve",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/refund/requests": {
+      "get": {
+        "operationId": "get_wx_pay_refund_requests",
+        "summary": "GET /api/wx/pay/refund/requests",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/refund/requests/{id}": {
+      "get": {
+        "operationId": "get_wx_pay_refund_requests_id",
+        "summary": "GET /api/wx/pay/refund/requests/{id}",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/pay/refund/notify": {
+      "post": {
+        "operationId": "post_wx_pay_refund_notify",
+        "summary": "POST /api/wx/pay/refund/notify",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/sign": {
+      "post": {
+        "operationId": "post_wx_pay_sign",
+        "summary": "POST /api/wx/pay/sign",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/query": {
+      "get": {
+        "operationId": "get_wx_pay_query",
+        "summary": "GET /api/wx/pay/query",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/orders/detail": {
+      "get": {
+        "operationId": "get_wx_pay_orders_detail",
+        "summary": "GET /api/wx/pay/orders/detail",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/orders": {
+      "get": {
+        "operationId": "get_wx_pay_orders",
+        "summary": "GET /api/wx/pay/orders",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/digital-identity/purchases/{user_id}": {
+      "get": {
+        "operationId": "get_wx_pay_digital_identity_purchases_user_id",
+        "summary": "GET /api/wx/pay/digital-identity/purchases/{user_id}",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/pay/admin/orders": {
+      "get": {
+        "operationId": "get_wx_pay_admin_orders",
+        "summary": "GET /api/wx/pay/admin/orders",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/admin/orders/{id}": {
+      "get": {
+        "operationId": "get_wx_pay_admin_orders_id",
+        "summary": "GET /api/wx/pay/admin/orders/{id}",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/pay/check-repayable": {
+      "get": {
+        "operationId": "get_wx_pay_check_repayable",
+        "summary": "GET /api/wx/pay/check-repayable",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/physical-categories": {
+      "get": {
+        "operationId": "get_physical_categories",
+        "summary": "GET /api/physical-categories",
+        "tags": [
+          "physical-categories"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_physical_categories",
+        "summary": "POST /api/physical-categories",
+        "tags": [
+          "physical-categories"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/physical-categories/{id}": {
+      "put": {
+        "operationId": "put_physical_categories_id",
+        "summary": "PUT /api/physical-categories/{id}",
+        "tags": [
+          "physical-categories"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_physical_categories_id",
+        "summary": "DELETE /api/physical-categories/{id}",
+        "tags": [
+          "physical-categories"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "get": {
+        "operationId": "get_physical_categories_id",
+        "summary": "GET /api/physical-categories/{id}",
+        "tags": [
+          "physical-categories"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/rights": {
+      "get": {
+        "operationId": "get_rights",
+        "summary": "GET /api/rights",
+        "tags": [
+          "rights"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_rights",
+        "summary": "POST /api/rights",
+        "tags": [
+          "rights"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/rights/{id}": {
+      "put": {
+        "operationId": "put_rights_id",
+        "summary": "PUT /api/rights/{id}",
+        "tags": [
+          "rights"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_rights_id",
+        "summary": "DELETE /api/rights/{id}",
+        "tags": [
+          "rights"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "get": {
+        "operationId": "get_rights_id",
+        "summary": "GET /api/rights/{id}",
+        "tags": [
+          "rights"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/search": {
+      "get": {
+        "operationId": "get_search",
+        "summary": "GET /api/search",
+        "tags": [
+          "search"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/transaction/records": {
+      "post": {
+        "operationId": "post_transaction_records",
+        "summary": "POST /api/transaction/records",
+        "tags": [
+          "transaction"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/transaction/detail/{id}": {
+      "get": {
+        "operationId": "get_transaction_detail_id",
+        "summary": "GET /api/transaction/detail/{id}",
+        "tags": [
+          "transaction"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/transaction/statistics": {
+      "get": {
+        "operationId": "get_transaction_statistics",
+        "summary": "GET /api/transaction/statistics",
+        "tags": [
+          "transaction"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/transaction/export": {
+      "post": {
+        "operationId": "post_transaction_export",
+        "summary": "POST /api/transaction/export",
+        "tags": [
+          "transaction"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/transaction/types": {
+      "get": {
+        "operationId": "get_transaction_types",
+        "summary": "GET /api/transaction/types",
+        "tags": [
+          "transaction"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/user/purchased": {
+      "get": {
+        "operationId": "get_user_purchased",
+        "summary": "GET /api/user/purchased",
+        "tags": [
+          "user"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/webview/proxy": {
+      "get": {
+        "operationId": "get_webview_proxy",
+        "summary": "GET /api/webview/proxy",
+        "tags": [
+          "webview"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/getPhoneNumber": {
+      "post": {
+        "operationId": "post_wx_getPhoneNumber",
+        "summary": "POST /api/wx/getPhoneNumber",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WxCodeBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wx/login": {
+      "post": {
+        "operationId": "post_wx_login",
+        "summary": "POST /api/wx/login",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WxCodeBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wx/bindUserInfo": {
+      "post": {
+        "operationId": "post_wx_bindUserInfo",
+        "summary": "POST /api/wx/bindUserInfo",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userInfo": {
+      "get": {
+        "operationId": "get_wx_userInfo",
+        "summary": "GET /api/wx/userInfo",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/updateProfile": {
+      "post": {
+        "operationId": "post_wx_updateProfile",
+        "summary": "POST /api/wx/updateProfile",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userApi/user/getToken": {
+      "post": {
+        "operationId": "post_wx_userApi_user_getToken",
+        "summary": "POST /api/wx/userApi/user/getToken",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userApi/external/user/real_name_registration/simplify/v3": {
+      "post": {
+        "operationId": "post_wx_userApi_external_user_real_name_registration_simplify_v3",
+        "summary": "POST /api/wx/userApi/external/user/real_name_registration/simplify/v3",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userPhone": {
+      "get": {
+        "operationId": "get_wx_userPhone",
+        "summary": "GET /api/wx/userPhone",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userVerificationStatus": {
+      "get": {
+        "operationId": "get_wx_userVerificationStatus",
+        "summary": "GET /api/wx/userVerificationStatus",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userApi/external/user/upload/idcard": {
+      "post": {
+        "operationId": "post_wx_userApi_external_user_upload_idcard",
+        "summary": "POST /api/wx/userApi/external/user/upload/idcard",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/getIp": {
+      "get": {
+        "operationId": "get_wx_getIp",
+        "summary": "GET /api/wx/getIp",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/userApi/external/user/idcard-verify": {
+      "post": {
+        "operationId": "post_wx_userApi_external_user_idcard_verify",
+        "summary": "POST /api/wx/userApi/external/user/idcard-verify",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/font-url": {
+      "get": {
+        "operationId": "get_wx_font_url",
+        "summary": "GET /api/wx/font-url",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/setPassword": {
+      "post": {
+        "operationId": "post_wx_setPassword",
+        "summary": "POST /api/wx/setPassword",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/changePassword": {
+      "post": {
+        "operationId": "post_wx_changePassword",
+        "summary": "POST /api/wx/changePassword",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/verifyPassword": {
+      "post": {
+        "operationId": "post_wx_verifyPassword",
+        "summary": "POST /api/wx/verifyPassword",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/addresses": {
+      "get": {
+        "operationId": "get_wx_addresses",
+        "summary": "GET /api/wx/addresses",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_wx_addresses",
+        "summary": "POST /api/wx/addresses",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/addresses/default": {
+      "get": {
+        "operationId": "get_wx_addresses_default",
+        "summary": "GET /api/wx/addresses/default",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/addresses/{id}": {
+      "get": {
+        "operationId": "get_wx_addresses_id",
+        "summary": "GET /api/wx/addresses/{id}",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_wx_addresses_id",
+        "summary": "PUT /api/wx/addresses/{id}",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_wx_addresses_id",
+        "summary": "DELETE /api/wx/addresses/{id}",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/addresses/{id}/default": {
+      "put": {
+        "operationId": "put_wx_addresses_id_default",
+        "summary": "PUT /api/wx/addresses/{id}/default",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/logistics/me/path": {
+      "post": {
+        "operationId": "post_wx_logistics_me_path",
+        "summary": "POST /api/wx/logistics/me/path",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/me/order": {
+      "post": {
+        "operationId": "post_wx_logistics_me_order",
+        "summary": "POST /api/wx/logistics/me/order",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/deliveries": {
+      "get": {
+        "operationId": "get_wx_logistics_deliveries",
+        "summary": "GET /api/wx/logistics/deliveries",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/orders": {
+      "post": {
+        "operationId": "post_wx_logistics_orders",
+        "summary": "POST /api/wx/logistics/orders",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/path": {
+      "post": {
+        "operationId": "post_wx_logistics_path",
+        "summary": "POST /api/wx/logistics/path",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/order/get": {
+      "post": {
+        "operationId": "post_wx_logistics_order_get",
+        "summary": "POST /api/wx/logistics/order/get",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/order/cancel": {
+      "post": {
+        "operationId": "post_wx_logistics_order_cancel",
+        "summary": "POST /api/wx/logistics/order/cancel",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "success"
+          }
+        }
+      }
+    }
+  }
+}

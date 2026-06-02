@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { watchDebounced } from '@vueuse/core'
 import axios from '@/utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '@/config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { ElMessage } from 'element-plus'
 import { Check, ChevronLeft, ChevronRight, Loader2, Search, X } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
@@ -140,7 +141,7 @@ function isArtworkInPending(type, artworkId) {
 }
 
 function getArtworkThumb(artwork) {
-  return artwork?.image ? getImageUrl(artwork.image) : ''
+  return artwork?.image ? getListThumbnailUrl(getImageUrl(artwork.image)) : ''
 }
 
 function getPickerCardClass(artwork) {

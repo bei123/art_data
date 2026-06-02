@@ -49,7 +49,7 @@
               <td class="px-3 py-2">
                 <div class="size-20 overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
-                    :src="getImageUrl(row.image)"
+                    :src="getListThumbnailUrl(getImageUrl(row.image))"
                     :alt="row.title ? `分类：${row.title}` : '分类配图'"
                     class="size-full object-cover"
                     loading="lazy"
@@ -257,6 +257,7 @@ import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import {
   AlertDialog,

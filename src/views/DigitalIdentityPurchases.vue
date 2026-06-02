@@ -27,7 +27,7 @@
             <el-image
               lazy
               style="width: 60px; height: 60px"
-              :src="getImageUrl(row.artwork_image)"
+              :src="getListThumbnailUrl(getImageUrl(row.artwork_image))"
               fit="cover"
               :alt="row.artwork_title ? `数字艺术品：${row.artwork_title}` : '数字艺术品'"
             >
@@ -62,6 +62,7 @@ import { useRoute } from 'vue-router'
 import { Loading } from '@element-plus/icons-vue'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 
 const route = useRoute()
 const purchases = ref([])

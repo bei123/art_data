@@ -154,7 +154,7 @@
               <td class="px-3 py-2">
                 <div class="size-12 overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
-                    :src="getImageUrl(row.avatar)"
+                    :src="getListThumbnailUrl(getImageUrl(row.avatar))"
                     :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
                     class="size-full object-cover"
                     loading="lazy"
@@ -581,7 +581,7 @@
                                   class="size-10 shrink-0 overflow-hidden rounded-md border border-border bg-muted/40"
                                 >
                                   <img
-                                    :src="getImageUrl(item.image)"
+                                    :src="getListThumbnailUrl(getImageUrl(item.image))"
                                     :alt="item.title"
                                     class="size-full object-cover"
                                     loading="lazy"
@@ -660,7 +660,7 @@
                                   class="size-10 shrink-0 overflow-hidden rounded-md border border-border bg-muted/40"
                                 >
                                   <img
-                                    :src="getImageUrl(item.image)"
+                                    :src="getListThumbnailUrl(getImageUrl(item.image))"
                                     :alt="item.title"
                                     class="size-full object-cover"
                                     loading="lazy"
@@ -825,6 +825,7 @@ import { ElMessage } from 'element-plus'
 import { AlertCircle, ChevronDown, ChevronUp, Loader2, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import {
   AlertDialog,

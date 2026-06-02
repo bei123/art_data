@@ -42,7 +42,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showPageSuccess } from '@/utils/appMessage'
 import {
   Building2,
   FileText,
@@ -116,8 +116,8 @@ async function handleLogout() {
   if (isLoggingOut.value) return
   isLoggingOut.value = true
   try {
+    showPageSuccess('已退出登录')
     await logoutCurrentUser()
-    ElMessage.success('已退出登录')
   } finally {
     isLoggingOut.value = false
   }

@@ -80,7 +80,7 @@
                   <div class="size-20 overflow-hidden rounded-md border border-border bg-muted/30">
                     <img
                       v-if="row.cover_image"
-                      :src="getImageUrl(row.cover_image)"
+                      :src="getListThumbnailUrl(getImageUrl(row.cover_image))"
                       :alt="row.title ? `展览封面：${row.title}` : '展览封面'"
                       class="size-full object-cover"
                       loading="lazy"
@@ -374,14 +374,14 @@
                   <div class="size-20 overflow-hidden rounded-md border border-border bg-muted/30">
                     <img
                       v-if="row.artwork?.image"
-                      :src="getImageUrl(row.artwork.image)"
+                      :src="getListThumbnailUrl(getImageUrl(row.artwork.image))"
                       alt=""
                       class="size-full object-cover"
                       loading="lazy"
                     >
                     <img
                       v-else-if="row.artwork?.image_url"
-                      :src="getImageUrl(row.artwork.image_url)"
+                      :src="getListThumbnailUrl(getImageUrl(row.artwork.image_url))"
                       alt=""
                       class="size-full object-cover"
                       loading="lazy"
@@ -631,6 +631,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, GripVertical, Loader2, Plus, Trash2, Upload } from 'lucide-vue-next'
 import { uploadImageToWebpLimit5MB } from '../utils/image'

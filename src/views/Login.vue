@@ -147,8 +147,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AlertCircle, Eye, EyeOff } from 'lucide-vue-next'
-import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
+import { showLayoutSuccess, showPageSuccess, showPageWarning } from '@/utils/appMessage'
 import { useUserStore } from '@/stores/user'
 import { CONFIG } from '@/config'
 import { resetTokenExpiryNotifications } from '@/utils/tokenExpiryReminder'
@@ -181,7 +181,7 @@ watch(
   () => route.query.reason,
   (reason) => {
     if (reason === 'session_expired') {
-      ElMessage.warning('登录已过期，请重新登录')
+      showPageWarning('登录已过期，请重新登录')
     }
   },
   { immediate: true }
@@ -306,14 +306,14 @@ const handleSubmit = async () => {
       localStorage.setItem('user', JSON.stringify(user))
       userStore.setUserInfo(user)
       resetTokenExpiryNotifications()
-      ElMessage.success('登录成功')
-      router.replace('/')
+      await router.replace('/')
+      showLayoutSuccess('登录成功')
     } else {
       if (body?.success === false) {
         formError.value = body?.error || '注册失败'
         return
       }
-      ElMessage.success('注册成功，请登录')
+      showPageSuccess('注册成功，请登录')
       isLogin.value = true
       form.username = ''
       form.email = ''

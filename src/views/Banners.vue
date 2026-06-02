@@ -50,7 +50,7 @@
               <td class="px-3 py-2">
                 <div class="h-[100px] w-[200px] overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
-                    :src="getImageUrl(row.image_url)"
+                    :src="getListThumbnailUrl(getImageUrl(row.image_url))"
                     :alt="row.title ? `轮播图：${row.title}` : '轮播图'"
                     class="size-full object-cover"
                     loading="lazy"
@@ -385,6 +385,7 @@ import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import {
   AlertDialog,

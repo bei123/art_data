@@ -112,7 +112,7 @@
                   <div class="size-12 shrink-0 overflow-hidden rounded-md border border-border bg-muted/30">
                     <img
                       v-if="item.images && item.images.length > 0"
-                      :src="getImageUrl(item.images[0])"
+                      :src="getListThumbnailUrl(getImageUrl(item.images[0]))"
                       :alt="item.title ? `商品：${item.title}` : '商品图'"
                       class="size-full object-cover"
                       loading="lazy"
@@ -307,7 +307,7 @@
                 <div class="size-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
                     v-if="item.images && item.images.length > 0"
-                    :src="getImageUrl(item.images[0])"
+                    :src="getListThumbnailUrl(getImageUrl(item.images[0]))"
                     :alt="item.title ? `商品：${item.title}` : '商品图'"
                     class="size-full object-cover"
                     loading="lazy"
@@ -646,6 +646,7 @@ import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, MapPin } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import {
   AlertDialog,
   AlertDialogCancel,

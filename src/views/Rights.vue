@@ -59,7 +59,7 @@
                     @click="openImagePreview(row.images, index, row.title)"
                   >
                     <img
-                      :src="getImageUrl(image)"
+                      :src="getListThumbnailUrl(getImageUrl(image))"
                       :alt="row.title ? `${row.title} 配图 ${index + 1}` : '版权实物配图'"
                       class="size-full object-cover"
                       loading="lazy"
@@ -88,7 +88,7 @@
               <td class="px-3 py-2.5">
                 <div v-if="row.artist" class="flex min-w-0 items-center gap-2">
                   <Avatar class="size-8 shrink-0 border border-border">
-                    <AvatarImage :src="getImageUrl(row.artist.avatar)" :alt="row.artist.name" />
+                    <AvatarImage :src="getListThumbnailUrl(getImageUrl(row.artist.avatar))" :alt="row.artist.name" />
                     <AvatarFallback class="text-xs">{{ row.artist.name?.charAt(0) || '?' }}</AvatarFallback>
                   </Avatar>
                   <span class="min-w-0 truncate text-sm">{{ row.artist.name }}</span>
@@ -524,6 +524,7 @@ import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Plus, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
+import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import '@wangeditor/editor/dist/css/style.css'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
