@@ -81,6 +81,178 @@ async function invalidateExhibitionDetailCache(exhibitionId) {
   }
 }
 
+/** 清除全部展览详情 Redis（原作/数字艺术品批量变更且无法枚举 id 时使用） */
+async function invalidateAllExhibitionDetailCaches() {
+  try {
+    const n = await redisClient.scanDelByPattern(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}*`);
+    if (n > 0) logger.info('invalidateAllExhibitionDetailCaches', { cleared: n });
+    return n;
+  } catch (e) {
+    logger.error('invalidateAllExhibitionDetailCaches failed', { err: e });
+    return 0;
+  }
+}
+
+function normalizeOriginalArtworkIdsForExhibitionCache(raw) {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return [...new Set(list.map((x) => parsePositiveInt(x)).filter(Boolean))];
+}
+
+function normalizeDigitalArtworkIdsForExhibitionCache(raw) {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return [
+    ...new Set(
+      list
+        .map((x) => (x === undefined || x === null ? '' : String(x).trim()))
+        .filter((s) => /^\d+$/.test(s))
+    ),
+  ];
+}
+
+function buildExhibitionItemsWhereForArtworkIds(originalIds, digitalIds) {
+  const parts = [];
+  const params = [];
+  if (originalIds.length) {
+    parts.push(
+      `(artwork_type = 'original' AND artwork_id IN (${originalIds.map(() => '?').join(',')}))`
+    );
+    params.push(...originalIds.map(String));
+  }
+  if (digitalIds.length) {
+    parts.push(
+      `(artwork_type = 'digital' AND artwork_id IN (${digitalIds.map(() => '?').join(',')}))`
+    );
+    params.push(...digitalIds.map(String));
+  }
+  return { parts, params };
+}
+
+/**
+ * 将引用指定作品的展览条目的艺术家关联，同步为作品当前 artist_id（与追加展览作品时未手动指定 artists 一致）。
+ * @returns {Promise<{ itemsUpdated: number, exhibitionIds: number[] }>}
+ */
+async function syncExhibitionItemArtistsFromArtworks(options = {}) {
+  const originalIds = normalizeOriginalArtworkIdsForExhibitionCache(options.originalArtworkIds);
+  const digitalIds = normalizeDigitalArtworkIdsForExhibitionCache(options.digitalArtworkIds);
+  if (!originalIds.length && !digitalIds.length) {
+    return { itemsUpdated: 0, exhibitionIds: [] };
+  }
+
+  const { parts, params } = buildExhibitionItemsWhereForArtworkIds(originalIds, digitalIds);
+  const connection = await db.getConnection();
+  let itemsUpdated = 0;
+  const exhibitionIds = new Set();
+
+  try {
+    const [items] = await connection.query(
+      `
+        SELECT id AS item_id, exhibition_id, artwork_type, artwork_id
+        FROM ${EXHIBITION_ITEMS_TABLE}
+        WHERE ${parts.join(' OR ')}
+      `,
+      params
+    );
+    if (!items?.length) {
+      connection.release();
+      return { itemsUpdated: 0, exhibitionIds: [] };
+    }
+
+    const { originalArtistByArtworkId, digitalArtistByArtworkId } = await fetchArtworkArtistIds(items);
+
+    await connection.beginTransaction();
+    for (const it of items) {
+      const rawArtistId =
+        it.artwork_type === 'original'
+          ? originalArtistByArtworkId.get(String(it.artwork_id))
+          : digitalArtistByArtworkId.get(String(it.artwork_id));
+      const artistId = parsePositiveInt(rawArtistId);
+
+      await connection.query(
+        `DELETE FROM ${EXHIBITION_ITEM_ARTISTS_TABLE} WHERE exhibition_item_id = ?`,
+        [it.item_id]
+      );
+      if (artistId) {
+        await connection.query(
+          `
+            INSERT INTO ${EXHIBITION_ITEM_ARTISTS_TABLE} (exhibition_item_id, artist_id, sort_order)
+            VALUES (?, ?, 1)
+          `,
+          [it.item_id, artistId]
+        );
+      }
+      itemsUpdated += 1;
+      exhibitionIds.add(it.exhibition_id);
+    }
+    await connection.commit();
+    if (itemsUpdated > 0) {
+      logger.info('syncExhibitionItemArtistsFromArtworks', {
+        originalCount: originalIds.length,
+        digitalCount: digitalIds.length,
+        itemsUpdated,
+        exhibitions: exhibitionIds.size,
+      });
+    }
+    return { itemsUpdated, exhibitionIds: [...exhibitionIds] };
+  } catch (e) {
+    try {
+      await connection.rollback();
+    } catch {
+      /* ignore */
+    }
+    logger.error('syncExhibitionItemArtistsFromArtworks failed', { err: e });
+    return { itemsUpdated: 0, exhibitionIds: [] };
+  } finally {
+    connection.release();
+  }
+}
+
+/**
+ * 原作/数字艺术品变更后：同步展览作品艺术家关联，并清除引用该作品的展览详情缓存。
+ * @param {{ originalArtworkIds?: Array<number|string>, digitalArtworkIds?: Array<number|string> }} [options]
+ * @returns {Promise<number>} 清除的展览数量
+ */
+async function invalidateExhibitionCachesForArtworks(options = {}) {
+  const originalIds = normalizeOriginalArtworkIdsForExhibitionCache(options.originalArtworkIds);
+  const digitalIds = normalizeDigitalArtworkIdsForExhibitionCache(options.digitalArtworkIds);
+  if (!originalIds.length && !digitalIds.length) return 0;
+
+  try {
+    const { exhibitionIds: syncedExhibitionIds } = await syncExhibitionItemArtistsFromArtworks(options);
+
+    const { parts, params } = buildExhibitionItemsWhereForArtworkIds(originalIds, digitalIds);
+    const [rows] = await db.query(
+      `
+        SELECT DISTINCT exhibition_id
+        FROM ${EXHIBITION_ITEMS_TABLE}
+        WHERE ${parts.join(' OR ')}
+      `,
+      params
+    );
+    const exhibitionIds = [
+      ...new Set([
+        ...(rows || []).map((r) => r.exhibition_id).filter(Boolean),
+        ...syncedExhibitionIds,
+      ]),
+    ];
+    for (const eid of exhibitionIds) {
+      await invalidateExhibitionDetailCache(eid);
+    }
+    if (exhibitionIds.length > 0) {
+      logger.info('invalidateExhibitionCachesForArtworks', {
+        originalCount: originalIds.length,
+        digitalCount: digitalIds.length,
+        exhibitions: exhibitionIds.length,
+      });
+    }
+    return exhibitionIds.length;
+  } catch (e) {
+    logger.error('invalidateExhibitionCachesForArtworks failed', { err: e });
+    return 0;
+  }
+}
+
 async function getCachedExhibitionDetail(exhibitionId) {
   try {
     const raw = await redisClient.get(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`);
@@ -1155,6 +1327,9 @@ module.exports = {
   ensureSchemaReady,
   invalidateExhibitionListCaches,
   invalidateExhibitionDetailCache,
+  invalidateAllExhibitionDetailCaches,
+  syncExhibitionItemArtistsFromArtworks,
+  invalidateExhibitionCachesForArtworks,
   setCachedExhibitionDetail,
   getExhibitionDetail,
   ensureExhibitionExists,

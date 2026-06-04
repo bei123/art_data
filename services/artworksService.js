@@ -5,6 +5,10 @@ const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const { invalidateArtistsListCache } = require('./artistsService');
 const {
+  invalidateExhibitionCachesForArtworks,
+  invalidateAllExhibitionDetailCaches,
+} = require('./exhibitionsService');
+const {
   attachAdminWmsImageFields,
   stripWmsFieldsForPublic,
 } = require('./wmsArtworkImageService');
@@ -25,6 +29,7 @@ const REDIS_ARTWORK_DETAIL_KEY_PREFIX = 'artworks:detail:';
  * - 传 `artworkDetailIds`（非空数组）：清全部 `artworks:list*`，并逐个删除对应 `artworks:detail:{id}`（适合 WMS 批量同步）。
  * - 仅传 `artworkDetailId`：清列表 + 删除单条详情（适合单条 PATCH/PUT）。
  * - 不传或空：清列表 + `scanDel` 全部 `artworks:detail*`（适合艺术家变更、批量删作品等）。
+ * - 同时同步引用该作品的展览艺术家关联，并清除 `exhibitions:detail:*`（内嵌作品与艺术家快照）。
  */
 async function invalidateArtworksPublicCaches(options = {}) {
   const opts = options || {}
@@ -51,10 +56,13 @@ async function invalidateArtworksPublicCaches(options = {}) {
       for (const id of batchIds) {
         await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id)
       }
+      await invalidateExhibitionCachesForArtworks({ originalArtworkIds: batchIds })
     } else if (singleId) {
       await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + singleId)
+      await invalidateExhibitionCachesForArtworks({ originalArtworkIds: [singleId] })
     } else {
       await redisClient.scanDelByPattern('artworks:detail*')
+      await invalidateAllExhibitionDetailCaches()
     }
   } catch (e) {
     logger.error('invalidateArtworksPublicCaches failed', { err: e })

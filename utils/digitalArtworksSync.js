@@ -503,6 +503,21 @@ async function syncDigitalArtworksOnce() {
   // mysql2: VALUES ? 传入一个二维数组
   await db.query(sql, [rows]);
 
+  const syncedIds = rows.map((r) => String(r[0])).filter(Boolean);
+  if (syncedIds.length) {
+    try {
+      const redisClient = require('./redisClient');
+      const { invalidateExhibitionCachesForArtworks } = require('../services/exhibitionsService');
+      await redisClient.del('digital_artworks:list');
+      for (const sid of syncedIds) {
+        await redisClient.del(`digital_artworks:detail:${sid}`);
+      }
+      await invalidateExhibitionCachesForArtworks({ digitalArtworkIds: syncedIds });
+    } catch (e) {
+      console.warn('[digitalArtworksSync] cache invalidation:', e?.message || e);
+    }
+  }
+
   return { synced: rows.length };
 }
 

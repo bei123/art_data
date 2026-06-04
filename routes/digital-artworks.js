@@ -10,6 +10,7 @@ const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
 const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
 const { ensureShowPurchaseLinkColumnReady } = require('../utils/digitalArtworksSync');
+const { invalidateExhibitionCachesForArtworks } = require('../services/exhibitionsService');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -19,6 +20,18 @@ const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY = 'digital_artworks:list';
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX = 'digital_artworks:list:artist:';
 const REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX = 'digital_artworks:detail:';
+
+async function clearDigitalArtworkPublicCaches(artworkId, artistIds = []) {
+  const sid = String(artworkId ?? '').trim();
+  if (!sid) return;
+  await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
+  const uniqueArtistIds = [...new Set((artistIds || []).filter((a) => a != null && a !== ''))];
+  for (const artistId of uniqueArtistIds) {
+    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artistId);
+  }
+  await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + sid);
+  await invalidateExhibitionCachesForArtworks({ digitalArtworkIds: [sid] });
+}
 
 /** Wespace H5 二级市场购买页，query 中 id 为 goodsId */
 const WESPACE_ASSETS_BUY_SECOND_LIST_BASE =
@@ -715,12 +728,7 @@ router.patch('/:id/hide', authenticateToken, async (req, res) => {
     // 更新隐藏状态
     await db.query(`UPDATE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} SET is_hidden = ? WHERE id = ?`, [is_hidden ? 1 : 0, id]);
 
-    // 清理缓存
-    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
-    if (artistId) {
-      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artistId);
-    }
-    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
+    await clearDigitalArtworkPublicCaches(id, [artistId]);
 
     res.json({
       message: is_hidden ? '作品已隐藏' : '作品已显示',
@@ -766,11 +774,7 @@ router.patch('/:id/purchase-link', authenticateToken, async (req, res) => {
       [showPurchase ? 1 : 0, sid]
     );
 
-    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
-    if (artistId) {
-      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + artistId);
-    }
-    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + sid);
+    await clearDigitalArtworkPublicCaches(sid, [artistId]);
 
     res.json({
       message: showPurchase ? '已开启购买链接' : '已关闭购买链接',
@@ -835,14 +839,7 @@ router.patch('/:id/artist', authenticateToken, async (req, res) => {
       );
     }
 
-    await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY);
-    if (oldArtistId) {
-      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + oldArtistId);
-    }
-    if (newArtistId) {
-      await redisClient.del(REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX + newArtistId);
-    }
-    await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + id);
+    await clearDigitalArtworkPublicCaches(id, [oldArtistId, newArtistId]);
 
     res.json({
       message: '艺术家关联已更新',
