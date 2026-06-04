@@ -5,6 +5,7 @@ const { authenticateToken, checkRole, optionalAuthenticate } = require('../auth'
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
 const wmsArtworkImage = require('../services/wmsArtworkImageService');
+const { respondJson } = require('../middleware/corsPolicy');
 
 function authenticateTokenAllowQuery(req, res, next) {
   if (!req.headers.authorization && req.query?.token) {
@@ -66,7 +67,11 @@ router.post(
       return res.status(r.status).json(r.body);
     } catch (error) {
       logger.error('WMS 同步失败', { err: error });
-      res.status(500).json({ error: 'WMS 同步失败' });
+      return respondJson(req, res, 500, {
+        error: 'WMS 同步失败',
+        code: 'WMS_SYNC_FAILED',
+        detail: process.env.NODE_ENV !== 'production' ? error.message : undefined,
+      });
     }
   }
 );

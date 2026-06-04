@@ -76,7 +76,27 @@ curl -skI "https://127.0.0.1:2000/api/health" -H "Host: api.wx.2000gallery.art"
 
 ---
 
-## 二、回源成功后：OPTIONS 须能到源站
+## 二、长耗时接口（WMS 同步 `POST /api/original-artworks/admin/sync-from-wms`）
+
+管理台一次同步可能运行 **数分钟**。若 ESA/Nginx **读超时** 短于实际耗时，边缘会返回 **502/524** 等错误页，**不带** `Access-Control-Allow-Origin`，浏览器会误报为 **CORS / Network Error**（并非 `wx.ht` 未加入白名单）。
+
+| 层级 | 建议 |
+|------|------|
+| 宝塔 `api.wx` 站点 Nginx | `proxy_read_timeout` / `proxy_send_timeout` **≥ 600s**（见 [nginx-baota-api-wx.example.conf](./nginx-baota-api-wx.example.conf)） |
+| ESA 源站/规则 | 回源读超时尽量与 Nginx 一致，避免 60–120s 默认值 |
+| 管理台 | 同步参数「最大页数」不宜过大；客户端超时已按页数动态放大 |
+
+源站自测（应返回 JSON 且带 ACAO，而非 HTML 错误页）：
+
+```bash
+curl -sI -X OPTIONS "https://api.wx.2000gallery.art/api/original-artworks/admin/sync-from-wms" \
+  -H "Origin: https://wx.ht.2000gallery.art" \
+  -H "Access-Control-Request-Method: POST"
+```
+
+---
+
+## 三、回源成功后：OPTIONS 须能到源站
 
 带 `Authorization` 的请求会先发 **OPTIONS 预检**。须满足其一：
 
@@ -85,7 +105,7 @@ curl -skI "https://127.0.0.1:2000/api/health" -H "Host: api.wx.2000gallery.art"
 
 ---
 
-## 三、（可选）ESA 边缘 CORS 规则
+## 四、（可选）ESA 边缘 CORS 规则
 
 在 **回源已 200** 仍缺 CORS 头时，按官方 [配置跨域资源共享](https://help.aliyun.com/zh/edge-security-acceleration/esa/use-cases/configure-cross-domain-resource-sharing) 在边缘补头。
 
@@ -122,7 +142,7 @@ curl -skI "https://127.0.0.1:2000/api/health" -H "Host: api.wx.2000gallery.art"
 
 ---
 
-## 四、Node 与前端环境变量
+## 五、Node 与前端环境变量
 
 **API 服务器 `.env`**
 
@@ -141,7 +161,7 @@ VITE_PUBLIC_API_BASE_URL=https://api.wx.2000gallery.art
 
 ---
 
-## 五、外网验收
+## 六、外网验收
 
 ```powershell
 powershell -File deploy/verify-api-cors.ps1
@@ -167,7 +187,7 @@ curl.exe -s "https://api.wx.2000gallery.art/api/health"
 
 ---
 
-## 六、两个 ESA 站点对照
+## 七、两个 ESA 站点对照
 
 | 站点 | 源站实际服务 | ESA 回源建议 |
 |------|----------------|--------------|

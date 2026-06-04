@@ -1737,6 +1737,16 @@ const confirmSyncFromWms = async () => {
       )
       return
     }
+    if (!e?.response) {
+      const isNetwork =
+        e?.message === 'Network Error' || e?.code === 'ERR_NETWORK' || e?.code === 'ERR_FAILED'
+      ElMessage.error(
+        isNetwork
+          ? '同步请求未收到有效响应（多为 CDN/网关超时或 502/524，响应无 CORS 头）。请减小「最大页数」后重试，或让运维提高 api.wx 回源读超时（建议 ≥600s），参见 deploy/CDN-API-CORS.md'
+          : (e?.message || '同步失败')
+      )
+      return
+    }
     const msg = e?.response?.data?.error || e?.message || '同步失败'
     ElMessage.error(typeof msg === 'string' ? msg : '同步失败')
   } finally {

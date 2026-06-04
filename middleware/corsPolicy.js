@@ -67,10 +67,17 @@ function corsPolicyOrigin(origin, callback) {
   return callback(null, false);
 }
 
+/** 错误/异常路径也显式带上 CORS（避免仅依赖 cors 包时边缘情况缺 ACAO） */
+function respondJson(req, res, status, body) {
+  applyCorsHeaders(req, res);
+  return res.status(status).json(body);
+}
+
 module.exports = {
   getAllowedCorsOrigins,
   isOriginAllowed,
   applyCorsHeaders,
   corsPreflightMiddleware,
   corsPolicyOrigin,
+  respondJson,
 };
