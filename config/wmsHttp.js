@@ -3,7 +3,8 @@
  *
  * 登录失败「用户名或密码错误」常见原因：
  * - .env 里密码含 # 或行首有空格，未用双引号导致被截断或读错
- * - 与浏览器不一致：WMS 要求「登录名」而 .env 填了邮箱（或相反），以 Web 登录页实际输入为准
+ * - 与浏览器不一致：WMS_HTTP_USER 须与登录框完全一致（如 zhibei@2000gallery.art，勿多空格）
+ * - Referer 须为站点根 /（客户端已与 DevTools 对齐）；WMS_HTTP_BASE_URL=https://wms.2000gallery.art
  * - 密码含特殊字符：可用 WMS_HTTP_PASSWORD_B64（UTF-8 明文做 base64，无换行）
  * - REBUILD 约定：URL 中 passwd 为占位 ******，真实密码在 POST body；客户端须与之一致（见 wmsHttpClient.wmsUserLogin）
  * - 返回 VCODE：站点开启图形验证码时，可设 WMS_HTTP_VCODE（与图一致），或 WMS_HTTP_COOKIE（从已打开 /user/login 的浏览器复制整段 Cookie，须含 RBSESSION）

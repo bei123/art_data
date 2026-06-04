@@ -92,6 +92,13 @@ function mergeCookieHeader(existing, fromSetCookie) {
   return `${a}; ${b}`
 }
 
+/** REBUILD 登录 JSON：error_code === 0 表示成功 */
+function isWmsLoginSuccess(response) {
+  if (!response || response.status < 200 || response.status >= 300) return false
+  const body = response.data
+  return Boolean(body && body.error_code === 0)
+}
+
 /**
  * 与浏览器一致：先打开登录页，拿到 RBSESSION（及验证码会话），再 POST /user/user-login。
  * @returns {Promise<string>} Cookie 请求头片段（可能为空）
@@ -156,8 +163,9 @@ async function wmsUserLogin(creds) {
   urlObj.searchParams.set('vcode', vcode)
 
   const useNoCache = creds.noCache !== false
+  // 与 Chrome DevTools 一致：Referer 为站点根 /，非 /user/login
   const headers = buildRbWebHeaders({
-    refererPath: '/user/login',
+    refererPath: '/',
     cookie: creds.cookie,
     noCache: useNoCache,
   })
@@ -201,8 +209,16 @@ async function wmsUserLoginFromEnv() {
 
   const { response, sessionCookie } = await wmsLoginInflight
   const merged = String(sessionCookie || '').trim()
-  if (merged) {
+  if (response && isWmsLoginSuccess(response) && merged) {
     wmsSessionCache = { cookie: merged, expiresAt: Date.now() + WMS_SESSION_CACHE_TTL_MS }
+  } else if (response && !isWmsLoginSuccess(response)) {
+    wmsSessionCache = { cookie: '', expiresAt: 0 }
+    const body = response.data
+    logger.warn('wms_user_login_rejected', {
+      httpStatus: response.status,
+      error_code: body && body.error_code,
+      error_msg: body && body.error_msg,
+    })
   }
   return { response, sessionCookie: merged }
 }
@@ -230,8 +246,8 @@ async function wmsUserLoginFromEnvUncached() {
     vcode,
     cookie: preCookie || undefined,
   })
-  const fromLogin = sessionCookie && String(sessionCookie).trim()
-  const merged = fromLogin || String(preCookie).trim()
+  const fromLogin = cookieHeaderFromSetCookie(response)
+  const merged = mergeCookieHeader(preCookie, fromLogin)
   return { response, sessionCookie: merged }
 }
 
