@@ -6,10 +6,12 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const {
   isWmsHttpConfigured,
+  isWmsLoginConfigured,
   getWmsHttpPasswordForLogin,
   WMS_HTTP_USER,
 } = require('../config/wmsHttp')
 const {
+  assertWmsLoginEnvConfigured,
   wmsUserLoginFromEnv,
   wmsProductDataList,
   wmsProductViewModel,
@@ -372,6 +374,7 @@ async function syncFromWmsAdmin(body) {
   const artistResolveInflight = new Map()
 
   try {
+    assertWmsLoginEnvConfigured()
     const { sessionCookie, response: loginRes } = await wmsUserLoginFromEnv()
     // 命中会话缓存时 loginRes 为 null，仅校验 cookie，勿读 loginRes.status
     if (loginRes) {
@@ -538,12 +541,12 @@ function startWmsProductSyncSchedule() {
     logger.info('wms_sync_schedule_disabled')
     return
   }
-  if (!isWmsHttpConfigured()) {
-    logger.warn('wms_sync_schedule_skip_not_configured')
-    return
-  }
-  if (!WMS_HTTP_USER || !getWmsHttpPasswordForLogin()) {
-    logger.warn('wms_sync_schedule_skip_missing_credentials')
+  if (!isWmsLoginConfigured()) {
+    logger.warn('wms_sync_schedule_skip_missing_credentials', {
+      hasBaseUrl: isWmsHttpConfigured(),
+      hasUser: Boolean(WMS_HTTP_USER),
+      hasPassword: Boolean(getWmsHttpPasswordForLogin()),
+    })
     return
   }
 

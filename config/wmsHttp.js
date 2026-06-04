@@ -77,6 +77,11 @@ function isWmsHttpConfigured() {
   return Boolean(WMS_HTTP_BASE_URL)
 }
 
+/** 是否具备 WMS 登录所需三项（基址、用户名、密码） */
+function isWmsLoginConfigured() {
+  return Boolean(WMS_HTTP_BASE_URL && WMS_HTTP_USER && getWmsHttpPasswordForLogin())
+}
+
 function parseExtraHeaders() {
   if (!WMS_HTTP_EXTRA_HEADERS_JSON) return {}
   try {
@@ -101,5 +106,6 @@ module.exports = {
   WMS_HTTP_VCODE,
   WMS_HTTP_USER_AGENT,
   isWmsHttpConfigured,
+  isWmsLoginConfigured,
   parseExtraHeaders,
 }

@@ -227,15 +227,32 @@ function clearWmsSessionCache() {
   wmsSessionCache = { cookie: '', expiresAt: 0 }
 }
 
-async function wmsUserLoginFromEnvUncached() {
-  const passwd = getWmsHttpPasswordForLogin()
-  if (!WMS_HTTP_USER || !passwd) {
+function assertWmsLoginEnvConfigured() {
+  if (!isWmsHttpConfigured()) {
+    const err = new Error('未配置 WMS_HTTP_BASE_URL（如 https://wms.2000gallery.art）')
+    err.code = 'WMS_HTTP_NOT_CONFIGURED'
+    throw err
+  }
+  if (!WMS_HTTP_USER) {
     const err = new Error(
-      'wmsUserLoginFromEnv 需要 WMS_HTTP_USER 与 WMS_HTTP_PASSWORD（或 WMS_HTTP_PASSWORD_B64）'
+      '未配置 WMS_HTTP_USER（须与 WMS 登录框一致，如 zhibei@2000gallery.art）'
     )
     err.code = 'WMS_HTTP_BAD_REQUEST'
     throw err
   }
+  const passwd = getWmsHttpPasswordForLogin()
+  if (!passwd) {
+    const err = new Error(
+      '未配置 WMS_HTTP_PASSWORD 或 WMS_HTTP_PASSWORD_B64（密码含 ! 等请用双引号或 B64）'
+    )
+    err.code = 'WMS_HTTP_BAD_REQUEST'
+    throw err
+  }
+}
+
+async function wmsUserLoginFromEnvUncached() {
+  assertWmsLoginEnvConfigured()
+  const passwd = getWmsHttpPasswordForLogin()
   const fromEnvCookie = String(WMS_HTTP_COOKIE || '').trim()
   const preCookie = fromEnvCookie || (await wmsWarmLoginSessionCookie())
   const vcode = String(WMS_HTTP_VCODE || '').trim()
@@ -449,6 +466,7 @@ module.exports = {
   wmsRequest,
   wmsUserLogin,
   wmsUserLoginFromEnv,
+  assertWmsLoginEnvConfigured,
   clearWmsSessionCache,
   wmsWarmLoginSessionCookie,
   wmsRbWebJsonPost,
