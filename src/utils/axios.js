@@ -9,7 +9,7 @@ const logHttpDebug =
 
 /**
  * 默认导出为已配置 baseURL、拦截器与 withCredentials 的实例。
- * 在组件中推荐：`const { api } = useApi()`（@/composables/use-api.js）或 `import api from '@/utils/axios'`。
+ * 在组件中推荐：`import api from '@/utils/axios'`。
  */
 const instance = axios.create({
   baseURL: getApiClientBaseUrl(),

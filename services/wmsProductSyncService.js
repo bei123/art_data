@@ -373,22 +373,25 @@ async function syncFromWmsAdmin(body) {
 
   try {
     const { sessionCookie, response: loginRes } = await wmsUserLoginFromEnv()
-    if (loginRes.status < 200 || loginRes.status >= 300) {
-      return adminResult(502, { error: 'WMS 登录 HTTP 失败', status: loginRes.status })
-    }
-    const loginBody = loginRes.data
-    if (!loginBody || loginBody.error_code !== 0) {
-      const wmsMsg = (loginBody && loginBody.error_msg) || '未知'
-      const baseHint =
-        '请核对 .env 的 WMS_HTTP_USER、WMS_HTTP_PASSWORD；密码含 # 等请用双引号包裹整段，或改用 WMS_HTTP_PASSWORD_B64（UTF-8 明文 base64）；账号须与网页登录框一致。'
-      const vcodeHint =
-        wmsMsg === 'VCODE'
-          ? ' 若站点开启图形验证码：在 .env 中设置 WMS_HTTP_VCODE（与登录页图片一致），或设置 WMS_HTTP_COOKIE（从已打开 /user/login 的浏览器复制整段 Cookie，须含 RBSESSION）；服务端已自动 GET /user/login 预热会话。'
-          : ''
-      return adminResult(502, {
-        error: `WMS 登录失败：${wmsMsg}。${baseHint}${vcodeHint}`,
-        error_msg: loginBody && loginBody.error_msg,
-      })
+    // 命中会话缓存时 loginRes 为 null，仅校验 cookie，勿读 loginRes.status
+    if (loginRes) {
+      if (loginRes.status < 200 || loginRes.status >= 300) {
+        return adminResult(502, { error: 'WMS 登录 HTTP 失败', status: loginRes.status })
+      }
+      const loginBody = loginRes.data
+      if (!loginBody || loginBody.error_code !== 0) {
+        const wmsMsg = (loginBody && loginBody.error_msg) || '未知'
+        const baseHint =
+          '请核对 .env 的 WMS_HTTP_USER、WMS_HTTP_PASSWORD；密码含 # 等请用双引号包裹整段，或改用 WMS_HTTP_PASSWORD_B64（UTF-8 明文 base64）；账号须与网页登录框一致。'
+        const vcodeHint =
+          wmsMsg === 'VCODE'
+            ? ' 若站点开启图形验证码：在 .env 中设置 WMS_HTTP_VCODE（与登录页图片一致），或设置 WMS_HTTP_COOKIE（从已打开 /user/login 的浏览器复制整段 Cookie，须含 RBSESSION）；服务端已自动 GET /user/login 预热会话。'
+            : ''
+        return adminResult(502, {
+          error: `WMS 登录失败：${wmsMsg}。${baseHint}${vcodeHint}`,
+          error_msg: loginBody && loginBody.error_msg,
+        })
+      }
     }
     const cookie = sessionCookie || ''
     if (!cookie) {

@@ -14,8 +14,6 @@ export default [
       'ssl/**',
       '**/.cursor/**',
       'package-lock.json',
-      // 本地草稿/片段脚本，不参与规范门禁
-      'upgrade_image_upload.js',
     ],
   },
 

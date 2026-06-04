@@ -48,6 +48,17 @@ const {
 
 const app = express();
 
+/** 反向代理（宝塔/Nginx）会带 X-Forwarded-For；须开启 trust proxy 供限流与 req.ip 正确 */
+function resolveTrustProxy() {
+  const raw = String(process.env.TRUST_PROXY ?? '1').trim().toLowerCase();
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  if (raw === 'true') return true;
+  const n = parseInt(raw, 10);
+  if (!Number.isNaN(n)) return n;
+  return 1;
+}
+app.set('trust proxy', resolveTrustProxy());
+
 // 微信支付回调接口必须用原始body字符串
 app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/pay/refund/notify', express.raw({ type: 'application/json' }));
