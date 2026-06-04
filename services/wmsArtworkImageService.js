@@ -6,7 +6,7 @@ const path = require('path')
 const db = require('../db')
 const logger = require('../utils/logger')
 const { uploadToOSS } = require('../config/oss')
-const { bufferToWebpLimit5MB } = require('../utils/imageWebp')
+const { bufferToWebpLimit5MB, buildQualityStepsFromStart } = require('../utils/imageWebp')
 const { validatePublicImageUrl } = require('../config/publicEnv')
 const {
   WMS_HTTP_BASE_URL,
@@ -15,6 +15,7 @@ const {
   WMS_IMAGE_CDN_ORIGIN,
   WMS_IMAGE_VIEW_PARAMS,
   WMS_IMAGE_PREVIEW_VIEW_PARAMS,
+  WMS_APPLY_WEBP_QUALITY,
 } = require('../config/wmsHttp')
 const { isQiniuWmsConfigured, signQiniuPrivateImageUrl } = require('../config/qiniuWms')
 const {
@@ -106,6 +107,13 @@ function cdnOrigin() {
   const base = String(WMS_IMAGE_CDN_ORIGIN || '').trim()
   if (!base) return ''
   return base.startsWith('http') ? base.replace(/\/+$/, '') : `http://${base.replace(/\/+$/, '')}`
+}
+
+/** 采用仓库图：默认拉原图；preview 仍用缩略图样式 */
+function resolveFullImageViewParams() {
+  const raw = String(WMS_IMAGE_VIEW_PARAMS || '').trim()
+  if (!raw || /^(original|none|raw)$/i.test(raw)) return ''
+  return raw
 }
 
 function isAbsoluteImageUrl(raw) {
@@ -480,7 +488,7 @@ async function fetchViaWmsFilexRead(cookie, relativePath) {
 /** 七牛 AK/SK 自签：先 imageView2 再 e/token（见七牛私有空间带样式授权文档） */
 async function fetchViaQiniuSigned(relativePath, variant) {
   const viewParams =
-    variant === 'preview' ? WMS_IMAGE_PREVIEW_VIEW_PARAMS : WMS_IMAGE_VIEW_PARAMS
+    variant === 'preview' ? WMS_IMAGE_PREVIEW_VIEW_PARAMS : resolveFullImageViewParams()
   const signed = signQiniuPrivateImageUrl(relativePath, viewParams)
   if (!signed) {
     const err = new Error('七牛签名未配置或路径无效')
@@ -818,7 +826,10 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
       })
 
       const webpStarted = Date.now()
-      const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`)
+      const webpFile = await bufferToWebpLimit5MB(buffer, `wms-${id}`, {
+        qualitySteps: buildQualityStepsFromStart(WMS_APPLY_WEBP_QUALITY),
+        webpEffort: 4,
+      })
       logger.info('apply_wms_image_webp_done', {
         id,
         bytes: webpFile?.size,
@@ -841,7 +852,7 @@ async function applyWmsImageToArtworkAdmin(artworkId, body) {
       logger.info('apply_wms_image_done', { id, index, rel, total_ms: Date.now() - startedAt })
 
       return adminResult(200, {
-        message: '已采用仓库图片（WebP 压缩）并发布到 OSS',
+        message: '已采用仓库原图（高质量 WebP）并发布到 OSS',
         image: upload.url,
         wms_path: rel,
       })

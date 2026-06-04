@@ -45,14 +45,20 @@ const WMS_IMAGE_CDN_ORIGIN = trimSlash(process.env.WMS_IMAGE_CDN_ORIGIN || 'http
  * QINIU_ACCESS_KEY / QINIU_SECRET_KEY — 必填才启用自签
  * QINIU_PRIVATE_URL_EXPIRES_SEC — 签名有效期秒数，默认 3600
  */
-/** 采用仓库图：七牛原图/高质量（w/0） */
-const WMS_IMAGE_VIEW_PARAMS = String(
-  process.env.WMS_IMAGE_VIEW_PARAMS || 'imageView2/2/w/0/interlace/1/q/100'
-).trim()
-/** 管理端预览代理：缩略图，减轻带宽与内存（与 WMS 列表 w/100 接近，略大以便辨认） */
+/**
+ * 采用仓库图时七牛 imageView2 参数。默认空字符串 = 拉取桶内原图（不经 imageView2 二次压缩）。
+ * 可设为 imageView2/2/w/0/interlace/1/q/100；设为 original/none/raw 同空字符串。
+ */
+const WMS_IMAGE_VIEW_PARAMS = String(process.env.WMS_IMAGE_VIEW_PARAMS ?? '').trim()
+/** 管理端预览代理：缩略图，减轻带宽与内存 */
 const WMS_IMAGE_PREVIEW_VIEW_PARAMS = String(
-  process.env.WMS_IMAGE_PREVIEW_VIEW_PARAMS || 'imageView2/2/w/400/interlace/1/q/85'
+  process.env.WMS_IMAGE_PREVIEW_VIEW_PARAMS || 'imageView2/2/w/640/interlace/1/q/90'
 ).trim()
+/** 采用仓库图转 WebP 的起始质量（1–100），不足 5MB 时再逐步降低 */
+const WMS_APPLY_WEBP_QUALITY = Math.min(
+  100,
+  Math.max(70, parseInt(process.env.WMS_APPLY_WEBP_QUALITY || '92', 10) || 92)
+)
 /** 可选：JSON 字符串，合并进请求头，如 {"X-Api-Key":"xxx"} */
 const WMS_HTTP_EXTRA_HEADERS_JSON = String(process.env.WMS_HTTP_EXTRA_HEADERS_JSON || '').trim()
 /** 可选：登录 POST 使用的 Cookie（如从 DevTools 复制，须含 RBSESSION）；若设置则跳过自动 GET /user/login 预热 */
@@ -101,6 +107,7 @@ module.exports = {
   WMS_IMAGE_CDN_ORIGIN,
   WMS_IMAGE_VIEW_PARAMS,
   WMS_IMAGE_PREVIEW_VIEW_PARAMS,
+  WMS_APPLY_WEBP_QUALITY,
   WMS_HTTP_EXTRA_HEADERS_JSON,
   WMS_HTTP_COOKIE,
   WMS_HTTP_VCODE,
