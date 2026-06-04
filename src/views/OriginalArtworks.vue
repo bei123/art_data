@@ -1681,6 +1681,18 @@ function resolveWmsSyncRequestBody() {
   return { maxPages, pageSize, detailConcurrency }
 }
 
+/** 从 WMS 同步：分页列表 + 并发详情，远超默认 30s */
+function wmsSyncClientTimeoutMs(body) {
+  const maxPages = Math.min(500, Math.max(1, Number(body?.maxPages) || 20))
+  const pageSize = Math.min(100, Math.max(1, Number(body?.pageSize) || 20))
+  const detailConcurrency = Math.min(10, Math.max(1, Number(body?.detailConcurrency) || 3))
+  const maxRecords = maxPages * pageSize
+  const ms = Math.ceil(
+    maxPages * 8000 + (maxRecords / detailConcurrency) * 12000 + 30000
+  )
+  return Math.min(900000, Math.max(120000, ms))
+}
+
 const openWmsSyncDialog = () => {
   if (!checkLoginStatus() || !isAdmin.value) return
   wmsSyncDialogOpen.value = true
@@ -1695,7 +1707,10 @@ const confirmSyncFromWms = async () => {
   wmsSyncDetailConcurrency.value = body.detailConcurrency
   wmsSyncing.value = true
   try {
-    const data = await axios.post('/original-artworks/admin/sync-from-wms', body)
+    const data = await axios.post('/original-artworks/admin/sync-from-wms', body, {
+      timeout: wmsSyncClientTimeoutMs(body),
+      skipGlobalError: true,
+    })
     const s = data?.stats
     if (s) {
       const artistHint =
@@ -1716,6 +1731,12 @@ const confirmSyncFromWms = async () => {
     await fetchArtworks()
   } catch (e) {
     if (import.meta.env.DEV) console.error('WMS 同步失败', e?.response?.data || e)
+    if (e?.code === 'ECONNABORTED') {
+      ElMessage.warning(
+        '同步请求已超时，后台可能仍在执行，请稍后刷新列表查看结果'
+      )
+      return
+    }
     const msg = e?.response?.data?.error || e?.message || '同步失败'
     ElMessage.error(typeof msg === 'string' ? msg : '同步失败')
   } finally {
