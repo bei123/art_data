@@ -982,7 +982,7 @@ async function handleDigitalQrUpload(item, event) {
     const formData = new FormData()
     formData.append('file', processedFile)
 
-    const uploadRes = await axios.post('/api/upload', formData, {
+    const uploadRes = await axios.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     const uploadedUrl = uploadRes?.url

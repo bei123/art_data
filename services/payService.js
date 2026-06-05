@@ -3309,6 +3309,72 @@ function isValidQrCodeUrl(raw) {
     return /^https?:\/\//i.test(url);
 }
 
+async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return null;
+
+    try {
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const nonceStr = generateNonceStr();
+        const method = 'GET';
+        const pathUrl = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}?mchid=${WX_PAY_CONFIG.mchId}`;
+        const signature = generateSignV3(method, pathUrl, timestamp, nonceStr, '');
+        const response = await axios.get(
+            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}?mchid=${WX_PAY_CONFIG.mchId}`,
+            {
+                headers: {
+                    Accept: 'application/json',
+                    Authorization: `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
+                    'User-Agent': 'axios/1.9.0',
+                },
+                timeout: 15000,
+            }
+        );
+        if (response.status === 200) return response.data;
+    } catch (err) {
+        logger.warn('查询微信支付单失败', { err: err.message, out_trade_no: cleanOutTradeNo });
+    }
+    return null;
+}
+
+async function resolveEffectiveOrderTradeState(orderRow, options = {}) {
+    const syncOnSuccess = options.syncOnSuccess === true;
+    const dbState = orderRow?.trade_state || null;
+    if (dbState === 'SUCCESS' || dbState === 'REFUND') return dbState;
+
+    const wxPay = await fetchWxPayOrderByOutTradeNo(orderRow?.out_trade_no);
+    const wxState = wxPay?.trade_state || null;
+    if (!wxState) return dbState;
+
+    if (
+        syncOnSuccess
+        && wxState === 'SUCCESS'
+        && dbState !== 'REFUND'
+        && orderRow?.id
+    ) {
+        await db.query(
+            `UPDATE orders SET
+                transaction_id = ?,
+                trade_type = ?,
+                trade_state = ?,
+                trade_state_desc = ?,
+                success_time = ?
+             WHERE id = ? AND trade_state != 'REFUND'`,
+            [
+                wxPay.transaction_id || orderRow.transaction_id || null,
+                wxPay.trade_type || orderRow.trade_type || null,
+                wxState,
+                wxPay.trade_state_desc || orderRow.trade_state_desc || null,
+                wxPay.success_time ? formatWechatTime(wxPay.success_time) : orderRow.success_time || null,
+                orderRow.id,
+            ]
+        );
+    }
+
+    return wxState;
+}
+
 async function uploadDigitalItemQrCode(req) {
     try {
         await ensureOrderItemsQrCodeColumns();
@@ -3330,13 +3396,16 @@ async function uploadDigitalItemQrCode(req) {
         const cleanUrl = String(qrCodeUrl).trim();
 
         const [orders] = await db.query(
-            'SELECT id, trade_state FROM orders WHERE id = ? LIMIT 1',
+            `SELECT id, out_trade_no, transaction_id, trade_type, trade_state, trade_state_desc, success_time
+             FROM orders WHERE id = ? LIMIT 1`,
             [orderId]
         );
         if (!orders.length) {
             return adminResult(404, { success: false, error: '订单不存在' });
         }
-        if (orders[0].trade_state !== 'SUCCESS') {
+
+        const effectiveTradeState = await resolveEffectiveOrderTradeState(orders[0], { syncOnSuccess: true });
+        if (effectiveTradeState !== 'SUCCESS') {
             return adminResult(400, { success: false, error: '仅支付成功的订单可上传交付二维码' });
         }
 
