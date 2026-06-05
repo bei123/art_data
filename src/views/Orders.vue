@@ -340,6 +340,61 @@
                   <div v-else class="mt-4 rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                     无地址信息
                   </div>
+                  <div
+                    v-if="item.type === 'digital'"
+                    class="mt-4 rounded-lg border border-border bg-muted/10 p-4"
+                  >
+                    <div class="mb-2 text-sm font-medium text-foreground">
+                      数字藏品交付二维码
+                    </div>
+                    <p class="mb-3 text-xs text-muted-foreground leading-relaxed">
+                      用户微信支付成功后，请上传藏品领取二维码；保存后用户可在订单详情与购买记录中查看。
+                    </p>
+                    <div v-if="!isOrderPaid(selectedOrder)" class="text-sm text-muted-foreground">
+                      订单尚未支付成功，暂不可上传。
+                    </div>
+                    <template v-else>
+                      <div v-if="item.qr_code_url || item.delivery_qr_code_url" class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+                        <div class="size-28 shrink-0 overflow-hidden rounded-md border border-border bg-background p-1">
+                          <img
+                            :src="getImageUrl(item.qr_code_url || item.delivery_qr_code_url)"
+                            alt="已上传的交付二维码"
+                            class="size-full object-contain"
+                          >
+                        </div>
+                        <div class="text-xs text-muted-foreground">
+                          <div>已上传</div>
+                          <div v-if="item.qr_code_uploaded_at || item.delivery_qr_code_at" class="mt-1 tabular-nums">
+                            {{ item.qr_code_uploaded_at || item.delivery_qr_code_at }}
+                          </div>
+                        </div>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <input
+                          :id="`qr-upload-${item.id}`"
+                          type="file"
+                          accept="image/*"
+                          class="sr-only"
+                          :disabled="qrUploadingItemId === item.id"
+                          @change="(e) => handleDigitalQrUpload(item, e)"
+                        >
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          :disabled="qrUploadingItemId === item.id"
+                          @click="triggerQrFileInput(item.id)"
+                        >
+                          <Loader2
+                            v-if="qrUploadingItemId === item.id"
+                            class="mr-1.5 size-3.5 animate-spin"
+                            aria-hidden="true"
+                          />
+                          {{ item.qr_code_url || item.delivery_qr_code_url ? '重新上传二维码' : '上传二维码' }}
+                        </Button>
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </div>
             </div>
@@ -678,6 +733,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const WAYBILL_STORAGE_KEY = 'admin_orders_last_waybill_v1'
 const LOGISTICS_BIZ_ID_CASH = 'SF_CASH'
@@ -687,6 +743,7 @@ const loading = ref(false)
 const listError = ref('')
 const detailDialogVisible = ref(false)
 const selectedOrder = ref(null)
+const qrUploadingItemId = ref(null)
 
 const deliveryList = ref([])
 const shipDialogVisible = ref(false)
@@ -871,6 +928,93 @@ function isOrderLogisticsEligible(order) {
   const state = order.pay_status?.trade_state || order.trade_state
   if (state !== 'SUCCESS') return false
   return order.items.some((it) => it.type === 'right' || it.type === 'artwork')
+}
+
+function isOrderPaid(order) {
+  if (!order) return false
+  const state = order.pay_status?.trade_state || order.trade_state
+  return state === 'SUCCESS'
+}
+
+function triggerQrFileInput(itemId) {
+  const input = document.getElementById(`qr-upload-${itemId}`)
+  if (input) input.click()
+}
+
+function syncOrderItemQrCode(orderId, itemId, payload) {
+  const patchItem = (item) => {
+    if (!item || item.id !== itemId) return item
+    return {
+      ...item,
+      qr_code_url: payload.qr_code_url,
+      delivery_qr_code_url: payload.qr_code_url,
+      qr_code_uploaded_at: payload.qr_code_uploaded_at,
+      delivery_qr_code_at: payload.qr_code_uploaded_at,
+      fulfillment: payload.fulfillment || item.fulfillment,
+    }
+  }
+
+  if (selectedOrder.value && selectedOrder.value.id === orderId && Array.isArray(selectedOrder.value.items)) {
+    selectedOrder.value = {
+      ...selectedOrder.value,
+      items: selectedOrder.value.items.map(patchItem),
+    }
+  }
+
+  orders.value = orders.value.map((order) => {
+    if (order.id !== orderId || !Array.isArray(order.items)) return order
+    return {
+      ...order,
+      items: order.items.map(patchItem),
+    }
+  })
+}
+
+async function handleDigitalQrUpload(item, event) {
+  const file = event?.target?.files?.[0]
+  if (!file || !selectedOrder.value || !item?.id) return
+
+  qrUploadingItemId.value = item.id
+  try {
+    const processedFile = await uploadImageToWebpLimit5MB(file)
+    if (!processedFile) return
+
+    const formData = new FormData()
+    formData.append('file', processedFile)
+
+    const uploadRes = await axios.post('/api/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    const uploadedUrl = uploadRes?.url
+    if (!uploadedUrl) {
+      ElMessage.error('图片上传失败')
+      return
+    }
+
+    const saveRes = await axios.patch(
+      `/wx/pay/admin/orders/${selectedOrder.value.id}/items/${item.id}/qr-code`,
+      { qr_code_url: uploadedUrl }
+    )
+
+    if (!saveRes?.success) {
+      ElMessage.error(saveRes?.error || '保存二维码失败')
+      return
+    }
+
+    const saved = saveRes.data || {}
+    syncOrderItemQrCode(selectedOrder.value.id, item.id, {
+      qr_code_url: saved.qr_code_url,
+      qr_code_uploaded_at: saved.qr_code_uploaded_at,
+      fulfillment: saved.fulfillment,
+    })
+    ElMessage.success('二维码已保存，用户可在订单中查看')
+  } catch (error) {
+    console.error('上传数字藏品二维码失败:', error)
+    ElMessage.error(error.response?.data?.error || '上传二维码失败')
+  } finally {
+    qrUploadingItemId.value = null
+    if (event?.target) event.target.value = ''
+  }
 }
 
 const serviceTypeOptions = computed(() => {

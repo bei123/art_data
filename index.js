@@ -39,6 +39,7 @@ const homeTitlesRouter = require('./routes/home-titles');
 const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
+const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const {
   applyCorsHeaders,
@@ -289,18 +290,37 @@ app.get(
       return res.status(access.status).json({ error: access.error })
     }
     try {
+      await ensureOrderItemsQrCodeColumns()
+
       const [purchases] = await db.query(`
       SELECT 
         dip.*,
         da.title as artwork_title,
-        da.image_url as artwork_image
+        da.image_url as artwork_image,
+        o.trade_state as order_trade_state,
+        oi.delivery_qr_code_url,
+        oi.delivery_qr_code_at
       FROM digital_identity_purchases dip
       JOIN digital_artworks da ON dip.digital_artwork_id = da.id
+      LEFT JOIN orders o ON dip.order_id = o.id
+      LEFT JOIN order_items oi ON oi.order_id = dip.order_id
+        AND oi.type = 'digital'
+        AND oi.digital_artwork_id = dip.digital_artwork_id
       WHERE dip.user_id = ?
       ORDER BY dip.purchase_date DESC
     `, [access.userId])
 
-      res.json(purchases)
+      const result = (purchases || []).map((row) => {
+        const isPaid = row.order_trade_state === 'SUCCESS'
+        const qrCodeUrl = isPaid && row.delivery_qr_code_url ? row.delivery_qr_code_url : null
+        return {
+          ...row,
+          qr_code_url: qrCodeUrl,
+          qr_code_uploaded_at: qrCodeUrl ? row.delivery_qr_code_at : null,
+        }
+      })
+
+      res.json(result)
     } catch (error) {
       console.error('获取数字身份购买记录失败:', error)
       res.status(500).json({ error: '获取数字身份购买记录失败' })
@@ -334,6 +354,11 @@ app.use('/api/original-artworks', artworksRouter);
 
 // 使用数字艺术品路由
 app.use('/api/digital-artworks', digitalArtworksRouter);
+
+// 确保订单项交付二维码字段存在
+ensureOrderItemsQrCodeColumns().catch((err) => {
+  logger.warn('order_items qr code columns ensure failed', { err: err.message });
+});
 
 // 定时同步外部数字艺术品到缓存表（用于列表/影藏展示）
 startDigitalArtworksSync();

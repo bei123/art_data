@@ -14,6 +14,7 @@ const redisClient = require('../utils/redisClient');
 const LOCK_EXPIRE = 30; // 30秒
 const CALLBACK_EXPIRE = 600; // 10分钟
 const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
+const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 
@@ -1780,6 +1781,8 @@ async function queryOrder(req) {
 
 async function listOrders(req) {
     try {
+        await ensureOrderItemsQrCodeColumns();
+
         const {
             user_id,
             status,
@@ -1913,6 +1916,8 @@ async function listOrders(req) {
                         oi.quantity,
                         oi.price,
                         oi.address_id,
+                        oi.delivery_qr_code_url,
+                        oi.delivery_qr_code_at,
                         r.title as right_title,
                         r.price as right_price,
                         r.original_price as right_original_price,
@@ -1957,6 +1962,7 @@ async function listOrders(req) {
                     quantity: item.quantity,
                     price: item.price,
                     address_id: item.address_id,
+                    ...mapDigitalItemQrFields(item),
                     address: item.address_id ? {
                         id: item.address_id,
                         receiver_name: item.receiver_name,
@@ -1982,11 +1988,17 @@ async function listOrders(req) {
                         images: item.right_image_url ? [item.right_image_url] : []
                     };
                 } else if (item.type === 'digital') {
+                    const digitalFulfillment = buildDigitalItemFulfillment({
+                        tradeState: order.trade_state,
+                        qrCodeUrl: item.delivery_qr_code_url,
+                        qrCodeAt: item.delivery_qr_code_at,
+                    });
                     processedItem = {
                         ...processedItem,
                         title: item.digital_title,
                         description: item.digital_description,
-                        images: item.digital_image_url ? [item.digital_image_url] : []
+                        images: item.digital_image_url ? [item.digital_image_url] : [],
+                        fulfillment: digitalFulfillment,
                     };
                 } else if (item.type === 'artwork') {
                     processedItem = {
@@ -2112,6 +2124,8 @@ async function listOrders(req) {
 
 async function digitalIdentityPurchases(req) {
     try {
+        await ensureOrderItemsQrCodeColumns();
+
         // 输入验证
         const userId = req.params.user_id;
         if (!userId || isNaN(parseInt(userId)) || parseInt(userId) <= 0) {
@@ -2130,15 +2144,46 @@ async function digitalIdentityPurchases(req) {
                  dip.order_id,
                  da.title as artwork_title,
                  da.image_url as artwork_image,
-                 o.out_trade_no as order_no
+                 o.out_trade_no as order_no,
+                 o.trade_state as order_trade_state,
+                 oi.id as order_item_id,
+                 oi.delivery_qr_code_url,
+                 oi.delivery_qr_code_at
              FROM digital_identity_purchases dip
              JOIN digital_artworks da ON dip.digital_artwork_id = da.id
              LEFT JOIN orders o ON dip.order_id = o.id
+             LEFT JOIN order_items oi ON oi.order_id = dip.order_id
+               AND oi.type = 'digital'
+               AND oi.digital_artwork_id = dip.digital_artwork_id
              WHERE dip.user_id = ?
              ORDER BY dip.purchase_date DESC
          `, [cleanUserId]);
 
-        return adminResult(200, purchases);
+        const result = (purchases || []).map((row) => {
+            const fulfillment = buildDigitalItemFulfillment({
+                tradeState: row.order_trade_state,
+                qrCodeUrl: row.delivery_qr_code_url,
+                qrCodeAt: row.delivery_qr_code_at,
+            });
+            return {
+                id: row.id,
+                user_id: row.user_id,
+                digital_artwork_id: row.digital_artwork_id,
+                discount_amount: row.discount_amount,
+                purchase_date: row.purchase_date,
+                order_id: row.order_id,
+                order_item_id: row.order_item_id,
+                artwork_title: row.artwork_title,
+                artwork_image: row.artwork_image,
+                order_no: row.order_no,
+                qr_code_url: fulfillment.qr_code_url,
+                qr_code_uploaded_at: fulfillment.qr_code_uploaded_at,
+                fulfillment_status: fulfillment.status,
+                fulfillment_hint: fulfillment.hint,
+            };
+        });
+
+        return adminResult(200, result);
     } catch (error) {
         logger.error('获取数字身份购买记录失败', { err: error });
         return adminResult(500, { error: '获取数字身份购买记录失败' });
@@ -2155,6 +2200,8 @@ function sanitizeOrderSearchKeyword(raw) {
 
 async function adminOrders(req) {
     try {
+        await ensureOrderItemsQrCodeColumns();
+
         const {
             status,
             type,
@@ -2252,6 +2299,8 @@ async function adminOrders(req) {
                      oi.quantity,
                      oi.price,
                      oi.address_id,
+                     oi.delivery_qr_code_url,
+                     oi.delivery_qr_code_at,
                      r.title as right_title,
                      r.price as right_price,
                      r.original_price as right_original_price,
@@ -2296,6 +2345,7 @@ async function adminOrders(req) {
                     quantity: item.quantity,
                     price: item.price,
                     address_id: item.address_id,
+                    ...mapDigitalItemQrFields(item),
                     address: item.address_id ? {
                         id: item.address_id,
                         receiver_name: item.receiver_name,
@@ -2321,11 +2371,17 @@ async function adminOrders(req) {
                         images: item.right_image_url ? [item.right_image_url] : []
                     };
                 } else if (item.type === 'digital') {
+                    const digitalFulfillment = buildDigitalItemFulfillment({
+                        tradeState: order.trade_state,
+                        qrCodeUrl: item.delivery_qr_code_url,
+                        qrCodeAt: item.delivery_qr_code_at,
+                    });
                     processedItem = {
                         ...processedItem,
                         title: item.digital_title,
                         description: item.digital_description,
-                        images: item.digital_image_url ? [item.digital_image_url] : []
+                        images: item.digital_image_url ? [item.digital_image_url] : [],
+                        fulfillment: digitalFulfillment,
                     };
                 } else if (item.type === 'artwork') {
                     processedItem = {
@@ -2691,6 +2747,36 @@ function mapShipmentRowFromDb(row) {
     };
 }
 
+function buildDigitalItemFulfillment({ tradeState, qrCodeUrl, qrCodeAt }) {
+    const isPaid = tradeState === 'SUCCESS';
+    const hasQrCode = Boolean(qrCodeUrl && String(qrCodeUrl).trim());
+    let status = 'awaiting_payment';
+    if (isPaid) status = hasQrCode ? 'delivered' : 'awaiting_qr_code';
+
+    let hint = '支付成功后，管理员将上传藏品二维码。';
+    if (isPaid && hasQrCode) hint = '请使用下方二维码完成数字藏品领取。';
+    else if (isPaid) hint = '支付成功，管理员正在准备交付二维码，请稍后查看。';
+
+    return {
+        type: 'digital_qr_code',
+        status,
+        qr_code_url: isPaid && hasQrCode ? String(qrCodeUrl).trim() : null,
+        qr_code_uploaded_at: hasQrCode ? toIsoOrNull(qrCodeAt) : null,
+        hint,
+    };
+}
+
+function mapDigitalItemQrFields(itemRow) {
+    const qrCodeUrl = itemRow.delivery_qr_code_url || null;
+    const qrCodeAt = itemRow.delivery_qr_code_at || null;
+    return {
+        delivery_qr_code_url: qrCodeUrl,
+        delivery_qr_code_at: toIsoOrNull(qrCodeAt),
+        qr_code_url: qrCodeUrl,
+        qr_code_uploaded_at: toIsoOrNull(qrCodeAt),
+    };
+}
+
 function mapShipmentsForBuyer(shipments) {
     if (!Array.isArray(shipments)) return [];
     return shipments.map((s) => {
@@ -2757,6 +2843,8 @@ function buildPhysicalItemLogistics(primaryShipment, includeWechatPath, options 
  * 订单详情：admin 用库表主键 id；buyer 用商户订单号 out_trade_no + 本人 user_id（小程序/H5）
  */
 async function orderDetailForActor(req, options = {}) {
+    await ensureOrderItemsQrCodeColumns();
+
     const mode = options.mode === 'buyer' ? 'buyer' : 'admin';
 
     let buyerId = null;
@@ -2867,6 +2955,8 @@ async function orderDetailForActor(req, options = {}) {
                 oi.quantity,
                 oi.price,
                 oi.address_id,
+                oi.delivery_qr_code_url,
+                oi.delivery_qr_code_at,
                 r.title AS right_title,
                 r.description AS right_description,
                 (SELECT ri.image_url FROM right_images ri WHERE ri.right_id = oi.right_id ORDER BY ri.id ASC LIMIT 1) AS right_image_url,
@@ -2942,10 +3032,13 @@ async function orderDetailForActor(req, options = {}) {
                 images = row.artwork_image ? [row.artwork_image] : [];
             }
 
-            const digital_view_hint =
-                row.type === 'digital'
-                    ? '数字权益/藏品：用户支付成功后可在小程序「我的」或订单相关入口查看（具体以小程序页面为准）。'
-                    : null;
+            const digitalFulfillment = row.type === 'digital'
+                ? buildDigitalItemFulfillment({
+                    tradeState: order.trade_state,
+                    qrCodeUrl: row.delivery_qr_code_url,
+                    qrCodeAt: row.delivery_qr_code_at,
+                })
+                : null;
 
             const logisticsPayload = row.type === 'right' || row.type === 'artwork'
                 ? buildPhysicalItemLogistics(primaryShipment, includeWechatPath, { audience: mode })
@@ -2953,6 +3046,7 @@ async function orderDetailForActor(req, options = {}) {
 
             return {
                 ...base,
+                ...mapDigitalItemQrFields(row),
                 business_ids: {
                     right_id: row.right_id != null ? row.right_id : null,
                     digital_artwork_id: row.digital_artwork_id != null ? row.digital_artwork_id : null,
@@ -2965,7 +3059,7 @@ async function orderDetailForActor(req, options = {}) {
                 fulfillment: {
                     address_snapshot: addressSnapshot,
                     logistics: logisticsPayload,
-                    digital_view_hint,
+                    digital: digitalFulfillment,
                 },
             };
         });
@@ -3187,6 +3281,87 @@ async function buyerOrderDetail(req) {
     return orderDetailForActor(req, { mode: 'buyer' });
 }
 
+function isValidQrCodeUrl(raw) {
+    if (raw == null || typeof raw !== 'string') return false;
+    const url = raw.trim();
+    if (!url || url.length > 512) return false;
+    return /^https?:\/\//i.test(url);
+}
+
+async function uploadDigitalItemQrCode(req) {
+    try {
+        await ensureOrderItemsQrCodeColumns();
+
+        const orderId = parseInt(String(req.params.orderId), 10);
+        const itemId = parseInt(String(req.params.itemId), 10);
+        const { qr_code_url: qrCodeUrl } = req.body || {};
+
+        if (!orderId || Number.isNaN(orderId) || orderId <= 0) {
+            return adminResult(400, { success: false, error: '无效的订单 ID' });
+        }
+        if (!itemId || Number.isNaN(itemId) || itemId <= 0) {
+            return adminResult(400, { success: false, error: '无效的订单项 ID' });
+        }
+        if (!isValidQrCodeUrl(qrCodeUrl)) {
+            return adminResult(400, { success: false, error: '请提供有效的二维码图片 URL（http/https）' });
+        }
+
+        const cleanUrl = String(qrCodeUrl).trim();
+
+        const [orders] = await db.query(
+            'SELECT id, trade_state FROM orders WHERE id = ? LIMIT 1',
+            [orderId]
+        );
+        if (!orders.length) {
+            return adminResult(404, { success: false, error: '订单不存在' });
+        }
+        if (orders[0].trade_state !== 'SUCCESS') {
+            return adminResult(400, { success: false, error: '仅支付成功的订单可上传交付二维码' });
+        }
+
+        const [items] = await db.query(
+            `SELECT id, type, digital_artwork_id, delivery_qr_code_url
+             FROM order_items
+             WHERE id = ? AND order_id = ?
+             LIMIT 1`,
+            [itemId, orderId]
+        );
+        if (!items.length) {
+            return adminResult(404, { success: false, error: '订单项不存在' });
+        }
+        if (items[0].type !== 'digital') {
+            return adminResult(400, { success: false, error: '仅数字艺术品订单项支持上传二维码' });
+        }
+
+        await db.query(
+            'UPDATE order_items SET delivery_qr_code_url = ?, delivery_qr_code_at = NOW() WHERE id = ? AND order_id = ?',
+            [cleanUrl, itemId, orderId]
+        );
+
+        const fulfillment = buildDigitalItemFulfillment({
+            tradeState: 'SUCCESS',
+            qrCodeUrl: cleanUrl,
+            qrCodeAt: new Date(),
+        });
+
+        return adminResult(200, {
+            success: true,
+            message: '二维码已保存',
+            data: {
+                order_id: orderId,
+                order_item_id: itemId,
+                digital_artwork_id: items[0].digital_artwork_id,
+                qr_code_url: fulfillment.qr_code_url,
+                qr_code_uploaded_at: fulfillment.qr_code_uploaded_at,
+                fulfillment,
+            },
+        });
+    } catch (error) {
+        logger.error('上传数字艺术品交付二维码失败', { err: error });
+        return adminResult(500, { success: false, error: '上传二维码失败' });
+    }
+}
+
 module.exports = {
   unifiedOrder,
   singleOrder,
@@ -3205,5 +3380,6 @@ module.exports = {
   checkRepayable,
   adminOrderDetail,
   buyerOrderDetail,
+  uploadDigitalItemQrCode,
 };
 

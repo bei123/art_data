@@ -1,6 +1,7 @@
 const db = require('../db');
 const logger = require('../utils/logger');
 const { PUBLIC_API_BASE_URL: BASE_URL } = require('../config/publicEnv');
+const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -8,6 +9,8 @@ function adminResult(status, body) {
 
 async function getPurchasedProducts(userId) {
   try {
+    await ensureOrderItemsQrCodeColumns();
+
     const [orders] = await db.query(
       'SELECT id FROM orders WHERE user_id = ? AND trade_state = ? ORDER BY created_at DESC',
       [userId, 'SUCCESS']
@@ -26,6 +29,8 @@ async function getPurchasedProducts(userId) {
         oi.artwork_id,
         oi.quantity,
         oi.price,
+        oi.delivery_qr_code_url,
+        oi.delivery_qr_code_at,
         r.title as right_title,
         r.price as right_price,
         r.original_price as right_original_price,
@@ -79,6 +84,7 @@ async function getPurchasedProducts(userId) {
           images: item.right_image_url ? [item.right_image_url] : [],
         };
       } else if (item.type === 'digital') {
+        const qrCodeUrl = item.delivery_qr_code_url || null;
         product = {
           ...product,
           digital_id: item.digital_artwork_id,
@@ -92,6 +98,8 @@ async function getPurchasedProducts(userId) {
           title: item.digital_title,
           description: item.digital_description,
           images: item.digital_image_url ? [item.digital_image_url] : [],
+          qr_code_url: qrCodeUrl,
+          qr_code_uploaded_at: item.delivery_qr_code_at || null,
         };
       } else if (item.type === 'artwork') {
         product = {

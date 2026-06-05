@@ -170,6 +170,17 @@ router.get('/admin/orders/:id', authenticateToken, checkRole(['admin']), async (
   }
 });
 
+/** 管理端：为已支付数字艺术品订单项上传交付二维码 */
+router.patch('/admin/orders/:orderId/items/:itemId/qr-code', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const r = await svc.uploadDigitalItemQrCode(req);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('上传数字艺术品交付二维码失败', { err: e });
+    return res.status(500).json({ success: false, error: '上传二维码失败' });
+  }
+});
+
 router.get('/check-repayable', authenticateToken, async (req, res) => {
   try {
     const r = await svc.checkRepayable(req);

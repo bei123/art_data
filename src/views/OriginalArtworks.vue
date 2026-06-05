@@ -1731,19 +1731,17 @@ const confirmSyncFromWms = async () => {
     await fetchArtworks()
   } catch (e) {
     if (import.meta.env.DEV) console.error('WMS 同步失败', e?.response?.data || e)
-    if (e?.code === 'ECONNABORTED') {
+    const isClientDisconnect =
+      e?.code === 'ECONNABORTED' ||
+      e?.code === 'ERR_NETWORK' ||
+      e?.code === 'ERR_FAILED' ||
+      e?.message === 'Network Error' ||
+      (!e?.response && e?.request)
+    if (isClientDisconnect) {
+      wmsSyncDialogOpen.value = false
+      await fetchArtworks()
       ElMessage.warning(
-        '同步请求已超时，后台可能仍在执行，请稍后刷新列表查看结果'
-      )
-      return
-    }
-    if (!e?.response) {
-      const isNetwork =
-        e?.message === 'Network Error' || e?.code === 'ERR_NETWORK' || e?.code === 'ERR_FAILED'
-      ElMessage.error(
-        isNetwork
-          ? '同步请求未收到有效响应（多为 CDN/网关超时或 502/524，响应无 CORS 头）。请减小「最大页数」后重试，或让运维提高 api.wx 回源读超时（建议 ≥600s），参见 deploy/CDN-API-CORS.md'
-          : (e?.message || '同步失败')
+        '浏览器未收到完整响应（多为 CDN/网关提前断开），后台通常仍在同步或已完成。已刷新列表，请核对数据；若仍不全可稍后再点刷新。'
       )
       return
     }
