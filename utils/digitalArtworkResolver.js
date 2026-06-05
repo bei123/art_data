@@ -3,7 +3,16 @@ const logger = require('./logger')
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external'
 
+/** Wespace 同步落库的 price 单位为分；本地 digital_artworks 与支付接口使用元 */
+const WESPACE_PRICE_FEN_PER_YUAN = 100
+
 let idColumnsEnsured = false
+
+function normalizeWespacePriceToYuan(raw) {
+  const n = typeof raw === 'number' ? raw : parseFloat(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.round((n / WESPACE_PRICE_FEN_PER_YUAN) * 100) / 100
+}
 
 function parseDigitalArtworkId(raw) {
   if (raw === undefined || raw === null) return { error: '缺少有效的数字艺术品ID' }
@@ -45,7 +54,7 @@ function mapExternalRow(row) {
     source: 'external',
     id: String(row.id),
     title: row.title || null,
-    price: parseFloat(row.price),
+    price: normalizeWespacePriceToYuan(row.price),
     batch_quantity: null,
     is_hidden: row.is_hidden === 1 || row.is_hidden === true,
     lv3_goods_number: row.lv3_goods_number,
@@ -227,7 +236,7 @@ const DIGITAL_ITEM_JOIN_SQL = `
 
 const DIGITAL_ITEM_SELECT_SQL = `
   COALESCE(da.title, dae.title) AS digital_title,
-  COALESCE(da.price, dae.price) AS digital_price,
+  COALESCE(da.price, dae.price / ${WESPACE_PRICE_FEN_PER_YUAN}) AS digital_price,
   COALESCE(da.description, dae.description) AS digital_description,
   COALESCE(da.image_url, dae.image_url) AS digital_image_url,
   COALESCE(da.batch_quantity, dae.lv3_goods_number, dae.lv3_total_num) AS digital_batch_quantity
@@ -245,4 +254,6 @@ module.exports = {
   fetchDigitalArtworksByIds,
   adjustDigitalArtworkStock,
   ensureDigitalArtworkIdColumns,
+  normalizeWespacePriceToYuan,
+  WESPACE_PRICE_FEN_PER_YUAN,
 }

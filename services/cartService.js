@@ -8,6 +8,7 @@ const {
   hasEnoughDigitalStock,
   isDigitalArtworkPurchasable,
   ensureDigitalArtworkIdColumns,
+  normalizeWespacePriceToYuan,
 } = require('../utils/digitalArtworkResolver');
 
 function adminResult(status, body) {
@@ -105,7 +106,11 @@ async function getCartList(userId) {
           [externalIds]
         );
         externals.forEach((d) => {
-          digitalsMap[String(d.id)] = { ...digitalsMap[String(d.id)], ...d };
+          digitalsMap[String(d.id)] = {
+            ...digitalsMap[String(d.id)],
+            ...d,
+            price: normalizeWespacePriceToYuan(d.price),
+          };
           if (d.artist_id) digitalArtistIds.push(d.artist_id);
         });
       }

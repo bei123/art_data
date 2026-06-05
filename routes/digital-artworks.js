@@ -10,6 +10,7 @@ const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
 const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
 const { ensureShowPurchaseLinkColumnReady } = require('../utils/digitalArtworksSync');
+const { normalizeWespacePriceToYuan } = require('../utils/digitalArtworkResolver');
 const { invalidateExhibitionCachesForArtworks } = require('../services/exhibitionsService');
 
 // 外部API配置
@@ -190,6 +191,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
       const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processedArtwork;
       return {
         ...rest,
+        price: normalizeWespacePriceToYuan(processedArtwork.price),
         artist: {
           id: processedArtwork.artist_id,
           name: artist_display_name,
@@ -290,6 +292,7 @@ router.get('/', async (req, res) => {
       const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processedArtwork;
       return {
         ...rest,
+        price: normalizeWespacePriceToYuan(processedArtwork.price),
         artist: {
           id: processedArtwork.artist_id,
           name: artist_display_name,
@@ -347,7 +350,7 @@ router.get('/public', async (req, res) => {
       return {
         ...rest,
         image: processed.image_url || '',
-        price: processed.price || 0,
+        price: normalizeWespacePriceToYuan(processed.price) || 0,
         artist: {
           id: processed.artist_id,
           name: artist_display_name,
@@ -394,6 +397,13 @@ router.get('/:id', async (req, res) => {
         }
         cached.show_purchase_link = showLink;
         cached.purchase_url = showLink ? buildWespacePurchaseUrl(cached.goods_id) : null;
+        const [priceRows] = await db.query(
+          `SELECT price FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ? LIMIT 1`,
+          [rawId]
+        );
+        if (priceRows.length) {
+          cached.price = normalizeWespacePriceToYuan(priceRows[0].price);
+        }
         return res.json(cached);
       }
     }
@@ -437,7 +447,7 @@ router.get('/:id', async (req, res) => {
         title: artwork.title,
         image_url: artwork.image_url,
         description: artwork.description,
-        price: artwork.price,
+        price: normalizeWespacePriceToYuan(artwork.price),
         created_at: artwork.created_at,
         registration_certificate: null,
         license_rights: null,
