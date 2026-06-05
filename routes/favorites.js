@@ -24,6 +24,18 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+/** 单条收藏状态（避免为判断一个商品是否收藏而拉全量列表） */
+router.get('/:itemType/:itemId', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const r = await svc.getFavoriteStatus(userId, req.params.itemType, req.params.itemId);
+    return res.status(r.status).json(r.body);
+  } catch (error) {
+    logger.error('查询收藏状态失败', { err: error });
+    res.status(500).json({ error: '查询收藏状态失败' });
+  }
+});
+
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;

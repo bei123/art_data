@@ -62,6 +62,27 @@ function parseDigitalArtItemId(raw) {
   return { id: s };
 }
 
+const VALID_FAVORITE_TYPES = ['artwork', 'digital_art', 'copyright_item'];
+
+function parseFavoriteItemRef(itemType, rawItemId) {
+  if (!VALID_FAVORITE_TYPES.includes(itemType)) {
+    return { error: '无效的收藏类型' };
+  }
+
+  if (itemType === 'digital_art') {
+    const decoded = typeof rawItemId === 'string' ? decodeURIComponent(rawItemId) : rawItemId;
+    const parsed = parseDigitalArtItemId(decoded);
+    if (parsed.error) return { error: parsed.error };
+    return { itemType, itemId: parsed.id };
+  }
+
+  const n = parseInt(rawItemId, 10);
+  if (Number.isNaN(n) || n <= 0) {
+    return { error: '无效的物品ID' };
+  }
+  return { itemType, itemId: n };
+}
+
 async function validateItemExists(itemId, itemType, connection = null) {
   try {
     const q = connection ? connection.query.bind(connection) : db.query;
@@ -102,25 +123,11 @@ async function addFavorite(userId, body) {
     return adminResult(400, { error: '缺少必要参数' });
   }
 
-  const validTypes = ['artwork', 'digital_art', 'copyright_item'];
-  if (!validTypes.includes(itemType)) {
-    return adminResult(400, { error: '无效的收藏类型' });
+  const parsedRef = parseFavoriteItemRef(itemType, itemId);
+  if (parsedRef.error) {
+    return adminResult(400, { error: parsedRef.error });
   }
-
-  let cleanItemId;
-  if (itemType === 'digital_art') {
-    const parsed = parseDigitalArtItemId(itemId);
-    if (parsed.error) {
-      return adminResult(400, { error: parsed.error });
-    }
-    cleanItemId = parsed.id;
-  } else {
-    const n = parseInt(itemId, 10);
-    if (Number.isNaN(n) || n <= 0) {
-      return adminResult(400, { error: '无效的物品ID' });
-    }
-    cleanItemId = n;
-  }
+  const cleanItemId = parsedRef.itemId;
 
   if (!userId || Number.isNaN(parseInt(userId, 10)) || parseInt(userId, 10) <= 0) {
     return adminResult(400, { error: '无效的用户ID' });
@@ -170,25 +177,11 @@ async function removeFavorite(userId, itemType, rawItemId) {
     return adminResult(400, { error: '无效的用户ID' });
   }
 
-  const validTypes = ['artwork', 'digital_art', 'copyright_item'];
-  if (!validTypes.includes(itemType)) {
-    return adminResult(400, { error: '无效的收藏类型' });
+  const parsedRef = parseFavoriteItemRef(itemType, rawItemId);
+  if (parsedRef.error) {
+    return adminResult(400, { error: parsedRef.error });
   }
-
-  let cleanItemId;
-  if (itemType === 'digital_art') {
-    const parsed = parseDigitalArtItemId(decodeURIComponent(rawItemId));
-    if (parsed.error) {
-      return adminResult(400, { error: parsed.error });
-    }
-    cleanItemId = parsed.id;
-  } else {
-    const n = parseInt(rawItemId, 10);
-    if (Number.isNaN(n) || n <= 0) {
-      return adminResult(400, { error: '无效的物品ID' });
-    }
-    cleanItemId = n;
-  }
+  const cleanItemId = parsedRef.itemId;
 
   try {
     const connection = await db.getConnection();
@@ -216,6 +209,49 @@ async function removeFavorite(userId, itemType, rawItemId) {
   } catch (err) {
     logger.error('取消收藏失败', { err });
     return adminResult(500, { error: '取消收藏服务暂时不可用' });
+  }
+}
+
+async function getFavoriteStatus(userId, itemType, rawItemId) {
+  if (!userId || Number.isNaN(parseInt(userId, 10)) || parseInt(userId, 10) <= 0) {
+    return adminResult(400, { error: '无效的用户ID' });
+  }
+
+  const parsedRef = parseFavoriteItemRef(itemType, rawItemId);
+  if (parsedRef.error) {
+    return adminResult(400, { error: parsedRef.error });
+  }
+
+  const { itemId: cleanItemId } = parsedRef;
+
+  try {
+    const [rows] = await db.query(
+      'SELECT id, created_at FROM favorites WHERE user_id = ? AND item_id = ? AND item_type = ? LIMIT 1',
+      [userId, cleanItemId, itemType]
+    );
+
+    const responseItemId = itemType === 'digital_art' ? String(cleanItemId) : cleanItemId;
+
+    if (!rows || rows.length === 0) {
+      return adminResult(200, {
+        success: true,
+        favorited: false,
+        item_type: itemType,
+        item_id: responseItemId,
+      });
+    }
+
+    return adminResult(200, {
+      success: true,
+      favorited: true,
+      favorite_id: rows[0].id,
+      favorite_time: rows[0].created_at,
+      item_type: itemType,
+      item_id: responseItemId,
+    });
+  } catch (err) {
+    logger.error('getFavoriteStatus failed', { err });
+    return adminResult(500, { error: '查询收藏状态失败' });
   }
 }
 
@@ -347,6 +383,7 @@ async function getFavoritesList(userId, query) {
 module.exports = {
   ensureFavoritesSchema,
   getFavoritesList,
+  getFavoriteStatus,
   addFavorite,
   removeFavorite,
 };
