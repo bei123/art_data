@@ -1,5 +1,14 @@
 const db = require('../db');
 const logger = require('../utils/logger');
+const {
+  DIGITAL_ARTWORKS_EXTERNAL_TABLE,
+  parseDigitalArtworkId,
+  fetchDigitalArtworkById,
+  fetchDigitalArtworksByIds,
+  hasEnoughDigitalStock,
+  isDigitalArtworkPurchasable,
+  ensureDigitalArtworkIdColumns,
+} = require('../utils/digitalArtworkResolver');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -13,6 +22,8 @@ function parsePositiveIntId(raw) {
 
 async function getCartList(userId) {
   try {
+    await ensureDigitalArtworkIdColumns();
+
     const [cartItems] = await db.query(
       'SELECT id, type, right_id, digital_artwork_id, artwork_id, quantity, price FROM cart_items WHERE user_id = ?',
       [userId]
@@ -66,14 +77,38 @@ async function getCartList(userId) {
     let digitalsMap = {};
     let digitalArtistIds = [];
     if (digitalIds.length > 0) {
-      const [digitals] = await db.query(
-        'SELECT id, title, price, image_url, description, artist_id FROM digital_artworks WHERE id IN (?)',
-        [digitalIds]
-      );
-      digitals.forEach((d) => {
-        digitalsMap[d.id] = d;
-        if (d.artist_id) digitalArtistIds.push(d.artist_id);
+      const resolvedDigitals = await fetchDigitalArtworksByIds(digitalIds);
+      const legacyIds = [];
+      resolvedDigitals.forEach((record, id) => {
+        digitalsMap[id] = record;
+        if (record.source === 'legacy') legacyIds.push(id);
       });
+
+      if (legacyIds.length > 0) {
+        const [digitals] = await db.query(
+          'SELECT id, title, price, image_url, description, artist_id FROM digital_artworks WHERE id IN (?)',
+          [legacyIds]
+        );
+        digitals.forEach((d) => {
+          const key = String(d.id);
+          digitalsMap[key] = { ...digitalsMap[key], ...d };
+          if (d.artist_id) digitalArtistIds.push(d.artist_id);
+        });
+      }
+
+      const externalIds = [...resolvedDigitals.keys()].filter((id) => resolvedDigitals.get(id)?.source === 'external');
+      if (externalIds.length > 0) {
+        const [externals] = await db.query(
+          `SELECT id, title, price, image_url, description, artist_id
+           FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
+           WHERE id IN (?)`,
+          [externalIds]
+        );
+        externals.forEach((d) => {
+          digitalsMap[String(d.id)] = { ...digitalsMap[String(d.id)], ...d };
+          if (d.artist_id) digitalArtistIds.push(d.artist_id);
+        });
+      }
     }
 
     let artworksMap = {};
@@ -199,33 +234,38 @@ async function addCartItem(userId, body) {
     }
 
     if (type === 'digital') {
-      if (!digital_artwork_id) {
-        return adminResult(400, { error: '缺少数字艺术品ID' });
+      await ensureDigitalArtworkIdColumns();
+
+      const parsedDigitalId = parseDigitalArtworkId(digital_artwork_id);
+      if (parsedDigitalId.error) {
+        return adminResult(400, { error: parsedDigitalId.error });
       }
-      const [digital] = await db.query('SELECT id, batch_quantity FROM digital_artworks WHERE id = ?', [digital_artwork_id]);
-      if (!digital || digital.length === 0) {
-        return adminResult(404, { error: '数字艺术品不存在' });
+
+      const digital = await fetchDigitalArtworkById(parsedDigitalId.id);
+      if (!digital || !isDigitalArtworkPurchasable(digital)) {
+        return adminResult(404, { error: '数字艺术品不存在或已下架' });
       }
-      if (digital[0].batch_quantity <= 0) {
+      if (!hasEnoughDigitalStock(digital, cleanQuantity)) {
         return adminResult(400, { error: '数字艺术品库存不足' });
       }
+
       const [existingItem] = await db.query(
         'SELECT id, quantity FROM cart_items WHERE user_id = ? AND digital_artwork_id = ? AND type = "digital"',
-        [userId, digital_artwork_id]
+        [userId, parsedDigitalId.id]
       );
       const cartQuantity = existingItem && existingItem.length > 0 ? existingItem[0].quantity : 0;
-      if (cartQuantity + cleanQuantity > digital[0].batch_quantity) {
+      if (!hasEnoughDigitalStock(digital, cartQuantity + cleanQuantity)) {
         return adminResult(400, { error: '加入购物车数量超过数字艺术品库存' });
       }
       if (existingItem && existingItem.length > 0) {
         await db.query(
           'UPDATE cart_items SET quantity = quantity + ? WHERE user_id = ? AND digital_artwork_id = ? AND type = "digital"',
-          [cleanQuantity, userId, digital_artwork_id]
+          [cleanQuantity, userId, parsedDigitalId.id]
         );
       } else {
         await db.query('INSERT INTO cart_items (user_id, type, digital_artwork_id, quantity) VALUES (?, "digital", ?, ?)', [
           userId,
-          digital_artwork_id,
+          parsedDigitalId.id,
           cleanQuantity,
         ]);
       }
@@ -331,11 +371,11 @@ async function updateCartItemQuantity(userId, rawCartItemId, body) {
         return adminResult(400, { error: '库存不足' });
       }
     } else if (cartItem.type === 'digital') {
-      const [digitalRows] = await db.query('SELECT id, batch_quantity FROM digital_artworks WHERE id = ?', [cartItem.digital_artwork_id]);
-      if (!digitalRows || digitalRows.length === 0) {
-        return adminResult(404, { error: '数字艺术品不存在' });
+      const digital = await fetchDigitalArtworkById(cartItem.digital_artwork_id);
+      if (!digital || !isDigitalArtworkPurchasable(digital)) {
+        return adminResult(404, { error: '数字艺术品不存在或已下架' });
       }
-      if (digitalRows[0].batch_quantity < quantity) {
+      if (!hasEnoughDigitalStock(digital, quantity)) {
         return adminResult(400, { error: '数字艺术品库存不足' });
       }
     } else {

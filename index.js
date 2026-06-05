@@ -40,6 +40,7 @@ const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
+const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const {
   applyCorsHeaders,
@@ -291,17 +292,19 @@ app.get(
     }
     try {
       await ensureOrderItemsQrCodeColumns()
+      await ensureDigitalArtworkIdColumns()
 
       const [purchases] = await db.query(`
       SELECT 
         dip.*,
-        da.title as artwork_title,
-        da.image_url as artwork_image,
+        COALESCE(da.title, dae.title) as artwork_title,
+        COALESCE(da.image_url, dae.image_url) as artwork_image,
         o.trade_state as order_trade_state,
         oi.delivery_qr_code_url,
         oi.delivery_qr_code_at
       FROM digital_identity_purchases dip
-      JOIN digital_artworks da ON dip.digital_artwork_id = da.id
+      LEFT JOIN digital_artworks da ON CAST(dip.digital_artwork_id AS CHAR) = CAST(da.id AS CHAR)
+      LEFT JOIN digital_artworks_external dae ON CAST(dip.digital_artwork_id AS CHAR) = dae.id
       LEFT JOIN orders o ON dip.order_id = o.id
       LEFT JOIN order_items oi ON oi.order_id = dip.order_id
         AND oi.type = 'digital'
@@ -358,6 +361,9 @@ app.use('/api/digital-artworks', digitalArtworksRouter);
 // 确保订单项交付二维码字段存在
 ensureOrderItemsQrCodeColumns().catch((err) => {
   logger.warn('order_items qr code columns ensure failed', { err: err.message });
+});
+ensureDigitalArtworkIdColumns().catch((err) => {
+  logger.warn('digital_artwork_id column ensure failed', { err: err.message });
 });
 
 // 定时同步外部数字艺术品到缓存表（用于列表/影藏展示）

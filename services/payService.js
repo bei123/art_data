@@ -15,6 +15,17 @@ const LOCK_EXPIRE = 30; // 30秒
 const CALLBACK_EXPIRE = 600; // 10分钟
 const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
+const {
+    DIGITAL_ITEM_JOIN_SQL,
+    DIGITAL_ITEM_SELECT_SQL,
+    parseDigitalArtworkId,
+    fetchDigitalArtworkById,
+    fetchDigitalArtworksByIds,
+    hasEnoughDigitalStock,
+    isDigitalArtworkPurchasable,
+    adjustDigitalArtworkStock,
+    ensureDigitalArtworkIdColumns,
+} = require('../utils/digitalArtworkResolver');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 
@@ -113,6 +124,8 @@ function formatWechatTime(isoString) {
 
 async function unifiedOrder(req) {
     try {
+        await ensureDigitalArtworkIdColumns();
+
         const { openid, total_fee, body, out_trade_no, cart_items, address_id } = req.body;
 
         // 输入验证
@@ -241,7 +254,11 @@ async function unifiedOrder(req) {
                 } else if (item.type === 'artwork') {
                     artworkIds.push(item.artwork_id);
                 } else if (item.type === 'digital') {
-                    digitalIds.push(item.digital_artwork_id);
+                    const parsedDigital = parseDigitalArtworkId(item.digital_artwork_id);
+                    if (!parsedDigital.error) {
+                        item.digital_artwork_id = parsedDigital.id;
+                        digitalIds.push(parsedDigital.id);
+                    }
                 }
             });
 
@@ -274,25 +291,36 @@ async function unifiedOrder(req) {
                 });
             }
 
-            // 批量查询digitals
+            // 批量查询 digitals（本地表 + 外部同步表）
             if (digitalIds.length > 0) {
-                const [digitals] = await connection.query(
-                    'SELECT id, price, batch_quantity FROM digital_artworks WHERE id IN (?)',
-                    [digitalIds]
-                );
-                digitals.forEach(digital => {
-                    goodsMap.set(`digital_${digital.id}`, digital);
+                const digitalsMap = await fetchDigitalArtworksByIds(digitalIds, connection);
+                digitalsMap.forEach((digital, id) => {
+                    goodsMap.set(`digital_${id}`, digital);
                 });
             }
 
             // 校验所有商品
             for (const item of cart_items) {
+                if (item.type === 'digital') {
+                    const parsedDigital = parseDigitalArtworkId(item.digital_artwork_id);
+                    if (parsedDigital.error) {
+                        await connection.rollback();
+                        return adminResult(400, { error: parsedDigital.error });
+                    }
+                    item.digital_artwork_id = parsedDigital.id;
+                }
+
                 const key = `${item.type}_${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id}`;
                 const goods = goodsMap.get(key);
 
                 if (!goods) {
                     await connection.rollback();
                     return adminResult(404, { error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 不存在或已下架` });
+                }
+
+                if (item.type === 'digital' && !isDigitalArtworkPurchasable(goods)) {
+                    await connection.rollback();
+                    return adminResult(404, { error: `数字艺术品ID ${item.digital_artwork_id} 不存在或已下架` });
                 }
 
                 // 验证库存
@@ -304,7 +332,7 @@ async function unifiedOrder(req) {
                     await connection.rollback();
                     return adminResult(400, { error: `艺术品ID ${item.artwork_id} 库存不足` });
                 }
-                if (item.type === 'digital' && goods.batch_quantity < item.quantity) {
+                if (item.type === 'digital' && !hasEnoughDigitalStock(goods, item.quantity)) {
                     await connection.rollback();
                     return adminResult(400, { error: `数字艺术品ID ${item.digital_artwork_id} 库存不足` });
                 }
@@ -338,6 +366,7 @@ async function unifiedOrder(req) {
                     dbPrice = effectivePrice;
                 } else if (item.type === 'digital') {
                     dbPrice = parseFloat(goods.price);
+                    if (!Number.isFinite(dbPrice)) dbPrice = 0;
                 } else if (item.type === 'artwork') {
                     dbPrice = (goods.discount_price && goods.discount_price > 0 && goods.discount_price < goods.original_price)
                         ? goods.discount_price
@@ -475,6 +504,8 @@ async function unifiedOrder(req) {
 
 async function singleOrder(req) {
     try {
+        await ensureDigitalArtworkIdColumns();
+
         const { openid, type, quantity, price, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
 
         // 输入验证
@@ -504,12 +535,15 @@ async function singleOrder(req) {
         }
 
         // 只允许一个商品id
-        if (
-            (type === 'right' && (!right_id || isNaN(parseInt(right_id)))) ||
-            (type === 'digital' && (!digital_artwork_id || isNaN(parseInt(digital_artwork_id)))) ||
-            (type === 'artwork' && (!artwork_id || isNaN(parseInt(artwork_id))))
-        ) {
+        if (type === 'right' && (!right_id || isNaN(parseInt(right_id)))) {
             return adminResult(400, { error: '缺少有效的商品ID' });
+        }
+        if (type === 'artwork' && (!artwork_id || isNaN(parseInt(artwork_id)))) {
+            return adminResult(400, { error: '缺少有效的商品ID' });
+        }
+        const parsedDigitalId = type === 'digital' ? parseDigitalArtworkId(digital_artwork_id) : null;
+        if (type === 'digital' && parsedDigitalId.error) {
+            return adminResult(400, { error: parsedDigitalId.error });
         }
 
         // 验证地址ID（可选，但建议提供）
@@ -666,20 +700,18 @@ async function singleOrder(req) {
                     });
                 }
             } else if (cleanType === 'digital') {
-                itemId = parseInt(digital_artwork_id);
-                const [digitals] = await connection.query(
-                    'SELECT id, price, batch_quantity FROM digital_artworks WHERE id = ?',
-                    [itemId]
-                );
-                if (!digitals || digitals.length === 0) {
+                itemId = parsedDigitalId.id;
+                const digital = await fetchDigitalArtworkById(itemId, connection);
+                if (!digital || !isDigitalArtworkPurchasable(digital)) {
                     await connection.rollback();
-                    return adminResult(404, { error: `数字艺术品ID ${itemId} 不存在` });
+                    return adminResult(404, { error: `数字艺术品ID ${itemId} 不存在或已下架` });
                 }
-                if (digitals[0].batch_quantity < cleanQuantity) {
+                if (!hasEnoughDigitalStock(digital, cleanQuantity)) {
                     await connection.rollback();
                     return adminResult(400, { error: `数字艺术品ID ${itemId} 库存不足` });
                 }
-                dbPrice = parseFloat(digitals[0].price);
+                dbPrice = parseFloat(digital.price);
+                if (!Number.isFinite(dbPrice)) dbPrice = 0;
                 if (Math.abs(cleanPrice - dbPrice) > 0.01) {
                     await connection.rollback();
                     return adminResult(400, {
@@ -949,13 +981,14 @@ async function payNotify(req) {
                     console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
                 }
 
-                // 批量更新digital_artworks库存
+                // 批量扣减数字艺术品库存（本地表或外部同步表）
                 if (digitalUpdates.length > 0) {
                     for (const [quantity, digitalArtworkId] of digitalUpdates) {
-                        await connection.query(
-                            'UPDATE digital_artworks SET batch_quantity = batch_quantity - ? WHERE id = ?',
-                            [quantity, digitalArtworkId]
-                        );
+                        await adjustDigitalArtworkStock({
+                            connection,
+                            id: digitalArtworkId,
+                            delta: -quantity,
+                        });
                     }
                     console.log(`批量扣减digital_artwork库存: ${digitalUpdates.length}条记录`);
                 }
@@ -1556,13 +1589,14 @@ async function refundNotify(req) {
                     }
                 }
 
-                // 批量更新digital_artworks库存
+                // 批量回补数字艺术品库存（本地表或外部同步表）
                 if (digitalUpdates.length > 0) {
                     for (const [quantity, digitalArtworkId] of digitalUpdates) {
-                        await connection.query(
-                            'UPDATE digital_artworks SET batch_quantity = batch_quantity + ? WHERE id = ?',
-                            [quantity, digitalArtworkId]
-                        );
+                        await adjustDigitalArtworkStock({
+                            connection,
+                            id: digitalArtworkId,
+                            delta: quantity,
+                        });
                     }
                     console.log('【退款回调】回补digital_artwork库存:', digitalUpdates.length, '条记录');
                 }
@@ -1925,11 +1959,7 @@ async function listOrders(req) {
                         r.status as right_status,
                         r.remaining_count as right_remaining_count,
                         ri.image_url as right_image_url,
-                        da.title as digital_title,
-                        da.price as digital_price,
-                        da.description as digital_description,
-                        da.image_url as digital_image_url,
-                        da.batch_quantity as digital_batch_quantity,
+                        ${DIGITAL_ITEM_SELECT_SQL},
                     oa.title as artwork_title,
                     oa.original_price as artwork_original_price,
                     oa.discount_price as artwork_discount_price,
@@ -1945,7 +1975,7 @@ async function listOrders(req) {
                 FROM order_items oi
                 LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
                 LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-                LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+                ${DIGITAL_ITEM_JOIN_SQL}
                 LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
                 LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
                 WHERE oi.order_id = ?
@@ -2142,15 +2172,16 @@ async function digitalIdentityPurchases(req) {
                  dip.discount_amount,
                  dip.purchase_date,
                  dip.order_id,
-                 da.title as artwork_title,
-                 da.image_url as artwork_image,
+                 COALESCE(da.title, dae.title) as artwork_title,
+                 COALESCE(da.image_url, dae.image_url) as artwork_image,
                  o.out_trade_no as order_no,
                  o.trade_state as order_trade_state,
                  oi.id as order_item_id,
                  oi.delivery_qr_code_url,
                  oi.delivery_qr_code_at
              FROM digital_identity_purchases dip
-             JOIN digital_artworks da ON dip.digital_artwork_id = da.id
+             LEFT JOIN digital_artworks da ON CAST(dip.digital_artwork_id AS CHAR) = CAST(da.id AS CHAR)
+             LEFT JOIN digital_artworks_external dae ON CAST(dip.digital_artwork_id AS CHAR) = dae.id
              LEFT JOIN orders o ON dip.order_id = o.id
              LEFT JOIN order_items oi ON oi.order_id = dip.order_id
                AND oi.type = 'digital'
@@ -2308,11 +2339,7 @@ async function adminOrders(req) {
                      r.status as right_status,
                      r.remaining_count as right_remaining_count,
                      ri.image_url as right_image_url,
-                     da.title as digital_title,
-                     da.price as digital_price,
-                     da.description as digital_description,
-                     da.image_url as digital_image_url,
-                     da.batch_quantity as digital_batch_quantity,
+                     ${DIGITAL_ITEM_SELECT_SQL},
                     oa.title as artwork_title,
                     oa.original_price as artwork_original_price,
                     oa.discount_price as artwork_discount_price,
@@ -2328,7 +2355,7 @@ async function adminOrders(req) {
                 FROM order_items oi
                 LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
                 LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-                LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+                ${DIGITAL_ITEM_JOIN_SQL}
                 LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
                 LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
                 WHERE oi.order_id = ?
@@ -2559,11 +2586,7 @@ async function checkRepayable(req) {
                  r.status as right_status,
                  r.remaining_count as right_remaining_count,
                  ri.image_url as right_image_url,
-                 da.title as digital_title,
-                 da.price as digital_price,
-                 da.description as digital_description,
-                 da.image_url as digital_image_url,
-                 da.batch_quantity as digital_batch_quantity,
+                 ${DIGITAL_ITEM_SELECT_SQL},
                 oa.title as artwork_title,
                 oa.original_price as artwork_original_price,
                 oa.discount_price as artwork_discount_price,
@@ -2573,7 +2596,7 @@ async function checkRepayable(req) {
             FROM order_items oi
             LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
             LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-            LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+            ${DIGITAL_ITEM_JOIN_SQL}
             LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
             WHERE oi.order_id = ?
         `, [order.id]);
@@ -2960,9 +2983,7 @@ async function orderDetailForActor(req, options = {}) {
                 r.title AS right_title,
                 r.description AS right_description,
                 (SELECT ri.image_url FROM right_images ri WHERE ri.right_id = oi.right_id ORDER BY ri.id ASC LIMIT 1) AS right_image_url,
-                da.title AS digital_title,
-                da.description AS digital_description,
-                da.image_url AS digital_image_url,
+                ${DIGITAL_ITEM_SELECT_SQL},
                 oa.title AS artwork_title,
                 oa.description AS artwork_description,
                 oa.image AS artwork_image,
@@ -2975,7 +2996,7 @@ async function orderDetailForActor(req, options = {}) {
                 wa.is_default
             FROM order_items oi
             LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-            LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
+            ${DIGITAL_ITEM_JOIN_SQL}
             LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
             LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
             WHERE oi.order_id = ?

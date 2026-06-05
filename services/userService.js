@@ -2,6 +2,11 @@ const db = require('../db');
 const logger = require('../utils/logger');
 const { PUBLIC_API_BASE_URL: BASE_URL } = require('../config/publicEnv');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
+const {
+  DIGITAL_ITEM_JOIN_SQL,
+  DIGITAL_ITEM_SELECT_SQL,
+  ensureDigitalArtworkIdColumns,
+} = require('../utils/digitalArtworkResolver');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -10,6 +15,7 @@ function adminResult(status, body) {
 async function getPurchasedProducts(userId) {
   try {
     await ensureOrderItemsQrCodeColumns();
+    await ensureDigitalArtworkIdColumns();
 
     const [orders] = await db.query(
       'SELECT id FROM orders WHERE user_id = ? AND trade_state = ? ORDER BY created_at DESC',
@@ -38,11 +44,8 @@ async function getPurchasedProducts(userId) {
         r.status as right_status,
         r.remaining_count as right_remaining_count,
         ri.image_url as right_image_url,
-        da.title as digital_title,
-        da.price as digital_price,
-        da.description as digital_description,
-        da.image_url as digital_image_url,
-        da.artist_id as digital_artist_id,
+        ${DIGITAL_ITEM_SELECT_SQL},
+        COALESCE(da.artist_id, dae.artist_id) as digital_artist_id,
         a1.name as digital_artist_name,
         a1.avatar as digital_artist_avatar,
         oa.title as artwork_title,
@@ -56,8 +59,8 @@ async function getPurchasedProducts(userId) {
       FROM order_items oi
       LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
       LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-      LEFT JOIN digital_artworks da ON oi.type = 'digital' AND oi.digital_artwork_id = da.id
-      LEFT JOIN artists a1 ON da.artist_id = a1.id
+      ${DIGITAL_ITEM_JOIN_SQL}
+      LEFT JOIN artists a1 ON COALESCE(da.artist_id, dae.artist_id) = a1.id
       LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
       LEFT JOIN artists a2 ON oa.artist_id = a2.id
       WHERE oi.order_id IN (?)
