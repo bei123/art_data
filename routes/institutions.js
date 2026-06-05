@@ -6,7 +6,7 @@ const svc = require('../services/institutionsService');
 
 router.get('/', async (req, res) => {
   try {
-    const r = await svc.getPublicInstitutionsList();
+    const r = await svc.getPublicInstitutionsList(req.query);
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取机构列表失败', { err: error });

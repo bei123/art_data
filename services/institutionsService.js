@@ -4,7 +4,7 @@ const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 
-const REDIS_INSTITUTIONS_LIST_KEY = 'institutions:list';
+const REDIS_INSTITUTIONS_LIST_KEY = 'institutions:list:v2';
 const REDIS_INSTITUTION_DETAIL_KEY_PREFIX = 'institutions:detail:';
 
 function adminResult(status, body) {
@@ -19,19 +19,95 @@ function parsePositiveIntId(raw) {
 
 async function invalidateInstitutionListCache() {
   await redisClient.del(REDIS_INSTITUTIONS_LIST_KEY);
+  await redisClient.del('institutions:list');
 }
 
-async function getPublicInstitutionsList() {
+function sanitizeInstitutionKeyword(raw) {
+  if (raw == null || typeof raw !== 'string') return '';
+  const t = raw.trim().slice(0, 100);
+  if (!t) return '';
+  return t.replace(/[%_\\]/g, '');
+}
+
+function wantsInstitutionsPagination(query) {
+  if (!query) return false;
+  return query.page != null || query.pageSize != null || Boolean(sanitizeInstitutionKeyword(query.keyword));
+}
+
+const INSTITUTION_ARTIST_COUNT_SQL = `
+  (
+    SELECT COUNT(*)
+    FROM artists a
+    WHERE a.institution_id = i.id AND COALESCE(a.is_public, 1) = 1
+  ) AS artist_count
+`;
+
+function mapInstitutionRow(row) {
+  const processed = processObjectImages(row, ['logo']);
+  return {
+    ...processed,
+    artist_count: Number(row.artist_count) || 0,
+  };
+}
+
+async function getPublicInstitutionsList(query = {}) {
+  const usePagination = wantsInstitutionsPagination(query);
+  const pageNum = parseInt(query.page, 10) > 0 ? parseInt(query.page, 10) : 1;
+  const sizeNum = Math.min(100, parseInt(query.pageSize, 10) > 0 ? parseInt(query.pageSize, 10) : 20);
+  const offset = (pageNum - 1) * sizeNum;
+  const keyword = sanitizeInstitutionKeyword(query.keyword);
+
   try {
-    const cache = await redisClient.get(REDIS_INSTITUTIONS_LIST_KEY);
-    if (cache) {
-      return adminResult(200, JSON.parse(cache));
+    if (!usePagination) {
+      const cache = await redisClient.get(REDIS_INSTITUTIONS_LIST_KEY);
+      if (cache) {
+        return adminResult(200, JSON.parse(cache));
+      }
     }
 
-    const [rows] = await db.query('SELECT * FROM institutions ORDER BY created_at DESC');
-    const institutionsWithProcessedImages = (rows || []).map((institution) =>
-      processObjectImages(institution, ['logo'])
+    const whereParts = [];
+    const whereParams = [];
+    if (keyword) {
+      const like = `%${keyword}%`;
+      whereParts.push('(i.name LIKE ? OR i.description LIKE ? OR i.address LIKE ?)');
+      whereParams.push(like, like, like);
+    }
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    if (usePagination) {
+      const [[{ total }]] = await db.query(
+        `SELECT COUNT(*) AS total FROM institutions i ${whereSql}`,
+        whereParams
+      );
+      const [rows] = await db.query(
+        `
+        SELECT i.*, ${INSTITUTION_ARTIST_COUNT_SQL}
+        FROM institutions i
+        ${whereSql}
+        ORDER BY i.created_at DESC
+        LIMIT ? OFFSET ?
+        `,
+        [...whereParams, sizeNum, offset]
+      );
+
+      return adminResult(200, {
+        data: (rows || []).map(mapInstitutionRow),
+        pagination: {
+          page: pageNum,
+          pageSize: sizeNum,
+          total: Number(total) || 0,
+        },
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT i.*, ${INSTITUTION_ARTIST_COUNT_SQL}
+      FROM institutions i
+      ORDER BY i.created_at DESC
+      `
     );
+    const institutionsWithProcessedImages = (rows || []).map(mapInstitutionRow);
 
     await redisClient.set(REDIS_INSTITUTIONS_LIST_KEY, JSON.stringify(institutionsWithProcessedImages));
     return adminResult(200, institutionsWithProcessedImages);
@@ -51,13 +127,20 @@ async function getPublicInstitutionDetail(rawId) {
       return adminResult(200, JSON.parse(cache));
     }
 
-    const [rows] = await db.query('SELECT * FROM institutions WHERE id = ?', [id]);
+    const [rows] = await db.query(
+      `
+      SELECT i.*, ${INSTITUTION_ARTIST_COUNT_SQL}
+      FROM institutions i
+      WHERE i.id = ?
+      `,
+      [id]
+    );
 
     if (!rows || rows.length === 0) {
       return adminResult(404, { error: '机构不存在' });
     }
 
-    const institution = processObjectImages(rows[0], ['logo']);
+    const institution = mapInstitutionRow(rows[0]);
     await redisClient.set(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id, JSON.stringify(institution));
     return adminResult(200, institution);
   } catch (error) {
@@ -86,7 +169,7 @@ async function getInstitutionArtists(rawInstitutionId) {
         i.description as institution_description
       FROM artists a
       LEFT JOIN institutions i ON a.institution_id = i.id
-      WHERE a.institution_id = ?
+      WHERE a.institution_id = ? AND COALESCE(a.is_public, 1) = 1
       ORDER BY a.created_at DESC
     `,
       [id]
