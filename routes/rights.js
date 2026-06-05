@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { authenticateToken, optionalAuthenticate } = require('../auth');
 const svc = require('../services/rightsService');
 
 router.get('/', async (req, res) => {
@@ -44,9 +44,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuthenticate, async (req, res) => {
   try {
-    const r = await svc.getPublicRightDetail(req.params.id);
+    const userId = req.user?.id ?? null;
+    const r = await svc.getPublicRightDetail(req.params.id, userId);
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取版权实物详情失败', { err: error });

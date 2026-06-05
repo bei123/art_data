@@ -2,6 +2,7 @@ const db = require('../db');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
+const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 
 const REDIS_RIGHTS_LIST_KEY = 'rights:list';
 const REDIS_RIGHT_DETAIL_KEY_PREFIX = 'rights:detail:';
@@ -615,18 +616,34 @@ async function deleteRightAdmin(rawId) {
   }
 }
 
-async function getPublicRightDetail(rawId) {
+function attachRightDiscountForUser(result, userId) {
+  if (!userId) return result;
+  return buildRightDiscountPricingByUser(userId, { [result.id]: result }).then((pricingMap) => {
+    const pricing = pricingMap[result.id] || {};
+    return {
+      ...result,
+      owned_eligible_digital_artwork_ids: pricing.owned_eligible_digital_artwork_ids || [],
+      has_discount: pricing.has_discount ?? parseMoney(result.discount_price) > 0,
+      discount_eligible: pricing.discount_eligible ?? false,
+      effective_price: pricing.effective_price ?? parseMoney(result.price),
+    };
+  });
+}
+
+async function getPublicRightDetail(rawId, userId = null) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的版权实物ID' });
 
   try {
+    let result = null;
     const cache = await redisClient.get(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
     if (cache) {
-      return adminResult(200, JSON.parse(cache));
+      result = JSON.parse(cache);
     }
 
-    const [rows] = await db.query(
-      `
+    if (!result) {
+      const [rows] = await db.query(
+        `
             SELECT 
                 r.id,
                 r.title,
@@ -652,36 +669,42 @@ async function getPublicRightDetail(rawId) {
             LEFT JOIN artists a ON r.artist_id = a.id
             WHERE r.id = ?
         `,
-      [id]
-    );
+        [id]
+      );
 
-    if (!rows || rows.length === 0) {
-      return adminResult(404, { error: '版权实物不存在' });
+      if (!rows || rows.length === 0) {
+        return adminResult(404, { error: '版权实物不存在' });
+      }
+
+      const right = processObjectImages(rows[0], ['image']);
+      const [images] = await db.query('SELECT image_url FROM right_images WHERE right_id = ? ORDER BY id', [right.id]);
+      const [eligibleList] = await db.query('SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?', [right.id]);
+
+      result = {
+        ...right,
+        rich_text: right.rich_text,
+        images: images.map((img) => processObjectImages(img, ['image_url']).image_url),
+        eligible_digital_artwork_ids: (eligibleList || []).map((x) => String(x.digital_artwork_id)),
+        category: {
+          id: right.category_id,
+          title: right.category_title,
+        },
+        artist: right.artist_id
+          ? {
+              id: right.artist_id,
+              name: right.artist_name,
+              avatar: right.artist_avatar,
+            }
+          : null,
+      };
+
+      await redisClient.setEx(REDIS_RIGHT_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
     }
 
-    const right = processObjectImages(rows[0], ['image']);
-    const [images] = await db.query('SELECT image_url FROM right_images WHERE right_id = ? ORDER BY id', [right.id]);
-    const [eligibleList] = await db.query('SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?', [right.id]);
+    if (userId) {
+      result = await attachRightDiscountForUser(result, userId);
+    }
 
-    const result = {
-      ...right,
-      rich_text: right.rich_text,
-      images: images.map((img) => processObjectImages(img, ['image_url']).image_url),
-      eligible_digital_artwork_ids: (eligibleList || []).map((x) => x.digital_artwork_id),
-      category: {
-        id: right.category_id,
-        title: right.category_title,
-      },
-      artist: right.artist_id
-        ? {
-            id: right.artist_id,
-            name: right.artist_name,
-            avatar: right.artist_avatar,
-          }
-        : null,
-    };
-
-    await redisClient.setEx(REDIS_RIGHT_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
     return adminResult(200, result);
   } catch (error) {
     logger.error('getPublicRightDetail failed', { err: error });
