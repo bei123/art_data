@@ -1912,7 +1912,7 @@ async function fetchListOrderItemsByOrderIds(orderIds) {
             title: mapListItemTitle(item),
             image: mapListItemImage(item),
             quantity: item.quantity,
-            price: item.price,
+            price: Number(item.price) || 0,
         });
         itemsByOrderId.set(item.order_id, bucket);
     }
@@ -1943,20 +1943,28 @@ async function fetchLatestRefundStatusByOutTradeNos(outTradeNos) {
     return refundByOutTradeNo;
 }
 
+function buildOrderStatusFields(tradeState, tradeStateDesc) {
+    const state = tradeState || 'UNKNOWN';
+    return {
+        pay_status: {
+            trade_state: state,
+            trade_state_desc: tradeStateDesc || getOrderStatusText(state),
+        },
+        order_status: {
+            type: getOrderStatusType(state),
+            text: getOrderStatusText(state),
+        },
+    };
+}
+
 function mapOrderToListCard(order, items, refundStatus) {
-    const tradeState = order.trade_state || 'UNKNOWN';
+    const statusFields = buildOrderStatusFields(order.trade_state, order.trade_state_desc);
     return {
         out_trade_no: order.out_trade_no,
         created_at: order.created_at,
-        total_fee: order.total_fee,
-        pay_status: {
-            trade_state: tradeState,
-        },
+        total_fee: Number(order.total_fee) || 0,
+        ...statusFields,
         refund_status: refundStatus || null,
-        order_status: {
-            type: getOrderStatusType(tradeState),
-            text: getOrderStatusText(tradeState),
-        },
         items,
     };
 }
@@ -2030,7 +2038,7 @@ async function listOrders(req) {
 
         const [[orders], [[{ total }]]] = await Promise.all([
             db.query(
-                `SELECT id, out_trade_no, created_at, total_fee, trade_state
+                `SELECT id, out_trade_no, created_at, total_fee, trade_state, trade_state_desc
                  FROM orders FORCE INDEX (idx_orders_user_id)
                  WHERE ${whereSql}
                  ORDER BY created_at DESC
@@ -2847,6 +2855,10 @@ async function orderDetailForActor(req, options = {}) {
         }
         const order = orderRows[0];
         const internalOrderId = order.id;
+        const syncedPayment = await syncOrderTradeStateFromWechat(order);
+        const effectiveTradeState = syncedPayment.tradeState;
+        const effectiveTradeStateDesc = syncedPayment.tradeStateDesc;
+        const wxPay = syncedPayment.wxPay;
 
         const includeWechatPath = req.query && (
             req.query.include_wechat_path === '1'
@@ -2986,7 +2998,7 @@ async function orderDetailForActor(req, options = {}) {
 
             const digitalFulfillment = row.type === 'digital'
                 ? buildDigitalItemFulfillment({
-                    tradeState: order.trade_state,
+                    tradeState: effectiveTradeState,
                     qrCodeUrl: row.delivery_qr_code_url,
                     qrCodeAt: row.delivery_qr_code_at,
                 })
@@ -3028,38 +3040,14 @@ async function orderDetailForActor(req, options = {}) {
             shipping_note: '当前库表未单独记录运费，按 0 展示；若含运费请后续扩展字段。',
             discount_yuan: Math.round(discountYuan * 100) / 100,
             amount_payable_yuan: Math.round(actualFeeYuan * 100) / 100,
-            amount_paid_yuan: order.trade_state === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null,
+            amount_paid_yuan: effectiveTradeState === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null,
             order_total_before_discount_yuan: Math.round(totalFeeYuan * 100) / 100,
         };
 
-        let wxPay = null;
-        try {
-            const timestamp = Math.floor(Date.now() / 1000).toString();
-            const nonceStr = generateNonceStr();
-            const method = 'GET';
-            const pathUrl = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`;
-            const signature = generateSignV3(method, pathUrl, timestamp, nonceStr, '');
-            const response = await axios.get(
-                `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`,
-                {
-                    headers: {
-                        Accept: 'application/json',
-                        Authorization: `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
-                        'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
-                        'User-Agent': 'axios/1.9.0',
-                    },
-                    timeout: 15000,
-                }
-            );
-            if (response.status === 200) wxPay = response.data;
-        } catch (err) {
-            logger.warn('adminOrderDetail 查询微信支付单失败，使用库内字段', { err: err.message });
-        }
-
         const payment = {
             transaction_id: wxPay?.transaction_id || order.transaction_id || null,
-            trade_state: wxPay?.trade_state || order.trade_state || null,
-            trade_state_desc: wxPay?.trade_state_desc || order.trade_state_desc || null,
+            trade_state: effectiveTradeState,
+            trade_state_desc: effectiveTradeStateDesc,
             trade_type: wxPay?.trade_type || order.trade_type || null,
             trade_type_label: tradeTypeLabel(wxPay?.trade_type || order.trade_type),
             bank_type: wxPay?.bank_type || null,
@@ -3103,17 +3091,17 @@ async function orderDetailForActor(req, options = {}) {
             description: order.body || '—',
         });
 
-        if (order.trade_state === 'NOTPAY' || order.trade_state === 'PAYERROR') {
+        if (effectiveTradeState === 'NOTPAY' || effectiveTradeState === 'PAYERROR') {
             timeline.push({
                 stage: 'AWAITING_PAYMENT',
                 at: toIsoOrNull(order.updated_at),
                 title: '待支付/待完成',
-                description: order.trade_state_desc || `当前状态：${order.trade_state}`,
+                description: effectiveTradeStateDesc || `当前状态：${effectiveTradeState}`,
             });
         }
 
         const paidAt = wxPay?.success_time || toIsoOrNull(order.success_time);
-        if (paidAt && (order.trade_state === 'SUCCESS' || order.trade_state === 'REFUND')) {
+        if (paidAt && (effectiveTradeState === 'SUCCESS' || effectiveTradeState === 'REFUND')) {
             timeline.push({
                 stage: 'PAID',
                 at: paidAt,
@@ -3165,21 +3153,21 @@ async function orderDetailForActor(req, options = {}) {
             }
         }
 
-        if (order.trade_state === 'REFUND') {
+        if (effectiveTradeState === 'REFUND') {
             timeline.push({
                 stage: 'ORDER_REFUNDED',
                 at: toIsoOrNull(order.updated_at),
                 title: '订单已退款',
-                description: order.trade_state_desc || '交易关闭或已退款',
+                description: effectiveTradeStateDesc || '交易关闭或已退款',
             });
         }
 
-        if (order.trade_state === 'CLOSED' || order.trade_state === 'REVOKED') {
+        if (effectiveTradeState === 'CLOSED' || effectiveTradeState === 'REVOKED') {
             timeline.push({
                 stage: 'ORDER_CLOSED',
                 at: toIsoOrNull(order.updated_at),
-                title: order.trade_state === 'REVOKED' ? '订单已撤销' : '订单已关闭',
-                description: order.trade_state_desc || '',
+                title: effectiveTradeState === 'REVOKED' ? '订单已撤销' : '订单已关闭',
+                description: effectiveTradeStateDesc || '',
             });
         }
 
@@ -3195,8 +3183,8 @@ async function orderDetailForActor(req, options = {}) {
             id: order.id,
             out_trade_no: order.out_trade_no,
             body: order.body,
-            trade_state: order.trade_state,
-            trade_state_desc: order.trade_state_desc,
+            trade_state: effectiveTradeState,
+            trade_state_desc: effectiveTradeStateDesc,
             created_at: toIsoOrNull(order.created_at),
             updated_at: toIsoOrNull(order.updated_at),
             user_nickname: order.user_nickname,
@@ -3206,16 +3194,55 @@ async function orderDetailForActor(req, options = {}) {
             orderPayload.user_id = order.user_id;
         }
 
+        const statusFields = buildOrderStatusFields(effectiveTradeState, effectiveTradeStateDesc);
+        const latestRefund = refunds.length > 0 ? refunds[refunds.length - 1] : null;
+        const refundStatus = latestRefund
+            ? {
+                status: latestRefund.status,
+                out_refund_no: latestRefund.out_refund_no,
+                wx_refund_id: latestRefund.wx_refund_id,
+                created_at: latestRefund.created_at,
+            }
+            : null;
+
+        const listCompatibleItems = items.map((item) => ({
+            type: item.type,
+            title: item.title,
+            image: item.images?.[0] || null,
+            quantity: item.quantity,
+            price: Number(item.price) || 0,
+        }));
+
+        const detailData = {
+            out_trade_no: order.out_trade_no,
+            created_at: toIsoOrNull(order.created_at),
+            total_fee: Number(order.total_fee) || 0,
+            ...statusFields,
+            refund_status: refundStatus,
+            items: listCompatibleItems,
+            fee,
+            payment,
+            timeline,
+            refunds,
+            shipments: shipmentsForResponse,
+            detail_items: items,
+        };
+
+        if (mode === 'buyer') {
+            return adminResult(200, {
+                success: true,
+                data: {
+                    ...detailData,
+                    order: orderPayload,
+                },
+            });
+        }
+
         return adminResult(200, {
             success: true,
             data: {
+                ...detailData,
                 order: orderPayload,
-                fee,
-                payment,
-                timeline,
-                refunds,
-                shipments: shipmentsForResponse,
-                items,
             },
         });
     } catch (error) {
@@ -3269,41 +3296,71 @@ async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
     return null;
 }
 
-async function resolveEffectiveOrderTradeState(orderRow, options = {}) {
-    const syncOnSuccess = options.syncOnSuccess === true;
+async function syncOrderTradeStateFromWechat(orderRow) {
     const dbState = orderRow?.trade_state || null;
-    if (dbState === 'SUCCESS' || dbState === 'REFUND') return dbState;
-
+    const dbDesc = orderRow?.trade_state_desc || null;
     const wxPay = await fetchWxPayOrderByOutTradeNo(orderRow?.out_trade_no);
-    const wxState = wxPay?.trade_state || null;
-    if (!wxState) return dbState;
 
-    if (
-        syncOnSuccess
-        && wxState === 'SUCCESS'
-        && dbState !== 'REFUND'
-        && orderRow?.id
-    ) {
+    if (!wxPay?.trade_state) {
+        return {
+            order: orderRow,
+            wxPay: null,
+            tradeState: dbState,
+            tradeStateDesc: dbDesc,
+            didSync: false,
+        };
+    }
+
+    if (dbState === 'REFUND') {
+        return {
+            order: orderRow,
+            wxPay,
+            tradeState: dbState,
+            tradeStateDesc: dbDesc,
+            didSync: false,
+        };
+    }
+
+    const wxState = wxPay.trade_state;
+    const wxDesc = wxPay.trade_state_desc || dbDesc;
+    let didSync = false;
+
+    if (wxState !== dbState && orderRow?.id) {
+        const successTime = wxPay.success_time ? formatWechatTime(wxPay.success_time) : null;
         await db.query(
             `UPDATE orders SET
-                transaction_id = ?,
-                trade_type = ?,
+                transaction_id = COALESCE(?, transaction_id),
+                trade_type = COALESCE(?, trade_type),
                 trade_state = ?,
                 trade_state_desc = ?,
-                success_time = ?
+                success_time = CASE WHEN ? IS NOT NULL THEN ? ELSE success_time END,
+                updated_at = NOW()
              WHERE id = ? AND trade_state != 'REFUND'`,
             [
-                wxPay.transaction_id || orderRow.transaction_id || null,
-                wxPay.trade_type || orderRow.trade_type || null,
+                wxPay.transaction_id || null,
+                wxPay.trade_type || null,
                 wxState,
-                wxPay.trade_state_desc || orderRow.trade_state_desc || null,
-                wxPay.success_time ? formatWechatTime(wxPay.success_time) : orderRow.success_time || null,
+                wxDesc,
+                successTime,
+                successTime,
                 orderRow.id,
             ]
         );
+        orderRow.trade_state = wxState;
+        orderRow.trade_state_desc = wxDesc;
+        if (wxPay.transaction_id) orderRow.transaction_id = wxPay.transaction_id;
+        if (wxPay.trade_type) orderRow.trade_type = wxPay.trade_type;
+        if (successTime) orderRow.success_time = successTime;
+        didSync = true;
     }
 
-    return wxState;
+    return {
+        order: orderRow,
+        wxPay,
+        tradeState: wxState,
+        tradeStateDesc: wxDesc,
+        didSync,
+    };
 }
 
 async function uploadDigitalItemQrCode(req) {
@@ -3335,7 +3392,7 @@ async function uploadDigitalItemQrCode(req) {
             return adminResult(404, { success: false, error: '订单不存在' });
         }
 
-        const effectiveTradeState = await resolveEffectiveOrderTradeState(orders[0], { syncOnSuccess: true });
+        const { tradeState: effectiveTradeState } = await syncOrderTradeStateFromWechat(orders[0]);
         if (effectiveTradeState !== 'SUCCESS') {
             return adminResult(400, { success: false, error: '仅支付成功的订单可上传交付二维码' });
         }
