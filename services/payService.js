@@ -1327,6 +1327,128 @@ async function refund(req) {
     }
 }
 
+function buildWechatApiHeaders(method, urlPath, body = '') {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonceStr = generateNonceStr();
+    const signature = generateSignV3(method, urlPath, timestamp, nonceStr, body);
+    return {
+        timestamp,
+        nonceStr,
+        headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
+            'User-Agent': 'axios/1.9.0',
+        },
+    };
+}
+
+async function fetchWxRefundByOutRefundNo(outRefundNo) {
+    const cleanOutRefundNo = String(outRefundNo || '').trim();
+    if (!cleanOutRefundNo) return null;
+
+    const urlPath = `/v3/refund/domestic/refunds/out-refund-no/${encodeURIComponent(cleanOutRefundNo)}`;
+    const { headers } = buildWechatApiHeaders('GET', urlPath, '');
+
+    try {
+        const response = await axios.get(`https://api.mch.weixin.qq.com${urlPath}`, { headers });
+        if (response.status === 200) return response.data;
+    } catch (error) {
+        logger.warn('查询微信退款单失败', {
+            out_refund_no: cleanOutRefundNo,
+            err: error?.response?.data || error?.message,
+        });
+    }
+    return null;
+}
+
+async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id }) {
+    const callbackKey = `refund:callback:${out_refund_no}`;
+    if (await redisClient.get(callbackKey)) {
+        return { alreadyDone: true };
+    }
+
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+    try {
+        const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${out_trade_no}`;
+        const inventoryDone = await redisClient.get(inventoryKey);
+        let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
+
+        if (!inventoryDone) {
+            const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
+            affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
+            const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
+            await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+        }
+
+        await connection.query(
+            `UPDATE refund_requests SET status = 'SUCCESS', wx_refund_id = ? WHERE out_refund_no = ?`,
+            [wx_refund_id, out_refund_no]
+        );
+        await connection.query(
+            `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款' WHERE out_trade_no = ?`,
+            [out_trade_no]
+        );
+
+        await connection.commit();
+
+        if (!inventoryDone) {
+            await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+            await clearInventoryRelatedCaches(affected);
+        }
+        await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
+        return { alreadyDone: false };
+    } catch (err) {
+        await connection.rollback();
+        throw err;
+    } finally {
+        connection.release();
+    }
+}
+
+async function markRefundFailed({ out_refund_no, wx_refund_id }) {
+    await db.query(
+        `UPDATE refund_requests SET status = 'FAILED', wx_refund_id = COALESCE(?, wx_refund_id) WHERE out_refund_no = ?`,
+        [wx_refund_id || null, out_refund_no]
+    );
+}
+
+async function syncRefundStatusFromWechat(refundRow) {
+    if (!refundRow || refundRow.status !== 'PROCESSING') {
+        return { refund: refundRow, didSync: false };
+    }
+
+    const wxRefund = await fetchWxRefundByOutRefundNo(refundRow.out_refund_no);
+    if (!wxRefund?.status) {
+        return { refund: refundRow, didSync: false };
+    }
+
+    const wxRefundId = wxRefund.refund_id || refundRow.wx_refund_id || null;
+    if (wxRefund.status === 'SUCCESS') {
+        await completeRefundSuccess({
+            out_refund_no: refundRow.out_refund_no,
+            out_trade_no: wxRefund.out_trade_no || refundRow.out_trade_no,
+            wx_refund_id: wxRefundId,
+        });
+        return {
+            refund: { ...refundRow, status: 'SUCCESS', wx_refund_id: wxRefundId },
+            didSync: true,
+        };
+    }
+
+    if (wxRefund.status === 'CLOSED' || wxRefund.status === 'ABNORMAL') {
+        await markRefundFailed({ out_refund_no: refundRow.out_refund_no, wx_refund_id: wxRefundId });
+        return {
+            refund: { ...refundRow, status: 'FAILED', wx_refund_id: wxRefundId },
+            didSync: true,
+        };
+    }
+
+    return { refund: refundRow, didSync: false };
+}
+
 async function refundApprove(req) {
     try {
         const { refund_id, approve, reject_reason } = req.body;
@@ -1407,37 +1529,59 @@ async function refundApprove(req) {
                     params.out_trade_no = refund.out_trade_no;
                 }
 
-                // 生成签名
-                const timestamp = Math.floor(Date.now() / 1000).toString();
-                const nonceStr = generateNonceStr();
-                const signature = generateSignV3(
-                    'POST',
-                    '/v3/refund/domestic/refunds',
-                    timestamp,
-                    nonceStr,
-                    JSON.stringify(params)
-                );
+                const requestBody = JSON.stringify(params);
+                const { headers } = buildWechatApiHeaders('POST', '/v3/refund/domestic/refunds', requestBody);
 
-                // 发送请求到微信支付
                 const response = await axios.post(
                     'https://api.mch.weixin.qq.com/v3/refund/domestic/refunds',
                     params,
-                    {
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
-                            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
-                            'User-Agent': 'axios/1.9.0'
-                        }
-                    }
+                    { headers }
                 );
 
                 if (response.status === 200) {
-                    // 更新退款申请状态为处理中
+                    const wxRefundId = response.data?.refund_id || null;
+                    const wxStatus = response.data?.status || 'PROCESSING';
+
+                    if (wxStatus === 'SUCCESS') {
+                        await connection.query(
+                            'UPDATE refund_requests SET status = "SUCCESS", wx_refund_id = ? WHERE id = ?',
+                            [wxRefundId, cleanRefundId]
+                        );
+                        await connection.commit();
+
+                        await completeRefundSuccess({
+                            out_refund_no: refund.out_refund_no,
+                            out_trade_no: response.data?.out_trade_no || refund.out_trade_no,
+                            wx_refund_id: wxRefundId,
+                        });
+
+                        return adminResult(200, {
+                            success: true,
+                            data: {
+                                status: 'SUCCESS',
+                                message: '退款已完成',
+                            },
+                        });
+                    }
+
+                    if (wxStatus === 'CLOSED' || wxStatus === 'ABNORMAL') {
+                        await connection.query(
+                            'UPDATE refund_requests SET status = "FAILED", wx_refund_id = ? WHERE id = ?',
+                            [wxRefundId, cleanRefundId]
+                        );
+                        await connection.commit();
+                        return adminResult(200, {
+                            success: true,
+                            data: {
+                                status: 'FAILED',
+                                message: '微信退款失败',
+                            },
+                        });
+                    }
+
                     await connection.query(
                         'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ? WHERE id = ?',
-                        [response.data.refund_id, cleanRefundId]
+                        [wxRefundId, cleanRefundId]
                     );
 
                     await connection.commit();
@@ -1445,16 +1589,16 @@ async function refundApprove(req) {
                         success: true,
                         data: {
                             status: 'PROCESSING',
-                            message: '退款申请已批准，正在处理中'
-                        }
-                    });
-                } else {
-                    await connection.rollback();
-                    return adminResult(400, {
-                        success: false,
-                        error: '退款申请处理失败'
+                            message: '退款申请已批准，正在处理中',
+                        },
                     });
                 }
+
+                await connection.rollback();
+                return adminResult(400, {
+                    success: false,
+                    error: '退款申请处理失败',
+                });
             } else {
                 // 拒绝退款申请
                 await connection.query(
@@ -1529,10 +1673,17 @@ async function listRefundRequests(req) {
         const [refunds] = await db.query(query, params);
         const [[{ total }]] = await db.query(countQuery, cleanStatus ? [cleanStatus] : []);
 
-        // 确保amount字段是有效的JSON字符串
-        const formattedRefunds = refunds.map(refund => ({
+        const syncedRefunds = await Promise.all(
+            (refunds || []).map(async (refund) => {
+                if (refund.status !== 'PROCESSING') return refund;
+                const { refund: synced } = await syncRefundStatusFromWechat(refund);
+                return synced;
+            })
+        );
+
+        const formattedRefunds = syncedRefunds.map((refund) => ({
             ...refund,
-            amount: typeof refund.amount === 'string' ? refund.amount : JSON.stringify(refund.amount)
+            amount: typeof refund.amount === 'string' ? refund.amount : JSON.stringify(refund.amount),
         }));
 
         return adminResult(200, {
@@ -1570,9 +1721,11 @@ async function getRefundRequestById(req) {
             return adminResult(404, { error: '退款申请不存在' });
         }
 
+        const { refund: syncedRefund } = await syncRefundStatusFromWechat(refunds[0]);
+
         return adminResult(200, {
             success: true,
-            data: refunds[0]
+            data: syncedRefund,
         });
     } catch (error) {
         logger.error('获取退款申请详情失败', { err: error });
@@ -1637,72 +1790,26 @@ async function refundNotify(req) {
         }
         // 处理退款结果
         if (callbackData.refund_status === 'SUCCESS') {
-            const callbackKey = `refund:callback:${callbackData.out_refund_no}`;
-            const callbackProcessed = await redisClient.get(callbackKey);
-            if (callbackProcessed) {
-                console.log('【退款回调】重复回调，已忽略:', callbackData.out_refund_no);
-                return adminResult(200, { code: 'SUCCESS', message: '重复回调，已忽略' });
-            }
-
             console.log('【退款回调】退款成功回调数据:', callbackData);
-            const {
-                out_refund_no,
-                out_trade_no,
-                refund_id,
-            } = callbackData;
-
-            const connection = await db.getConnection();
-            await connection.beginTransaction();
-            try {
-                const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${out_trade_no}`;
-                const inventoryDone = await redisClient.get(inventoryKey);
-                let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
-
-                if (!inventoryDone) {
-                    const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
-                    affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
-                    const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
-                    await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
-                    console.log('【退款回调】库存回补完成', { out_trade_no, rights: affected.rightIds.length });
-                }
-
-                await connection.query(
-                    `UPDATE refund_requests SET 
-                        status = 'SUCCESS',
-                        wx_refund_id = ?,
-                        updated_at = NOW()
-                     WHERE out_refund_no = ?`,
-                    [refund_id, out_refund_no]
-                );
-                await connection.query(
-                    `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款', updated_at = NOW() WHERE out_trade_no = ?`,
-                    [out_trade_no]
-                );
-
-                await connection.commit();
-
-                if (!inventoryDone) {
-                    await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
-                    await clearInventoryRelatedCaches(affected);
-                }
-                await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
-            } catch (err) {
-                await connection.rollback();
-                throw err;
-            } finally {
-                connection.release();
-            }
-
-            return adminResult(200, {
-                code: 'SUCCESS',
-                message: 'OK'
+            await completeRefundSuccess({
+                out_refund_no: callbackData.out_refund_no,
+                out_trade_no: callbackData.out_trade_no,
+                wx_refund_id: callbackData.refund_id,
             });
-        } else {
-            return adminResult(200, {
-                code: 'FAIL',
-                message: callbackData.refund_status || '退款失败'
+            return adminResult(200, { code: 'SUCCESS', message: 'OK' });
+        }
+
+        if (callbackData.refund_status === 'CLOSED' || callbackData.refund_status === 'ABNORMAL') {
+            await markRefundFailed({
+                out_refund_no: callbackData.out_refund_no,
+                wx_refund_id: callbackData.refund_id,
             });
         }
+
+        return adminResult(200, {
+            code: 'SUCCESS',
+            message: callbackData.refund_status || 'OK',
+        });
     } catch (error) {
         logger.error('退款回调处理失败', { err: error });
         return adminResult(500, {

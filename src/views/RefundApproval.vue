@@ -89,6 +89,16 @@
                   >
                     审批
                   </Button>
+                  <Button
+                    v-if="row.status === 'PROCESSING'"
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    :disabled="syncingRefundId === row.id"
+                    @click="syncRefundStatus(row)"
+                  >
+                    刷新状态
+                  </Button>
                   <Button size="sm" type="button" variant="secondary" @click="showDetail(row)">
                     详情
                   </Button>
@@ -316,6 +326,7 @@ const filterStatus = ref('')
 const approveDialogVisible = ref(false)
 const detailDialogVisible = ref(false)
 const approving = ref(false)
+const syncingRefundId = ref(null)
 const currentRefund = ref({})
 const approveForm = ref({
   id: null,
@@ -389,6 +400,29 @@ const showApproveDialog = (refund) => {
 const showDetail = (refund) => {
   currentRefund.value = refund
   detailDialogVisible.value = true
+}
+
+async function syncRefundStatus(refund) {
+  if (!refund?.id) return
+  syncingRefundId.value = refund.id
+  try {
+    const response = await axios.get(`/wx/pay/refund/requests/${refund.id}`)
+    if (response.success) {
+      const nextStatus = response.data?.status
+      const idx = refunds.value.findIndex((item) => item.id === refund.id)
+      if (idx >= 0) refunds.value[idx] = { ...refunds.value[idx], ...response.data }
+      if (nextStatus === 'SUCCESS') ElMessage.success('退款已完成')
+      else if (nextStatus === 'FAILED') ElMessage.warning('微信侧退款失败')
+      else ElMessage.info('微信侧仍在处理中，请稍后再试')
+    } else {
+      ElMessage.error(response.error || '刷新状态失败')
+    }
+  } catch (error) {
+    console.error('刷新退款状态失败:', error)
+    ElMessage.error('刷新状态失败')
+  } finally {
+    syncingRefundId.value = null
+  }
 }
 
 const handleApprove = async () => {
