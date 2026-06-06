@@ -1344,23 +1344,66 @@ function buildWechatApiHeaders(method, urlPath, body = '') {
     };
 }
 
-async function fetchWxRefundByOutRefundNo(outRefundNo) {
-    const cleanOutRefundNo = String(outRefundNo || '').trim();
-    if (!cleanOutRefundNo) return null;
+function normalizeWxRefundPathSegment(value) {
+    return String(value || '').trim();
+}
 
-    const urlPath = `/v3/refund/domestic/refunds/out-refund-no/${encodeURIComponent(cleanOutRefundNo)}`;
+async function fetchWxRefundByPathSegment(pathSegment) {
+    const segment = normalizeWxRefundPathSegment(pathSegment);
+    if (!segment) return { data: null, notFound: false };
+
+    const urlPath = `/v3/refund/domestic/refunds/${segment}`;
     const { headers } = buildWechatApiHeaders('GET', urlPath, '');
 
     try {
         const response = await axios.get(`https://api.mch.weixin.qq.com${urlPath}`, { headers });
-        if (response.status === 200) return response.data;
+        if (response.status === 200) return { data: response.data, notFound: false };
     } catch (error) {
+        const status = error?.response?.status;
+        const wxError = error?.response?.data;
+        if (status === 404) {
+            return { data: null, notFound: true, wxError };
+        }
         logger.warn('查询微信退款单失败', {
-            out_refund_no: cleanOutRefundNo,
-            err: error?.response?.data || error?.message,
+            path_segment: segment,
+            status,
+            err: wxError || error?.message,
         });
     }
-    return null;
+    return { data: null, notFound: false };
+}
+
+async function fetchWxRefundForRow(refundRow) {
+    const outRefundNo = normalizeWxRefundPathSegment(refundRow?.out_refund_no);
+    if (outRefundNo) {
+        const byOutRefundNo = await fetchWxRefundByPathSegment(outRefundNo);
+        if (byOutRefundNo.data) return byOutRefundNo;
+        if (!byOutRefundNo.notFound && !byOutRefundNo.data) return byOutRefundNo;
+
+        const wxRefundId = normalizeWxRefundPathSegment(refundRow?.wx_refund_id);
+        if (wxRefundId) {
+            const byWxRefundId = await fetchWxRefundByPathSegment(wxRefundId);
+            if (byWxRefundId.data) return byWxRefundId;
+            if (byWxRefundId.notFound) return { data: null, notFound: true };
+            return byWxRefundId;
+        }
+
+        if (byOutRefundNo.notFound) return { data: null, notFound: true };
+    }
+    return { data: null, notFound: false };
+}
+
+async function markRefundPendingRetry(refundRow, reason) {
+    await db.query(
+        `UPDATE refund_requests
+         SET status = 'PENDING',
+             wx_refund_id = NULL,
+             reject_reason = ?,
+             rejected_at = NULL,
+             approved_at = NULL
+         WHERE id = ? AND status = 'PROCESSING'`,
+        [reason, refundRow.id]
+    );
 }
 
 async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id }) {
@@ -1420,7 +1463,22 @@ async function syncRefundStatusFromWechat(refundRow) {
         return { refund: refundRow, didSync: false };
     }
 
-    const wxRefund = await fetchWxRefundByOutRefundNo(refundRow.out_refund_no);
+    const lookup = await fetchWxRefundForRow(refundRow);
+    if (lookup.notFound) {
+        const reason = '微信侧未找到退款单，请重新审批提交';
+        await markRefundPendingRetry(refundRow, reason);
+        return {
+            refund: {
+                ...refundRow,
+                status: 'PENDING',
+                wx_refund_id: null,
+                reject_reason: reason,
+            },
+            didSync: true,
+        };
+    }
+
+    const wxRefund = lookup.data;
     if (!wxRefund?.status) {
         return { refund: refundRow, didSync: false };
     }
@@ -1522,11 +1580,31 @@ async function refundApprove(req) {
                     amount: amountData
                 };
 
-                // 添加微信支付订单号或商户订单号
-                if (refund.transaction_id) {
-                    params.transaction_id = refund.transaction_id;
+                let transactionId = refund.transaction_id || null;
+                if (!transactionId && refund.out_trade_no) {
+                    const [orderRows] = await connection.query(
+                        'SELECT transaction_id FROM orders WHERE out_trade_no = ? LIMIT 1',
+                        [refund.out_trade_no]
+                    );
+                    transactionId = orderRows[0]?.transaction_id || null;
+                    if (transactionId) {
+                        await connection.query(
+                            'UPDATE refund_requests SET transaction_id = ? WHERE id = ?',
+                            [transactionId, cleanRefundId]
+                        );
+                    }
+                }
+
+                if (transactionId) {
+                    params.transaction_id = transactionId;
                 } else if (refund.out_trade_no) {
                     params.out_trade_no = refund.out_trade_no;
+                } else {
+                    await connection.rollback();
+                    return adminResult(400, {
+                        success: false,
+                        error: '缺少微信支付订单号或商户订单号，无法发起退款',
+                    });
                 }
 
                 const requestBody = JSON.stringify(params);
@@ -1622,10 +1700,12 @@ async function refundApprove(req) {
             connection.release();
         }
     } catch (error) {
-        logger.error('处理退款申请失败', { err: error });
+        const wxErr = error?.response?.data;
+        logger.error('处理退款申请失败', { err: wxErr || error });
+        const wxHint = wxErr?.message || wxErr?.code;
         return adminResult(500, {
             success: false,
-            error: '处理退款申请失败'
+            error: wxHint ? `处理退款申请失败：${wxHint}` : '处理退款申请失败',
         });
     }
 }

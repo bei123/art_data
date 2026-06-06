@@ -413,6 +413,7 @@ async function syncRefundStatus(refund) {
       if (idx >= 0) refunds.value[idx] = { ...refunds.value[idx], ...response.data }
       if (nextStatus === 'SUCCESS') ElMessage.success('退款已完成')
       else if (nextStatus === 'FAILED') ElMessage.warning('微信侧退款失败')
+      else if (nextStatus === 'PENDING') ElMessage.warning('微信侧未找到退款单，已退回待审批，请重新审批')
       else ElMessage.info('微信侧仍在处理中，请稍后再试')
     } else {
       ElMessage.error(response.error || '刷新状态失败')
