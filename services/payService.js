@@ -26,8 +26,185 @@ const {
     adjustDigitalArtworkStock,
     ensureDigitalArtworkIdColumns,
 } = require('../utils/digitalArtworkResolver');
+const { clearRightsInventoryCaches } = require('./rightsService');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
+const REDIS_PAY_INVENTORY_FULFILLED_PREFIX = 'pay:inventory:fulfilled:';
+const REDIS_REFUND_INVENTORY_RESTORED_PREFIX = 'refund:inventory:restored:';
+const INVENTORY_FLAG_EXPIRE_SEC = 60 * 60 * 24 * 90;
+
+async function loadOrderItemsForInventory(outTradeNo, connection = null) {
+    const runner = connection || db;
+    const [orderItems] = await runner.query(`
+        SELECT oi.type, oi.quantity, oi.right_id, oi.artwork_id, oi.digital_artwork_id, oi.order_id
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.out_trade_no = ?
+    `, [outTradeNo]);
+    return orderItems || [];
+}
+
+async function applyOrderItemsInventoryDelta({ orderItems, mode, connection = null }) {
+    const runner = connection || db;
+    const rightIds = [];
+    const artworkIds = [];
+    const digitalIds = [];
+
+    for (const item of orderItems) {
+        const qty = Number(item.quantity) || 0;
+        if (qty <= 0) continue;
+
+        if (item.type === 'right' && item.right_id) {
+            if (mode === 'deduct') {
+                await runner.query(
+                    'UPDATE rights SET remaining_count = GREATEST(remaining_count - ?, 0) WHERE id = ?',
+                    [qty, item.right_id]
+                );
+            } else {
+                await runner.query(
+                    'UPDATE rights SET remaining_count = remaining_count + ? WHERE id = ?',
+                    [qty, item.right_id]
+                );
+            }
+            rightIds.push(item.right_id);
+            continue;
+        }
+
+        if (item.type === 'artwork' && item.artwork_id) {
+            if (mode === 'deduct') {
+                await runner.query(
+                    'UPDATE original_artworks SET stock = GREATEST(stock - ?, 0) WHERE id = ?',
+                    [qty, item.artwork_id]
+                );
+            } else {
+                await runner.query(
+                    'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
+                    [qty, item.artwork_id]
+                );
+            }
+            artworkIds.push(item.artwork_id);
+            continue;
+        }
+
+        if (item.type === 'digital' && item.digital_artwork_id) {
+            await adjustDigitalArtworkStock({
+                connection,
+                id: item.digital_artwork_id,
+                delta: mode === 'deduct' ? -qty : qty,
+            });
+            digitalIds.push(item.digital_artwork_id);
+        }
+    }
+
+    return { rightIds, artworkIds, digitalIds };
+}
+
+async function recordDigitalIdentityPurchases({ outTradeNo, userId, orderItems, connection = null }) {
+    const runner = connection || db;
+    const digitalItems = (orderItems || []).filter((item) => item.type === 'digital');
+    if (!digitalItems.length || !userId) return;
+
+    for (const item of digitalItems) {
+        await runner.query(
+            'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
+            [userId, item.digital_artwork_id, 0, item.order_id]
+        );
+    }
+}
+
+async function removeDigitalIdentityPurchasesByOrderIds(orderIds, connection = null) {
+    if (!orderIds?.length) return;
+    const runner = connection || db;
+    await runner.query('DELETE FROM digital_identity_purchases WHERE order_id IN (?)', [orderIds]);
+}
+
+async function clearInventoryRelatedCaches({ rightIds = [], artworkIds = [], digitalIds = [] }) {
+    await clearRightsInventoryCaches({ rightIds });
+    if (artworkIds.length > 0) {
+        await clearPhysicalCategoriesCache();
+    }
+    if (digitalIds.length > 0) {
+        logger.info('digital inventory cache refresh skipped', { digitalIds });
+    }
+}
+
+async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+
+    const inventoryKey = `${REDIS_PAY_INVENTORY_FULFILLED_PREFIX}${cleanOutTradeNo}`;
+    const alreadyFulfilled = await redisClient.get(inventoryKey);
+    if (alreadyFulfilled) return { skipped: true, reason: 'already_fulfilled' };
+
+    const ownsConnection = !options.connection;
+    const connection = options.connection || await db.getConnection();
+
+    try {
+        if (ownsConnection) await connection.beginTransaction();
+
+        const [orders] = await connection.query(
+            'SELECT id, user_id, trade_state FROM orders WHERE out_trade_no = ? LIMIT 1',
+            [cleanOutTradeNo]
+        );
+        if (!orders.length || orders[0].trade_state !== 'SUCCESS') {
+            if (ownsConnection) await connection.rollback();
+            return { skipped: true, reason: 'not_success' };
+        }
+
+        const orderItems = await loadOrderItemsForInventory(cleanOutTradeNo, connection);
+        const affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+        await recordDigitalIdentityPurchases({
+            outTradeNo: cleanOutTradeNo,
+            userId: orders[0].user_id,
+            orderItems,
+            connection,
+        });
+
+        if (ownsConnection) await connection.commit();
+        await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+        await clearInventoryRelatedCaches(affected);
+        return { ok: true, affected };
+    } catch (error) {
+        if (ownsConnection) await connection.rollback();
+        logger.error('fulfillPaidOrderInventory failed', { err: error, out_trade_no: cleanOutTradeNo });
+        throw error;
+    } finally {
+        if (ownsConnection) connection.release();
+    }
+}
+
+async function restoreRefundedOrderInventory(outTradeNo, options = {}) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+
+    const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${cleanOutTradeNo}`;
+    const alreadyRestored = await redisClient.get(inventoryKey);
+    if (alreadyRestored) return { skipped: true, reason: 'already_restored' };
+
+    const ownsConnection = !options.connection;
+    const connection = options.connection || await db.getConnection();
+
+    try {
+        if (ownsConnection) await connection.beginTransaction();
+
+        const orderItems = await loadOrderItemsForInventory(cleanOutTradeNo, connection);
+        const affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
+
+        const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
+        await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+
+        if (ownsConnection) await connection.commit();
+        await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+        await clearInventoryRelatedCaches(affected);
+        return { ok: true, affected };
+    } catch (error) {
+        if (ownsConnection) await connection.rollback();
+        logger.error('restoreRefundedOrderInventory failed', { err: error, out_trade_no: cleanOutTradeNo });
+        throw error;
+    } finally {
+        if (ownsConnection) connection.release();
+    }
+}
 
 // 清理实物分类相关缓存
 async function clearPhysicalCategoriesCache() {
@@ -888,41 +1065,40 @@ async function payNotify(req) {
         }
         // 处理支付结果
         if (callbackData.trade_state === 'SUCCESS') {
-            // 回调去重
             const callbackKey = `pay:callback:${callbackData.out_trade_no}`;
-            const processed = await redisClient.set(callbackKey, '1', { NX: true, EX: CALLBACK_EXPIRE });
-            if (!processed) {
+            const callbackProcessed = await redisClient.get(callbackKey);
+            if (callbackProcessed) {
                 return adminResult(200, { code: 'SUCCESS', message: '重复回调，已忽略' });
             }
-            // 日志：支付成功回调
+
             console.log('支付成功回调数据:', callbackData);
             const {
-                out_trade_no, // 商户订单号
-                transaction_id, // 微信支付订单号
-                trade_type, // 交易类型
-                trade_state, // 交易状态
-                trade_state_desc, // 交易状态描述
-                success_time, // 支付完成时间
-                amount // 订单金额
+                out_trade_no,
+                transaction_id,
+                trade_type,
+                trade_state,
+                trade_state_desc,
+                success_time,
             } = callbackData;
-            // 开始事务
+
             const connection = await db.getConnection();
             await connection.beginTransaction();
+            let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
+            let shouldFulfillInventory = false;
             try {
-                // 更新订单状态前先判断是否已退款，同时获取用户ID
                 const [orders] = await connection.query(
-                    'SELECT trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                    'SELECT trade_state, user_id FROM orders WHERE out_trade_no = ? FOR UPDATE',
                     [out_trade_no]
                 );
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
                     console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
                     await connection.commit();
+                    await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                     return adminResult(200, { code: 'SUCCESS', message: '订单已退款，不再覆盖' });
                 }
 
-                const userId = orders[0].user_id;
+                const userId = orders[0]?.user_id;
 
-                // 只有不是REFUND才更新为SUCCESS
                 await connection.query(
                     `UPDATE orders SET 
               transaction_id = ?,
@@ -933,90 +1109,29 @@ async function payNotify(req) {
             WHERE out_trade_no = ?`,
                     [transaction_id, trade_type, trade_state, trade_state_desc, success_time ? formatWechatTime(success_time) : null, out_trade_no]
                 );
-                // 获取订单项
-                const [orderItems] = await connection.query(`
-                    SELECT oi.*, o.id as order_id
-                    FROM order_items oi
-                    JOIN orders o ON oi.order_id = o.id
-                    WHERE o.out_trade_no = ?
-                `, [out_trade_no]);
-                console.log('订单项:', orderItems);
 
-                // 批量更新商品库存
-                const rightUpdates = [];
-                const artworkUpdates = [];
-                const digitalUpdates = [];
-
-                for (const item of orderItems) {
-                    if (item.type === 'right') {
-                        rightUpdates.push([item.quantity, item.right_id]);
-                    } else if (item.type === 'artwork') {
-                        artworkUpdates.push([item.quantity, item.artwork_id]);
-                    } else if (item.type === 'digital') {
-                        digitalUpdates.push([item.quantity, item.digital_artwork_id]);
-                    }
-                }
-
-                // 批量更新rights库存
-                if (rightUpdates.length > 0) {
-                    for (const [quantity, rightId] of rightUpdates) {
-                        await connection.query(
-                            'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ?',
-                            [quantity, rightId]
-                        );
-                    }
-                    console.log(`批量扣减right库存: ${rightUpdates.length}条记录`);
-                }
-
-                // 批量更新artworks库存
-                if (artworkUpdates.length > 0) {
-                    for (const [quantity, artworkId] of artworkUpdates) {
-                        await connection.query(
-                            'UPDATE original_artworks SET stock = stock - ? WHERE id = ?',
-                            [quantity, artworkId]
-                        );
-                    }
-                    console.log(`批量扣减artwork库存: ${artworkUpdates.length}条记录`);
-                }
-
-                // 批量扣减数字艺术品库存（本地表或外部同步表）
-                if (digitalUpdates.length > 0) {
-                    for (const [quantity, digitalArtworkId] of digitalUpdates) {
-                        await adjustDigitalArtworkStock({
-                            connection,
-                            id: digitalArtworkId,
-                            delta: -quantity,
-                        });
-                    }
-                    console.log(`批量扣减digital_artwork库存: ${digitalUpdates.length}条记录`);
-                }
-
-                // 处理数字身份购买记录
-                const digitalPurchaseUpdates = [];
-                for (const item of orderItems) {
-                    if (item.type === 'digital') {
-                        digitalPurchaseUpdates.push([item.order_id, item.digital_artwork_id, item.quantity, item.price]);
-                    }
-                }
-
-                if (digitalPurchaseUpdates.length > 0) {
-                    for (const [orderId, digitalArtworkId, quantity, price] of digitalPurchaseUpdates) {
-                        // 计算抵扣金额（这里可以根据业务逻辑调整）
-                        const discountAmount = 0; // 数字身份购买暂时不设置抵扣
-
-                        await connection.query(
-                            'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
-                            [userId, digitalArtworkId, discountAmount, orderId]
-                        );
-                    }
-                    console.log(`记录数字身份购买: ${digitalPurchaseUpdates.length}条记录`);
+                const inventoryKey = `${REDIS_PAY_INVENTORY_FULFILLED_PREFIX}${out_trade_no}`;
+                const inventoryDone = await redisClient.get(inventoryKey);
+                if (!inventoryDone) {
+                    const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
+                    affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+                    await recordDigitalIdentityPurchases({
+                        outTradeNo: out_trade_no,
+                        userId,
+                        orderItems,
+                        connection,
+                    });
+                    shouldFulfillInventory = true;
+                    console.log('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length });
                 }
 
                 await connection.commit();
-                console.log('支付回调处理完成，库存已更新，数字身份购买已记录');
-
-                // 清理相关缓存
-                await clearPhysicalCategoriesCache();
+                if (shouldFulfillInventory) {
+                    await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+                    await clearInventoryRelatedCaches(affected);
+                }
+                await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
+                console.log('支付回调处理完成');
 
                 return adminResult(200, {
                     code: 'SUCCESS',
@@ -1522,131 +1637,55 @@ async function refundNotify(req) {
         }
         // 处理退款结果
         if (callbackData.refund_status === 'SUCCESS') {
-            // 回调去重
             const callbackKey = `refund:callback:${callbackData.out_refund_no}`;
-            const processed = await redisClient.set(callbackKey, '1', { NX: true, EX: CALLBACK_EXPIRE });
-            if (!processed) {
+            const callbackProcessed = await redisClient.get(callbackKey);
+            if (callbackProcessed) {
                 console.log('【退款回调】重复回调，已忽略:', callbackData.out_refund_no);
                 return adminResult(200, { code: 'SUCCESS', message: '重复回调，已忽略' });
             }
 
             console.log('【退款回调】退款成功回调数据:', callbackData);
             const {
-                out_refund_no, // 商户退款单号
-                out_trade_no, // 商户订单号
-                refund_id, // 微信退款单号
-                refund_status, // 退款状态
-                success_time, // 退款成功时间
-                amount // 金额信息
+                out_refund_no,
+                out_trade_no,
+                refund_id,
             } = callbackData;
 
-            // 更新订单项库存回补
             const connection = await db.getConnection();
             await connection.beginTransaction();
             try {
-                // 查询订单项 - 使用JOIN优化
-                const [orderItems] = await connection.query(`
-                    SELECT oi.*, o.id as order_id
-                    FROM order_items oi
-                    JOIN orders o ON oi.order_id = o.id
-                    WHERE o.out_trade_no = ?
-                `, [out_trade_no]);
+                const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${out_trade_no}`;
+                const inventoryDone = await redisClient.get(inventoryKey);
+                let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
 
-                // 批量更新库存
-                const rightUpdates = [];
-                const artworkUpdates = [];
-                const digitalUpdates = [];
-
-                for (const item of orderItems) {
-                    if (item.type === 'right') {
-                        rightUpdates.push([item.quantity, item.right_id]);
-                    } else if (item.type === 'artwork') {
-                        artworkUpdates.push([item.quantity, item.artwork_id]);
-                    } else if (item.type === 'digital') {
-                        digitalUpdates.push([item.quantity, item.digital_artwork_id]);
-                    }
+                if (!inventoryDone) {
+                    const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
+                    affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
+                    const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
+                    await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+                    console.log('【退款回调】库存回补完成', { out_trade_no, rights: affected.rightIds.length });
                 }
 
-                // 批量更新rights库存
-                if (rightUpdates.length > 0) {
-                    for (const [quantity, rightId] of rightUpdates) {
-                        await connection.query(
-                            'UPDATE rights SET remaining_count = remaining_count + ? WHERE id = ?',
-                            [quantity, rightId]
-                        );
-                    }
-                }
-
-                // 批量更新artworks库存
-                if (artworkUpdates.length > 0) {
-                    for (const [quantity, artworkId] of artworkUpdates) {
-                        await connection.query(
-                            'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
-                            [quantity, artworkId]
-                        );
-                    }
-                }
-
-                // 批量回补数字艺术品库存（本地表或外部同步表）
-                if (digitalUpdates.length > 0) {
-                    for (const [quantity, digitalArtworkId] of digitalUpdates) {
-                        await adjustDigitalArtworkStock({
-                            connection,
-                            id: digitalArtworkId,
-                            delta: quantity,
-                        });
-                    }
-                    console.log('【退款回调】回补digital_artwork库存:', digitalUpdates.length, '条记录');
-                }
-
-                // 处理数字身份购买记录回滚
-                const orderIds = [];
-                for (const item of orderItems) {
-                    if (item.type === 'digital') {
-                        orderIds.push(item.order_id);
-                    }
-                }
-
-                if (orderIds.length > 0) {
-                    // 删除相关的数字身份购买记录（基于订单号）
-                    await connection.query(
-                        'DELETE FROM digital_identity_purchases WHERE order_id IN (?)',
-                        [orderIds]
-                    );
-                    console.log('【退款回调】删除数字身份购买记录:', orderIds.length, '条');
-                }
-
-                await connection.commit();
-                console.log('【退款回调】库存回补完成，数字身份购买记录已删除');
-
-                // 清理相关缓存
-                await clearPhysicalCategoriesCache();
-
-                // 只更新refund_requests表的处理状态
-                try {
-                    await connection.query(
-                        `UPDATE refund_requests SET 
+                await connection.query(
+                    `UPDATE refund_requests SET 
                         status = 'SUCCESS',
                         wx_refund_id = ?,
                         updated_at = NOW()
-                        WHERE out_refund_no = ?`,
-                        [
-                            refund_id,
-                            out_refund_no
-                        ]
-                    );
-                    // 新增：更新订单状态为已退款，并打印SQL执行结果
-                    console.log('【退款回调】数据库查找订单号:', out_trade_no);
-                    const [updateResult] = await connection.query(
-                        `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款', updated_at = NOW() WHERE out_trade_no = ?`,
-                        [out_trade_no]
-                    );
-                    console.log('【退款回调】订单状态更新SQL结果:', updateResult);
-                    console.log('【退款回调】退款申请状态和订单状态更新完成');
-                } catch (updateError) {
-                    logger.error('【退款回调】更新退款申请或订单状态失败', { err: updateError });
-                    // 不影响回调应答，只记录错误
+                     WHERE out_refund_no = ?`,
+                    [refund_id, out_refund_no]
+                );
+                await connection.query(
+                    `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款', updated_at = NOW() WHERE out_trade_no = ?`,
+                    [out_trade_no]
+                );
+
+                await connection.commit();
+
+                if (!inventoryDone) {
+                    await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+                    await clearInventoryRelatedCaches(affected);
                 }
+                await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
             } catch (err) {
                 await connection.rollback();
                 throw err;
@@ -3398,6 +3437,17 @@ async function syncOrderTradeStateFromWechat(orderRow) {
         if (wxPay.trade_type) orderRow.trade_type = wxPay.trade_type;
         if (successTime) orderRow.success_time = successTime;
         didSync = true;
+    }
+
+    if (wxState === 'SUCCESS' && orderRow?.out_trade_no) {
+        try {
+            await fulfillPaidOrderInventory(orderRow.out_trade_no);
+        } catch (inventoryErr) {
+            logger.warn('同步支付成功后扣减库存失败', {
+                err: inventoryErr,
+                out_trade_no: orderRow.out_trade_no,
+            });
+        }
     }
 
     return {

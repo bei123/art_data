@@ -712,10 +712,18 @@ async function getPublicRightDetail(rawId, userId = null) {
   }
 }
 
+async function clearRightsInventoryCaches({ rightIds = [] } = {}) {
+  await clearRightsCache();
+  await clearPhysicalCategoriesCache();
+  const uniqueRightIds = [...new Set((rightIds || []).map((id) => Number(id)).filter((id) => id > 0))];
+  await Promise.all(uniqueRightIds.map((id) => redisClient.del(`${REDIS_RIGHT_DETAIL_KEY_PREFIX}${id}`)));
+}
+
 module.exports = {
   getPublicRightsList,
   createRightAdmin,
   updateRightAdmin,
   deleteRightAdmin,
   getPublicRightDetail,
+  clearRightsInventoryCaches,
 };
