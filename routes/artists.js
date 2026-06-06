@@ -13,26 +13,6 @@ router.use(async (req, res, next) => {
   }
 });
 
-router.get('/public-order', authenticateToken, async (req, res) => {
-  try {
-    const r = await svc.getPublicArtistsForSortAdmin(req.query);
-    return res.status(r.status).json(r.body);
-  } catch (error) {
-    logger.error('获取公开艺术家排序列表失败', { err: error });
-    res.status(500).json({ error: '获取公开艺术家排序列表失败' });
-  }
-});
-
-router.put('/sort', authenticateToken, async (req, res) => {
-  try {
-    const r = await svc.reorderPublicArtistsAdmin(req.body);
-    return res.status(r.status).json(r.body);
-  } catch (error) {
-    logger.error('更新艺术家展示顺序失败', { err: error });
-    res.status(500).json({ error: '更新艺术家展示顺序失败' });
-  }
-});
-
 router.get('/', optionalAuthenticate, async (req, res) => {
   try {
     const r = await svc.getPublicArtistsList(req.query, Boolean(req.includeHidden));

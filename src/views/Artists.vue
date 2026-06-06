@@ -6,6 +6,7 @@
       </h2>
       <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Select
+          v-if="!isArtistSortMode"
           :model-value="institutionSelectValue"
           @update:model-value="onInstitutionSelectChange"
         >
@@ -105,10 +106,10 @@
     <Card v-if="isArtistSortMode" class="relative overflow-hidden shadow-none ring-1">
       <CardHeader class="pb-2">
         <CardTitle class="text-base">
-          公开艺术家展示顺序
+          机构与艺术家展示顺序
         </CardTitle>
         <p class="text-sm text-muted-foreground">
-          {{ artistSortScopeLabel }}。拖拽或使用上下移动调整前台展示顺序，仅对「公开」艺术家生效。
+          前台将机构与独立公开艺术家混排展示。拖拽或使用上下移动调整顺序；隶属机构的艺术家请在机构详情中查看。
         </p>
       </CardHeader>
       <div
@@ -125,16 +126,17 @@
             <tr class="border-b border-border bg-muted/40">
               <th class="h-10 w-14 px-3 text-left font-medium" />
               <th class="h-10 w-16 px-3 text-left font-medium">序号</th>
-              <th class="h-10 w-16 px-3 text-left font-medium">头像</th>
-              <th class="h-10 px-3 text-left font-medium">姓名</th>
-              <th class="h-10 min-w-[8rem] px-3 text-left font-medium">所属机构</th>
+              <th class="h-10 w-20 px-3 text-left font-medium">类型</th>
+              <th class="h-10 w-16 px-3 text-left font-medium">图片</th>
+              <th class="h-10 px-3 text-left font-medium">名称</th>
+              <th class="h-10 min-w-[8rem] px-3 text-left font-medium">备注</th>
               <th class="h-10 w-36 px-3 text-left font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="(row, sortIndex) in publicArtistsForSort"
-              :key="row.id"
+              v-for="(row, sortIndex) in showcaseItemsForSort"
+              :key="`${row.type}-${row.id}`"
               draggable="true"
               class="border-b border-border transition-colors hover:bg-muted/30"
               :class="{
@@ -152,22 +154,25 @@
                 <GripVertical class="size-4 cursor-grab active:cursor-grabbing" aria-hidden="true" />
               </td>
               <td class="px-3 py-2 tabular-nums text-muted-foreground">{{ sortIndex + 1 }}</td>
+              <td class="px-3 py-2.5">
+                <Badge :variant="row.type === 'institution' ? 'default' : 'outline'">
+                  {{ row.type === 'institution' ? '机构' : '艺术家' }}
+                </Badge>
+              </td>
               <td class="px-3 py-2">
                 <div class="size-10 overflow-hidden rounded-md border border-border bg-muted/30">
                   <img
-                    :src="getListThumbnailUrl(getImageUrl(row.avatar))"
-                    :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
+                    :src="getListThumbnailUrl(getImageUrl(row.type === 'institution' ? row.logo : row.avatar))"
+                    :alt="row.name ? `${row.name} 图片` : '展示图'"
                     class="size-full object-cover"
                     loading="lazy"
                   >
                 </div>
               </td>
               <td class="px-3 py-2.5 font-medium">{{ row.name }}</td>
-              <td class="px-3 py-2.5">
-                <Badge v-if="row.institution" variant="secondary">
-                  {{ row.institution.name }}
-                </Badge>
-                <span v-else class="text-muted-foreground">独立艺术家</span>
+              <td class="px-3 py-2.5 text-muted-foreground">
+                <span v-if="row.type === 'institution'">旗下 {{ row.artist_count || 0 }} 位公开艺术家</span>
+                <span v-else>{{ row.era || '独立艺术家' }}</span>
               </td>
               <td class="px-3 py-2.5">
                 <div class="flex flex-wrap gap-1.5">
@@ -176,7 +181,7 @@
                     variant="outline"
                     type="button"
                     :disabled="sortIndex === 0 || isSavingArtistsOrder"
-                    @click="movePublicArtist(sortIndex, sortIndex - 1)"
+                    @click="moveShowcaseItem(sortIndex, sortIndex - 1)"
                   >
                     上移
                   </Button>
@@ -184,17 +189,17 @@
                     size="sm"
                     variant="outline"
                     type="button"
-                    :disabled="sortIndex >= publicArtistsForSort.length - 1 || isSavingArtistsOrder"
-                    @click="movePublicArtist(sortIndex, sortIndex + 1)"
+                    :disabled="sortIndex >= showcaseItemsForSort.length - 1 || isSavingArtistsOrder"
+                    @click="moveShowcaseItem(sortIndex, sortIndex + 1)"
                   >
                     下移
                   </Button>
                 </div>
               </td>
             </tr>
-            <tr v-if="!publicArtistsForSort.length && !sortListLoading">
-              <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
-                当前范围内暂无公开艺术家
+            <tr v-if="!showcaseItemsForSort.length && !sortListLoading">
+              <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">
+                暂无可排序的展示项
               </td>
             </tr>
           </tbody>
@@ -999,7 +1004,7 @@ const featuredSaving = ref(false)
 const artistIsPublicUpdatingId = ref(null)
 const isArtistSortMode = ref(false)
 const sortListLoading = ref(false)
-const publicArtistsForSort = ref([])
+const showcaseItemsForSort = ref([])
 const artistSortDragFromIndex = ref(null)
 const artistSortDragOverIndex = ref(null)
 const isSavingArtistsOrder = ref(false)
@@ -1077,12 +1082,6 @@ const institutionSelectValue = computed(() =>
   selectedInstitutionId.value == null ? 'all' : String(selectedInstitutionId.value)
 )
 
-const artistSortScopeLabel = computed(() => {
-  if (selectedInstitutionId.value == null) return '当前范围：全部公开艺术家'
-  const inst = institutions.value.find((i) => i.id === selectedInstitutionId.value)
-  return inst ? `当前范围：${inst.name} 的公开艺术家` : '当前范围：所选机构的公开艺术家'
-})
-
 const artistTotalPages = computed(() =>
   Math.max(1, Math.ceil((pagination.value.total || 0) / (pagination.value.pageSize || 20)))
 )
@@ -1091,24 +1090,16 @@ function onInstitutionSelectChange(v) {
   selectedInstitutionId.value = v === 'all' ? null : Number(v)
   pagination.value.page = 1
   clearArtistSelection()
-  if (isArtistSortMode.value) {
-    fetchPublicArtistsForSort()
-    return
-  }
   loadArtistList()
 }
 
-async function fetchPublicArtistsForSort() {
+async function fetchShowcaseItemsForSort() {
   sortListLoading.value = true
   try {
-    const params = {}
-    if (selectedInstitutionId.value != null) {
-      params.institution_id = selectedInstitutionId.value
-    }
-    const res = await axios.get('/artists/public-order', { params })
-    publicArtistsForSort.value = Array.isArray(res?.artists) ? res.artists : []
+    const res = await axios.get('/showcase/admin-order')
+    showcaseItemsForSort.value = Array.isArray(res?.items) ? res.items : []
   } catch (e) {
-    publicArtistsForSort.value = []
+    showcaseItemsForSort.value = []
     ElMessage.error(e?.response?.data?.error || e?.error || '获取排序列表失败')
   } finally {
     sortListLoading.value = false
@@ -1122,7 +1113,7 @@ function toggleArtistSortMode() {
     return
   }
   isArtistSortMode.value = true
-  fetchPublicArtistsForSort()
+  fetchShowcaseItemsForSort()
 }
 
 function handleArtistSortDragStart(index, event) {
@@ -1159,22 +1150,20 @@ async function handleArtistSortDrop(toIndex, event) {
   artistSortDragFromIndex.value = null
   artistSortDragOverIndex.value = null
   if (fromIndex === null || fromIndex === toIndex) return
-  await movePublicArtist(fromIndex, toIndex)
+  await moveShowcaseItem(fromIndex, toIndex)
 }
 
-async function savePublicArtistsOrder(artists) {
-  if (!artists?.length) return false
+async function saveShowcaseOrder(items) {
+  if (!items?.length) return false
   isSavingArtistsOrder.value = true
   try {
-    const body = { artist_ids: artists.map((a) => a.id) }
-    if (selectedInstitutionId.value != null) {
-      body.institution_id = selectedInstitutionId.value
-    }
-    const res = await axios.put('/artists/sort', body)
-    if (Array.isArray(res?.artists)) {
-      publicArtistsForSort.value = res.artists
+    const res = await axios.put('/showcase/sort', {
+      items: items.map((item) => ({ type: item.type, id: item.id })),
+    })
+    if (Array.isArray(res?.items)) {
+      showcaseItemsForSort.value = res.items
     } else {
-      await fetchPublicArtistsForSort()
+      await fetchShowcaseItemsForSort()
     }
     ElMessage.success('展示顺序已保存')
     return true
@@ -1186,15 +1175,15 @@ async function savePublicArtistsOrder(artists) {
   }
 }
 
-async function movePublicArtist(fromIndex, toIndex) {
-  const artists = [...publicArtistsForSort.value]
-  if (fromIndex < 0 || fromIndex >= artists.length || toIndex < 0 || toIndex >= artists.length) return
-  const previous = publicArtistsForSort.value
-  const [item] = artists.splice(fromIndex, 1)
-  artists.splice(toIndex, 0, item)
-  publicArtistsForSort.value = artists
-  const ok = await savePublicArtistsOrder(artists)
-  if (!ok) publicArtistsForSort.value = previous
+async function moveShowcaseItem(fromIndex, toIndex) {
+  const items = [...showcaseItemsForSort.value]
+  if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex >= items.length) return
+  const previous = showcaseItemsForSort.value
+  const [item] = items.splice(fromIndex, 1)
+  items.splice(toIndex, 0, item)
+  showcaseItemsForSort.value = items
+  const ok = await saveShowcaseOrder(items)
+  if (!ok) showcaseItemsForSort.value = previous
 }
 
 function handleArtistSearch() {
@@ -1402,7 +1391,7 @@ const handleArtistListPublicChange = async (row, nextPublic) => {
   artistIsPublicUpdatingId.value = row.id
   try {
     await axios.put(`/artists/${row.id}`, { is_public: next })
-    if (isArtistSortMode.value) await fetchPublicArtistsForSort()
+    if (isArtistSortMode.value) await fetchShowcaseItemsForSort()
     syncArtistIsPublicInLists(row.id, next)
     ElMessage.success(next === 1 ? '已设为公开' : '已设为仅后台')
   } catch (e) {

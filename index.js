@@ -35,6 +35,7 @@ const assetTransferRouter = require('./routes/asset-transfer');
 const assetVerifyRouter = require('./routes/asset-verify');
 const transactionRouter = require('./routes/transaction');
 const institutionsRouter = require('./routes/institutions');
+const showcaseRouter = require('./routes/showcase');
 const homeTitlesRouter = require('./routes/home-titles');
 const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
@@ -403,6 +404,7 @@ app.use('/api/transaction', transactionRouter);
 
 // 使用机构路由
 app.use('/api/institutions', institutionsRouter);
+app.use('/api/showcase', showcaseRouter);
 
 // 使用首页标题路由
 app.use('/api/home-titles', homeTitlesRouter);

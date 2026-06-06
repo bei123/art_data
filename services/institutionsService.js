@@ -84,7 +84,7 @@ async function getPublicInstitutionsList(query = {}) {
         SELECT i.*, ${INSTITUTION_ARTIST_COUNT_SQL}
         FROM institutions i
         ${whereSql}
-        ORDER BY i.created_at DESC
+        ORDER BY i.sort_order ASC, i.id ASC
         LIMIT ? OFFSET ?
         `,
         [...whereParams, sizeNum, offset]
@@ -104,7 +104,7 @@ async function getPublicInstitutionsList(query = {}) {
       `
       SELECT i.*, ${INSTITUTION_ARTIST_COUNT_SQL}
       FROM institutions i
-      ORDER BY i.created_at DESC
+      ORDER BY i.sort_order ASC, i.id ASC
       `
     );
     const institutionsWithProcessedImages = (rows || []).map(mapInstitutionRow);
@@ -221,12 +221,14 @@ async function createInstitutionAdmin(body) {
   const cleanDescription = description ? description.trim() : '';
 
   try {
+    const { getNextShowcaseSortOrder, invalidateShowcaseCache } = require('./showcaseService');
+    const sort_order = await getNextShowcaseSortOrder();
     const [result] = await db.query(
-      'INSERT INTO institutions (name, logo, description, address, phone, website) VALUES (?, ?, ?, ?, ?, ?)',
-      [cleanName, logo, cleanDescription, address, phone, website]
+      'INSERT INTO institutions (name, logo, description, address, phone, website, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [cleanName, logo, cleanDescription, address, phone, website, sort_order]
     );
 
-    await invalidateInstitutionListCache();
+    await invalidateShowcaseCache();
     return adminResult(200, {
       id: result.insertId,
       name: cleanName,
@@ -258,7 +260,8 @@ async function updateInstitutionAdmin(rawId, body) {
       [name, logo, description, address, phone, website, id]
     );
 
-    await invalidateInstitutionListCache();
+    const { invalidateShowcaseCache } = require('./showcaseService');
+    await invalidateShowcaseCache();
     await redisClient.del(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id);
 
     const [institutions] = await db.query('SELECT * FROM institutions WHERE id = ?', [id]);
@@ -296,7 +299,8 @@ async function deleteInstitutionAdmin(rawId) {
     await connection.query('DELETE FROM institutions WHERE id = ?', [id]);
 
     await connection.commit();
-    await invalidateInstitutionListCache();
+    const { invalidateShowcaseCache } = require('./showcaseService');
+    await invalidateShowcaseCache();
     await redisClient.del(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id);
     return adminResult(200, { message: '删除成功' });
   } catch (error) {
@@ -315,4 +319,5 @@ module.exports = {
   createInstitutionAdmin,
   updateInstitutionAdmin,
   deleteInstitutionAdmin,
+  invalidateInstitutionListCache,
 };
