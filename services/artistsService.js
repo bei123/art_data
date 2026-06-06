@@ -151,7 +151,6 @@ async function getPublicArtistsList(query, includeHidden = false) {
       `
         SELECT 
           a.*,
-          i.id as institution_id,
           i.name as institution_name,
           i.logo as institution_logo,
           i.description as institution_description
@@ -184,7 +183,6 @@ async function getPublicArtistsList(query, includeHidden = false) {
       `
         SELECT 
           a.*,
-          i.id as institution_id,
           i.name as institution_name,
           i.logo as institution_logo,
           i.description as institution_description
@@ -222,7 +220,6 @@ async function getPublicArtistsList(query, includeHidden = false) {
   const [rows] = await db.query(`
     SELECT 
       a.*,
-      i.id as institution_id,
       i.name as institution_name,
       i.logo as institution_logo,
       i.description as institution_description
@@ -264,7 +261,6 @@ async function getPublicArtistDetail(rawId, includeHidden = false) {
     `
       SELECT 
         a.*,
-        i.id as institution_id,
         i.name as institution_name,
         i.logo as institution_logo,
         i.description as institution_description
@@ -360,8 +356,7 @@ async function updateArtistAdmin(rawId, body) {
   const artistRowId = parsePositiveIntId(rawId);
   if (!artistRowId) return adminResult(400, { error: '无效的艺术家ID' });
 
-  const { name, era, avatar, banner, description, biography, journey, institution_id, achievements, is_public } =
-    body || {};
+  const { name, era, avatar, banner, description, biography, journey, achievements, is_public } = body || {};
   const updateData = {};
   if (name !== undefined && name !== null) updateData.name = name;
   if (era !== undefined && era !== null) updateData.era = era;
@@ -370,7 +365,6 @@ async function updateArtistAdmin(rawId, body) {
   if (description !== undefined && description !== null) updateData.description = description;
   if (biography !== undefined && biography !== null) updateData.biography = biography;
   if (journey !== undefined && journey !== null) updateData.journey = journey;
-  if (institution_id !== undefined && institution_id !== null) updateData.institution_id = institution_id;
   if (achievements !== undefined && achievements !== null) updateData.achievements = achievements;
   if (is_public !== undefined && is_public !== null) updateData.is_public = is_public;
 
@@ -380,14 +374,20 @@ async function updateArtistAdmin(rawId, body) {
   if (banner && !validateImageUrl(banner)) {
     return adminResult(400, { error: '无效的背景图URL' });
   }
-  if (institution_id) {
-    const institutionId = parseInt(institution_id, 10);
-    if (Number.isNaN(institutionId) || institutionId <= 0) {
-      return adminResult(400, { error: '无效的机构ID' });
-    }
-    const [institutionRows] = await db.query('SELECT id FROM institutions WHERE id = ?', [institutionId]);
-    if (institutionRows.length === 0) {
-      return adminResult(400, { error: '指定的机构不存在' });
+  if (body && 'institution_id' in body) {
+    const rawInstitutionId = body.institution_id;
+    if (rawInstitutionId === null || rawInstitutionId === '' || rawInstitutionId === 'none') {
+      updateData.institution_id = null;
+    } else {
+      const institutionId = parseInt(rawInstitutionId, 10);
+      if (Number.isNaN(institutionId) || institutionId <= 0) {
+        return adminResult(400, { error: '无效的机构ID' });
+      }
+      const [institutionRows] = await db.query('SELECT id FROM institutions WHERE id = ?', [institutionId]);
+      if (institutionRows.length === 0) {
+        return adminResult(400, { error: '指定的机构不存在' });
+      }
+      updateData.institution_id = institutionId;
     }
   }
 
@@ -474,7 +474,6 @@ async function updateArtistAdmin(rawId, body) {
       `
       SELECT 
         a.*,
-        i.id as institution_id,
         i.name as institution_name,
         i.logo as institution_logo,
         i.description as institution_description

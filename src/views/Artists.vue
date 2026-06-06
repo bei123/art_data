@@ -1447,7 +1447,7 @@ const handleEdit = (row) => {
     banner: row.banner,
     description: row.description,
     journey: row.journey,
-    institution_id: row.institution ? row.institution.id : null,
+    institution_id: row.institution?.id ?? row.institution_id ?? null,
     is_public: Number(row.is_public) === 0 ? 0 : 1
   }
   featuredSearch.value = ''
@@ -1882,6 +1882,7 @@ const handleSubmit = async () => {
   try {
     const submitData = {
       ...form.value,
+      institution_id: form.value.institution_id ?? null,
       avatar: form.value.avatar ? (form.value.avatar.startsWith('http') ? form.value.avatar.replace(API_BASE_URL, '') : form.value.avatar) : '',
       banner: form.value.banner ? (form.value.banner.startsWith('http') ? form.value.banner.replace(API_BASE_URL, '') : form.value.banner) : ''
     }
