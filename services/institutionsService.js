@@ -170,7 +170,7 @@ async function getInstitutionArtists(rawInstitutionId) {
       FROM artists a
       LEFT JOIN institutions i ON a.institution_id = i.id
       WHERE a.institution_id = ? AND COALESCE(a.is_public, 1) = 1
-      ORDER BY a.created_at DESC
+      ORDER BY a.sort_order ASC, a.id ASC
     `,
       [id]
     );

@@ -6,6 +6,13 @@ const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEn
 
 const REDIS_ARTISTS_LIST_KEY = 'artists:list';
 const REDIS_ARTIST_DETAIL_KEY_PREFIX = 'artists:detail:';
+const ARTISTS_TABLE = 'artists';
+const PUBLIC_ARTIST_ORDER_SQL = 'ORDER BY a.sort_order ASC, a.id ASC';
+const PUBLIC_ARTIST_ORDER_SQL_NO_ALIAS = 'ORDER BY sort_order ASC, id ASC';
+const ADMIN_ARTIST_ORDER_SQL =
+  'ORDER BY (CASE WHEN COALESCE(a.is_public, 1) = 1 THEN 0 ELSE 1 END) ASC, a.sort_order ASC, a.id ASC';
+
+let artistSchemaReadyPromise = null;
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -38,6 +45,104 @@ function mapArtistRows(rows) {
 function wantsArtistsPagination(query) {
   if (!query) return false;
   return query.page != null || query.pageSize != null;
+}
+
+function uniqPreserveOrder(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const item of arr) {
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+
+function parseArtistIdsList(raw) {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const parsed = raw.map((id) => parsePositiveIntId(id)).filter((id) => id != null);
+  if (parsed.length !== raw.length) return null;
+  if (parsed.length > 500) return null;
+  return uniqPreserveOrder(parsed);
+}
+
+function mergeArtistOrder(globalIds, scopeIdSet, reorderedScopeIds) {
+  const reorderedQueue = [...reorderedScopeIds];
+  return globalIds.map((id) => (scopeIdSet.has(id) ? reorderedQueue.shift() : id));
+}
+
+async function ensureArtistSchema() {
+  const connection = await db.getConnection();
+  try {
+    const [cols] = await connection.query(
+      `SELECT COUNT(*) AS cnt
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = ?
+         AND COLUMN_NAME = 'sort_order'`,
+      [ARTISTS_TABLE]
+    );
+    const exists = cols && cols[0] && Number(cols[0].cnt) > 0;
+    if (!exists) {
+      await connection.query(
+        `ALTER TABLE ${ARTISTS_TABLE} ADD COLUMN sort_order INT NOT NULL DEFAULT 0`
+      );
+      const [rows] = await connection.query(
+        `SELECT id FROM ${ARTISTS_TABLE}
+         WHERE COALESCE(is_public, 1) = 1
+         ORDER BY created_at DESC, id DESC`
+      );
+      for (let i = 0; i < (rows || []).length; i += 1) {
+        await connection.query(`UPDATE ${ARTISTS_TABLE} SET sort_order = ? WHERE id = ?`, [
+          i + 1,
+          rows[i].id,
+        ]);
+      }
+    }
+  } catch (e) {
+    logger.error('ensureArtistSchema failed', { err: e });
+    throw e;
+  } finally {
+    connection.release();
+  }
+}
+
+async function ensureArtistSchemaReady() {
+  if (!artistSchemaReadyPromise) {
+    artistSchemaReadyPromise = ensureArtistSchema().catch((e) => {
+      artistSchemaReadyPromise = null;
+      throw e;
+    });
+  }
+  await artistSchemaReadyPromise;
+}
+
+async function getNextPublicArtistSortOrder(connection) {
+  const runner = connection || db;
+  const [[row]] = await runner.query(
+    `SELECT COALESCE(MAX(sort_order), 0) AS m FROM ${ARTISTS_TABLE} WHERE COALESCE(is_public, 1) = 1`
+  );
+  return (Number(row?.m) || 0) + 1;
+}
+
+async function applyArtistSortOrder(artistIds) {
+  const connection = await db.getConnection();
+  await connection.beginTransaction();
+  try {
+    for (let i = 0; i < artistIds.length; i += 1) {
+      await connection.query(`UPDATE ${ARTISTS_TABLE} SET sort_order = ? WHERE id = ?`, [
+        i + 1,
+        artistIds[i],
+      ]);
+    }
+    await connection.commit();
+    connection.release();
+  } catch (e) {
+    await connection.rollback();
+    connection.release();
+    throw e;
+  }
+  await invalidateArtistsListCache();
 }
 
 /** 清除全量艺术家列表缓存（GET /api/artists 无 institution_id 时走 Redis `artists:list`） */
@@ -98,7 +203,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
         FROM artists a
         LEFT JOIN institutions i ON a.institution_id = i.id
         ${whereSql}
-        ORDER BY a.created_at DESC
+        ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
         LIMIT ?, ?
       `,
       [...whereParams, offset, sizeNum]
@@ -132,7 +237,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
         LEFT JOIN institutions i ON a.institution_id = i.id
         WHERE a.institution_id = ?
         ${!includeHidden ? 'AND COALESCE(a.is_public, 1) = 1' : ''}
-        ORDER BY a.created_at DESC
+        ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
       `,
       [institutionId]
     );
@@ -169,7 +274,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
     FROM artists a
     LEFT JOIN institutions i ON a.institution_id = i.id
     ${publicWhere}
-    ORDER BY a.created_at DESC
+    ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
   `);
 
   const artistsWithProcessedImages = mapArtistRows(rows);
@@ -270,9 +375,10 @@ async function createArtistAdmin(body) {
   const is_public =
     body?.is_public === 0 || body?.is_public === false || body?.is_public === '0' ? 0 : 1;
   try {
+    const sort_order = is_public === 1 ? await getNextPublicArtistSortOrder() : 0;
     const [result] = await db.query(
-      'INSERT INTO artists (avatar, name, description, institution_id, is_public) VALUES (?, ?, ?, ?, ?)',
-      [avatar, cleanName, cleanDescription, institution_id || null, is_public]
+      'INSERT INTO artists (avatar, name, description, institution_id, is_public, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+      [avatar, cleanName, cleanDescription, institution_id || null, is_public, sort_order]
     );
     await invalidateArtistsListCache();
     return adminResult(200, {
@@ -370,6 +476,23 @@ async function updateArtistAdmin(rawId, body) {
     if (updateFields.length > 0) {
       updateValues.push(artistRowId);
       await db.query(`UPDATE artists SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
+    }
+    if (updateData.is_public !== undefined) {
+      const nextPublic =
+        updateData.is_public === 0 || updateData.is_public === false || updateData.is_public === '0' ? 0 : 1;
+      if (nextPublic === 1) {
+        const [[row]] = await db.query(
+          `SELECT COALESCE(sort_order, 0) AS sort_order FROM ${ARTISTS_TABLE} WHERE id = ?`,
+          [artistRowId]
+        );
+        if (!Number(row?.sort_order)) {
+          const nextSort = await getNextPublicArtistSortOrder();
+          await db.query(`UPDATE ${ARTISTS_TABLE} SET sort_order = ? WHERE id = ?`, [
+            nextSort,
+            artistRowId,
+          ]);
+        }
+      }
     }
     await invalidateArtistsListCache();
     await redisClient.del(REDIS_ARTIST_DETAIL_KEY_PREFIX + artistRowId);
@@ -563,6 +686,143 @@ async function setFeaturedArtworksAdmin(rawId, body) {
   }
 }
 
+async function getPublicArtistsForSortAdmin(query) {
+  await ensureArtistSchemaReady();
+  const institutionRaw = query?.institution_id;
+  let institutionId = null;
+  if (institutionRaw != null && institutionRaw !== '') {
+    institutionId = parsePositiveIntId(institutionRaw);
+    if (!institutionId) return adminResult(400, { error: '无效的机构ID' });
+    const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [
+      institutionId,
+    ]);
+    if (!institutionRows.length) return adminResult(404, { error: '机构不存在' });
+  }
+
+  const whereParts = ['COALESCE(a.is_public, 1) = 1'];
+  const whereParams = [];
+  if (institutionId) {
+    whereParts.push('a.institution_id = ?');
+    whereParams.push(institutionId);
+  }
+  const whereSql = `WHERE ${whereParts.join(' AND ')}`;
+
+  const [rows] = await db.query(
+    `
+      SELECT
+        a.id,
+        a.name,
+        a.avatar,
+        a.era,
+        a.sort_order,
+        a.institution_id,
+        i.name AS institution_name
+      FROM ${ARTISTS_TABLE} a
+      LEFT JOIN institutions i ON a.institution_id = i.id
+      ${whereSql}
+      ${PUBLIC_ARTIST_ORDER_SQL}
+      LIMIT 500
+    `,
+    whereParams
+  );
+
+  const artists = (rows || []).map((row) => {
+    const processed = processObjectImages(row, ['avatar']);
+    return {
+      id: processed.id,
+      name: processed.name,
+      avatar: processed.avatar || '',
+      era: processed.era,
+      sort_order: processed.sort_order,
+      institution: processed.institution_id
+        ? { id: processed.institution_id, name: processed.institution_name }
+        : null,
+    };
+  });
+
+  return adminResult(200, {
+    artists,
+    artist_ids: artists.map((a) => a.id),
+    total: artists.length,
+    institution_id: institutionId,
+  });
+}
+
+async function reorderPublicArtistsAdmin(body) {
+  await ensureArtistSchemaReady();
+
+  const institutionRaw = body?.institution_id;
+  let institutionId = null;
+  if (institutionRaw != null && institutionRaw !== '') {
+    institutionId = parsePositiveIntId(institutionRaw);
+    if (!institutionId) return adminResult(400, { error: '无效的机构ID' });
+    const [institutionRows] = await db.query('SELECT id FROM institutions WHERE id = ?', [
+      institutionId,
+    ]);
+    if (!institutionRows.length) return adminResult(404, { error: '机构不存在' });
+  }
+
+  const artistIds = parseArtistIdsList(body?.artist_ids);
+  if (!artistIds) {
+    return adminResult(400, { error: 'artist_ids 必须为非空整数数组，且不可超过 500 项' });
+  }
+
+  const scopeWhereParts = ['COALESCE(is_public, 1) = 1'];
+  const scopeParams = [];
+  if (institutionId) {
+    scopeWhereParts.push('institution_id = ?');
+    scopeParams.push(institutionId);
+  }
+  const scopeWhereSql = `WHERE ${scopeWhereParts.join(' AND ')}`;
+
+  const placeholders = artistIds.map(() => '?').join(',');
+  const [scopeRows] = await db.query(
+    `SELECT id FROM ${ARTISTS_TABLE} ${scopeWhereSql} AND id IN (${placeholders})`,
+    [...scopeParams, ...artistIds]
+  );
+  if ((scopeRows || []).length !== artistIds.length) {
+    return adminResult(400, { error: 'artist_ids 包含非公开或不属于当前范围的艺术家' });
+  }
+
+  const [allScopeRows] = await db.query(
+    `SELECT id FROM ${ARTISTS_TABLE} ${scopeWhereSql} ${PUBLIC_ARTIST_ORDER_SQL_NO_ALIAS}`,
+    scopeParams
+  );
+  const scopeCount = (allScopeRows || []).length;
+  if (artistIds.length !== scopeCount) {
+    return adminResult(400, {
+      error: institutionId
+        ? 'artist_ids 必须包含该机构全部公开艺术家'
+        : 'artist_ids 必须包含全部公开艺术家（拖拽排序时需提交完整列表）',
+      expected: scopeCount,
+      received: artistIds.length,
+    });
+  }
+
+  let finalOrder = artistIds;
+  if (institutionId) {
+    const [globalRows] = await db.query(
+      `SELECT id FROM ${ARTISTS_TABLE} WHERE COALESCE(is_public, 1) = 1 ORDER BY sort_order ASC, id ASC`
+    );
+    const globalIds = (globalRows || []).map((r) => r.id);
+    const scopeIdSet = new Set((allScopeRows || []).map((r) => r.id));
+    finalOrder = mergeArtistOrder(globalIds, scopeIdSet, artistIds);
+  }
+
+  try {
+    await applyArtistSortOrder(finalOrder);
+  } catch (e) {
+    logger.error('reorderPublicArtistsAdmin failed', { err: e });
+    return adminResult(500, { error: '更新艺术家展示顺序失败' });
+  }
+
+  const sortList = await getPublicArtistsForSortAdmin({ institution_id: institutionId });
+  return adminResult(200, {
+    message: '艺术家展示顺序已更新',
+    ...sortList.body,
+  });
+}
+
 async function getPublicFeaturedArtworks(rawId, includeHidden = false) {
   const artistId = parsePositiveIntId(rawId);
   if (!artistId) return adminResult(400, { error: '无效的艺术家ID' });
@@ -610,12 +870,15 @@ async function getPublicFeaturedArtworks(rawId, includeHidden = false) {
 module.exports = {
   REDIS_ARTISTS_LIST_KEY,
   REDIS_ARTIST_DETAIL_KEY_PREFIX,
+  ensureArtistSchemaReady,
   getPublicArtistsList,
   getPublicArtistDetail,
+  getPublicArtistsForSortAdmin,
   createArtistAdmin,
   updateArtistAdmin,
   deleteArtistAdmin,
   bulkDeleteArtistsAdmin,
+  reorderPublicArtistsAdmin,
   setFeaturedArtworksAdmin,
   getPublicFeaturedArtworks,
   invalidateArtistsListCache,

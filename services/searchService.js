@@ -183,7 +183,7 @@ async function searchArtists(query, includeHidden = false) {
       FROM artists a
       LEFT JOIN institutions i ON a.institution_id = i.id
       ${whereSql}
-      ORDER BY a.created_at DESC
+      ORDER BY a.sort_order ASC, a.id ASC
       LIMIT ? OFFSET ?
     `,
     [...params, limitNum, offset]

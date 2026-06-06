@@ -42,6 +42,14 @@
           批量删除
           <span v-if="selectedArtistCount > 0" class="ml-1 tabular-nums">({{ selectedArtistCount }})</span>
         </Button>
+        <Button
+          v-if="!isSearchMode"
+          type="button"
+          :variant="isArtistSortMode ? 'default' : 'outline'"
+          @click="toggleArtistSortMode"
+        >
+          {{ isArtistSortMode ? '返回列表' : '调整展示顺序' }}
+        </Button>
         <Button type="button" @click="handleAdd">
           添加艺术家
         </Button>
@@ -94,7 +102,107 @@
       </AlertDescription>
     </Alert>
 
-    <Card class="relative overflow-hidden shadow-none ring-1">
+    <Card v-if="isArtistSortMode" class="relative overflow-hidden shadow-none ring-1">
+      <CardHeader class="pb-2">
+        <CardTitle class="text-base">
+          公开艺术家展示顺序
+        </CardTitle>
+        <p class="text-sm text-muted-foreground">
+          {{ artistSortScopeLabel }}。拖拽或使用上下移动调整前台展示顺序，仅对「公开」艺术家生效。
+        </p>
+      </CardHeader>
+      <div
+        v-if="sortListLoading"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
+        aria-busy="true"
+        aria-label="加载中"
+      >
+        <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
+      </div>
+      <CardContent class="overflow-x-auto p-0 sm:px-6 sm:pb-6">
+        <table class="w-full min-w-[640px] text-sm">
+          <thead>
+            <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 w-14 px-3 text-left font-medium" />
+              <th class="h-10 w-16 px-3 text-left font-medium">序号</th>
+              <th class="h-10 w-16 px-3 text-left font-medium">头像</th>
+              <th class="h-10 px-3 text-left font-medium">姓名</th>
+              <th class="h-10 min-w-[8rem] px-3 text-left font-medium">所属机构</th>
+              <th class="h-10 w-36 px-3 text-left font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(row, sortIndex) in publicArtistsForSort"
+              :key="row.id"
+              draggable="true"
+              class="border-b border-border transition-colors hover:bg-muted/30"
+              :class="{
+                'opacity-50 ring-2 ring-primary': artistSortDragFromIndex === sortIndex,
+                'ring-2 ring-primary/60': artistSortDragOverIndex === sortIndex && artistSortDragFromIndex !== sortIndex,
+                'pointer-events-none opacity-60': isSavingArtistsOrder,
+              }"
+              @dragstart="handleArtistSortDragStart(sortIndex, $event)"
+              @dragend="handleArtistSortDragEnd"
+              @dragover="handleArtistSortDragOver(sortIndex, $event)"
+              @dragleave="handleArtistSortDragLeave(sortIndex, $event)"
+              @drop="handleArtistSortDrop(sortIndex, $event)"
+            >
+              <td class="px-3 py-2 text-muted-foreground">
+                <GripVertical class="size-4 cursor-grab active:cursor-grabbing" aria-hidden="true" />
+              </td>
+              <td class="px-3 py-2 tabular-nums text-muted-foreground">{{ sortIndex + 1 }}</td>
+              <td class="px-3 py-2">
+                <div class="size-10 overflow-hidden rounded-md border border-border bg-muted/30">
+                  <img
+                    :src="getListThumbnailUrl(getImageUrl(row.avatar))"
+                    :alt="row.name ? `${row.name} 头像` : '艺术家头像'"
+                    class="size-full object-cover"
+                    loading="lazy"
+                  >
+                </div>
+              </td>
+              <td class="px-3 py-2.5 font-medium">{{ row.name }}</td>
+              <td class="px-3 py-2.5">
+                <Badge v-if="row.institution" variant="secondary">
+                  {{ row.institution.name }}
+                </Badge>
+                <span v-else class="text-muted-foreground">独立艺术家</span>
+              </td>
+              <td class="px-3 py-2.5">
+                <div class="flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    :disabled="sortIndex === 0 || isSavingArtistsOrder"
+                    @click="movePublicArtist(sortIndex, sortIndex - 1)"
+                  >
+                    上移
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    :disabled="sortIndex >= publicArtistsForSort.length - 1 || isSavingArtistsOrder"
+                    @click="movePublicArtist(sortIndex, sortIndex + 1)"
+                  >
+                    下移
+                  </Button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!publicArtistsForSort.length && !sortListLoading">
+              <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
+                当前范围内暂无公开艺术家
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+
+    <Card v-else class="relative overflow-hidden shadow-none ring-1">
       <div
         v-if="listLoading"
         class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
@@ -223,7 +331,7 @@
       </CardContent>
     </Card>
 
-    <Card class="shadow-none ring-1">
+    <Card v-if="!isArtistSortMode" class="shadow-none ring-1">
       <CardContent class="flex flex-col gap-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <span v-if="isSearchMode && searchKeyword.trim()" class="text-sm text-muted-foreground">
           搜索结果：共 {{ pagination.total }} 条
@@ -822,7 +930,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, ChevronDown, ChevronUp, Loader2, Search, Trash2, Upload, X } from 'lucide-vue-next'
+import { AlertCircle, ChevronDown, ChevronUp, GripVertical, Loader2, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
@@ -889,6 +997,12 @@ const featuredSearch = ref('')
 const featuredSaving = ref(false)
 
 const artistIsPublicUpdatingId = ref(null)
+const isArtistSortMode = ref(false)
+const sortListLoading = ref(false)
+const publicArtistsForSort = ref([])
+const artistSortDragFromIndex = ref(null)
+const artistSortDragOverIndex = ref(null)
+const isSavingArtistsOrder = ref(false)
 
 const selectedArtistIds = ref([])
 const bulkDeleteArtistDialogOpen = ref(false)
@@ -963,6 +1077,12 @@ const institutionSelectValue = computed(() =>
   selectedInstitutionId.value == null ? 'all' : String(selectedInstitutionId.value)
 )
 
+const artistSortScopeLabel = computed(() => {
+  if (selectedInstitutionId.value == null) return '当前范围：全部公开艺术家'
+  const inst = institutions.value.find((i) => i.id === selectedInstitutionId.value)
+  return inst ? `当前范围：${inst.name} 的公开艺术家` : '当前范围：所选机构的公开艺术家'
+})
+
 const artistTotalPages = computed(() =>
   Math.max(1, Math.ceil((pagination.value.total || 0) / (pagination.value.pageSize || 20)))
 )
@@ -971,7 +1091,110 @@ function onInstitutionSelectChange(v) {
   selectedInstitutionId.value = v === 'all' ? null : Number(v)
   pagination.value.page = 1
   clearArtistSelection()
+  if (isArtistSortMode.value) {
+    fetchPublicArtistsForSort()
+    return
+  }
   loadArtistList()
+}
+
+async function fetchPublicArtistsForSort() {
+  sortListLoading.value = true
+  try {
+    const params = {}
+    if (selectedInstitutionId.value != null) {
+      params.institution_id = selectedInstitutionId.value
+    }
+    const res = await axios.get('/artists/public-order', { params })
+    publicArtistsForSort.value = Array.isArray(res?.artists) ? res.artists : []
+  } catch (e) {
+    publicArtistsForSort.value = []
+    ElMessage.error(e?.response?.data?.error || e?.error || '获取排序列表失败')
+  } finally {
+    sortListLoading.value = false
+  }
+}
+
+function toggleArtistSortMode() {
+  if (isArtistSortMode.value) {
+    isArtistSortMode.value = false
+    loadArtistList()
+    return
+  }
+  isArtistSortMode.value = true
+  fetchPublicArtistsForSort()
+}
+
+function handleArtistSortDragStart(index, event) {
+  if (isSavingArtistsOrder.value) {
+    event.preventDefault()
+    return
+  }
+  artistSortDragFromIndex.value = index
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(index))
+}
+
+function handleArtistSortDragEnd() {
+  artistSortDragFromIndex.value = null
+  artistSortDragOverIndex.value = null
+}
+
+function handleArtistSortDragOver(index, event) {
+  if (artistSortDragFromIndex.value === null) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  artistSortDragOverIndex.value = index
+}
+
+function handleArtistSortDragLeave(index, event) {
+  if (artistSortDragOverIndex.value === index && !event.currentTarget.contains(event.relatedTarget)) {
+    artistSortDragOverIndex.value = null
+  }
+}
+
+async function handleArtistSortDrop(toIndex, event) {
+  event.preventDefault()
+  const fromIndex = artistSortDragFromIndex.value
+  artistSortDragFromIndex.value = null
+  artistSortDragOverIndex.value = null
+  if (fromIndex === null || fromIndex === toIndex) return
+  await movePublicArtist(fromIndex, toIndex)
+}
+
+async function savePublicArtistsOrder(artists) {
+  if (!artists?.length) return false
+  isSavingArtistsOrder.value = true
+  try {
+    const body = { artist_ids: artists.map((a) => a.id) }
+    if (selectedInstitutionId.value != null) {
+      body.institution_id = selectedInstitutionId.value
+    }
+    const res = await axios.put('/artists/sort', body)
+    if (Array.isArray(res?.artists)) {
+      publicArtistsForSort.value = res.artists
+    } else {
+      await fetchPublicArtistsForSort()
+    }
+    ElMessage.success('展示顺序已保存')
+    return true
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.error || '保存排序失败')
+    return false
+  } finally {
+    isSavingArtistsOrder.value = false
+  }
+}
+
+async function movePublicArtist(fromIndex, toIndex) {
+  const artists = [...publicArtistsForSort.value]
+  if (fromIndex < 0 || fromIndex >= artists.length || toIndex < 0 || toIndex >= artists.length) return
+  const previous = publicArtistsForSort.value
+  const [item] = artists.splice(fromIndex, 1)
+  artists.splice(toIndex, 0, item)
+  publicArtistsForSort.value = artists
+  const ok = await savePublicArtistsOrder(artists)
+  if (!ok) publicArtistsForSort.value = previous
 }
 
 function handleArtistSearch() {
@@ -980,6 +1203,7 @@ function handleArtistSearch() {
     ElMessage.warning('请输入搜索关键词')
     return
   }
+  isArtistSortMode.value = false
   isSearchMode.value = true
   pagination.value.page = 1
   clearArtistSelection()
@@ -1178,6 +1402,7 @@ const handleArtistListPublicChange = async (row, nextPublic) => {
   artistIsPublicUpdatingId.value = row.id
   try {
     await axios.put(`/artists/${row.id}`, { is_public: next })
+    if (isArtistSortMode.value) await fetchPublicArtistsForSort()
     syncArtistIsPublicInLists(row.id, next)
     ElMessage.success(next === 1 ? '已设为公开' : '已设为仅后台')
   } catch (e) {
