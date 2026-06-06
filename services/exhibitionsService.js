@@ -1284,6 +1284,72 @@ async function updateExhibitionItemArtistsAdmin(rawExhibitionId, rawItemId, body
   }
 }
 
+function parseExhibitionItemIdsList(raw) {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const parsed = raw.map((id) => parsePositiveInt(id)).filter(Boolean);
+  if (parsed.length !== raw.length) return null;
+  if (parsed.length > 500) return null;
+  return uniqPreserveOrder(parsed);
+}
+
+async function reorderExhibitionItemsAdmin(rawExhibitionId, body) {
+  const exhibitionId = parsePositiveInt(rawExhibitionId);
+  if (!exhibitionId) return adminResult(400, { error: '无效的展览ID' });
+  if (!(await ensureExhibitionExists(exhibitionId))) {
+    return adminResult(404, { error: '展览不存在' });
+  }
+
+  const itemIds = parseExhibitionItemIdsList(body?.item_ids);
+  if (!itemIds) {
+    return adminResult(400, { error: 'item_ids 必须为非空整数数组，且不可超过 500 项' });
+  }
+
+  const placeholders = itemIds.map(() => '?').join(',');
+  const [rows] = await db.query(
+    `SELECT id FROM ${EXHIBITION_ITEMS_TABLE} WHERE exhibition_id = ? AND id IN (${placeholders})`,
+    [exhibitionId, ...itemIds]
+  );
+  if ((rows || []).length !== itemIds.length) {
+    return adminResult(400, { error: 'item_ids 包含不属于本展览或不存在的作品' });
+  }
+
+  const [[{ total }]] = await db.query(
+    `SELECT COUNT(*) AS total FROM ${EXHIBITION_ITEMS_TABLE} WHERE exhibition_id = ?`,
+    [exhibitionId]
+  );
+  const totalCount = Number(total) || 0;
+  if (itemIds.length !== totalCount) {
+    return adminResult(400, {
+      error: 'item_ids 必须包含本展览全部作品（拖拽排序时需提交完整列表）',
+      expected: totalCount,
+      received: itemIds.length,
+    });
+  }
+
+  const connection = await db.getConnection();
+  await connection.beginTransaction();
+  try {
+    for (let i = 0; i < itemIds.length; i += 1) {
+      await connection.query(
+        `UPDATE ${EXHIBITION_ITEMS_TABLE} SET sort_order = ? WHERE id = ? AND exhibition_id = ?`,
+        [i + 1, itemIds[i], exhibitionId]
+      );
+    }
+    await connection.commit();
+    connection.release();
+  } catch (e) {
+    await connection.rollback();
+    connection.release();
+    logger.error('reorderExhibitionItemsAdmin tx failed', { err: e });
+    return adminResult(500, { error: '更新展览作品排序失败' });
+  }
+
+  await invalidateExhibitionDetailCache(exhibitionId);
+  const detail = await getExhibitionDetail(exhibitionId);
+  await setCachedExhibitionDetail(exhibitionId, detail);
+  return adminResult(200, { message: '展览作品排序已更新', detail });
+}
+
 async function deleteExhibitionItemAdmin(rawExhibitionId, rawItemId) {
   const exhibitionId = parsePositiveInt(rawExhibitionId);
   const itemId = parsePositiveInt(rawItemId);
@@ -1351,6 +1417,7 @@ module.exports = {
   updateExhibitionAdmin,
   appendExhibitionItemsAdmin,
   replaceExhibitionItemsAdmin,
+  reorderExhibitionItemsAdmin,
   updateExhibitionItemArtistsAdmin,
   deleteExhibitionItemAdmin,
 };

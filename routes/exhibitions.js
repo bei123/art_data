@@ -127,6 +127,17 @@ router.post('/:id/items', authenticateToken, checkRole(['admin']), async (req, r
   }
 });
 
+// 展览作品排序（需要 admin）
+router.put('/:id/items/sort', authenticateToken, checkRole(['admin']), async (req, res) => {
+  try {
+    const r = await svc.reorderExhibitionItemsAdmin(req.params.id, req.body);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('reorder exhibition items failed', { err: e });
+    res.status(500).json({ error: '更新展览作品排序失败' });
+  }
+});
+
 // 替换展览作品（需要 admin）
 router.put('/:id/items', authenticateToken, checkRole(['admin']), async (req, res) => {
   try {

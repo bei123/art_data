@@ -338,6 +338,14 @@
       </div>
 
       <Card class="relative overflow-hidden shadow-none ring-1">
+        <CardHeader class="pb-2">
+          <CardTitle class="text-base">
+            展览作品
+          </CardTitle>
+          <CardDescription v-if="(exhibitionDetail?.items || []).length > 1">
+            拖拽行可调整展示顺序
+          </CardDescription>
+        </CardHeader>
         <div
           v-if="loadingDetail"
           class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
@@ -346,10 +354,11 @@
         >
           <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
         </div>
-        <CardContent class="overflow-x-auto p-0 sm:p-6">
+        <CardContent class="overflow-x-auto p-0 sm:px-6 sm:pb-6">
           <table class="w-full min-w-[900px] text-sm">
             <thead>
               <tr class="border-b border-border bg-muted/40">
+                <th class="h-10 w-14 px-3 text-left font-medium" />
                 <th class="h-10 w-20 px-3 text-left font-medium">排序</th>
                 <th class="h-10 w-28 px-3 text-left font-medium">类型</th>
                 <th class="h-10 w-28 px-3 text-left font-medium">图片</th>
@@ -360,11 +369,25 @@
             </thead>
             <tbody>
               <tr
-                v-for="row in exhibitionDetail?.items || []"
+                v-for="(row, itemIndex) in exhibitionDetail?.items || []"
                 :key="row.id"
+                draggable="true"
                 class="border-b border-border transition-colors hover:bg-muted/30"
+                :class="{
+                  'opacity-50 ring-2 ring-primary': itemDragFromIndex === itemIndex,
+                  'ring-2 ring-primary/60': itemDragOverIndex === itemIndex && itemDragFromIndex !== itemIndex,
+                  'pointer-events-none opacity-60': isSavingItemsOrder,
+                }"
+                @dragstart="handleItemSortDragStart(itemIndex, $event)"
+                @dragend="handleItemSortDragEnd"
+                @dragover="handleItemSortDragOver(itemIndex, $event)"
+                @dragleave="handleItemSortDragLeave(itemIndex, $event)"
+                @drop="handleItemSortDrop(itemIndex, $event)"
               >
-                <td class="px-3 py-2 tabular-nums text-muted-foreground">{{ row.sort_order }}</td>
+                <td class="px-3 py-2 text-muted-foreground">
+                  <GripVertical class="size-4 cursor-grab active:cursor-grabbing" aria-hidden="true" />
+                </td>
+                <td class="px-3 py-2 tabular-nums text-muted-foreground">{{ itemIndex + 1 }}</td>
                 <td class="px-3 py-2.5">
                   <Badge :variant="row.artwork_type === 'digital' ? 'outline' : 'secondary'">
                     {{ row.artwork_type === 'digital' ? '数字' : '原作' }}
@@ -409,6 +432,26 @@
                 </td>
                 <td class="px-3 py-2.5">
                   <div class="flex flex-wrap gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      :disabled="itemIndex === 0 || isSavingItemsOrder"
+                      aria-label="上移"
+                      @click="moveExhibitionItem(itemIndex, itemIndex - 1)"
+                    >
+                      上移
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      :disabled="itemIndex >= (exhibitionDetail?.items?.length || 0) - 1 || isSavingItemsOrder"
+                      aria-label="下移"
+                      @click="moveExhibitionItem(itemIndex, itemIndex + 1)"
+                    >
+                      下移
+                    </Button>
                     <Button size="sm" variant="destructive" type="button" @click="openRemoveItemDialog(row)">
                       移除
                     </Button>
@@ -416,7 +459,7 @@
                 </td>
               </tr>
               <tr v-if="exhibitionDetail && !(exhibitionDetail.items || []).length && !loadingDetail">
-                <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
+                <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">
                   暂无展览作品，可点击上方追加
                 </td>
               </tr>
@@ -677,6 +720,9 @@ const isLivePhotosDragOver = ref(false)
 const livePhotoDragFromIndex = ref(null)
 const livePhotoDragOverIndex = ref(null)
 const isSavingLivePhotosOrder = ref(false)
+const itemDragFromIndex = ref(null)
+const itemDragOverIndex = ref(null)
+const isSavingItemsOrder = ref(false)
 const livePhotosUploadProgress = ref(0)
 const isLivePhotosUploading = ref(false)
 const isLivePhotosProcessing = ref(false)
@@ -1026,6 +1072,79 @@ async function handleLivePhotoSortDrop(toIndex, event) {
   livePhotoDragOverIndex.value = null
   if (fromIndex === null || fromIndex === toIndex) return
   await moveLivePhoto(fromIndex, toIndex)
+}
+
+function handleItemSortDragStart(index, event) {
+  if (isSavingItemsOrder.value) {
+    event.preventDefault()
+    return
+  }
+  itemDragFromIndex.value = index
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(index))
+}
+
+function handleItemSortDragEnd() {
+  itemDragFromIndex.value = null
+  itemDragOverIndex.value = null
+}
+
+function handleItemSortDragOver(index, event) {
+  if (itemDragFromIndex.value === null) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  itemDragOverIndex.value = index
+}
+
+function handleItemSortDragLeave(index, event) {
+  if (itemDragOverIndex.value === index && !event.currentTarget.contains(event.relatedTarget)) {
+    itemDragOverIndex.value = null
+  }
+}
+
+async function handleItemSortDrop(toIndex, event) {
+  event.preventDefault()
+  const fromIndex = itemDragFromIndex.value
+  itemDragFromIndex.value = null
+  itemDragOverIndex.value = null
+  if (fromIndex === null || fromIndex === toIndex) return
+  await moveExhibitionItem(fromIndex, toIndex)
+}
+
+async function saveExhibitionItemsOrder(items) {
+  if (!exhibitionId.value || !items?.length) return false
+  isSavingItemsOrder.value = true
+  try {
+    const res = await axios.put(`/exhibitions/${exhibitionId.value}/items/sort`, {
+      item_ids: items.map((item) => item.id),
+    })
+    if (res?.detail) {
+      exhibitionDetail.value = res.detail
+    } else {
+      await fetchDetail(exhibitionId.value)
+    }
+    ElMessage.success('作品排序已保存')
+    return true
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.error || '保存排序失败')
+    return false
+  } finally {
+    isSavingItemsOrder.value = false
+  }
+}
+
+async function moveExhibitionItem(fromIndex, toIndex) {
+  if (!exhibitionDetail.value?.items?.length) return
+  const items = [...exhibitionDetail.value.items]
+  if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex >= items.length) return
+
+  const previousItems = exhibitionDetail.value.items
+  const [item] = items.splice(fromIndex, 1)
+  items.splice(toIndex, 0, item)
+  exhibitionDetail.value.items = items
+
+  const ok = await saveExhibitionItemsOrder(items)
+  if (!ok) exhibitionDetail.value.items = previousItems
 }
 
 async function moveLivePhoto(fromIndex, toIndex) {
