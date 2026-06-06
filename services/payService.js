@@ -2726,19 +2726,47 @@ function mapShipmentRowFromDb(row) {
     };
 }
 
-function buildDigitalItemFulfillment({ tradeState, qrCodeUrl, qrCodeAt }) {
-    const isPaid = tradeState === 'SUCCESS';
+function buildDigitalItemFulfillment({ tradeState, tradeStateDesc, qrCodeUrl, qrCodeAt }) {
+    const state = tradeState || 'UNKNOWN';
     const hasQrCode = Boolean(qrCodeUrl && String(qrCodeUrl).trim());
-    let status = 'awaiting_payment';
-    if (isPaid) status = hasQrCode ? 'delivered' : 'awaiting_qr_code';
+    const isPaid = state === 'SUCCESS';
 
-    let hint = '支付成功后，管理员将上传藏品二维码。';
-    if (isPaid && hasQrCode) hint = '请使用下方二维码完成数字藏品领取。';
-    else if (isPaid) hint = '支付成功，管理员正在准备交付二维码，请稍后查看。';
+    let status = 'unknown';
+    let statusLabel = '未知状态';
+    let hint = tradeStateDesc || '订单状态未知，请稍后重试或联系客服。';
+
+    if (state === 'NOTPAY') {
+        status = 'awaiting_payment';
+        statusLabel = '待支付';
+        hint = '支付成功后，管理员将上传藏品二维码。';
+    } else if (state === 'PAYERROR') {
+        status = 'payment_failed';
+        statusLabel = '支付失败';
+        hint = tradeStateDesc || '支付未完成，请重新下单或联系客服。';
+    } else if (state === 'SUCCESS') {
+        status = hasQrCode ? 'delivered' : 'awaiting_qr_code';
+        statusLabel = hasQrCode ? '已交付' : '待上传二维码';
+        hint = hasQrCode
+            ? '请使用下方二维码完成数字藏品领取。'
+            : '支付成功，管理员正在准备交付二维码，请稍后查看。';
+    } else if (state === 'CLOSED') {
+        status = 'closed';
+        statusLabel = '已关闭';
+        hint = tradeStateDesc || '订单已关闭，无法继续支付。';
+    } else if (state === 'REVOKED') {
+        status = 'cancelled';
+        statusLabel = '已撤销';
+        hint = tradeStateDesc || '订单已撤销。';
+    } else if (state === 'REFUND') {
+        status = 'refunded';
+        statusLabel = '已退款';
+        hint = tradeStateDesc || '订单已退款。';
+    }
 
     return {
         type: 'digital_qr_code',
         status,
+        status_label: statusLabel,
         qr_code_url: isPaid && hasQrCode ? String(qrCodeUrl).trim() : null,
         qr_code_uploaded_at: hasQrCode ? toIsoOrNull(qrCodeAt) : null,
         hint,
@@ -3016,6 +3044,7 @@ async function orderDetailForActor(req, options = {}) {
             const digitalFulfillment = row.type === 'digital'
                 ? buildDigitalItemFulfillment({
                     tradeState: effectiveTradeState,
+                    tradeStateDesc: effectiveTradeStateDesc,
                     qrCodeUrl: row.delivery_qr_code_url,
                     qrCodeAt: row.delivery_qr_code_at,
                 })
