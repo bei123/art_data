@@ -53,8 +53,6 @@ const WX_PAY_CONFIG = {
 
     spbillCreateIp: '127.0.0.1' // 终端IP
 };
-logger.info('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key.length);
-
 // 检查必要的环境变量
 if (!WX_PAY_CONFIG.key) {
     logger.error('错误: 缺少必要的环境变量 WX_PAY_KEY');
@@ -89,7 +87,7 @@ function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })
     verify.end();
     return verify.verify(publicKey, signature, 'base64');
 }
-logger.info('APIv3密钥:', JSON.stringify(WX_PAY_CONFIG.key), WX_PAY_CONFIG.key.length);
+
 // 解密回调数据
 function decryptCallbackData(associatedData, nonce, ciphertext) {
     const key = Buffer.from(WX_PAY_CONFIG.key, 'utf8'); // 32字节明文

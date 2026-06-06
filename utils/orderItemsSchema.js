@@ -14,17 +14,29 @@ const QR_CODE_COLUMNS = [
   },
 ]
 
+async function hasColumn(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
+  )
+  return rows.length > 0
+}
+
 async function ensureOrderItemsQrCodeColumns() {
   if (ensured) return
 
   for (const col of QR_CODE_COLUMNS) {
     try {
+      if (await hasColumn('order_items', col.name)) continue
       await db.query(`ALTER TABLE order_items ADD COLUMN ${col.name} ${col.ddl}`)
       logger.info('order_items column added', { column: col.name })
     } catch (err) {
-      if (err.code !== 'ER_DUP_FIELDNAME') {
-        logger.warn('order_items ensure column failed', { column: col.name, err: err.message })
-      }
+      logger.warn('order_items ensure column failed', { column: col.name, err: err.message })
     }
   }
 

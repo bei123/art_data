@@ -209,12 +209,29 @@ async function adjustDigitalArtworkStock({ connection, id, delta }) {
   return externalRestore?.affectedRows > 0
 }
 
+async function getColumnType(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT COLUMN_TYPE
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
+  )
+  return rows[0]?.COLUMN_TYPE?.toLowerCase() || null
+}
+
 async function ensureDigitalArtworkIdColumns() {
   if (idColumnsEnsured) return
 
-  const tables = ['order_items', 'cart_items', 'digital_identity_purchases']
+  const tables = ['order_items', 'cart_items']
   for (const table of tables) {
     try {
+      const columnType = await getColumnType(table, 'digital_artwork_id')
+      if (!columnType) continue
+      if (columnType.includes('varchar(64)')) continue
+
       await db.query(
         `ALTER TABLE ${table} MODIFY COLUMN digital_artwork_id VARCHAR(64) NULL`
       )
