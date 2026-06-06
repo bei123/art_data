@@ -125,6 +125,7 @@ router.get('/orders/detail', authenticateToken, async (req, res) => {
   }
 });
 
+/** 小程序订单列表：JWT 识别用户，支持 status 分页 */
 router.get('/orders', authenticateToken, async (req, res) => {
   try {
     const r = await svc.listOrders(req);

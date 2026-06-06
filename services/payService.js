@@ -1813,68 +1813,175 @@ async function queryOrder(req) {
     }
 }
 
+function getOrderStatusType(tradeState) {
+    switch (tradeState) {
+        case 'NOTPAY':
+            return 'pending';
+        case 'PAYERROR':
+            return 'payment_failed';
+        case 'SUCCESS':
+            return 'completed';
+        case 'CLOSED':
+        case 'REVOKED':
+            return 'cancelled';
+        case 'REFUND':
+            return 'refunded';
+        default:
+            return 'unknown';
+    }
+}
+
+function getOrderStatusText(tradeState) {
+    switch (tradeState) {
+        case 'NOTPAY':
+            return '未支付';
+        case 'PAYERROR':
+            return '支付失败';
+        case 'SUCCESS':
+            return '支付成功';
+        case 'CLOSED':
+            return '已关闭';
+        case 'REVOKED':
+            return '已撤销';
+        case 'REFUND':
+            return '转入退款';
+        default:
+            return '未知状态';
+    }
+}
+
+function resolveListStatusFilter(status) {
+    if (!status || status === 'all') return null;
+    const map = {
+        pending: ['NOTPAY', 'PAYERROR'],
+        NOTPAY: ['NOTPAY'],
+        completed: ['SUCCESS'],
+        SUCCESS: ['SUCCESS'],
+        cancelled: ['CLOSED', 'REVOKED'],
+        CLOSED: ['CLOSED'],
+        REVOKED: ['REVOKED'],
+        refunded: ['REFUND'],
+        REFUND: ['REFUND'],
+    };
+    return map[status] || null;
+}
+
+function mapListItemImage(item) {
+    if (item.type === 'right') return item.right_image_url || null;
+    if (item.type === 'digital') return item.digital_image_url || null;
+    if (item.type === 'artwork') return item.artwork_image || null;
+    return null;
+}
+
+function mapListItemTitle(item) {
+    if (item.type === 'right') return item.right_title || '';
+    if (item.type === 'digital') return item.digital_title || '';
+    if (item.type === 'artwork') return item.artwork_title || '';
+    return '';
+}
+
+async function fetchListOrderItemsByOrderIds(orderIds) {
+    if (!orderIds.length) return new Map();
+
+    const placeholders = orderIds.map(() => '?').join(', ');
+    const [orderItems] = await db.query(`
+        SELECT
+            oi.order_id,
+            oi.type,
+            oi.quantity,
+            oi.price,
+            r.title as right_title,
+            ri.image_url as right_image_url,
+            ${DIGITAL_ITEM_SELECT_SQL},
+            oa.title as artwork_title,
+            oa.image as artwork_image
+        FROM order_items oi
+        LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+        LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
+        ${DIGITAL_ITEM_JOIN_SQL}
+        LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+        WHERE oi.order_id IN (${placeholders})
+        ORDER BY oi.id ASC
+    `, orderIds);
+
+    const itemsByOrderId = new Map();
+    for (const item of orderItems) {
+        const bucket = itemsByOrderId.get(item.order_id) || [];
+        bucket.push({
+            type: item.type,
+            title: mapListItemTitle(item),
+            image: mapListItemImage(item),
+            quantity: item.quantity,
+            price: item.price,
+        });
+        itemsByOrderId.set(item.order_id, bucket);
+    }
+    return itemsByOrderId;
+}
+
+async function fetchLatestRefundStatusByOutTradeNos(outTradeNos) {
+    if (!outTradeNos.length) return new Map();
+
+    const placeholders = outTradeNos.map(() => '?').join(', ');
+    const [rows] = await db.query(`
+        SELECT out_trade_no, status, wx_refund_id, created_at
+        FROM refund_requests
+        WHERE out_trade_no IN (${placeholders})
+        ORDER BY id DESC
+    `, outTradeNos);
+
+    const refundByOutTradeNo = new Map();
+    for (const row of rows) {
+        if (!refundByOutTradeNo.has(row.out_trade_no)) {
+            refundByOutTradeNo.set(row.out_trade_no, {
+                status: row.status,
+                wx_refund_id: row.wx_refund_id || null,
+                created_at: row.created_at,
+            });
+        }
+    }
+    return refundByOutTradeNo;
+}
+
+function mapOrderToListCard(order, items, refundStatus) {
+    const tradeState = order.trade_state || 'UNKNOWN';
+    return {
+        out_trade_no: order.out_trade_no,
+        created_at: order.created_at,
+        total_fee: order.total_fee,
+        pay_status: {
+            trade_state: tradeState,
+        },
+        refund_status: refundStatus || null,
+        order_status: {
+            type: getOrderStatusType(tradeState),
+            text: getOrderStatusText(tradeState),
+        },
+        items,
+    };
+}
+
 async function listOrders(req) {
     try {
-        await ensureOrderItemsQrCodeColumns();
-
         const {
-            user_id,
+            user_id: queryUserId,
             status,
-            type,
             page = 1,
-            limit = 10
+            limit = 10,
         } = req.query;
 
-        // 订单状态分类函数 - 完全以微信支付API返回的状态为准
-        const getOrderStatusType = (tradeState) => {
-            if (!tradeState) {
-                return 'unknown';
-            }
-
-            switch (tradeState) {
-                case 'NOTPAY':
-                    return 'pending';
-                case 'PAYERROR':
-                    return 'payment_failed';
-                case 'SUCCESS':
-                    return 'completed';
-                case 'CLOSED':
-                case 'REVOKED':
-                    return 'cancelled';
-                case 'REFUND':
-                    return 'refunded';
-                default:
-                    return 'unknown';
-            }
-        };
-
-        const getOrderStatusText = (tradeState) => {
-            if (!tradeState) {
-                return '未知状态';
-            }
-
-            switch (tradeState) {
-                case 'NOTPAY':
-                    return '未支付';
-                case 'PAYERROR':
-                    return '支付失败';
-                case 'SUCCESS':
-                    return '支付成功';
-                case 'CLOSED':
-                    return '已关闭';
-                case 'REVOKED':
-                    return '已撤销';
-                case 'REFUND':
-                    return '转入退款';
-                default:
-                    return '未知状态';
-            }
-        };
-
-        // 输入验证
-        if (!user_id || isNaN(parseInt(user_id)) || parseInt(user_id) <= 0) {
-            return adminResult(400, { error: '缺少有效的用户ID' });
-        }
+        const validStatusTypes = [
+            'all',
+            'pending',
+            'completed',
+            'cancelled',
+            'refunded',
+            'NOTPAY',
+            'SUCCESS',
+            'CLOSED',
+            'REVOKED',
+            'REFUND',
+        ];
 
         if (page && (isNaN(parseInt(page)) || parseInt(page) <= 0)) {
             return adminResult(400, { error: '页码必须是正整数' });
@@ -1884,268 +1991,92 @@ async function listOrders(req) {
             return adminResult(400, { error: '每页数量必须在1-100之间' });
         }
 
-        // 定义有效的订单状态类型
-        const validStatusTypes = ['all', 'pending', 'completed', 'cancelled', 'refunded'];
-
-        if (status && !validStatusTypes.includes(status)) {
-            return adminResult(400, { error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, refunded' });
-        }
-
-        // 清理输入
-        const cleanUserId = parseInt(user_id);
-        const cleanPage = parseInt(page);
-        const cleanLimit = parseInt(limit);
-        const cleanStatus = status ? status.trim() : null;
-
-        // 查询用户是否存在
-        const [users] = await db.query(
-            'SELECT * FROM wx_users WHERE id = ?',
-            [cleanUserId]
-        );
-
-        if (users.length === 0) {
-            return adminResult(404, { error: '用户不存在' });
-        }
-
-        // 构建查询条件 - 使用索引优化
-        let query = 'SELECT * FROM orders FORCE INDEX (idx_orders_user_id) WHERE user_id = ?';
-        let countQuery = 'SELECT COUNT(*) as total FROM orders FORCE INDEX (idx_orders_user_id) WHERE user_id = ?';
-        let params = [cleanUserId];
-        let countParams = [cleanUserId];
-
-        // 由于完全依赖微信API，状态筛选将在获取数据后进行
-        // 这里先获取所有订单，然后在内存中进行筛选
-        // 注意：这种方式会影响分页的准确性，建议前端处理筛选逻辑
-
-        // 添加排序和分页 - 使用索引优化
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-        const offset = (cleanPage - 1) * cleanLimit;
-        params.push(cleanLimit, offset);
-
-        // 执行查询
-        const [orders] = await db.query(query, params);
-        const [[{ total }]] = await db.query(countQuery, countParams);
-
-        // 由于完全依赖微信API，状态筛选功能暂时移除
-        // 建议前端根据返回的order_status.type进行筛选
-        // 这样可以确保状态筛选的准确性
-        // 
-        // 修改说明：
-        // 1. 订单状态完全以微信支付API返回的trade_state为准
-        // 2. 不再依赖数据库中的trade_state字段
-        // 3. 如果微信API调用失败，返回unknown状态而不是数据库状态
-        // 4. 统计信息基于微信API返回的状态实时计算
-        // 5. 状态筛选建议在前端进行，确保准确性
-
-        // 查询每个订单的订单项
-        const ordersWithItems = await Promise.all(orders.map(async (order) => {
-            // 查询订单项 - 优化查询，避免复杂CASE WHEN
-            const [orderItems] = await db.query(`
-                    SELECT 
-                        oi.id,
-                        oi.type,
-                        oi.right_id,
-                        oi.digital_artwork_id,
-                        oi.artwork_id,
-                        oi.quantity,
-                        oi.price,
-                        oi.address_id,
-                        oi.delivery_qr_code_url,
-                        oi.delivery_qr_code_at,
-                        r.title as right_title,
-                        r.price as right_price,
-                        r.original_price as right_original_price,
-                        r.description as right_description,
-                        r.status as right_status,
-                        r.remaining_count as right_remaining_count,
-                        ri.image_url as right_image_url,
-                        ${DIGITAL_ITEM_SELECT_SQL},
-                    oa.title as artwork_title,
-                    oa.original_price as artwork_original_price,
-                    oa.discount_price as artwork_discount_price,
-                    oa.description as artwork_description,
-                    oa.image as artwork_image,
-                    wa.receiver_name,
-                    wa.receiver_phone,
-                    wa.province,
-                    wa.city,
-                    wa.district,
-                    wa.detail_address,
-                    wa.is_default
-                FROM order_items oi
-                LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-                LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-                ${DIGITAL_ITEM_JOIN_SQL}
-                LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
-                LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
-                WHERE oi.order_id = ?
-            `, [order.id]);
-
-            // 处理订单项数据
-            const orderItemsWithImages = orderItems.map(item => {
-                let processedItem = {
-                    id: item.id,
-                    type: item.type,
-                    right_id: item.right_id != null ? item.right_id : null,
-                    digital_artwork_id: item.digital_artwork_id != null ? item.digital_artwork_id : null,
-                    artwork_id: item.artwork_id != null ? item.artwork_id : null,
-                    quantity: item.quantity,
-                    price: item.price,
-                    address_id: item.address_id,
-                    ...mapDigitalItemQrFields(item),
-                    address: item.address_id ? {
-                        id: item.address_id,
-                        receiver_name: item.receiver_name,
-                        receiver_phone: item.receiver_phone,
-                        province: item.province,
-                        city: item.city,
-                        district: item.district,
-                        detail_address: item.detail_address,
-                        is_default: item.is_default === 1,
-                        full_address: `${item.province} ${item.city} ${item.district} ${item.detail_address}`
-                    } : null
-                };
-
-                // 根据类型设置相应的字段
-                if (item.type === 'right') {
-                    processedItem = {
-                        ...processedItem,
-                        title: item.right_title,
-                        original_price: item.right_original_price,
-                        description: item.right_description,
-                        status: item.right_status,
-                        remaining_count: item.right_remaining_count,
-                        images: item.right_image_url ? [item.right_image_url] : []
-                    };
-                } else if (item.type === 'digital') {
-                    const digitalFulfillment = buildDigitalItemFulfillment({
-                        tradeState: order.trade_state,
-                        qrCodeUrl: item.delivery_qr_code_url,
-                        qrCodeAt: item.delivery_qr_code_at,
-                    });
-                    processedItem = {
-                        ...processedItem,
-                        title: item.digital_title,
-                        description: item.digital_description,
-                        images: item.digital_image_url ? [item.digital_image_url] : [],
-                        fulfillment: digitalFulfillment,
-                    };
-                } else if (item.type === 'artwork') {
-                    processedItem = {
-                        ...processedItem,
-                        title: item.artwork_title,
-                        original_price: item.artwork_original_price,
-                        discount_price: item.artwork_discount_price,
-                        description: item.artwork_description,
-                        images: item.artwork_image ? [item.artwork_image] : []
-                    };
-                }
-
-                return {
-                    ...processedItem,
-                    business_ids: {
-                        right_id: processedItem.right_id,
-                        digital_artwork_id: processedItem.digital_artwork_id,
-                        artwork_id: processedItem.artwork_id,
-                    },
-                };
+        if (status && !validStatusTypes.includes(String(status).trim())) {
+            return adminResult(400, {
+                error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, refunded, NOTPAY, SUCCESS, CLOSED, REVOKED, REFUND',
             });
+        }
 
-            // 查询微信支付订单状态 - 完全以微信API返回的数据为准
-            try {
-                const timestamp = Math.floor(Date.now() / 1000).toString();
-                const nonceStr = generateNonceStr();
-                const method = 'GET';
-                const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`;
-                const body = '';
-                const signature = generateSignV3(method, url, timestamp, nonceStr, body);
+        const authUserId = req.user?.id;
+        if (!authUserId) {
+            return adminResult(401, { error: '未登录' });
+        }
 
-                const response = await axios.get(
-                    `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`,
-                    {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
-                            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
-                            'User-Agent': 'axios/1.9.0'
-                        }
-                    }
-                );
-
-                const wxPayData = response.data;
-
-                return {
-                    ...order,
-                    items: orderItemsWithImages,
-                    order_status: {
-                        type: getOrderStatusType(wxPayData.trade_state),
-                        text: getOrderStatusText(wxPayData.trade_state)
-                    },
-                    pay_status: {
-                        trade_state: wxPayData.trade_state,
-                        trade_state_desc: wxPayData.trade_state_desc,
-                        success_time: wxPayData.success_time,
-                        amount: wxPayData.amount ? {
-                            total: wxPayData.amount.total,
-                            currency: wxPayData.amount.currency
-                        } : null,
-                        transaction_id: wxPayData.transaction_id
-                    }
-                };
-            } catch (error) {
-                logger.error('查询微信支付状态失败', { err: error });
-
-                // 如果查询微信支付状态失败，返回错误状态
-                return {
-                    ...order,
-                    items: orderItemsWithImages,
-                    order_status: {
-                        type: 'unknown',
-                        text: '支付状态查询失败'
-                    },
-                    pay_status: {
-                        trade_state: 'UNKNOWN',
-                        trade_state_desc: '支付状态查询失败',
-                        success_time: null,
-                        amount: null,
-                        transaction_id: null
-                    }
-                };
+        if (queryUserId) {
+            const parsedQueryUserId = parseInt(queryUserId, 10);
+            if (isNaN(parsedQueryUserId) || parsedQueryUserId <= 0) {
+                return adminResult(400, { error: '无效的用户ID' });
             }
-        }));
+            if (parsedQueryUserId !== Number(authUserId)) {
+                return adminResult(403, { error: '无权查看其他用户订单' });
+            }
+        }
 
-        // 基于微信API返回的状态进行实时统计
-        const statusStats = [{
-            pending_count: ordersWithItems.filter(order => order.order_status.type === 'pending').length,
-            completed_count: ordersWithItems.filter(order => order.order_status.type === 'completed').length,
-            cancelled_count: ordersWithItems.filter(order => order.order_status.type === 'cancelled').length,
-            refunded_count: ordersWithItems.filter(order => order.order_status.type === 'refunded').length,
-            total_count: parseInt(total)
-        }];
+        const cleanUserId = Number(authUserId);
+        const cleanPage = parseInt(page, 10);
+        const cleanLimit = parseInt(limit, 10);
+        const cleanStatus = status ? String(status).trim() : 'all';
+        const statusStates = resolveListStatusFilter(cleanStatus);
+
+        const whereParts = ['user_id = ?'];
+        const whereParams = [cleanUserId];
+        if (statusStates?.length) {
+            whereParts.push(`trade_state IN (${statusStates.map(() => '?').join(', ')})`);
+            whereParams.push(...statusStates);
+        }
+
+        const whereSql = whereParts.join(' AND ');
+        const offset = (cleanPage - 1) * cleanLimit;
+
+        const [[orders], [[{ total }]]] = await Promise.all([
+            db.query(
+                `SELECT id, out_trade_no, created_at, total_fee, trade_state
+                 FROM orders FORCE INDEX (idx_orders_user_id)
+                 WHERE ${whereSql}
+                 ORDER BY created_at DESC
+                 LIMIT ? OFFSET ?`,
+                [...whereParams, cleanLimit, offset]
+            ),
+            db.query(
+                `SELECT COUNT(*) as total
+                 FROM orders FORCE INDEX (idx_orders_user_id)
+                 WHERE ${whereSql}`,
+                whereParams
+            ),
+        ]);
+
+        const orderIds = orders.map((order) => order.id);
+        const [itemsByOrderId, refundByOutTradeNo] = await Promise.all([
+            fetchListOrderItemsByOrderIds(orderIds),
+            fetchLatestRefundStatusByOutTradeNos(orders.map((order) => order.out_trade_no)),
+        ]);
+
+        const orderCards = orders.map((order) => mapOrderToListCard(
+            order,
+            itemsByOrderId.get(order.id) || [],
+            refundByOutTradeNo.get(order.out_trade_no) || null
+        ));
+
+        const totalCount = Number(total);
+        const hasMore = cleanPage * cleanLimit < totalCount;
 
         return adminResult(200, {
             success: true,
             data: {
-                orders: ordersWithItems,
+                orders: orderCards,
                 pagination: {
-                    total: parseInt(total),
                     page: cleanPage,
-                    limit: cleanLimit
+                    limit: cleanLimit,
+                    total: totalCount,
+                    has_more: hasMore,
                 },
-                statistics: {
-                    pending: statusStats[0]?.pending_count || 0,
-                    completed: statusStats[0]?.completed_count || 0,
-                    cancelled: statusStats[0]?.cancelled_count || 0,
-                    refunded: statusStats[0]?.refunded_count || 0,
-                    total: statusStats[0]?.total_count || 0
-                }
-            }
+            },
         });
     } catch (error) {
         logger.error('查询订单列表失败', { err: error });
         return adminResult(500, {
             success: false,
-            error: '查询订单列表失败'
+            error: '查询订单列表失败',
         });
     }
 }
