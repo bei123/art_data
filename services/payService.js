@@ -1820,6 +1820,7 @@ function getOrderStatusType(tradeState) {
         case 'SUCCESS':
             return 'completed';
         case 'CLOSED':
+            return 'closed';
         case 'REVOKED':
             return 'cancelled';
         case 'REFUND':
@@ -1856,6 +1857,7 @@ function resolveListStatusFilter(status) {
         completed: ['SUCCESS'],
         SUCCESS: ['SUCCESS'],
         cancelled: ['CLOSED', 'REVOKED'],
+        closed: ['CLOSED'],
         CLOSED: ['CLOSED'],
         REVOKED: ['REVOKED'],
         refunded: ['REFUND'],
@@ -1943,23 +1945,36 @@ async function fetchLatestRefundStatusByOutTradeNos(outTradeNos) {
 
 function buildOrderStatusFields(tradeState, tradeStateDesc) {
     const state = tradeState || 'UNKNOWN';
+    const displayText = tradeStateDesc || getOrderStatusText(state);
     return {
         pay_status: {
             trade_state: state,
-            trade_state_desc: tradeStateDesc || getOrderStatusText(state),
+            trade_state_desc: displayText,
         },
         order_status: {
             type: getOrderStatusType(state),
-            text: getOrderStatusText(state),
+            text: displayText,
         },
     };
+}
+
+async function refreshListOrdersPaymentState(orders) {
+    const needSync = orders.filter((order) => order.trade_state === 'NOTPAY' || order.trade_state === 'PAYERROR');
+    if (needSync.length === 0) return;
+
+    await Promise.all(needSync.map((order) => syncOrderTradeStateFromWechat(order)));
+}
+
+function filterOrdersByStatus(orders, statusStates) {
+    if (!statusStates?.length) return orders;
+    return orders.filter((order) => statusStates.includes(order.trade_state));
 }
 
 function mapOrderToListCard(order, items, refundStatus) {
     const statusFields = buildOrderStatusFields(order.trade_state, order.trade_state_desc);
     return {
         out_trade_no: order.out_trade_no,
-        created_at: order.created_at,
+        created_at: toIsoOrNull(order.created_at),
         total_fee: Number(order.total_fee) || 0,
         ...statusFields,
         refund_status: refundStatus || null,
@@ -1981,6 +1996,7 @@ async function listOrders(req) {
             'pending',
             'completed',
             'cancelled',
+            'closed',
             'refunded',
             'NOTPAY',
             'SUCCESS',
@@ -1999,7 +2015,7 @@ async function listOrders(req) {
 
         if (status && !validStatusTypes.includes(String(status).trim())) {
             return adminResult(400, {
-                error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, refunded, NOTPAY, SUCCESS, CLOSED, REVOKED, REFUND',
+                error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, closed, refunded, NOTPAY, SUCCESS, CLOSED, REVOKED, REFUND',
             });
         }
 
@@ -2051,13 +2067,16 @@ async function listOrders(req) {
             ),
         ]);
 
-        const orderIds = orders.map((order) => order.id);
+        await refreshListOrdersPaymentState(orders);
+        const visibleOrders = filterOrdersByStatus(orders, statusStates);
+
+        const orderIds = visibleOrders.map((order) => order.id);
         const [itemsByOrderId, refundByOutTradeNo] = await Promise.all([
             fetchListOrderItemsByOrderIds(orderIds),
-            fetchLatestRefundStatusByOutTradeNos(orders.map((order) => order.out_trade_no)),
+            fetchLatestRefundStatusByOutTradeNos(visibleOrders.map((order) => order.out_trade_no)),
         ]);
 
-        const orderCards = orders.map((order) => mapOrderToListCard(
+        const orderCards = visibleOrders.map((order) => mapOrderToListCard(
             order,
             itemsByOrderId.get(order.id) || [],
             refundByOutTradeNo.get(order.out_trade_no) || null
