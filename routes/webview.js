@@ -2,16 +2,23 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const logger = require('../utils/logger');
+const { authenticateTokenAllowQuery } = require('../auth');
+const {
+  validateProxyTargetUrl,
+  assertResolvedHostIsPublic,
+  createProxyRedirectGuard,
+} = require('../utils/proxyUrlPolicy');
 
 /**
  * WebView 代理接口
  * 用于代理无法配置为业务域名的页面
  * 接口地址: GET /api/webview/proxy
  * 请求参数:
- *   - targetUrl (string, required): 要代理的目标URL（收银台URL）
+ *   - targetUrl (string, required): 要代理的目标URL（收银台URL，须在域名白名单内）
  *   - authorization (string, optional): Authorization 头值（Bearer token）
+ *   - token (string, optional): 本系统 JWT（web-view 无法带头时使用）
  */
-router.get('/proxy', async (req, res) => {
+router.get('/proxy', authenticateTokenAllowQuery, async (req, res) => {
   try {
     const { targetUrl, authorization } = req.query;
     
@@ -23,30 +30,42 @@ router.get('/proxy', async (req, res) => {
       });
     }
 
-    // 解码URL
-    const decodedTargetUrl = decodeURIComponent(targetUrl);
-    
-    console.log('代理请求:', decodedTargetUrl);
-    console.log('Authorization:', authorization ? '已提供' : '未提供');
-
-    // 验证URL格式
+    let decodedTargetUrl
     try {
-      const urlObj = new URL(decodedTargetUrl);
-      // 只允许http和https协议
-      if (!['http:', 'https:'].includes(urlObj.protocol)) {
-        return res.status(400).json({
-          code: 400,
-          status: false,
-          message: '只支持http和https协议'
-        });
-      }
-    } catch (e) {
+      decodedTargetUrl = decodeURIComponent(String(targetUrl))
+    } catch {
       return res.status(400).json({
         code: 400,
         status: false,
-        message: '无效的URL格式'
-      });
+        message: 'targetUrl解码失败'
+      })
     }
+
+    const urlCheck = validateProxyTargetUrl(decodedTargetUrl)
+    if (!urlCheck.ok) {
+      return res.status(urlCheck.status).json({
+        code: urlCheck.status,
+        status: false,
+        message: urlCheck.message
+      })
+    }
+
+    const dnsCheck = await assertResolvedHostIsPublic(urlCheck.hostname)
+    if (!dnsCheck.ok) {
+      logger.warn('webview_proxy_dns_blocked', { hostname: urlCheck.hostname, user_id: req.user?.id })
+      return res.status(dnsCheck.status).json({
+        code: dnsCheck.status,
+        status: false,
+        message: dnsCheck.message
+      })
+    }
+
+    decodedTargetUrl = urlCheck.url
+    logger.info('webview_proxy_request', {
+      hostname: urlCheck.hostname,
+      user_id: req.user?.id,
+      has_authorization: Boolean(authorization),
+    })
 
     // 构建请求头，只使用用户明确提供的 authorization（必须是 Bearer token）
     const requestHeaders = {
@@ -129,11 +148,11 @@ router.get('/proxy', async (req, res) => {
     // 注意：不使用 axios 的 auth 配置选项，避免自动添加 Basic Auth
     const response = await axios.get(decodedTargetUrl, {
       headers: requestHeaders,
-      maxRedirects: 3, // 允许必要的重定向（如 HTTP->HTTPS），但限制次数避免意外跳转
+      maxRedirects: 5,
+      beforeRedirect: createProxyRedirectGuard(),
       timeout: 30000,
       responseType: 'text',
-      validateStatus: (status) => status < 500, // 不抛出4xx错误
-      // 明确不使用 auth 配置，避免 axios 自动添加 Basic Auth
+      validateStatus: (status) => status < 500,
       auth: undefined,
     });
 
@@ -579,6 +598,15 @@ router.get('/proxy', async (req, res) => {
     res.status(response.status).send(htmlContent);
 
   } catch (error) {
+    if (error.code === 'PROXY_REDIRECT_BLOCKED') {
+      logger.warn('webview_proxy_redirect_blocked', { message: error.message, user_id: req.user?.id })
+      return res.status(403).json({
+        code: 403,
+        status: false,
+        message: '重定向目标不在允许列表中'
+      })
+    }
+
     logger.error('代理请求失败:', { err: error })
     
     if (error.response) {

@@ -407,8 +407,19 @@ const logout = async (req, res) => {
 /** 须后台 admin 角色；用法：router.post('/x', ...requireAdmin, handler) */
 const requireAdmin = [authenticateToken, checkRole(['admin'])];
 
+/** img / web-view 等无法带 Authorization 头时，允许 query.token 传 JWT */
+function authenticateTokenAllowQuery(req, res, next) {
+  if (!req.headers.authorization && req.query?.token) {
+    const raw = String(req.query.token).trim()
+    const token = raw.includes('%') ? decodeURIComponent(raw) : raw.replace(/ /g, '+')
+    req.headers.authorization = `Bearer ${token}`
+  }
+  return authenticateToken(req, res, next)
+}
+
 module.exports = {
   authenticateToken,
+  authenticateTokenAllowQuery,
   optionalAuthenticate,
   assertSelfOrAdmin,
   checkRole,

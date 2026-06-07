@@ -1,20 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, checkRole, optionalAuthenticate, requireAdmin } = require('../auth');
+const { authenticateToken, checkRole, optionalAuthenticate, requireAdmin, authenticateTokenAllowQuery } = require('../auth');
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
 const wmsArtworkImage = require('../services/wmsArtworkImageService');
 const { respondJson } = require('../middleware/corsPolicy');
-
-function authenticateTokenAllowQuery(req, res, next) {
-  if (!req.headers.authorization && req.query?.token) {
-    const raw = String(req.query.token).trim();
-    const token = raw.includes('%') ? decodeURIComponent(raw) : raw.replace(/ /g, '+');
-    req.headers.authorization = `Bearer ${token}`;
-  }
-  return authenticateToken(req, res, next);
-}
 
 router.get('/', optionalAuthenticate, async (req, res) => {
   try {
