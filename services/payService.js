@@ -25,6 +25,7 @@ const {
     isDigitalArtworkPurchasable,
     adjustDigitalArtworkStock,
     ensureDigitalArtworkIdColumns,
+    resolveSubmittedDigitalPriceYuan,
 } = require('../utils/digitalArtworkResolver');
 const { clearRightsInventoryCaches } = require('./rightsService');
 
@@ -542,6 +543,8 @@ async function unifiedOrder(req) {
                 } else if (item.type === 'digital') {
                     dbPrice = parseFloat(goods.price);
                     if (!Number.isFinite(dbPrice)) dbPrice = 0;
+                    itemPrice = resolveSubmittedDigitalPriceYuan(itemPrice, dbPrice);
+                    item.price = itemPrice;
                 } else if (item.type === 'artwork') {
                     dbPrice = (goods.discount_price && goods.discount_price > 0 && goods.discount_price < goods.original_price)
                         ? goods.discount_price
@@ -804,6 +807,7 @@ async function singleOrder(req) {
 
             // 校验商品
             let itemId, dbPrice, stock, actualPrice;
+            let unitPriceYuan = cleanPrice;
             if (cleanType === 'right') {
                 itemId = parseInt(right_id);
                 const [rights] = await connection.query(
@@ -887,7 +891,8 @@ async function singleOrder(req) {
                 }
                 dbPrice = parseFloat(digital.price);
                 if (!Number.isFinite(dbPrice)) dbPrice = 0;
-                if (Math.abs(cleanPrice - dbPrice) > 0.01) {
+                unitPriceYuan = resolveSubmittedDigitalPriceYuan(cleanPrice, dbPrice);
+                if (Math.abs(unitPriceYuan - dbPrice) > 0.01) {
                     await connection.rollback();
                     return adminResult(400, {
                         error: `数字艺术品ID ${itemId} 价格不匹配`,
@@ -897,7 +902,7 @@ async function singleOrder(req) {
             }
 
             // 计算实际支付金额（考虑抵扣）
-            const total_fee = cleanPrice * cleanQuantity;
+            const total_fee = unitPriceYuan * cleanQuantity;
             const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
             let orderId;
@@ -927,7 +932,7 @@ async function singleOrder(req) {
             if (cleanType === 'right') {
                 orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, cleanPrice, address_id || null];
             } else if (cleanType === 'digital') {
-                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, cleanPrice, address_id || null];
+                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, unitPriceYuan, address_id || null];
             } else if (cleanType === 'artwork') {
                 orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, cleanPrice, address_id || null];
             }

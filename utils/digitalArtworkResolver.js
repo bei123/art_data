@@ -14,6 +14,33 @@ function normalizeWespacePriceToYuan(raw) {
   return Math.round((n / WESPACE_PRICE_FEN_PER_YUAN) * 100) / 100
 }
 
+/**
+ * 将客户端提交的数字艺术品单价统一为元。
+ * Wespace 部分接口/小程序仍可能传分（如 12000），与库内元价（120）对齐后再校验与落库。
+ */
+function priceCents(value) {
+  const n = typeof value === 'number' ? value : parseFloat(value)
+  if (!Number.isFinite(n)) return null
+  return Math.round(n * 100)
+}
+
+function resolveSubmittedDigitalPriceYuan(submittedPrice, dbPriceYuan) {
+  const submitted = typeof submittedPrice === 'number' ? submittedPrice : parseFloat(submittedPrice)
+  const dbYuan = typeof dbPriceYuan === 'number' ? dbPriceYuan : parseFloat(dbPriceYuan)
+  if (!Number.isFinite(submitted)) return submitted
+  if (!Number.isFinite(dbYuan) || dbYuan <= 0) return submitted
+
+  const submittedCents = priceCents(submitted)
+  const dbCents = priceCents(dbYuan)
+  if (submittedCents != null && dbCents != null && submittedCents === dbCents) return submitted
+
+  const asYuanFromFen = submitted / WESPACE_PRICE_FEN_PER_YUAN
+  const fenAsYuanCents = priceCents(asYuanFromFen)
+  if (fenAsYuanCents != null && dbCents != null && fenAsYuanCents === dbCents) return asYuanFromFen
+
+  return submitted
+}
+
 function parseDigitalArtworkId(raw) {
   if (raw === undefined || raw === null) return { error: '缺少有效的数字艺术品ID' }
 
@@ -272,5 +299,6 @@ module.exports = {
   adjustDigitalArtworkStock,
   ensureDigitalArtworkIdColumns,
   normalizeWespacePriceToYuan,
+  resolveSubmittedDigitalPriceYuan,
   WESPACE_PRICE_FEN_PER_YUAN,
 }
