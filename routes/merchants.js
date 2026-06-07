@@ -1,36 +1,16 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
 const fs = require('fs');
 const router = express.Router();
 const logger = require('../utils/logger');
 const { requireAdmin } = require('../auth');
+const { merchantImageUpload } = require('../config/multerUpload');
 const svc = require('../services/merchantsService');
 
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
 }
 
-const storage = multer.memoryStorage();
-
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-  const ext = path.extname(file.originalname).toLowerCase();
-
-  if (allowedTypes.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error('不支持的文件类型'));
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
-});
+const upload = merchantImageUpload;
 
 router.get('/', async (req, res) => {
   try {

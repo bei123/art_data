@@ -1,13 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const multer = require('multer');
 const { uploadToOSS } = require('../config/oss');
+const { adminMediaUpload } = require('../config/multerUpload');
 const { requireAdmin } = require('../auth');
 
-// 用 multer 处理 form-data 文件
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = adminMediaUpload;
 
 router.post('/', ...requireAdmin, upload.single('file'), async (req, res) => {
   console.log('收到上传请求，req.file:', req.file);

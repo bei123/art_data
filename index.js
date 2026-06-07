@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer');
 const path = require('path');
 const db = require('./db');
 const redisClient = require('./utils/redisClient');
@@ -11,7 +10,6 @@ const https = require('https');
 const fs = require('fs');
 const { body } = require('express-validator');
 const auth = require('./auth');
-const { uploadToOSS } = require('./config/oss');
 const { PUBLIC_API_BASE_URL } = require('./config/publicEnv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -199,62 +197,6 @@ const sslOptions = {
   key: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.key')),
   cert: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.pem'))
 };
-
-// 配置文件上传 - 使用内存存储
-const storage = multer.memoryStorage();
-
-// 文件类型验证
-const fileFilter = (req, file, cb) => {
-  // 允许的文件类型
-  const allowedTypes = [
-    '.jpg', '.jpeg', '.png', '.gif', '.webp',
-    '.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'
-  ];
-  const ext = path.extname(file.originalname).toLowerCase();
-  
-  if (allowedTypes.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error('不支持的文件类型'));
-  }
-};
-
-const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: {
-    fileSize: 100 * 1024 * 1024 // 限制文件大小为100MB
-  }
-});
-
-// 静态文件服务
-app.use('/uploads', express.static('uploads'));
-
-// 创建上传目录
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
-}
-
-// 文件上传接口（需登录，防止匿名刷 OSS）
-app.post('/api/upload', ...auth.requireAdmin, upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: '没有上传文件' });
-    }
-    
-    const result = await uploadToOSS(req.file);
-    res.json({
-      url: result.url,
-      name: result.name,
-      size: result.size
-    });
-  } catch (error) {
-    console.error('文件上传失败:', error);
-    res.status(500).json({ error: '文件上传服务暂时不可用，请稍后再试' });
-  }
-});
-
-
 
 // 认证相关路由
 app.post('/api/auth/register',
