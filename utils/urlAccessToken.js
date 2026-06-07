@@ -7,7 +7,7 @@ const URL_ACCESS_TTL_SECONDS = (() => {
   return Number.isFinite(n) && n >= 60 && n <= 3600 ? n : 900
 })()
 
-const ALLOWED_PURPOSES = new Set(['webview_proxy'])
+const ALLOWED_PURPOSES = new Set(['webview_proxy', 'local_upload'])
 
 function sessionTokenSid(sessionToken) {
   return crypto.createHash('sha256').update(String(sessionToken)).digest('hex').slice(0, 32)

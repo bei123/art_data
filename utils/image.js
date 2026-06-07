@@ -1,4 +1,6 @@
 const { PUBLIC_API_BASE_URL: API_BASE_URL } = require('../config/publicEnv');
+const { toUploadRelativePath } = require('./localUploadPath');
+const { signLocalUploadPath } = require('./signedLocalUpload');
 
 /**
  * 处理图片URL，不再添加WebP转换参数
@@ -9,6 +11,10 @@ function processImageUrl(url) {
   // 检查url是否为字符串类型
   if (typeof url !== 'string' || !url) {
     return url;
+  }
+
+  if (toUploadRelativePath(url)) {
+    return signLocalUploadPath(url);
   }
 
   // 如果是相对路径，添加完整URL

@@ -184,8 +184,11 @@ async function apiHealthHandler(req, res) {
 app.get('/api/health', apiHealthHandler);
 app.get('/api/health/live', apiHealthHandler);
 
-// 静态文件服务
-app.use('/uploads', express.static('uploads'));
+// 本地上传目录（非公开静态；经签名 URL 或登录后访问）
+const { serveLocalUpload } = require('./middleware/localUploads');
+const localUploadsRouter = express.Router();
+localUploadsRouter.get('*', serveLocalUpload);
+app.use('/uploads', localUploadsRouter);
 
 // 创建上传目录
 if (!fs.existsSync('uploads')) {
@@ -225,7 +228,45 @@ app.post('/api/auth/url-access', auth.authenticateToken, async (req, res) => {
     return res.status(401).json({ error: '未提供认证token' });
   }
 
-  const { purpose, targetUrl } = req.body || {};
+  const { purpose, targetUrl, filePath } = req.body || {};
+
+  if (purpose === 'local_upload') {
+    if (req.user?.is_wx_user) {
+      return res.status(403).json({ error: '权限不足' });
+    }
+
+    const [userRoles] = await db.query(
+      'SELECT r.name FROM roles r JOIN users u ON r.id = u.role_id WHERE u.id = ?',
+      [req.user.id]
+    );
+    if (userRoles.length === 0 || userRoles[0].name !== 'admin') {
+      return res.status(403).json({ error: '权限不足' });
+    }
+
+    const { toUploadRelativePath } = require('./utils/localUploadPath');
+    const normalizedPath = toUploadRelativePath(filePath);
+    if (!normalizedPath) {
+      return res.status(400).json({ error: 'filePath 无效' });
+    }
+
+    try {
+      const result = await mintUrlAccessToken(sessionToken, {
+        purpose: 'local_upload',
+        claims: { filePath: normalizedPath },
+      });
+      if (!result.ok) {
+        return res.status(result.status).json({ error: result.error });
+      }
+      return res.json({
+        access: result.access,
+        expiresIn: result.expiresIn,
+      });
+    } catch (error) {
+      logger.error('mint_local_upload_access_failed', { err: error });
+      return res.status(500).json({ error: '签发 access 失败' });
+    }
+  }
+
   if (purpose !== 'webview_proxy') {
     return res.status(400).json({ error: '不支持的 purpose' });
   }
