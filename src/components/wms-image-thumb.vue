@@ -1,13 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import {
-  buildWmsAdminImageUrl,
-  fetchWmsImageObjectUrl,
-} from '@/utils/wms-image-preview'
-import { isSafariWebKit } from '@/utils/browser'
+import { fetchWmsImageObjectUrl } from '@/utils/wms-image-preview'
 import { Skeleton } from '@/components/ui/skeleton'
-
-const preferBlobOnThisBrowser = isSafariWebKit()
 
 const props = defineProps({
   artworkId: { type: [Number, String], required: true },
@@ -21,11 +15,9 @@ const props = defineProps({
 const emit = defineEmits(['loaded', 'error'])
 
 const rootRef = ref(null)
-const directUrl = computed(() => buildWmsAdminImageUrl(props.artworkId, props.index))
 const displayUrl = ref('')
 const isLoading = ref(true)
 const hasError = ref(false)
-const useBlobFallback = ref(false)
 
 /** 切换 index 时用于强制 img 重新挂载 */
 const imgMountKey = computed(() => `${props.artworkId}:${props.index}`)
@@ -52,13 +44,12 @@ function finishLoaded(url) {
   emit('loaded', url)
 }
 
-async function loadBlobFallback() {
+async function loadImage() {
   const token = ++loadToken
   abortInflight()
   clearDisplay()
   isLoading.value = true
   hasError.value = false
-  useBlobFallback.value = true
   abortController = new AbortController()
 
   try {
@@ -78,34 +69,6 @@ async function loadBlobFallback() {
   }
 }
 
-function startDirectLoad() {
-  const token = ++loadToken
-  abortInflight()
-  clearDisplay()
-  useBlobFallback.value = false
-  isLoading.value = true
-  hasError.value = false
-  const url = directUrl.value
-  if (!url) {
-    hasError.value = true
-    isLoading.value = false
-    emit('error')
-    return
-  }
-  if (token !== loadToken) return
-  finishLoaded(url)
-}
-
-function startLoadForBrowser() {
-  if (preferBlobOnThisBrowser) loadBlobFallback()
-  else startDirectLoad()
-}
-
-function handleImgError() {
-  if (useBlobFallback.value || hasError.value) return
-  loadBlobFallback()
-}
-
 function disconnectObserver() {
   if (observer) {
     observer.disconnect()
@@ -117,18 +80,18 @@ function connectObserver() {
   disconnectObserver()
   const el = rootRef.value
   if (!el) {
-    startLoadForBrowser()
+    loadImage()
     return
   }
   if (!props.lazy || typeof IntersectionObserver === 'undefined') {
-    startLoadForBrowser()
+    loadImage()
     return
   }
   observer = new IntersectionObserver(
     (entries) => {
       if (!entries[0]?.isIntersecting) return
       disconnectObserver()
-      startLoadForBrowser()
+      loadImage()
     },
     { root: null, rootMargin: '120px', threshold: 0.01 }
   )
@@ -175,7 +138,6 @@ defineExpose({ reload: scheduleLoad, displayUrl })
       :class="imgClass"
       decoding="async"
       loading="eager"
-      @error="handleImgError"
     >
     <div
       v-else

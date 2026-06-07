@@ -2,15 +2,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { validationResult } = require('express-validator');
 const { pool, query } = require('./db');
-
-// JWT密钥
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// 检查必要的环境变量
-if (!JWT_SECRET) {
-    console.error('错误: 缺少必要的环境变量 JWT_SECRET');
-    process.exit(1);
-}
+const {
+  JWT_SECRET,
+  extractBearerToken,
+  verifyActiveSessionToken,
+  resolveAuthFromRequest,
+} = require('./utils/sessionAuth');
 
 // 生成JWT token
 const generateToken = (userId) => {
@@ -19,28 +16,19 @@ const generateToken = (userId) => {
 
 // 验证token中间件（JWT 与 user_sessions 一致：登出或过期会话即失效）
 const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = extractBearerToken(req.headers['authorization']);
 
   if (!token) {
     return res.status(401).json({ error: '未提供认证token' });
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-
-    const [sessions] = await query(
-      'SELECT user_id FROM user_sessions WHERE token = ? AND expires_at > NOW() LIMIT 1',
-      [token]
-    );
-
-    if (!sessions || sessions.length === 0) {
-      return res.status(401).json({ error: '登录已失效，请重新登录' });
+    const verified = await verifyActiveSessionToken(token);
+    if (!verified.ok) {
+      return res.status(verified.status).json({ error: verified.error });
     }
 
-    if (Number(sessions[0].user_id) !== Number(decoded.userId)) {
-      return res.status(403).json({ error: '无效的token' });
-    }
+    const decoded = { userId: verified.userId, openid: verified.openid };
 
     const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
 
@@ -61,12 +49,6 @@ const authenticateToken = async (req, res, next) => {
     req.user = { ...wxUsers[0], is_wx_user: true };
     next();
   } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: '登录已过期，请重新登录' });
-    }
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(403).json({ error: '无效的token' });
-    }
     console.error('authenticateToken', error);
     return res.status(500).json({ error: '认证服务暂时不可用' });
   }
@@ -80,16 +62,13 @@ const optionalAuthenticate = async (req, res, next) => {
   req.user = undefined;
   req.includeHidden = false;
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = extractBearerToken(authHeader);
   if (!token) return next();
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const [sessions] = await query(
-      'SELECT user_id FROM user_sessions WHERE token = ? AND expires_at > NOW() LIMIT 1',
-      [token]
-    );
-    if (!sessions || sessions.length === 0) return next();
-    if (Number(sessions[0].user_id) !== Number(decoded.userId)) return next();
+    const verified = await verifyActiveSessionToken(token);
+    if (!verified.ok) return next();
+
+    const decoded = { userId: verified.userId, openid: verified.openid };
 
     const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
     if (users.length > 0) {
@@ -407,23 +386,15 @@ const logout = async (req, res) => {
 /** 须后台 admin 角色；用法：router.post('/x', ...requireAdmin, handler) */
 const requireAdmin = [authenticateToken, checkRole(['admin'])];
 
-/** img / web-view 等无法带 Authorization 头时，允许 query.token 传 JWT */
-function authenticateTokenAllowQuery(req, res, next) {
-  if (!req.headers.authorization && req.query?.token) {
-    const raw = String(req.query.token).trim()
-    const token = raw.includes('%') ? decodeURIComponent(raw) : raw.replace(/ /g, '+')
-    req.headers.authorization = `Bearer ${token}`
-  }
-  return authenticateToken(req, res, next)
-}
-
 module.exports = {
   authenticateToken,
-  authenticateTokenAllowQuery,
   optionalAuthenticate,
   assertSelfOrAdmin,
   checkRole,
   requireAdmin,
+  extractBearerToken,
+  verifyActiveSessionToken,
+  resolveAuthFromRequest,
   register,
   login,
   getCurrentUser,

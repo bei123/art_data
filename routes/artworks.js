@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, checkRole, optionalAuthenticate, requireAdmin, authenticateTokenAllowQuery } = require('../auth');
+const { authenticateToken, checkRole, optionalAuthenticate, requireAdmin } = require('../auth');
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
 const wmsArtworkImage = require('../services/wmsArtworkImageService');
@@ -66,11 +66,10 @@ router.post(
   }
 );
 
-/** 管理端：代理预览 WMS 仓库图（img 标签可用 query.token 传 JWT） */
+/** 管理端：代理预览 WMS 仓库图（须 Authorization 头，禁止 query 传 JWT） */
 router.get(
   '/:id/admin/wms-image',
-  authenticateTokenAllowQuery,
-  checkRole(['admin']),
+  ...requireAdmin,
   async (req, res) => {
     try {
       const r = await wmsArtworkImage.streamWmsArtworkImageAdmin(req.params.id, req.query, res, req);

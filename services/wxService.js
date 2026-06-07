@@ -12,9 +12,52 @@ const sharp = require('sharp');
 const { getAccessToken } = require('./wechatMiniProgramToken');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const { resolveAuthFromRequest } = require('../auth');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
+}
+
+function maskPhone(phone) {
+  if (!phone || typeof phone !== 'string') return null
+  const trimmed = phone.trim()
+  if (trimmed.length < 7) return null
+  return `${trimmed.substring(0, 3)}****${trimmed.substring(trimmed.length - 4)}`
+}
+
+function formatWxUserProfile(row) {
+  return {
+    id: row.id,
+    openid: row.openid,
+    nickname: row.nickname,
+    avatar: row.avatar,
+    phone: maskPhone(row.phone),
+    has_password: Boolean(row.has_password),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    usn: row.usn || null,
+  }
+}
+
+async function resolveWxSession(req, { extendedError = false } = {}) {
+  const auth = await resolveAuthFromRequest(req)
+  if (!auth.ok) {
+    const body = extendedError
+      ? {
+          code: auth.status,
+          status: false,
+          message: auth.error === '未登录' ? '缺少token' : auth.error,
+        }
+      : { error: auth.error }
+    return { ok: false, result: adminResult(auth.status, body) }
+  }
+  return {
+    ok: true,
+    token: auth.token,
+    userId: auth.userId,
+    openid: auth.openid,
+    payload: { userId: auth.userId, openid: auth.openid },
+  }
 }
 
 // 新增：MD5加密函数
@@ -167,7 +210,7 @@ const { code } = req.body;
                 openid: user.openid,
                 nickname: user.nickname,
                 avatar: user.avatar,
-                phone: user.phone ? user.phone.substring(0, 3) + '****' + user.phone.substring(user.phone.length - 4) : null,
+                phone: maskPhone(user.phone),
                 created_at: user.created_at,
                 updated_at: user.updated_at
             }
@@ -179,18 +222,9 @@ const { code } = req.body;
 }
 
 async function bindUserInfo(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const { phone, nickname, avatar } = req.body;
 
@@ -267,21 +301,11 @@ async function bindUserInfo(req) {
 }
 
 async function userInfo(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     try {
-        // 查询用户信息，关联查询external_users表获取usn和token
         const [users] = await db.query(`
             SELECT 
                 wu.id,
@@ -289,11 +313,10 @@ async function userInfo(req) {
                 wu.nickname,
                 wu.avatar,
                 wu.phone,
-                wu.password_hash,
+                (wu.password_hash IS NOT NULL AND wu.password_hash != '') AS has_password,
                 wu.created_at,
                 wu.updated_at,
-                eu.usn,
-                eu.token
+                eu.usn
             FROM wx_users wu
             LEFT JOIN external_users eu ON eu.wx_user_id = wu.id
             WHERE wu.id = ?
@@ -303,20 +326,7 @@ async function userInfo(req) {
             return adminResult(404, { error: '用户不存在' });
 }
 
-        const user = users[0];
-        // 对敏感信息进行脱敏处理
-        return adminResult(200, {
-            id: user.id,
-            openid: user.openid,
-            nickname: user.nickname,
-            avatar: user.avatar,
-            phone: user.phone ? user.phone.substring(0, 3) + '****' + user.phone.substring(user.phone.length - 4) : null,
-            password_hash: user.password_hash,
-            created_at: user.created_at,
-            updated_at: user.updated_at,
-            usn: user.usn || null,
-            token: user.token || null
-        });
+        return adminResult(200, formatWxUserProfile(users[0]));
 } catch (err) {
         logger.error('获取用户信息失败', { err });
         return adminResult(500, { error: '获取用户信息服务暂时不可用' });
@@ -324,18 +334,9 @@ async function userInfo(req) {
 }
 
 async function updateProfile(req) {
-// 1. 验证用户身份
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const { nickname } = req.body;
     const avatarFile = req.file;
@@ -401,6 +402,7 @@ async function updateProfile(req) {
                 nickname,
                 avatar,
                 phone,
+                (password_hash IS NOT NULL AND password_hash != '') AS has_password,
                 created_at,
                 updated_at
             FROM wx_users 
@@ -414,7 +416,7 @@ async function updateProfile(req) {
         return adminResult(200, {
             success: true,
             message: '用户信息更新成功',
-            user: users[0]
+            user: formatWxUserProfile({ ...users[0], usn: null })
         });
 } catch (err) {
         logger.error('更新用户信息失败', { err });
@@ -457,23 +459,10 @@ const { appInfo } = req.body;
 }
 
 async function realNameRegistration(req) {
-// 从请求头获取token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, {
-            code: 401,
-            status: false,
-            message: '缺少token'
-        });
-}
-
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { code: 401, status: false, message: 'token无效' });
-}
+    const session = await resolveWxSession(req, { extendedError: true })
+    if (!session.ok) return session.result
+    const payload = session.payload
+    const token = session.token
 
     // 输入验证
     if (!req.body || typeof req.body !== 'object') {
@@ -539,18 +528,9 @@ async function realNameRegistration(req) {
 }
 
 async function userPhone(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     try {
         // 查询用户手机号
@@ -574,18 +554,9 @@ async function userPhone(req) {
 }
 
 async function userVerificationStatus(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     try {
         // 查询用户最新的实名认证记录
@@ -898,18 +869,9 @@ function getFontUrl(req) {
 }
 
 async function setPassword(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const { password } = req.body;
 
@@ -964,18 +926,9 @@ async function setPassword(req) {
 }
 
 async function changePassword(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const { oldPassword, newPassword } = req.body;
 
@@ -1046,18 +999,9 @@ async function changePassword(req) {
 }
 
 async function verifyPassword(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const { password } = req.body;
 
@@ -1103,18 +1047,9 @@ async function verifyPassword(req) {
 }
 
 async function listAddresses(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     try {
         // 查询用户的所有地址
@@ -1148,18 +1083,9 @@ async function listAddresses(req) {
 }
 
 async function getAddressDefault(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     try {
         // 查询用户的默认地址
@@ -1201,18 +1127,9 @@ async function getAddressDefault(req) {
 }
 
 async function getAddressById(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const addressId = parseInt(req.params.id);
     if (isNaN(addressId) || addressId <= 0) {
@@ -1254,18 +1171,9 @@ async function getAddressById(req) {
 }
 
 async function createAddress(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const {
         receiver_name,
@@ -1368,18 +1276,9 @@ async function createAddress(req) {
 }
 
 async function updateAddress(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const addressId = parseInt(req.params.id);
     if (isNaN(addressId) || addressId <= 0) {
@@ -1499,18 +1398,9 @@ async function updateAddress(req) {
 }
 
 async function deleteAddress(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const addressId = parseInt(req.params.id);
     if (isNaN(addressId) || addressId <= 0) {
@@ -1559,18 +1449,9 @@ async function deleteAddress(req) {
 }
 
 async function setAddressDefault(req) {
-// 解析 token
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return adminResult(401, { error: '未登录' });
-}
-    const token = authHeader.replace('Bearer ', '');
-    let payload;
-    try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return adminResult(401, { error: 'token无效' });
-}
+    const session = await resolveWxSession(req)
+    if (!session.ok) return session.result
+    const payload = session.payload
 
     const addressId = parseInt(req.params.id);
     if (isNaN(addressId) || addressId <= 0) {

@@ -274,6 +274,53 @@ app.get('/api/auth/me', auth.authenticateToken, auth.getCurrentUser);
 
 app.post('/api/auth/logout', auth.authenticateToken, auth.logout);
 
+app.post('/api/auth/url-access', auth.authenticateToken, async (req, res) => {
+  const { mintUrlAccessToken } = require('./utils/urlAccessToken');
+  const { validateProxyTargetUrl } = require('./utils/proxyUrlPolicy');
+
+  const sessionToken = auth.extractBearerToken(req.headers.authorization);
+  if (!sessionToken) {
+    return res.status(401).json({ error: '未提供认证token' });
+  }
+
+  const { purpose, targetUrl } = req.body || {};
+  if (purpose !== 'webview_proxy') {
+    return res.status(400).json({ error: '不支持的 purpose' });
+  }
+  if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
+    return res.status(400).json({ error: 'targetUrl 不能为空' });
+  }
+
+  let decodedTargetUrl;
+  try {
+    decodedTargetUrl = decodeURIComponent(targetUrl.trim());
+  } catch {
+    return res.status(400).json({ error: 'targetUrl 格式无效' });
+  }
+
+  const urlCheck = validateProxyTargetUrl(decodedTargetUrl);
+  if (!urlCheck.ok) {
+    return res.status(urlCheck.status).json({ error: urlCheck.message });
+  }
+
+  try {
+    const result = await mintUrlAccessToken(sessionToken, {
+      purpose: 'webview_proxy',
+      claims: { targetUrl: urlCheck.url },
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    return res.json({
+      access: result.access,
+      expiresIn: result.expiresIn,
+    });
+  } catch (error) {
+    logger.error('mint_url_access_failed', { err: error });
+    return res.status(500).json({ error: '签发 access 失败' });
+  }
+});
+
 // 保护需要认证的路由
 // app.use('/api/original-artworks', auth.authenticateToken);
 // app.use('/api/digital-artworks', auth.authenticateToken);

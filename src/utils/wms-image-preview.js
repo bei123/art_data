@@ -22,15 +22,13 @@ function trimTrailingSlash(s) {
 }
 
 /**
- * 管理端 WMS 图代理地址（img 可直接使用，走浏览器缓存；支持 query.token）
+ * 管理端 WMS 图代理地址（须配合 Authorization 请求头，不在 URL 中携带 JWT）
  */
 export function buildWmsAdminImageUrl(artworkId, index = 0) {
   const id = Number(artworkId)
   if (!id || id <= 0) return ''
   const base = trimTrailingSlash(API_BASE_URL)
-  const token = localStorage.getItem('token') || ''
   const params = new URLSearchParams({ index: String(Math.max(0, index)) })
-  if (token) params.set('token', token)
   return `${base}/api/original-artworks/${id}/admin/wms-image?${params}`
 }
 

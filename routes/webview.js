@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateTokenAllowQuery } = require('../auth');
+const { authenticateWebviewAccess } = require('../middleware/webviewAccess');
 const {
   validateProxyTargetUrl,
   assertResolvedHostIsPublic,
@@ -16,9 +16,9 @@ const {
  * 请求参数:
  *   - targetUrl (string, required): 要代理的目标URL（收银台URL，须在域名白名单内）
  *   - authorization (string, optional): Authorization 头值（Bearer token）
- *   - token (string, optional): 本系统 JWT（web-view 无法带头时使用）
+ *   - access (string, optional): 短期 URL access（web-view 无法带头时使用，须先 POST /api/auth/url-access 签发）
  */
-router.get('/proxy', authenticateTokenAllowQuery, async (req, res) => {
+router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
   try {
     const { targetUrl, authorization } = req.query;
     
