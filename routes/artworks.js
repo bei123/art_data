@@ -17,7 +17,7 @@ router.get('/', optionalAuthenticate, async (req, res) => {
   }
 });
 
-router.get('/performance/metrics', async (req, res) => {
+router.get('/performance/metrics', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.getArtworksPerformanceMetrics();
     return res.status(r.status).json(r.body);

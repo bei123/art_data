@@ -12,6 +12,11 @@ const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields'
 const { ensureShowPurchaseLinkColumnReady } = require('../utils/digitalArtworksSync');
 const { normalizeWespacePriceToYuan } = require('../utils/digitalArtworkResolver');
 const { invalidateExhibitionCachesForArtworks } = require('../services/exhibitionsService');
+const {
+  runHealthChecks,
+  buildPublicReadinessResponse,
+  logDegradedHealth,
+} = require('../utils/healthCheck');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -54,24 +59,14 @@ function normalizeShowPurchaseLink(v) {
 // 数据库健康检查端点
 router.get('/health', async (req, res) => {
   try {
-    const poolStatus = db.getPoolStatus();
-    const healthCheck = await db.checkPoolHealth();
-
-    res.json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      database: {
-        poolStatus,
-        healthCheck
-      }
-    });
+    const result = await runHealthChecks();
+    logDegradedHealth(result);
+    res
+      .status(result.ok ? 200 : 503)
+      .json(buildPublicReadinessResponse(result));
   } catch (error) {
     logger.error('健康检查失败', { err: error });
-    res.status(500).json({
-      status: 'error',
-      timestamp: new Date().toISOString(),
-      error: error.message
-    });
+    res.status(503).json({ status: 'degraded' });
   }
 });
 

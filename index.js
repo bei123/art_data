@@ -2,7 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const db = require('./db');
-const redisClient = require('./utils/redisClient');
+const {
+  runHealthChecks,
+  buildLiveResponse,
+  buildPublicReadinessResponse,
+  buildDetailedHealthResponse,
+  logDegradedHealth,
+} = require('./utils/healthCheck');
 const { requestContextMiddleware } = require('./middleware/requestContext');
 const logger = require('./utils/logger');
 const { sendErrorResponse } = require('./utils/apiErrors');
@@ -149,40 +155,29 @@ app.use('/api/auth/login', loginLimiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-async function apiHealthHandler(req, res) {
-  const [dbHealth, redisHealth] = await Promise.all([
-    db.checkPoolHealth(),
-    redisClient.checkRedisHealth(),
-  ]);
-  const dbOk = dbHealth.healthy === true;
-  const redisOk = redisHealth.ok === true;
-  const ok = dbOk && redisOk;
-  res.status(ok ? 200 : 503).json({
-    status: ok ? 'ok' : 'degraded',
-    timestamp: new Date().toISOString(),
-    request_id: req.requestId || null,
-    checks: {
-      database: {
-        healthy: dbOk,
-        ...(dbHealth.error ? { error: dbHealth.error } : {}),
-      },
-      redis: redisOk
-        ? {
-            ok: true,
-            ...(redisHealth.latency_ms != null
-              ? { latency_ms: redisHealth.latency_ms }
-              : {}),
-          }
-        : {
-            ok: false,
-            ...(redisHealth.error ? { error: redisHealth.error } : {}),
-          },
-    },
-  });
+async function apiLiveHandler(req, res) {
+  res.status(200).json(buildLiveResponse())
 }
 
-app.get('/api/health', apiHealthHandler);
-app.get('/api/health/live', apiHealthHandler);
+async function apiReadinessHandler(req, res) {
+  const result = await runHealthChecks()
+  logDegradedHealth(result)
+  res
+    .status(result.ok ? 200 : 503)
+    .json(buildPublicReadinessResponse(result))
+}
+
+async function apiDetailedHealthHandler(req, res) {
+  const result = await runHealthChecks()
+  logDegradedHealth(result)
+  res
+    .status(result.ok ? 200 : 503)
+    .json(buildDetailedHealthResponse(result, req))
+}
+
+app.get('/api/health/live', apiLiveHandler);
+app.get('/api/health', apiReadinessHandler);
+app.get('/api/admin/health', ...auth.requireAdmin, apiDetailedHealthHandler);
 
 // 本地上传目录（非公开静态；经签名 URL 或登录后访问）
 const { serveLocalUpload } = require('./middleware/localUploads');
