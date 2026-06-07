@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, checkRole, optionalAuthenticate } = require('../auth');
+const { authenticateToken, checkRole, optionalAuthenticate, requireAdmin } = require('../auth');
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
 const wmsArtworkImage = require('../services/wmsArtworkImageService');
@@ -36,7 +36,7 @@ router.get('/performance/metrics', async (req, res) => {
   }
 });
 
-router.post('/performance/clear-cache', authenticateToken, async (req, res) => {
+router.post('/performance/clear-cache', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.clearArtworksPerformanceCacheAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -46,7 +46,7 @@ router.post('/performance/clear-cache', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/performance/reset', authenticateToken, async (req, res) => {
+router.post('/performance/reset', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.resetArtworksPerformanceMetrics();
     return res.status(r.status).json(r.body);
@@ -59,8 +59,7 @@ router.post('/performance/reset', authenticateToken, async (req, res) => {
 /** 从 WMS 同步原作（管理员）；需 .env 中 WMS_HTTP_* 与库表 wms_record_id 迁移 */
 router.post(
   '/admin/sync-from-wms',
-  authenticateToken,
-  checkRole(['admin']),
+  ...requireAdmin,
   async (req, res) => {
     try {
       const r = await wmsSync.syncFromWmsAdmin(req.body || {});
@@ -95,8 +94,7 @@ router.get(
 /** 管理端：采用仓库图 → 上传 OSS → 写入 image 字段对外展示 */
 router.post(
   '/:id/admin/apply-wms-image',
-  authenticateToken,
-  checkRole(['admin']),
+  ...requireAdmin,
   async (req, res) => {
     try {
       const r = await wmsArtworkImage.applyWmsImageToArtworkAdmin(req.params.id, req.body || {});
@@ -108,7 +106,7 @@ router.post(
   }
 );
 
-router.patch('/:id/is-public', authenticateToken, async (req, res) => {
+router.patch('/:id/is-public', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.patchOriginalArtworkIsPublicAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -128,7 +126,7 @@ router.get('/:id', optionalAuthenticate, async (req, res) => {
   }
 });
 
-router.post('/bulk-delete', authenticateToken, async (req, res) => {
+router.post('/bulk-delete', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.bulkDeleteOriginalArtworksAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -138,7 +136,7 @@ router.post('/bulk-delete', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.createOriginalArtworkAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -148,7 +146,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.updateOriginalArtworkAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -158,7 +156,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.deleteOriginalArtworkAdmin(req.params.id);
     return res.status(r.status).json(r.body);

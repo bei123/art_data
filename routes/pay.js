@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, assertSelfOrAdmin, checkRole } = require('../auth');
+const { authenticateToken, assertSelfOrAdmin, requireAdmin } = require('../auth');
 const svc = require('../services/payService');
 
 router.post('/unifiedorder', authenticateToken, async (req, res) => {
@@ -54,7 +54,7 @@ router.post('/refund', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/refund/approve', authenticateToken, async (req, res) => {
+router.post('/refund/approve', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.refundApprove(req);
     return res.status(r.status).json(r.body);
@@ -64,7 +64,7 @@ router.post('/refund/approve', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/refund/requests', authenticateToken, async (req, res) => {
+router.get('/refund/requests', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.listRefundRequests(req);
     return res.status(r.status).json(r.body);
@@ -74,7 +74,7 @@ router.get('/refund/requests', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/refund/requests/:id', authenticateToken, async (req, res) => {
+router.get('/refund/requests/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.getRefundRequestById(req);
     return res.status(r.status).json(r.body);
@@ -150,7 +150,7 @@ router.get('/digital-identity/purchases/:user_id', authenticateToken, async (req
   }
 });
 
-router.get('/admin/orders', authenticateToken, async (req, res) => {
+router.get('/admin/orders', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.adminOrders(req);
     return res.status(r.status).json(r.body);
@@ -161,7 +161,7 @@ router.get('/admin/orders', authenticateToken, async (req, res) => {
 });
 
 /** 管理端订单详情（费用分项、支付脱敏、时间轴、退款、履约、业务 ID、shipments；?include_wechat_path=1 时顺带调微信 getPath） */
-router.get('/admin/orders/:id', authenticateToken, checkRole(['admin']), async (req, res) => {
+router.get('/admin/orders/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.adminOrderDetail(req);
     return res.status(r.status).json(r.body);
@@ -172,7 +172,7 @@ router.get('/admin/orders/:id', authenticateToken, checkRole(['admin']), async (
 });
 
 /** 管理端：为已支付数字艺术品订单项上传交付二维码 */
-router.patch('/admin/orders/:orderId/items/:itemId/qr-code', authenticateToken, checkRole(['admin']), async (req, res) => {
+router.patch('/admin/orders/:orderId/items/:itemId/qr-code', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.uploadDigitalItemQrCode(req);
     return res.status(r.status).json(r.body);

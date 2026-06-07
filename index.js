@@ -236,7 +236,7 @@ if (!fs.existsSync('uploads')) {
 }
 
 // 文件上传接口（需登录，防止匿名刷 OSS）
-app.post('/api/upload', auth.authenticateToken, upload.single('file'), async (req, res) => {
+app.post('/api/upload', ...auth.requireAdmin, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: '没有上传文件' });

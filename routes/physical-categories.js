@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { requireAdmin } = require('../auth');
 const svc = require('../services/physicalCategoriesService');
 
 router.get('/', async (req, res) => {
@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.createPhysicalCategoryAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -24,7 +24,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.updatePhysicalCategoryAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -34,7 +34,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.deletePhysicalCategoryAdmin(req.params.id);
     return res.status(r.status).json(r.body);

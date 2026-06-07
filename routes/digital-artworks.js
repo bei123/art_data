@@ -3,7 +3,7 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
 const db = require('../db');
-const { authenticateToken } = require('../auth');
+const { requireAdmin } = require('../auth');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const redisClient = require('../utils/redisClient');
@@ -151,7 +151,7 @@ function toIsoDate(value) {
 }
 
 // 获取数字艺术品列表（管理员接口，包含隐藏作品）
-router.get('/admin', authenticateToken, async (req, res) => {
+router.get('/admin', ...requireAdmin, async (req, res) => {
   try {
     const { artist_id, page = 1, pageSize = 20 } = req.query;
     const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
@@ -220,7 +220,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
  * 读取同步落库的 orderApi/goods/ver/details 完整 data（goodsVer / IssueInfo / goods / goodsWhitePaper 等）
  * GET /api/digital-artworks/admin/:id/wespace-details
  */
-router.get('/admin/:id/wespace-details', authenticateToken, async (req, res) => {
+router.get('/admin/:id/wespace-details', ...requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
     if (id === undefined || id === null || String(id).trim() === '') {
@@ -698,19 +698,19 @@ router.get('/:id', async (req, res) => {
 });
 
 // 创建数字艺术品（需要认证）
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', ...requireAdmin, async (req, res) => {
   // 后台已切换为只允许展示/隐藏，不再允许新增/编辑
   return res.status(405).json({ error: '当前后台已关闭编辑功能，只允许显示/隐藏' });
 });
 
 // 更新数字艺术品（需要认证）
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ...requireAdmin, async (req, res) => {
   // 后台已切换为只允许展示/隐藏，不再允许新增/编辑
   return res.status(405).json({ error: '当前后台已关闭编辑功能，只允许显示/隐藏' });
 });
 
 // 隐藏/显示数字艺术品（需要认证）
-router.patch('/:id/hide', authenticateToken, async (req, res) => {
+router.patch('/:id/hide', ...requireAdmin, async (req, res) => {
   try {
     const { is_hidden } = req.body;
 
@@ -755,7 +755,7 @@ router.patch('/:id/hide', authenticateToken, async (req, res) => {
  * PATCH /api/digital-artworks/:id/purchase-link
  * Body: { show_purchase_link: boolean }
  */
-router.patch('/:id/purchase-link', authenticateToken, async (req, res) => {
+router.patch('/:id/purchase-link', ...requireAdmin, async (req, res) => {
   try {
     const { show_purchase_link: showPurchase } = req.body;
     if (typeof showPurchase !== 'boolean') {
@@ -801,7 +801,7 @@ router.patch('/:id/purchase-link', authenticateToken, async (req, res) => {
  * PATCH /api/digital-artworks/:id/artist
  * Body: { artist_id: number | null } — null 表示取消关联
  */
-router.patch('/:id/artist', authenticateToken, async (req, res) => {
+router.patch('/:id/artist', ...requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
     if (id === undefined || id === null || String(id).trim() === '') {
@@ -864,7 +864,7 @@ router.patch('/:id/artist', authenticateToken, async (req, res) => {
 });
 
 // 删除数字艺术品（需要认证）
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ...requireAdmin, async (req, res) => {
   // 后台已切换为只允许展示/隐藏，不再允许删除
   return res.status(405).json({ error: '当前后台已关闭编辑功能，只允许显示/隐藏' });
 });

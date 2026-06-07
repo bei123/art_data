@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, optionalAuthenticate } = require('../auth');
+const { optionalAuthenticate, requireAdmin } = require('../auth');
 const svc = require('../services/artistsService');
 
 router.use(async (req, res, next) => {
@@ -43,7 +43,7 @@ router.get('/:id', optionalAuthenticate, async (req, res) => {
   }
 });
 
-router.post('/bulk-delete', authenticateToken, async (req, res) => {
+router.post('/bulk-delete', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.bulkDeleteArtistsAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -53,7 +53,7 @@ router.post('/bulk-delete', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.createArtistAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -63,7 +63,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id/featured-artworks', authenticateToken, async (req, res) => {
+router.put('/:id/featured-artworks', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.setFeaturedArtworksAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -73,7 +73,7 @@ router.put('/:id/featured-artworks', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.updateArtistAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -83,7 +83,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.deleteArtistAdmin(req.params.id);
     return res.status(r.status).json(r.body);

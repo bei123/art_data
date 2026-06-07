@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { requireAdmin } = require('../auth');
 const svc = require('../services/showcaseService');
 
 router.use(async (req, res, next) => {
@@ -23,7 +23,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/admin-order', authenticateToken, async (req, res) => {
+router.get('/admin-order', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.getShowcaseForSortAdmin();
     return res.status(r.status).json(r.body);
@@ -33,7 +33,7 @@ router.get('/admin-order', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/sort', authenticateToken, async (req, res) => {
+router.put('/sort', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.reorderShowcaseAdmin(req.body);
     return res.status(r.status).json(r.body);

@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { requireAdmin } = require('../auth');
 const svc = require('../services/merchantsService');
 
 if (!fs.existsSync('uploads')) {
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/upload-logo', authenticateToken, upload.single('file'), async (req, res) => {
+router.post('/upload-logo', ...requireAdmin, upload.single('file'), async (req, res) => {
   try {
     const r = await svc.uploadMerchantLogo(req.file);
     return res.status(r.status).json(r.body);
@@ -55,7 +55,7 @@ router.post('/upload-logo', authenticateToken, upload.single('file'), async (req
   }
 });
 
-router.post('/upload-images', authenticateToken, upload.array('images', 10), async (req, res) => {
+router.post('/upload-images', ...requireAdmin, upload.array('images', 10), async (req, res) => {
   try {
     const r = await svc.uploadMerchantImages(req.files);
     return res.status(r.status).json(r.body);
@@ -65,7 +65,7 @@ router.post('/upload-images', authenticateToken, upload.array('images', 10), asy
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.createMerchantAdmin(req.body);
     return res.status(r.status).json(r.body);
@@ -78,7 +78,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.patch('/:id/status', authenticateToken, async (req, res) => {
+router.patch('/:id/status', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.patchMerchantStatusAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -91,7 +91,7 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
-router.patch('/:id/sort', authenticateToken, async (req, res) => {
+router.patch('/:id/sort', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.patchMerchantSortAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -117,7 +117,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.updateMerchantAdmin(req.params.id, req.body);
     return res.status(r.status).json(r.body);
@@ -130,7 +130,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.deleteMerchantAdmin(req.params.id);
     return res.status(r.status).json(r.body);

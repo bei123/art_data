@@ -130,6 +130,9 @@ async function assertSelfOrAdmin(req, targetUserId) {
   if (Number(req.user.id) === id) {
     return { ok: true, userId: id }
   }
+  if (req.user.is_wx_user) {
+    return { ok: false, status: 403, error: '无权查看该用户的购买记录' }
+  }
   const [userRoles] = await query(
     'SELECT r.name FROM roles r JOIN users u ON r.id = u.role_id WHERE u.id = ?',
     [req.user.id]
@@ -145,6 +148,10 @@ const checkRole = (roles) => {
   return async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: '未认证' });
+    }
+
+    if (req.user.is_wx_user) {
+      return res.status(403).json({ error: '权限不足' });
     }
 
     const [userRoles] = await query(
@@ -397,11 +404,15 @@ const logout = async (req, res) => {
   }
 };
 
+/** 须后台 admin 角色；用法：router.post('/x', ...requireAdmin, handler) */
+const requireAdmin = [authenticateToken, checkRole(['admin'])];
+
 module.exports = {
   authenticateToken,
   optionalAuthenticate,
   assertSelfOrAdmin,
   checkRole,
+  requireAdmin,
   register,
   login,
   getCurrentUser,

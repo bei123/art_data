@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const db = require('../db');
-const { authenticateToken } = require('../auth');
+const { requireAdmin } = require('../auth');
 const redisClient = require('../utils/redisClient');
 
 const REDIS_HOME_TITLES_KEY = 'home:titles';
@@ -55,7 +55,7 @@ router.get('/', async (req, res) => {
 });
 
 // 更新首页标题（需要认证）
-router.put('/', authenticateToken, async (req, res) => {
+router.put('/', ...requireAdmin, async (req, res) => {
   try {
     const { main_title, sub_title } = req.body;
 
