@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
+const { assertSafePathSegment, joinUrlPath } = require('../utils/safeOutboundUrl');
 
 /**
  * 外部API配置
@@ -120,9 +121,9 @@ router.put('/update/:id', async (req, res) => {
       });
     }
 
-    // 调用外部API更新发行铸造
+    const safeId = assertSafePathSegment(id, 'id');
     const response = await axios.put(
-      `${EXTERNAL_API_CONFIG.BASE_URL}${EXTERNAL_API_CONFIG.ISSUANCE.UPDATE}/${id}`,
+      joinUrlPath(EXTERNAL_API_CONFIG.BASE_URL, EXTERNAL_API_CONFIG.ISSUANCE.UPDATE, safeId),
       req.body,
       {
         headers: {
@@ -197,9 +198,9 @@ router.delete('/delete/:id', async (req, res) => {
       });
     }
 
-    // 调用外部API删除发行铸造
+    const safeId = assertSafePathSegment(id, 'id');
     const response = await axios.delete(
-      `${EXTERNAL_API_CONFIG.BASE_URL}${EXTERNAL_API_CONFIG.ISSUANCE.DELETE}/${id}`,
+      joinUrlPath(EXTERNAL_API_CONFIG.BASE_URL, EXTERNAL_API_CONFIG.ISSUANCE.DELETE, safeId),
       {
         headers: {
           'Authorization': authToken.trim()
@@ -780,9 +781,9 @@ router.get('/detail/:id', async (req, res) => {
       });
     }
 
-    // 调用外部API获取发行铸造详情
+    const safeId = assertSafePathSegment(id, 'id');
     const response = await axios.get(
-      `${EXTERNAL_API_CONFIG.BASE_URL}${EXTERNAL_API_CONFIG.ISSUANCE.LIST}/${id}`,
+      joinUrlPath(EXTERNAL_API_CONFIG.BASE_URL, EXTERNAL_API_CONFIG.ISSUANCE.LIST, safeId),
       {
         headers: {
           'Authorization': authToken.trim()

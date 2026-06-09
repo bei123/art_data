@@ -16,6 +16,7 @@ const {
   buildOnDuplicateListV3Sql,
   LIST_V3_SCHEMA
 } = require('./digitalArtworksListV3Fields');
+const { resolveExternalBearerAuthorization } = require('./externalApiAuth');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 
@@ -23,13 +24,6 @@ const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const EXTERNAL_API_CONFIG = {
   VERIFICATION_CODE_BASE_URL: 'https://node.wespace.cn'
 };
-
-function getExternalAuthorization() {
-  // 外部API统一使用测试token（与 routes/digital-artworks.js 保持一致）
-  const testToken = process.env.EXTERNAL_BEARER_TOKEN ||
-    'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c24iOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwiYWNjb3VudF90eXBlIjoiYWRtaW4iLCJ1c2VyX25hbWUiOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwic2NvcGUiOlsiYWxsIl0sImlkIjoxODE0NTAsImV4cCI6MTc2NDc2MDU3NiwianRpIjoiYjEzNzI4NTUtNmU0Zi00ZWViLThiYTctMmE5YTkwOGYzMWNmIiwiY2xpZW50X2lkIjoid2VzcGFjZSJ9.ombbQ9GWbtJT-S1qm_FEG1GgkBccvsS8Vk1T26VoIHQo-XDm61jWA3bhdf29nqSOX-cFD_pVKTw8jUhJw8YlrsR0mTw-rpnBYAIlRDI2NVK7M7q6pdBbiBhZYETOhouDUOYCyPIv4CVw68VWULVWbdosktnQtFDi8KK54dnEX3Q';
-  return `Bearer ${testToken}`;
-}
 
 function extractUsnFromBearerAuthorization(authorization) {
   if (!authorization || typeof authorization !== 'string') return null;
@@ -204,7 +198,8 @@ async function ensureShowPurchaseLinkColumn(existingCols) {
 }
 
 async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
-  const authorization = getExternalAuthorization();
+  const authorization = resolveExternalBearerAuthorization();
+  if (!authorization) return null;
   const goodsListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
 
   const goodsParam = JSON.stringify({
@@ -266,7 +261,8 @@ async function fetchGoodsVerListFirst(goodsId, buyerUsn) {
  */
 async function fetchQgListFromIndexV2(usn) {
   if (!usn || String(usn).trim() === '') return [];
-  const authorization = getExternalAuthorization();
+  const authorization = resolveExternalBearerAuthorization();
+  if (!authorization) return [];
   const url = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
   const response = await axios.get(url, {
     params: {
@@ -306,7 +302,8 @@ async function fetchQgListFromIndexV2(usn) {
  */
 async function fetchGoodsVerDetails(goodsVerId) {
   if (!goodsVerId) return null;
-  const authorization = getExternalAuthorization();
+  const authorization = resolveExternalBearerAuthorization();
+  if (!authorization) return null;
   const url = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
   const form = new URLSearchParams();
   form.append('goods', JSON.stringify({ goodsVerId: String(goodsVerId) }));
@@ -350,7 +347,11 @@ async function syncDigitalArtworksOnce() {
   await ensureLegacyDetailsJsonColumn(existingCols);
   await ensureShowPurchaseLinkColumn(existingCols);
 
-  const authorization = getExternalAuthorization();
+  const authorization = resolveExternalBearerAuthorization();
+  if (!authorization) {
+    console.warn('[digitalArtworksSync] EXTERNAL_BEARER_TOKEN 未配置，跳过同步');
+    return { synced: 0 };
+  }
   // 数字艺术品 goods_id：来自 GET orderApi/wespace/index/list/V2 的 data.qgList[].goods_id（与 curl 一致需传 usn）
   const buyerUsn =
     process.env.DIGITAL_ARTWORKS_SYNC_BUYER_USN ||

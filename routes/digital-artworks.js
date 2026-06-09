@@ -17,6 +17,10 @@ const {
   buildPublicReadinessResponse,
   logDegradedHealth,
 } = require('../utils/healthCheck');
+const {
+  resolveExternalBearerAuthorization,
+  externalAuthNotConfiguredBody,
+} = require('../utils/externalApiAuth');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -69,38 +73,6 @@ router.get('/health', async (req, res) => {
     res.status(503).json({ status: 'degraded' });
   }
 });
-
-/**
- * 获取外部API授权信息（统一使用测试token）
- */
-function getExternalAuthorization() {
-  // 外部API统一使用测试token
-  const testToken = process.env.EXTERNAL_BEARER_TOKEN || 
-                   'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c24iOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwiYWNjb3VudF90eXBlIjoiYWRtaW4iLCJ1c2VyX25hbWUiOiI0MWY4ZDY4MzE2NTcxMmFmM2FlYzMzZTFjODQwODk4ZmU0YmRlYzlmNjM3ZWFmNjY0MmQwNzc0ZTJlODFmYjNiIiwic2NvcGUiOlsiYWxsIl0sImlkIjoxODE0NTAsImV4cCI6MTc2NDc2MDU3NiwianRpIjoiYjEzNzI4NTUtNmU0Zi00ZWViLThiYTctMmE5YTkwOGYzMWNmIiwiY2xpZW50X2lkIjoid2VzcGFjZSJ9.ombbQ9GWbtJT-S1qm_FEG1GgkBccvsS8Vk1T26VoIHQo-XDm61jWA3bhdf29nqSOX-cFD_pVKTw8jUhJw8YlrsR0mTw-rpnBYAIlRDI2NVK7M7q6pdBbiBhZYETOhouDUOYCyPIv4CVw68VWULVWbdosktnQtFDi8KK54dnEX3Q';
-  return `Bearer ${testToken}`;
-}
-
-/**
- * 获取授权信息的辅助函数（用于内部API）
- */
-function getAuthorization(req) {
-  // 优先使用请求头中的 authorization（可能是 Bearer token 或 Basic 认证）
-  let authorization = req.headers.authorization || req.headers.Authorization;
-  
-  // 如果没有提供，尝试从专门的请求头获取
-  if (!authorization) {
-    authorization = req.headers['x-external-authorization'] || 
-                   req.headers['X-External-Authorization'];
-  }
-  
-  // 如果还是没有，使用环境变量或默认值（Basic 认证）
-  if (!authorization) {
-    authorization = process.env.VERIFICATION_CODE_AUTHORIZATION || 
-                   'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
-  }
-  
-  return authorization;
-}
 
 /**
  * 从外部数据中解析 issueInfo
@@ -528,8 +500,11 @@ router.get('/:id', async (req, res) => {
     // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id（外部表已有 goods_id 时跳过）
     if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0 && !obtainedGoodsId) {
       try {
-        const authorization = getExternalAuthorization();
-        
+        const authorization = resolveExternalBearerAuthorization();
+        if (!authorization) {
+          throw new Error('EXTERNAL_BEARER_TOKEN not configured');
+        }
+
         const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
         const response = await axios.get(productListUrl, {
           params: {
@@ -579,10 +554,11 @@ router.get('/:id', async (req, res) => {
     let targetGoodsVerId = goodsVerId; // 优先使用手动传入的 goodsVerId
     if (shouldFuse && !targetGoodsVerId && obtainedGoodsId && usn) {
       try {
-        // 外部API统一使用测试token
-        const authorization = getExternalAuthorization();
-        
-        // 构建商品接口的请求参数 - goods 作为表单数据传递（application/x-www-form-urlencoded）
+        const authorization = resolveExternalBearerAuthorization();
+        if (!authorization) {
+          throw new Error('EXTERNAL_BEARER_TOKEN not configured');
+        }
+
         const goodsParam = JSON.stringify({
           goodsId: obtainedGoodsId,
           buyerUsn: usn.trim(),
@@ -592,10 +568,7 @@ router.get('/:id', async (req, res) => {
         });
         
         const goodsListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
-        console.log('调用商品接口获取 goodsVerId，请求参数:', goodsParam);
-        console.log('Authorization 类型:', authorization?.startsWith('Bearer ') ? 'Bearer Token' : authorization?.startsWith('Basic ') ? 'Basic Auth' : '未知');
-        console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
-        
+
         // 使用 URLSearchParams 构建表单数据
         const formData = new URLSearchParams();
         formData.append('goods', goodsParam);
@@ -882,10 +855,11 @@ router.get('/order/product-list', async (req, res) => {
       });
     }
 
-    // 获取 authorization，外部接口统一使用 Basic 认证
-    const authorization = getExternalAuthorization();
+    const authorization = resolveExternalBearerAuthorization();
+    if (!authorization) {
+      return res.status(503).json(externalAuthNotConfiguredBody());
+    }
 
-    // 构建请求参数
     const params = {
       usn: usn.trim()
     };
@@ -911,10 +885,7 @@ router.get('/order/product-list', async (req, res) => {
 
     // 调用外部API获取产品列表
     const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
-    console.log('调用外部产品列表接口:', productListUrl);
-    console.log('请求参数:', params);
-    console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
-    
+
     const response = await axios.get(
       productListUrl,
       {
@@ -1004,20 +975,17 @@ router.post('/goods/ver/list/v3', async (req, res) => {
       });
     }
 
-    // 获取 authorization，外部接口统一使用 Basic 认证
-    const authorization = getExternalAuthorization();
+    const authorization = resolveExternalBearerAuthorization();
+    if (!authorization) {
+      return res.status(503).json(externalAuthNotConfiguredBody());
+    }
 
-    // 构建请求参数 - goods 参数需要作为查询参数传递（URL编码的JSON字符串）
     const params = {
       goods: goods.trim()
     };
 
-    // 调用外部API获取商品详情
     const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
-    console.log('调用外部商品详情接口:', goodsDetailUrl);
-    console.log('请求参数:', params);
-    console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
-    
+
     const response = await axios.post(
       goodsDetailUrl,
       null, // POST 请求体为空，参数通过查询字符串传递
@@ -1361,15 +1329,13 @@ router.post('/goods/ver/details', async (req, res) => {
       goodsData = goods;
     }
 
-    // 获取 authorization，外部接口统一使用 Basic 认证
-    const authorization = getExternalAuthorization();
+    const authorization = resolveExternalBearerAuthorization();
+    if (!authorization) {
+      return res.status(503).json(externalAuthNotConfiguredBody());
+    }
 
-    // 调用外部API获取商品详情
     const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/details`;
-    console.log('调用外部商品详情接口:', goodsDetailUrl);
-    console.log('请求参数:', goodsData);
-    console.log('Authorization:', authorization ? (authorization.startsWith('Bearer ') ? authorization.substring(0, 30) + '...' : authorization.substring(0, 20) + '...') : '未设置');
-    
+
     // 根据 goods 的数据类型构建请求数据
     // 如果 goods 是对象，转换为 JSON 字符串作为表单字段发送
     // 如果 goods 是字符串，直接作为表单字段发送

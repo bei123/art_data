@@ -14,8 +14,7 @@ export default defineConfig(({ mode }) => {
     target: devProxyTarget,
     changeOrigin: true,
     secure: false,
-    ws: true,
-    rewrite: (p) => p.replace(/^\/api/, '/api')
+    ws: true
   }
 
   if (proxyDebug) {

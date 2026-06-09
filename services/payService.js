@@ -14,6 +14,11 @@ const redisClient = require('../utils/redisClient');
 const LOCK_EXPIRE = 30; // 30秒
 const CALLBACK_EXPIRE = 600; // 10分钟
 const { getWechatpayPublicKey } = require('../utils/wechatpayCerts');
+const {
+    assertWechatOutTradeNo,
+    wechatPayOutTradeNoQueryUrl,
+    wechatPayOutTradeNoCloseUrl,
+} = require('../utils/safeOutboundUrl');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 const {
     DIGITAL_ITEM_JOIN_SQL,
@@ -1178,26 +1183,27 @@ async function closeOrder(req) {
             return adminResult(400, { error: '商户订单号长度不能超过64个字符' });
         }
 
-        const cleanOutTradeNo = out_trade_no.trim();
+        let cleanOutTradeNo;
+        try {
+            cleanOutTradeNo = assertWechatOutTradeNo(out_trade_no);
+        } catch {
+            return adminResult(400, { error: '商户订单号格式无效' });
+        }
 
-        // 构建请求参数
         const params = {
             mchid: WX_PAY_CONFIG.mchId
         };
 
-        // 生成签名所需的参数
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
         const method = 'POST';
         const url = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}/close`;
         const bodyStr = JSON.stringify(params);
 
-        // 生成签名
         const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
 
-        // 发送请求到微信支付
         const response = await axios.post(
-            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}/close`,
+            wechatPayOutTradeNoCloseUrl(cleanOutTradeNo),
             params,
             {
                 headers: {
@@ -1959,20 +1965,22 @@ async function queryOrder(req) {
             return adminResult(400, { error: '商户订单号长度不能超过64个字符' });
         }
 
-        const cleanOutTradeNo = out_trade_no.trim();
+        let cleanOutTradeNo;
+        try {
+            cleanOutTradeNo = assertWechatOutTradeNo(out_trade_no);
+        } catch {
+            return adminResult(400, { error: '商户订单号格式无效' });
+        }
 
-        // 生成签名所需的参数
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
         const method = 'GET';
         const url = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}`;
 
-        // 生成签名
         const signature = generateSignV3(method, url, timestamp, nonceStr, '');
 
-        // 发送请求到微信支付
         const response = await axios.get(
-            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}`,
+            wechatPayOutTradeNoQueryUrl(cleanOutTradeNo),
             {
                 headers: {
                     'Accept': 'application/json',

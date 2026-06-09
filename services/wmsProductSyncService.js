@@ -45,7 +45,7 @@ function elementTextValue(el) {
 /** 与 REBUILD 列表单元格类似：REFERENCE 常渲染为 text / html，详情里可能只有 id */
 function stripHtmlToText(html) {
   const s = String(html ?? '')
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

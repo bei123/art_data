@@ -120,6 +120,20 @@ function createProxyRedirectGuard() {
   }
 }
 
+/**
+ * Validate proxy target and return a fixed href for outbound requests.
+ * @returns {Promise<{ ok: true, requestUrl: string, hostname: string } | { ok: false, status: number, message: string }>}
+ */
+async function resolveSafeProxyRequestUrl(urlString) {
+  const urlCheck = validateProxyTargetUrl(urlString)
+  if (!urlCheck.ok) return urlCheck
+
+  const dnsCheck = await assertResolvedHostIsPublic(urlCheck.hostname)
+  if (!dnsCheck.ok) return dnsCheck
+
+  return { ok: true, requestUrl: new URL(urlCheck.url).href, hostname: urlCheck.hostname }
+}
+
 module.exports = {
   parseAllowedHosts,
   isPrivateOrReservedIp,
@@ -127,4 +141,5 @@ module.exports = {
   validateProxyTargetUrl,
   assertResolvedHostIsPublic,
   createProxyRedirectGuard,
+  resolveSafeProxyRequestUrl,
 }

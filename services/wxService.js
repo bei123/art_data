@@ -60,22 +60,7 @@ async function resolveWxSession(req, { extendedError = false } = {}) {
   }
 }
 
-// 新增：MD5加密函数
-function md5(str) {
-    return crypto.createHash('md5').update(str).digest('hex');
-}
-// 新增：生成随机盐
-function generateSalt(length = 16) {
-    return crypto.randomBytes(length).toString('hex').slice(0, length);
-}
-// 新增：多次MD5加盐加密
-function md5WithSalt(password, salt, times = 3) {
-    let hash = password + salt;
-    for (let i = 0; i < times; i++) {
-        hash = crypto.createHash('md5').update(hash).digest('hex');
-    }
-    return hash;
-}
+const { hashWxPassword, verifyWxPassword, isBcryptHash } = require('../utils/wxPassword');
 
 // 创建阿里云二要素核验客户端
 function createDytnsClient() {
@@ -907,13 +892,9 @@ async function setPassword(req) {
             return adminResult(400, { error: '密码已经设置过，如需修改请使用修改密码接口' });
 }
 
-        // 生成盐
-        const salt = generateSalt(16);
-        // 多次MD5加密
-        const passwordHash = md5WithSalt(password, salt, 3);
+        const passwordHash = await hashWxPassword(password);
 
-        // 更新用户密码和盐
-        await db.query('UPDATE wx_users SET password_hash = ?, salt = ?, updated_at = NOW() WHERE id = ?', [passwordHash, salt, payload.userId]);
+        await db.query('UPDATE wx_users SET password_hash = ?, salt = NULL, updated_at = NOW() WHERE id = ?', [passwordHash, payload.userId]);
 
         return adminResult(200, {
             success: true,
@@ -974,19 +955,14 @@ async function changePassword(req) {
             return adminResult(400, { error: '用户尚未设置密码，请先设置密码' });
 }
 
-        // 验证旧密码（多次MD5+盐）
-        const isValidOldPassword = (md5WithSalt(oldPassword, user.salt, 3) === user.password_hash);
+        const isValidOldPassword = await verifyWxPassword(oldPassword, user.password_hash, user.salt);
         if (!isValidOldPassword) {
             return adminResult(400, { error: '旧密码错误' });
 }
 
-        // 生成新盐
-        const newSalt = generateSalt(16);
-        // 多次MD5加密新密码
-        const newPasswordHash = md5WithSalt(newPassword, newSalt, 3);
+        const newPasswordHash = await hashWxPassword(newPassword);
 
-        // 更新用户密码和盐
-        await db.query('UPDATE wx_users SET password_hash = ?, salt = ?, updated_at = NOW() WHERE id = ?', [newPasswordHash, newSalt, payload.userId]);
+        await db.query('UPDATE wx_users SET password_hash = ?, salt = NULL, updated_at = NOW() WHERE id = ?', [newPasswordHash, payload.userId]);
 
         return adminResult(200, {
             success: true,
@@ -1032,8 +1008,15 @@ async function verifyPassword(req) {
             return adminResult(400, { error: '用户尚未设置密码' });
 }
 
-        // 验证密码（多次MD5+盐）
-        const isValidPassword = (md5WithSalt(password, user.salt, 3) === user.password_hash);
+        const isValidPassword = await verifyWxPassword(password, user.password_hash, user.salt);
+
+        if (isValidPassword && !isBcryptHash(user.password_hash)) {
+            const upgradedHash = await hashWxPassword(password);
+            await db.query('UPDATE wx_users SET password_hash = ?, salt = NULL, updated_at = NOW() WHERE id = ?', [
+                upgradedHash,
+                payload.userId,
+            ]);
+        }
 
         return adminResult(200, {
             success: true,

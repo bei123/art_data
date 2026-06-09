@@ -6,18 +6,20 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
+const {
+  resolveWespaceBasicAuthorization,
+  externalAuthNotConfiguredBody,
+} = require('../utils/externalApiAuth');
+const { assertSafePathSegment, joinUrlPath } = require('../utils/safeOutboundUrl');
 
 // Redis缓存键前缀
 const REDIS_EXTERNAL_USER_KEY_PREFIX = 'external_user:';
 const REDIS_EXTERNAL_USER_BY_WX_ID_KEY_PREFIX = 'external_user:wx_id:';
 const REDIS_EXTERNAL_USER_CACHE_TTL = 86400; // 24小时过期
 
-/**
- * MD5加密函数
- * @param {string} str - 需要加密的字符串
- * @returns {string} MD5加密后的字符串
- */
-function md5(str) {
+/** Wespace 注册接口要求 MD5 密码，非本地存储用途 */
+function md5ForExternalWespaceApi(str) {
+  // codeql[js/insufficient-password-hash]: Remote Wespace API contract requires MD5.
   return crypto.createHash('md5').update(str).digest('hex');
 }
 
@@ -194,11 +196,10 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
       });
     }
 
-    // 获取 authorization，优先从请求头获取，如果没有则从环境变量获取
-    const authorization = req.headers.authorization ||
-      req.headers.Authorization ||
-      process.env.VERIFICATION_CODE_AUTHORIZATION ||
-      'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA=='; // 默认值作为fallback
+    const authorization = resolveWespaceBasicAuthorization(req);
+    if (!authorization) {
+      return res.status(503).json(externalAuthNotConfiguredBody());
+    }
 
     // 调用外部API获取验证码
     const response = await axios.get(
@@ -298,33 +299,13 @@ router.post('/user/login', async (req, res) => {
       });
     }
 
-    // 登录接口需要使用 Basic 认证，不是 Bearer token
-    // 支持从专门的请求头 'x-external-authorization' 获取，或者从环境变量获取
-    // 如果请求头是 Basic 开头的，也可以使用
-    let authorization = req.headers['x-external-authorization'] ||
-      req.headers['X-External-Authorization'];
-
-    // 如果请求头传入的是 Basic 认证，也可以使用
-    if (!authorization && req.headers.authorization && req.headers.authorization.startsWith('Basic ')) {
-      authorization = req.headers.authorization;
-    }
-
-    // 如果还是没有，使用环境变量或默认值
+    const authorization = resolveWespaceBasicAuthorization(req);
     if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION ||
-        'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+      return res.status(503).json(externalAuthNotConfiguredBody());
     }
 
-    // 构建 form-urlencoded 格式的请求体（直接拼接，参考成功请求格式）
-    // 成功格式：account=13611329007&captcha=5857
     const formData = `account=${account.trim()}&captcha=${captcha.trim()}`;
-
-    // 调用外部API登录
     const loginUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/userApi/user/login`;
-    console.log('调用外部登录接口:', loginUrl);
-    console.log('请求参数:', { account: account.trim(), captcha: '***' });
-    console.log('请求体数据:', formData);
-    console.log('Authorization:', authorization ? (authorization.startsWith('Basic ') ? authorization.substring(0, 20) + '...' : 'Basic ...') : '未设置');
 
     const response = await axios.post(
       loginUrl,
@@ -766,21 +747,13 @@ router.post('/user/register', async (req, res) => {
       });
     }
 
-    // 注册接口需要使用 Basic 认证
-    let authorization = req.headers['x-external-authorization'] ||
-      req.headers['X-External-Authorization'];
-
-    if (!authorization && req.headers.authorization && req.headers.authorization.startsWith('Basic ')) {
-      authorization = req.headers.authorization;
-    }
-
+    const authorization = resolveWespaceBasicAuthorization(req);
     if (!authorization) {
-      authorization = process.env.VERIFICATION_CODE_AUTHORIZATION ||
-        'Basic d2VzcGFjZTp3ZXNwYWNlLXNlY3JldA==';
+      return res.status(503).json(externalAuthNotConfiguredBody());
     }
 
     // 对密码进行MD5加密
-    const passwordMd5 = md5(password.trim());
+    const passwordMd5 = md5ForExternalWespaceApi(password.trim());
 
     // 构建 form-urlencoded 格式的请求体
     // 处理可选参数和URL编码
@@ -1157,9 +1130,19 @@ router.put('/asset-types/:id', async (req, res) => {
       pid: pid || null
     };
 
-    // 调用外部API
+    let safeId;
+    try {
+      safeId = assertSafePathSegment(id, 'id');
+    } catch {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'ID参数无效',
+        data: null,
+      });
+    }
     const response = await axios.put(
-      `${EXTERNAL_API_CONFIG.BASE_URL}/assetsApi/pr/basic/pt/type/update/${id}`,
+      joinUrlPath(EXTERNAL_API_CONFIG.BASE_URL, 'assetsApi/pr/basic/pt/type/update', safeId),
       requestData,
       {
         headers: {
@@ -1200,9 +1183,19 @@ router.delete('/asset-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 调用外部API
+    let safeId;
+    try {
+      safeId = assertSafePathSegment(id, 'id');
+    } catch {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'ID参数无效',
+        data: null,
+      });
+    }
     const response = await axios.delete(
-      `${EXTERNAL_API_CONFIG.BASE_URL}/assetsApi/pr/basic/pt/type/delete/${id}`,
+      joinUrlPath(EXTERNAL_API_CONFIG.BASE_URL, 'assetsApi/pr/basic/pt/type/delete', safeId),
       {
         timeout: 10000
       }

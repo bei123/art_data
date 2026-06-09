@@ -8,7 +8,6 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const {
   WMS_HTTP_BASE_URL,
   WMS_HTTP_USER,
-  getWmsHttpPasswordForLogin,
   isWmsLoginConfigured,
 } = require('../config/wmsHttp')
 const { assertWmsLoginEnvConfigured, wmsUserLoginFromEnv } = require('../utils/wmsHttpClient')
@@ -16,8 +15,7 @@ const { assertWmsLoginEnvConfigured, wmsUserLoginFromEnv } = require('../utils/w
 async function main() {
   console.log('WMS_HTTP_BASE_URL:', WMS_HTTP_BASE_URL || '(未设置)')
   console.log('WMS_HTTP_USER:', WMS_HTTP_USER ? `"${WMS_HTTP_USER}"` : '(未设置)')
-  const hasPwd = Boolean(getWmsHttpPasswordForLogin())
-  console.log('WMS_HTTP_PASSWORD:', hasPwd ? '(已设置，长度 ' + getWmsHttpPasswordForLogin().length + ')' : '(未设置)')
+  console.log('WMS_HTTP_PASSWORD:', isWmsLoginConfigured() ? '(已设置)' : '(未设置)')
   console.log('isWmsLoginConfigured:', isWmsLoginConfigured())
 
   if (!isWmsLoginConfigured()) {

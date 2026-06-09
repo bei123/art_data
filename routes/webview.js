@@ -4,9 +4,8 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const { authenticateWebviewAccess } = require('../middleware/webviewAccess');
 const {
-  validateProxyTargetUrl,
-  assertResolvedHostIsPublic,
   createProxyRedirectGuard,
+  resolveSafeProxyRequestUrl,
 } = require('../utils/proxyUrlPolicy');
 
 /**
@@ -41,28 +40,21 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
       })
     }
 
-    const urlCheck = validateProxyTargetUrl(decodedTargetUrl)
-    if (!urlCheck.ok) {
-      return res.status(urlCheck.status).json({
-        code: urlCheck.status,
+    const proxyUrl = await resolveSafeProxyRequestUrl(decodedTargetUrl)
+    if (!proxyUrl.ok) {
+      if (proxyUrl.message === '目标地址不可访问' || proxyUrl.message === '无法解析目标域名') {
+        logger.warn('webview_proxy_dns_blocked', { user_id: req.user?.id })
+      }
+      return res.status(proxyUrl.status).json({
+        code: proxyUrl.status,
         status: false,
-        message: urlCheck.message
+        message: proxyUrl.message
       })
     }
 
-    const dnsCheck = await assertResolvedHostIsPublic(urlCheck.hostname)
-    if (!dnsCheck.ok) {
-      logger.warn('webview_proxy_dns_blocked', { hostname: urlCheck.hostname, user_id: req.user?.id })
-      return res.status(dnsCheck.status).json({
-        code: dnsCheck.status,
-        status: false,
-        message: dnsCheck.message
-      })
-    }
-
-    decodedTargetUrl = urlCheck.url
+    const safeTargetUrl = proxyUrl.requestUrl
     logger.info('webview_proxy_request', {
-      hostname: urlCheck.hostname,
+      hostname: proxyUrl.hostname,
       user_id: req.user?.id,
       has_authorization: Boolean(authorization),
     })
@@ -73,7 +65,7 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
       'Accept-Language': req.headers['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
       'Accept-Encoding': 'gzip, deflate, br',
-      'Referer': decodedTargetUrl,
+      'Referer': safeTargetUrl,
       'Cache-Control': 'no-cache',
     };
     
@@ -146,7 +138,7 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
 
     // 请求目标页面
     // 注意：不使用 axios 的 auth 配置选项，避免自动添加 Basic Auth
-    const response = await axios.get(decodedTargetUrl, {
+    const response = await axios.get(safeTargetUrl, {
       headers: requestHeaders,
       maxRedirects: 5,
       beforeRedirect: createProxyRedirectGuard(),
@@ -162,7 +154,7 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
     if (htmlContent && typeof htmlContent === 'string' && 
         (htmlContent.includes('<!DOCTYPE') || htmlContent.includes('<html') || htmlContent.includes('<HTML'))) {
       
-      const targetBaseUrl = new URL(decodedTargetUrl);
+      const targetBaseUrl = new URL(safeTargetUrl);
       const baseOrigin = `${targetBaseUrl.protocol}//${targetBaseUrl.host}`;
       // 使用 origin + pathname，避免包含 hash 和 query，因为 hash 不应该在 base href 中
       // 确保 pathname 以斜杠结尾，这样相对路径才能正确解析
@@ -221,6 +213,23 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
       // 注意：不要修改 HTML 中的路径，让浏览器通过 base 标签自动处理
       // 这样可以确保所有静态资源都从原始服务器加载，而不是代理服务器
 
+      const targetRouteLiteral = JSON.stringify(targetRoute || '');
+      const baseOriginLiteral = JSON.stringify(baseOrigin);
+      const hasInjectAuth = Boolean(
+        authorization && !String(authorization).toLowerCase().includes('null')
+      );
+      const authHeaderLiteral = hasInjectAuth ? JSON.stringify(authorization) : '';
+      const injectAuthFetchLine = hasInjectAuth
+        ? `options.headers['Authorization'] = ${authHeaderLiteral};`
+        : '';
+      const injectAuthXhrBlock = hasInjectAuth
+        ? `try {
+                    if (!setHeaders.has('authorization')) {
+                      this.setRequestHeader('Authorization', ${authHeaderLiteral});
+                    }
+                  } catch(e) {}`
+        : '';
+
       // 3. 注入脚本，用于处理后续的API请求和路由问题
       const injectScript = `
         <script>
@@ -238,7 +247,7 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
             (function() {
               try {
                 // 目标路由值
-                const targetRoute = '${targetRoute.replace(/'/g, "\\'")}';
+                const targetRoute = ${targetRouteLiteral};
                 
                 // 从代理 URL 的查询参数中提取 targetUrl（如果存在）
                 // 这样可以确保使用的是正确的 hash，而不是代理 URL 本身的 hash
@@ -382,10 +391,9 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
                 options.headers = options.headers || {};
                 
                 // 获取原始服务器的 origin（用于设置 origin 和 referer）
-                const originalOrigin = '${baseOrigin}';
+                const originalOrigin = ${baseOriginLiteral};
                 
-                // 添加 Authorization 头（如果有）
-                ${authorization && !authorization.toLowerCase().includes('null') ? `options.headers['Authorization'] = '${authorization.replace(/'/g, "\\'")}';` : ''}
+                ${injectAuthFetchLine}
                 
                 // 对于向原始服务器或 node.wespace.cn 的请求，添加必要的请求头
                 try {
@@ -429,7 +437,7 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
             
             // 拦截XMLHttpRequest，添加必要的请求头
             if (originalXHR) {
-              const originalOrigin = '${baseOrigin}';
+              const originalOrigin = ${baseOriginLiteral};
               const XHRConstructor = function() {
                 const xhr = new originalXHR();
                 const originalOpen = xhr.open;
@@ -453,12 +461,7 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
                 };
                 
                 xhr.send = function(data) {
-                  // 添加 Authorization 头（如果有）
-                  ${authorization && !authorization.toLowerCase().includes('null') ? `try { 
-                    if (!setHeaders.has('authorization')) {
-                      this.setRequestHeader('Authorization', '${authorization.replace(/'/g, "\\'")}');
-                    }
-                  } catch(e) {}` : ''}
+                  ${injectAuthXhrBlock}
                   
                   // 对于向原始服务器或 node.wespace.cn 的请求，添加必要的请求头
                   try {

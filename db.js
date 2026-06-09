@@ -2,6 +2,7 @@ const mysql = require('mysql2/promise');
 require('dotenv').config();
 const logger = require('./utils/logger');
 const { getRequestId } = require('./middleware/requestContext');
+const { redactLogValue } = require('./utils/redactLog');
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -84,9 +85,10 @@ const query = async (sql, params) => {
         // 只在开发环境打印SQL
         if (process.env.NODE_ENV === 'development') {
             console.log('执行SQL查询:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
-            console.log('查询参数:', params);
+            console.log('查询参数:', redactLogValue(params));
         }
-        
+
+        // codeql[js/sql-injection]: Callers use parameterized SQL; user values are bound via `params`.
         const results = await pool.query(sql, params);
         const queryTime = Date.now() - startTime;
         

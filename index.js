@@ -148,6 +148,21 @@ const loginLimiter = rateLimit({
 
 app.use('/api/auth/login', loginLimiter);
 
+const uploadsLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    applyCorsHeaders(req, res);
+    res.status(429).json({
+      error: '文件访问过于频繁，请稍后再试',
+      code: 'UPLOADS_RATE_LIMIT',
+      request_id: req.requestId || null,
+    });
+  },
+});
+
 // 为 webview 代理路由禁用 CSP（使用更宽松的 meta CSP）
 // 在路由处理中会移除 CSP 头，让页面使用注入的 meta CSP
 
@@ -183,7 +198,7 @@ app.get('/api/admin/health', ...auth.requireAdmin, apiDetailedHealthHandler);
 const { serveLocalUpload } = require('./middleware/localUploads');
 const localUploadsRouter = express.Router();
 localUploadsRouter.get('*', serveLocalUpload);
-app.use('/uploads', localUploadsRouter);
+app.use('/uploads', uploadsLimiter, localUploadsRouter);
 
 // 创建上传目录
 if (!fs.existsSync('uploads')) {
