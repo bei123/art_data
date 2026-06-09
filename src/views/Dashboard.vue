@@ -239,42 +239,21 @@ const fetchStats = async () => {
   statsLoading.value = true
   statsError.value = ''
   try {
-    const originalRes = await axios.get('/original-artworks?pageSize=1000')
-    const digitalRes = await axios.get('/digital-artworks?pageSize=1000')
-    const categoriesRes = await axios.get('/physical-categories?limit=1000')
-
-    let originalArtworks = []
-    if (originalRes && originalRes.data && Array.isArray(originalRes.data)) {
-      originalArtworks = originalRes.data
-    } else if (Array.isArray(originalRes)) {
-      originalArtworks = originalRes
-    }
-
-    let digitalArtworks = []
-    if (Array.isArray(digitalRes)) {
-      digitalArtworks = digitalRes
-    }
-
-    let categories = []
-    if (categoriesRes && categoriesRes.data && Array.isArray(categoriesRes.data)) {
-      categories = categoriesRes.data
-    } else if (Array.isArray(categoriesRes)) {
-      categories = categoriesRes
-    }
+    const overview = await axios.get('/dashboard/overview')
 
     stats.value = {
-      originalArtworks: originalArtworks.length,
-      digitalArtworks: digitalArtworks.length,
-      physicalCategories: categories.length,
+      originalArtworks: overview?.counts?.originalArtworks ?? 0,
+      digitalArtworks: overview?.counts?.digitalArtworks ?? 0,
+      physicalCategories: overview?.counts?.physicalCategories ?? 0,
     }
 
-    recentOriginalArtworks.value = originalArtworks
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .slice(0, 5)
+    recentOriginalArtworks.value = Array.isArray(overview?.recentOriginalArtworks)
+      ? overview.recentOriginalArtworks
+      : []
 
-    recentDigitalArtworks.value = digitalArtworks
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .slice(0, 5)
+    recentDigitalArtworks.value = Array.isArray(overview?.recentDigitalArtworks)
+      ? overview.recentDigitalArtworks
+      : []
   } catch {
     stats.value = {
       originalArtworks: 0,

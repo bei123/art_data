@@ -43,6 +43,7 @@ const showcaseRouter = require('./routes/showcase');
 const homeTitlesRouter = require('./routes/home-titles');
 const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
+const dashboardRouter = require('./routes/dashboard');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
@@ -411,6 +412,9 @@ ensureDigitalArtworkIdColumns().catch((err) => {
 startDigitalArtworksSync();
 // 定时从 WMS 同步原作主档（价格、艺术家、仓库图路径等）
 startWmsProductSyncSchedule();
+
+// 使用仪表盘路由
+app.use('/api/dashboard', dashboardRouter);
 
 // 使用实物分类路由
 app.use('/api/physical-categories', physicalCategoriesRouter);
