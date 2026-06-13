@@ -49,6 +49,7 @@ const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
+const { startLogisticsPathNotifyScheduler } = require('./services/logisticsPathNotify');
 const {
   applyCorsHeaders,
   corsPreflightMiddleware,
@@ -415,6 +416,7 @@ startDigitalArtworksSync();
 startWmsProductSyncSchedule();
 // 待付款订阅消息：截止前 N 分钟扫描 Redis 排期并发送
 startPaymentPendingReminderScheduler();
+startLogisticsPathNotifyScheduler();
 
 // 使用仪表盘路由
 app.use('/api/dashboard', dashboardRouter);

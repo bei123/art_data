@@ -57,6 +57,38 @@ function formatSubscribeNumberValue(value, fallback = '0') {
   return '0'
 }
 
+/** 微信 character_string 类型：字母、数字、符号，不含中文 */
+function formatSubscribeCharacterStringValue(value, fallback = '') {
+  const raw = String(value ?? '').trim()
+  const cleaned = raw.replace(/[^\w\-./#]/g, '')
+  if (cleaned) return clipText(cleaned, 32)
+  const fallbackClean = String(fallback ?? '').trim().replace(/[^\w\-./#]/g, '')
+  if (fallbackClean) return clipText(fallbackClean, 32)
+  return '0'
+}
+
+const DELIVERY_COMPANY_NAMES = {
+  SF: '顺丰快递',
+  YTO: '圆通速递',
+  ZTO: '中通快递',
+  STO: '申通快递',
+  YD: '韵达快递',
+  EMS: 'EMS',
+  JD: '京东快递',
+  DBL: '德邦快递',
+  HTKY: '百世快递',
+  JTSD: '极兔速递',
+}
+
+function resolveDeliveryCompanyName(deliveryId, companyName) {
+  const named = companyName != null ? String(companyName).trim() : ''
+  if (named) return clipText(named, 20)
+  const id = deliveryId != null ? String(deliveryId).trim().toUpperCase() : ''
+  if (id && DELIVERY_COMPANY_NAMES[id]) return DELIVERY_COMPANY_NAMES[id]
+  if (id) return clipText(id, 20)
+  return '快递公司'
+}
+
 function formatAmountYuan(yuan) {
   const n = Number(yuan)
   if (!Number.isFinite(n)) return '0元'
@@ -646,46 +678,54 @@ async function notifyRefundSuccess({
   })
 }
 
-/** 订单发货 */
-async function notifyOrderShipped({
+/** 物流状态提醒（发货成功等；模板：物流公司/运单号/物流状态/商品名称） */
+async function notifyLogisticsStatus({
   orderId,
   outTradeNo,
   waybillId,
   deliveryId,
-  shipTime,
+  companyName,
+  logisticsStatus,
   trackingHint,
-  etaText,
   force = false,
   ignoreChecks = false,
 }) {
   const templates = getWxSubscribeTemplates()
+  const templateId = templates.logisticsStatus || templates.orderShipped
   const ctx = await loadOrderNotifyContext({ orderId, outTradeNo })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
   if (!ignoreChecks && !ctx.hasPhysicalItem) return { skipped: true, reason: 'no_physical_item' }
+  if (!templateId) return { skipped: true, reason: 'template_not_configured' }
 
-  const shippedAt = shipTime ? new Date(shipTime) : new Date()
-  const tracking = clipText(trackingHint || `${deliveryId || '快递'} 已揽件`, 20)
-  const eta = clipText(etaText || '以快递实际送达为准', 32)
+  const statusText = clipText(
+    logisticsStatus || trackingHint || '卖家正在积极准备商品',
+    20,
+  )
+  const waybill = formatSubscribeCharacterStringValue(waybillId, '0')
 
   return dispatchSubscribeMessage({
-    scene: 'orderShipped',
+    scene: 'logisticsStatus',
     redisKey: waybillId
-      ? `subscribe:sent:shipped:${ctx.orderId}:${waybillId}`
-      : `subscribe:sent:shipped:${ctx.orderId}`,
+      ? `subscribe:sent:logistics:${ctx.orderId}:${waybill}:${statusText.slice(0, 8)}`
+      : `subscribe:sent:logistics:${ctx.orderId}`,
     openid: ctx.openid,
-    templateId: templates.orderShipped,
+    templateId,
     userId: ctx.userId,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
     force,
     data: {
-      thing1: dataValue(ctx.productTitle || '商品'),
-      date4: dataValue(formatWechatDate(shippedAt)),
-      thing6: dataValue(tracking),
-      date7: dataValue(eta),
-      thing8: dataValue(ctx.fullAddress || '—'),
+      name1: dataValue(resolveDeliveryCompanyName(deliveryId, companyName)),
+      character_string2: dataValue(waybill),
+      thing3: dataValue(statusText),
+      thing5: dataValue(clipText(ctx.productTitle || '商品', 20)),
     },
   })
+}
+
+/** @deprecated 使用 notifyLogisticsStatus */
+async function notifyOrderShipped(params) {
+  return notifyLogisticsStatus(params)
 }
 
 const RESEND_SCENES = [
@@ -715,9 +755,14 @@ const RESEND_SCENES = [
     description: '可传 out_refund_no；不传则取该订单最近一条成功退款',
   },
   {
+    key: 'logisticsStatus',
+    label: '物流状态提醒',
+    description: '可传 waybill_id、delivery_id、logistics_status；不传则从 order_shipments 取最近一条',
+  },
+  {
     key: 'orderShipped',
-    label: '订单发货',
-    description: '可传 waybill_id / delivery_id；不传则从 order_shipments 取最近一条',
+    label: '订单发货（同物流状态提醒）',
+    description: '兼容旧 scene；字段同 logisticsStatus',
   },
   {
     key: 'virtualDeliveryPreparing',
@@ -877,6 +922,7 @@ async function resendSubscribeNotify(req) {
       })
       break
     }
+    case 'logisticsStatus':
     case 'orderShipped': {
       const ctx = await loadOrderNotifyContext(base)
       if (!ctx) return adminNotifyResult(404, { error: '订单不存在' })
@@ -886,14 +932,14 @@ async function resendSubscribeNotify(req) {
       if (!waybillId && !ignoreChecks) {
         return adminNotifyResult(400, { error: '无发货记录，请传 waybill_id 或先完成物流发货' })
       }
-      result = await notifyOrderShipped({
+      result = await notifyLogisticsStatus({
         orderId: ctx.orderId,
         outTradeNo: ctx.outTradeNo,
         waybillId,
         deliveryId,
-        shipTime: body.ship_time || body.shipTime || shipment?.created_at,
+        companyName: body.company_name || body.companyName,
+        logisticsStatus: body.logistics_status || body.logisticsStatus,
         trackingHint: body.tracking_hint || body.trackingHint,
-        etaText: body.eta_text || body.etaText,
         force,
         ignoreChecks,
       })
@@ -1040,6 +1086,7 @@ module.exports = {
   startPaymentPendingReminderScheduler,
   notifyOrderCancelled,
   notifyRefundSuccess,
+  notifyLogisticsStatus,
   notifyOrderShipped,
   notifyVirtualDeliveryPreparing,
   notifyVirtualDeliveryShipped,

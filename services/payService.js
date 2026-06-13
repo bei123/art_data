@@ -3453,6 +3453,7 @@ async function orderDetailForActor(req, options = {}) {
                     delivery_id: shipments[i].delivery_id,
                     waybill_id: shipments[i].waybill_id,
                     add_source: shipments[i].add_source === 2 ? 2 : 0,
+                    skip_path_notify: true,
                 };
                 if (shipments[i].add_source === 2 && shipments[i].wx_appid) {
                     pathBody.wx_appid = shipments[i].wx_appid;

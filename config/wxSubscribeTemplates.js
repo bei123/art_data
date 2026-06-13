@@ -12,8 +12,10 @@ const DEFAULT_TEMPLATES = {
   paymentPending: '3XayJ63OyXUiOXC2XQXw2WXD_fjx1PLuMPD28HjJvBY',
   /** 购物（虚拟发货）服务动态 — 服务卡片，非普通订阅文案，暂不自动下发 */
   virtualDelivery: 'inIqNTjUpx2vNBgGvBg4TAuHeC9m9nJL16WyxkqcB5o',
-  /** 订单发货提醒 */
-  orderShipped: 'n5W2-XXBQ8d279lE8AJ-3mM6Y8KTmNU0w9UUcTBizs8',
+  /** 物流状态提醒（发货成功等） */
+  logisticsStatus: 'cas1lppyqjEsP-vpsMrR6pQo2I7iaqnEERMi19DuF5o',
+  /** @deprecated 与 logisticsStatus 同模板，保留 scene 键兼容 */
+  orderShipped: 'cas1lppyqjEsP-vpsMrR6pQo2I7iaqnEERMi19DuF5o',
   /** 订单支付成功通知 */
   orderPaid: 'cFih0vORYpwPHBZpAXKgKhM_9OHfD3xHAuHeJv0NZSs',
 }
@@ -31,7 +33,14 @@ function getWxSubscribeTemplates() {
     refundResult: readTemplateId('WX_SUBSCRIBE_TMPL_REFUND_RESULT', DEFAULT_TEMPLATES.refundResult),
     paymentPending: readTemplateId('WX_SUBSCRIBE_TMPL_PAYMENT_PENDING', DEFAULT_TEMPLATES.paymentPending),
     virtualDelivery: readTemplateId('WX_SUBSCRIBE_TMPL_VIRTUAL_DELIVERY', DEFAULT_TEMPLATES.virtualDelivery),
-    orderShipped: readTemplateId('WX_SUBSCRIBE_TMPL_ORDER_SHIPPED', DEFAULT_TEMPLATES.orderShipped),
+    logisticsStatus: readTemplateId(
+      'WX_SUBSCRIBE_TMPL_LOGISTICS_STATUS',
+      DEFAULT_TEMPLATES.logisticsStatus,
+    ),
+    orderShipped: readTemplateId(
+      'WX_SUBSCRIBE_TMPL_ORDER_SHIPPED',
+      readTemplateId('WX_SUBSCRIBE_TMPL_LOGISTICS_STATUS', DEFAULT_TEMPLATES.logisticsStatus),
+    ),
     orderPaid: readTemplateId('WX_SUBSCRIBE_TMPL_ORDER_PAID', DEFAULT_TEMPLATES.orderPaid),
   }
 }

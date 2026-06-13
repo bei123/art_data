@@ -498,7 +498,7 @@ const activeTab = ref('private')
 const scenarioRows = [
   { key: 'paid', scene: '支付成功', title: '订单支付成功通知', trigger: '微信支付成功回调' },
   { key: 'pending', scene: '待付款', title: '待付款提醒', trigger: '统一下单后排期，支付截止前 5 分钟发送' },
-  { key: 'shipped', scene: '发货', title: '订单发货提醒', trigger: '管理端微信物流发货成功' },
+  { key: 'shipped', scene: '物流', title: '物流状态提醒', trigger: '发货成功、查询轨迹(getPath)节点变化、定时轮询轨迹更新' },
   { key: 'refund', scene: '退款', title: '退款结果通知', trigger: '退款成功回调 / 审批完成' },
   { key: 'cancel', scene: '取消', title: '订单取消通知', trigger: '关闭未支付订单' },
   { key: 'virtual', scene: '数字艺术品交付', title: '购物（虚拟发货）服务动态', trigger: '支付成功激活「备货中」；管理员上传领取二维码后更新为「已发货」' },

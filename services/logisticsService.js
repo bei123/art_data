@@ -2,7 +2,10 @@ const axios = require('axios')
 const db = require('../db')
 const logger = require('../utils/logger')
 const { getAccessToken } = require('./wechatMiniProgramToken')
-const { fireSubscribeNotify, notifyOrderShipped } = require('./subscribeMessageNotify')
+const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
+const {
+  handleLogisticsPathNotifyAsync,
+} = require('./logisticsPathNotify')
 const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv')
 
 function adminResult(status, body) {
@@ -450,14 +453,15 @@ async function addOrder(req) {
     }
 
     fireSubscribeNotify(
-      notifyOrderShipped({
+      notifyLogisticsStatus({
         orderId: internalOrderId,
         outTradeNo: orderRow.out_trade_no,
         waybillId: String(data.waybill_id).trim(),
         deliveryId: delivery_id,
-        trackingHint: `${delivery_id} 已揽件，运单 ${String(data.waybill_id).trim()}`,
+        companyName: b.delivery_name || b.company_name,
+        logisticsStatus: '包裹已发出，快递公司已揽件',
       }),
-      'orderShipped',
+      'logisticsStatus',
     )
 
     return adminResult(200, {
@@ -524,12 +528,26 @@ async function getPath(req) {
       })
     }
 
+    const pathItemList = data.path_item_list || []
+    const skipPathNotify = b.skip_path_notify === true || b.skipPathNotify === true
+
+    if (ctx.internal_order_id && !skipPathNotify) {
+      handleLogisticsPathNotifyAsync({
+        orderId: ctx.internal_order_id,
+        deliveryId: delivery_id,
+        waybillId: waybill_id,
+        companyName: b.delivery_name || b.company_name,
+        pathItemList,
+        source: 'getPath',
+      })
+    }
+
     return adminResult(200, {
       openid: data.openid,
       delivery_id: data.delivery_id,
       waybill_id: data.waybill_id,
-      path_item_num: data.path_item_num ?? (Array.isArray(data.path_item_list) ? data.path_item_list.length : 0),
-      path_item_list: data.path_item_list || []
+      path_item_num: data.path_item_num ?? (Array.isArray(pathItemList) ? pathItemList.length : 0),
+      path_item_list: pathItemList
     })
   } catch (err) {
     logger.error('getPath 失败', { err })
