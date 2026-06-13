@@ -3,6 +3,7 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
 const { getAccessToken } = require('./wechatMiniProgramToken')
+const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
 const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 
