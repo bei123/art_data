@@ -753,7 +753,7 @@ async function handleConfirmDelete() {
 async function fetchResendScenes() {
   try {
     const res = await axios.get('/wx/subscribe-message/resend/scenes', { timeout: 15000 })
-    resendScenes.value = Array.isArray(res?.data?.scenes) ? res.data.scenes : []
+    resendScenes.value = Array.isArray(res?.scenes) ? res.scenes : []
   } catch {
     resendScenes.value = []
   }
@@ -787,8 +787,8 @@ async function handleResend() {
     }
 
     const res = await axios.post('/wx/subscribe-message/resend', payload, { timeout: 30000 })
-    resendResult.value = res.data
-    if (res.data?.success) showLayoutSuccess('补发成功')
+    resendResult.value = res
+    if (res?.success) showLayoutSuccess('补发成功')
   } catch (error) {
     const data = error?.response?.data
     resendResult.value = data || { success: false, error: extractErrorMessage(error) }
