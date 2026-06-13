@@ -338,6 +338,14 @@ function generateNonceStr() {
     return Math.random().toString(36).substring(2, 17);
 }
 
+function generateOutRefundNo(orderId) {
+    const ts = Date.now().toString(36).toUpperCase();
+    const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `RF${orderId}${ts}${rand}`.slice(0, 64);
+}
+
+const BLOCKING_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING', 'SUCCESS'];
+
 // 生成签名
 function generateSignV3(method, url, timestamp, nonceStr, body) {
     // 1. 构造签名串
@@ -1845,6 +1853,139 @@ async function refundApprove(req) {
         return adminResult(500, {
             success: false,
             error: wxHint ? `处理退款申请失败：${wxHint}` : '处理退款申请失败',
+        });
+    }
+}
+
+async function adminOrderRefund(req) {
+    try {
+        const orderId = parseInt(String(req.params.id), 10);
+        const { reason, refund_amount_yuan: refundAmountYuan } = req.body || {};
+
+        if (!orderId || Number.isNaN(orderId) || orderId <= 0) {
+            return adminResult(400, { success: false, error: '无效的订单 ID' });
+        }
+
+        const cleanReason = typeof reason === 'string' ? reason.trim() : '';
+        if (!cleanReason) {
+            return adminResult(400, { success: false, error: '请填写退款原因' });
+        }
+        if (cleanReason.length > 80) {
+            return adminResult(400, { success: false, error: '退款原因长度不能超过80个字符' });
+        }
+
+        const [orders] = await db.query(
+            `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee
+             FROM orders WHERE id = ? LIMIT 1`,
+            [orderId]
+        );
+        if (!orders.length) {
+            return adminResult(404, { success: false, error: '订单不存在' });
+        }
+
+        const order = orders[0];
+        const synced = await syncOrderTradeStateFromWechat(order);
+        const tradeState = synced.tradeState || order.trade_state;
+
+        if (tradeState === 'REFUND') {
+            return adminResult(400, { success: false, error: '订单已退款' });
+        }
+        if (tradeState !== 'SUCCESS') {
+            return adminResult(400, { success: false, error: '仅支付成功的订单可发起退款' });
+        }
+
+        const [existingRefunds] = await db.query(
+            `SELECT id, status FROM refund_requests
+             WHERE out_trade_no = ? AND status IN (?, ?, ?, ?)`,
+            [order.out_trade_no, ...BLOCKING_REFUND_STATUSES]
+        );
+        if (existingRefunds.length) {
+            return adminResult(400, {
+                success: false,
+                error: `该订单已有进行中的退款（${existingRefunds[0].status}），请勿重复发起`,
+            });
+        }
+
+        const actualFeeYuan = parseFloat(order.actual_fee) || parseFloat(order.total_fee) || 0;
+        if (!Number.isFinite(actualFeeYuan) || actualFeeYuan <= 0) {
+            return adminResult(400, { success: false, error: '订单实付金额无效，无法退款' });
+        }
+
+        let refundYuan = actualFeeYuan;
+        if (refundAmountYuan != null && refundAmountYuan !== '') {
+            refundYuan = parseFloat(refundAmountYuan);
+            if (!Number.isFinite(refundYuan) || refundYuan <= 0) {
+                return adminResult(400, { success: false, error: '退款金额无效' });
+            }
+            if (refundYuan - actualFeeYuan > 0.001) {
+                return adminResult(400, { success: false, error: '退款金额不能超过实付金额' });
+            }
+        }
+
+        const cleanAmount = {
+            refund: Math.round(refundYuan * 100),
+            total: Math.round(actualFeeYuan * 100),
+            currency: 'CNY',
+        };
+        const outRefundNo = generateOutRefundNo(orderId);
+        const transactionId = synced.wxPay?.transaction_id || order.transaction_id || null;
+
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
+        try {
+            const [refundResult] = await connection.query(
+                `INSERT INTO refund_requests (
+                    out_trade_no,
+                    out_refund_no,
+                    transaction_id,
+                    reason,
+                    amount,
+                    status,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
+                [
+                    order.out_trade_no,
+                    outRefundNo,
+                    transactionId,
+                    cleanReason,
+                    JSON.stringify(cleanAmount),
+                ]
+            );
+            await connection.commit();
+
+            const approveResult = await refundApprove({
+                body: {
+                    refund_id: refundResult.insertId,
+                    approve: true,
+                },
+            });
+
+            if (approveResult.status !== 200 || !approveResult.body?.success) {
+                return approveResult;
+            }
+
+            return adminResult(200, {
+                success: true,
+                data: {
+                    refund_id: refundResult.insertId,
+                    out_refund_no: outRefundNo,
+                    status: approveResult.body?.data?.status || 'PROCESSING',
+                    message: approveResult.body?.data?.message || '退款已提交',
+                },
+            });
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    } catch (error) {
+        const wxErr = error?.response?.data;
+        logger.error('管理端发起退款失败', { err: wxErr || error, orderId: req.params?.id });
+        const wxHint = wxErr?.message || wxErr?.code;
+        return adminResult(500, {
+            success: false,
+            error: wxHint ? `发起退款失败：${wxHint}` : '发起退款失败',
         });
     }
 }
@@ -3929,6 +4070,7 @@ module.exports = {
   listOrders,
   digitalIdentityPurchases,
   adminOrders,
+  adminOrderRefund,
   checkRepayable,
   adminOrderDetail,
   buyerOrderDetail,

@@ -160,6 +160,17 @@ router.get('/admin/orders', ...requireAdmin, async (req, res) => {
   }
 });
 
+/** 管理端：对已支付订单发起退款（创建退款单并提交微信） */
+router.post('/admin/orders/:id/refund', ...requireAdmin, async (req, res) => {
+  try {
+    const r = await svc.adminOrderRefund(req);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('管理端发起退款失败', { err: e });
+    return res.status(500).json({ success: false, error: '发起退款失败' });
+  }
+});
+
 /** 管理端订单详情（费用分项、支付脱敏、时间轴、退款、履约、业务 ID、shipments；?include_wechat_path=1 时顺带调微信 getPath） */
 router.get('/admin/orders/:id', ...requireAdmin, async (req, res) => {
   try {

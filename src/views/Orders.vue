@@ -152,9 +152,20 @@
               </td>
               <td class="px-3 py-2.5 tabular-nums text-muted-foreground">{{ row.created_at }}</td>
               <td class="px-3 py-2.5 text-right">
-                <Button size="sm" type="button" @click="viewOrderDetail(row)">
-                  查看详情
-                </Button>
+                <div class="flex flex-wrap justify-end gap-1.5">
+                  <Button
+                    v-if="canOrderRefund(row)"
+                    size="sm"
+                    type="button"
+                    variant="destructive"
+                    @click="openRefundDialog(row)"
+                  >
+                    退款
+                  </Button>
+                  <Button size="sm" type="button" @click="viewOrderDetail(row)">
+                    查看详情
+                  </Button>
+                </div>
               </td>
             </tr>
             <tr v-if="orders.length === 0 && !loading">
@@ -218,6 +229,15 @@
         </DialogHeader>
 
         <div v-if="selectedOrder" class="max-h-[calc(90vh-8rem)] space-y-6 overflow-y-auto pr-1">
+          <div
+            v-if="detailLoading"
+            class="flex items-center justify-center py-12 text-sm text-muted-foreground"
+            aria-busy="true"
+          >
+            <Loader2 class="mr-2 size-4 animate-spin" aria-hidden="true" />
+            加载订单详情…
+          </div>
+          <template v-else>
           <div>
             <h3 class="mb-3 border-b border-border pb-2 text-base font-semibold text-foreground">
               订单信息
@@ -292,6 +312,58 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <div v-if="selectedOrder.refunds?.length || canOrderRefund(selectedOrder)" class="rounded-lg border border-border bg-muted/10 p-4">
+            <h3 class="mb-2 text-base font-semibold text-foreground">
+              退款
+            </h3>
+            <p class="mb-3 text-sm text-muted-foreground leading-relaxed">
+              对已支付成功的订单发起全额退款，将自动提交至微信并恢复库存。
+            </p>
+            <div v-if="selectedOrder.refunds?.length" class="mb-4 space-y-2">
+              <div
+                v-for="refund in selectedOrder.refunds"
+                :key="refund.id"
+                class="rounded-md border border-border bg-background p-3 text-sm"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-mono text-xs text-muted-foreground">{{ refund.out_refund_no }}</span>
+                  <Badge :variant="getRefundStatusBadgeVariant(refund.status)">
+                    {{ getRefundStatusText(refund.status) }}
+                  </Badge>
+                </div>
+                <div class="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                  <span>退款金额：¥{{ refund.refund_amount_yuan ?? '—' }}</span>
+                  <span v-if="refund.reason">原因：{{ refund.reason }}</span>
+                  <span v-if="refund.created_at">申请：{{ formatRefundDate(refund.created_at) }}</span>
+                </div>
+                <div v-if="refund.status === 'PROCESSING'" class="mt-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    :disabled="syncingRefundId === refund.id"
+                    @click="syncOrderRefundStatus(refund)"
+                  >
+                    <Loader2
+                      v-if="syncingRefundId === refund.id"
+                      class="mr-1.5 size-3.5 animate-spin"
+                      aria-hidden="true"
+                    />
+                    刷新退款状态
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <Button
+              v-if="canOrderRefund(selectedOrder)"
+              type="button"
+              variant="destructive"
+              @click="openRefundDialog(selectedOrder)"
+            >
+              发起退款
+            </Button>
           </div>
 
           <div>
@@ -422,7 +494,47 @@
               </Button>
             </div>
           </div>
+          </template>
         </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="refundDialogVisible">
+      <DialogContent class="max-w-[calc(100%-2rem)] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>发起退款</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-1 text-sm">
+            <span class="text-muted-foreground">订单号</span>
+            <span class="font-mono text-xs break-all">{{ refundForm.out_trade_no }}</span>
+          </div>
+          <div class="grid gap-1 text-sm">
+            <span class="text-muted-foreground">实付金额</span>
+            <span class="font-medium tabular-nums">¥{{ refundForm.refund_amount_yuan }}</span>
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="refund-reason">退款原因 <span class="text-destructive">*</span></Label>
+            <Textarea
+              id="refund-reason"
+              v-model="refundForm.reason"
+              placeholder="例如：用户申请退款、重复下单等"
+              class="min-h-24"
+              rows="3"
+            />
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="refundDialogVisible = false">
+            取消
+          </Button>
+          <Button type="button" variant="destructive" :disabled="refundSubmitting" @click="submitOrderRefund">
+            <Loader2 v-if="refundSubmitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            确认退款
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 
@@ -742,8 +854,19 @@ const orders = ref([])
 const loading = ref(false)
 const listError = ref('')
 const detailDialogVisible = ref(false)
+const detailLoading = ref(false)
 const selectedOrder = ref(null)
 const qrUploadingItemId = ref(null)
+
+const refundDialogVisible = ref(false)
+const refundSubmitting = ref(false)
+const syncingRefundId = ref(null)
+const refundForm = reactive({
+  orderId: null,
+  out_trade_no: '',
+  refund_amount_yuan: '',
+  reason: '',
+})
 
 const deliveryList = ref([])
 const shipDialogVisible = ref(false)
@@ -879,10 +1002,208 @@ const handleCurrentChange = (page) => {
   fetchOrders()
 }
 
-const viewOrderDetail = (order) => {
+const viewOrderDetail = async (order) => {
   selectedOrder.value = order
   detailDialogVisible.value = true
+  detailLoading.value = true
   prefillTrackFormFromStorage(order.id)
+  try {
+    await refreshSelectedOrderDetail(order.id)
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function mapDetailItemsToOrderItems(detailItems) {
+  return (detailItems || []).map((item) => ({
+    ...item,
+    address: item.address_snapshot || item.fulfillment?.address_snapshot || item.address || null,
+    qr_code_url: item.qr_code_url || item.delivery_qr_code_url,
+    delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
+  }))
+}
+
+function mergeAdminOrderDetail(listOrder, data) {
+  const payStatus = {
+    ...(data.pay_status || listOrder.pay_status || {}),
+    transaction_id: data.payment?.transaction_id ?? listOrder.pay_status?.transaction_id,
+    success_time: data.payment?.success_time ?? listOrder.pay_status?.success_time,
+    amount: data.payment?.amount_total_fen != null
+      ? { total: data.payment.amount_total_fen, currency: data.payment?.currency || 'CNY' }
+      : listOrder.pay_status?.amount,
+  }
+
+  return {
+    ...listOrder,
+    ...data,
+    id: listOrder.id,
+    user_nickname: listOrder.user_nickname ?? data.order?.user_nickname,
+    user_avatar: listOrder.user_avatar ?? data.order?.user_avatar,
+    actual_fee: data.fee?.amount_payable_yuan ?? listOrder.actual_fee,
+    discount_amount: data.fee?.discount_yuan ?? listOrder.discount_amount,
+    total_fee: data.fee?.order_total_before_discount_yuan ?? listOrder.total_fee ?? data.total_fee,
+    pay_status: payStatus,
+    items: mapDetailItemsToOrderItems(data.detail_items?.length ? data.detail_items : listOrder.items),
+    refunds: data.refunds || [],
+  }
+}
+
+async function refreshSelectedOrderDetail(orderId) {
+  const response = await axios.get(`/wx/pay/admin/orders/${orderId}`)
+  if (!response.success || !response.data) {
+    throw new Error(response.error || '获取订单详情失败')
+  }
+
+  const listOrder = orders.value.find((row) => row.id === orderId) || selectedOrder.value
+  selectedOrder.value = mergeAdminOrderDetail(listOrder || { id: orderId }, response.data)
+  return selectedOrder.value
+}
+
+const BLOCKING_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING', 'SUCCESS']
+
+function getOrderTradeState(order) {
+  if (!order) return ''
+  return order.pay_status?.trade_state || order.trade_state || ''
+}
+
+function hasBlockingRefund(order) {
+  const refunds = order?.refunds || []
+  return refunds.some((refund) => BLOCKING_REFUND_STATUSES.includes(refund.status))
+}
+
+function canOrderRefund(order) {
+  if (!order) return false
+  const state = getOrderTradeState(order)
+  if (state !== 'SUCCESS') return false
+  if (hasBlockingRefund(order)) return false
+  const refundStatus = order.refund_status?.status
+  if (refundStatus && BLOCKING_REFUND_STATUSES.includes(refundStatus)) return false
+  return true
+}
+
+function openRefundDialog(order) {
+  if (!canOrderRefund(order)) {
+    ElMessage.warning('当前订单不可退款')
+    return
+  }
+
+  refundForm.orderId = order.id
+  refundForm.out_trade_no = order.out_trade_no || ''
+  refundForm.refund_amount_yuan = String(order.actual_fee ?? order.fee?.amount_payable_yuan ?? '')
+  refundForm.reason = ''
+  refundDialogVisible.value = true
+}
+
+async function submitOrderRefund() {
+  if (!refundForm.orderId) return
+  const reason = typeof refundForm.reason === 'string' ? refundForm.reason.trim() : ''
+  if (!reason) {
+    ElMessage.warning('请填写退款原因')
+    return
+  }
+
+  refundSubmitting.value = true
+  try {
+    const response = await axios.post(`/wx/pay/admin/orders/${refundForm.orderId}/refund`, {
+      reason,
+      refund_amount_yuan: refundForm.refund_amount_yuan,
+    })
+
+    if (response.success) {
+      const status = response.data?.status
+      if (status === 'SUCCESS') ElMessage.success('退款已完成')
+      else if (status === 'FAILED') ElMessage.warning('微信侧退款失败，请到退款审批页查看')
+      else ElMessage.success(response.data?.message || '退款已提交，处理中')
+
+      refundDialogVisible.value = false
+      await fetchOrders()
+      if (detailDialogVisible.value && selectedOrder.value?.id === refundForm.orderId) {
+        detailLoading.value = true
+        try {
+          await refreshSelectedOrderDetail(refundForm.orderId)
+        } finally {
+          detailLoading.value = false
+        }
+      }
+    } else {
+      ElMessage.error(response.error || '发起退款失败')
+    }
+  } catch (error) {
+    console.error('发起退款失败:', error)
+    ElMessage.error(error?.response?.data?.error || error?.message || '发起退款失败')
+  } finally {
+    refundSubmitting.value = false
+  }
+}
+
+async function syncOrderRefundStatus(refund) {
+  if (!refund?.id) return
+  syncingRefundId.value = refund.id
+  try {
+    const response = await axios.get(`/wx/pay/refund/requests/${refund.id}`)
+    if (!response.success) {
+      ElMessage.error(response.error || '刷新退款状态失败')
+      return
+    }
+
+    const nextStatus = response.data?.status
+    if (selectedOrder.value?.refunds?.length) {
+      selectedOrder.value = {
+        ...selectedOrder.value,
+        refunds: selectedOrder.value.refunds.map((row) => (
+          row.id === refund.id ? { ...row, ...response.data } : row
+        )),
+      }
+    }
+
+    if (nextStatus === 'SUCCESS') {
+      ElMessage.success('退款已完成')
+      await fetchOrders()
+      if (selectedOrder.value?.id) {
+        await refreshSelectedOrderDetail(selectedOrder.value.id)
+      }
+    } else if (nextStatus === 'FAILED') {
+      ElMessage.warning('微信侧退款失败')
+    } else if (nextStatus === 'PENDING') {
+      ElMessage.warning('微信侧未找到退款单，已退回待审批')
+    } else {
+      ElMessage.info('微信侧仍在处理中，请稍后再试')
+    }
+  } catch (error) {
+    console.error('刷新退款状态失败:', error)
+    ElMessage.error('刷新退款状态失败')
+  } finally {
+    syncingRefundId.value = null
+  }
+}
+
+function getRefundStatusBadgeVariant(status) {
+  const variants = {
+    PENDING: 'outline',
+    APPROVED: 'default',
+    REJECTED: 'destructive',
+    PROCESSING: 'secondary',
+    SUCCESS: 'default',
+    FAILED: 'destructive',
+  }
+  return variants[status] || 'secondary'
+}
+
+function getRefundStatusText(status) {
+  const texts = {
+    PENDING: '待审批',
+    APPROVED: '已批准',
+    REJECTED: '已拒绝',
+    PROCESSING: '处理中',
+    SUCCESS: '退款成功',
+    FAILED: '退款失败',
+  }
+  return texts[status] || status
+}
+
+function formatRefundDate(dateStr) {
+  if (!dateStr) return ''
+  return new Date(dateStr).toLocaleString()
 }
 
 function readWaybillMap() {
