@@ -205,7 +205,14 @@ async function loadOrderNotifyContext({ orderId, outTradeNo }) {
   )
   if (!orders.length) return null
   const order = orders[0]
-  if (!order.openid) return null
+  if (!order.openid) {
+    logger.warn('订单通知上下文缺少 openid', {
+      orderId: order.id,
+      outTradeNo: order.out_trade_no,
+      userId: order.user_id,
+    })
+    return null
+  }
 
   const [items] = await db.query(
     `SELECT oi.type, oi.quantity, oi.price,
@@ -404,7 +411,7 @@ async function notifyOrderPaid({ outTradeNo, orderId, force = false }) {
     outTradeNo: ctx.outTradeNo,
     force,
     data: {
-      number1: dataValue(clipText(String(ctx.orderId), 32)),
+      number1: dataValue(clipText(ctx.outTradeNo, 32)),
       amount12: dataValue(formatAmountYuan(ctx.payAmountYuan)),
       thing4: dataValue(ctx.productTitle || '商品'),
       thing8: dataValue(addressText),
@@ -506,6 +513,12 @@ async function processDuePaymentPendingReminders() {
 
   let processed = 0
   for (const outTradeNo of dueItems || []) {
+    const ctx = await loadOrderNotifyContext({ outTradeNo })
+    if (!ctx || (ctx.tradeState && ctx.tradeState !== 'NOTPAY')) {
+      await redisClient.zRem(PENDING_SCHEDULE_KEY, outTradeNo)
+      continue
+    }
+
     const removed = await redisClient.zRem(PENDING_SCHEDULE_KEY, outTradeNo)
     if (!removed) continue
     processed += 1

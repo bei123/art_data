@@ -189,6 +189,42 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
     }
 }
 
+async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, payTime }) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+
+    let paidResult;
+    try {
+        paidResult = await notifyOrderPaid({ outTradeNo: cleanOutTradeNo });
+    } catch (err) {
+        logger.warn('支付成功订阅消息异常', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+        paidResult = { ok: false, error: err?.message || err };
+    }
+
+    if (paidResult?.skipped) {
+        logger.info('支付成功订阅消息跳过', { outTradeNo: cleanOutTradeNo, reason: paidResult.reason });
+    } else if (paidResult?.ok === false) {
+        logger.warn('支付成功订阅消息未送达', {
+            outTradeNo: cleanOutTradeNo,
+            errcode: paidResult.error?.errcode,
+            error: paidResult.error?.error || paidResult.error?.errmsg || paidResult.error,
+        });
+    } else {
+        logger.info('支付成功订阅消息已发送', { outTradeNo: cleanOutTradeNo });
+    }
+
+    fireSubscribeNotify(
+        notifyVirtualDeliveryPreparing({
+            outTradeNo: cleanOutTradeNo,
+            transactionId,
+            payTime,
+        }),
+        'virtualDeliveryPreparing',
+    );
+
+    return paidResult;
+}
+
 async function restoreRefundedOrderInventory(outTradeNo, options = {}) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
@@ -1091,9 +1127,20 @@ async function payNotify(req) {
         }
         // 处理支付结果
         if (callbackData.trade_state === 'SUCCESS') {
-            const callbackKey = `pay:callback:${callbackData.out_trade_no}`;
+            const out_trade_no_early = callbackData.out_trade_no;
+            const callbackKey = `pay:callback:${out_trade_no_early}`;
             const callbackProcessed = await redisClient.get(callbackKey);
             if (callbackProcessed) {
+                await cancelPaymentPendingReminder(out_trade_no_early).catch((err) => {
+                    logger.warn('重复回调取消待付款提醒失败', { outTradeNo: out_trade_no_early, err: err?.message || err });
+                });
+                await emitPaymentSuccessSubscribeNotifies({
+                    outTradeNo: out_trade_no_early,
+                    transactionId: callbackData.transaction_id,
+                    payTime: callbackData.success_time,
+                }).catch((err) => {
+                    logger.warn('重复回调补发支付成功通知失败', { outTradeNo: out_trade_no_early, err: err?.message || err });
+                });
                 return adminResult(200, { code: 'SUCCESS', message: '重复回调，已忽略' });
             }
 
@@ -1159,18 +1206,14 @@ async function payNotify(req) {
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                 console.log('支付回调处理完成');
 
-                cancelPaymentPendingReminder(out_trade_no).catch((err) => {
+                await cancelPaymentPendingReminder(out_trade_no).catch((err) => {
                     logger.warn('取消待付款提醒排期失败', { outTradeNo: out_trade_no, err: err?.message || err });
                 });
-                fireSubscribeNotify(notifyOrderPaid({ outTradeNo: out_trade_no }), 'orderPaid');
-                fireSubscribeNotify(
-                    notifyVirtualDeliveryPreparing({
-                        outTradeNo: out_trade_no,
-                        transactionId: transaction_id,
-                        payTime: success_time,
-                    }),
-                    'virtualDeliveryPreparing',
-                );
+                await emitPaymentSuccessSubscribeNotifies({
+                    outTradeNo: out_trade_no,
+                    transactionId: transaction_id,
+                    payTime: success_time,
+                });
 
                 return adminResult(200, {
                     code: 'SUCCESS',
@@ -3680,6 +3723,26 @@ async function syncOrderTradeStateFromWechat(orderRow) {
     }
 
     if (wxState === 'SUCCESS' && orderRow?.out_trade_no) {
+        if (didSync || dbState === 'NOTPAY') {
+            await cancelPaymentPendingReminder(orderRow.out_trade_no).catch((err) => {
+                logger.warn('同步支付成功时取消待付款提醒失败', {
+                    outTradeNo: orderRow.out_trade_no,
+                    err: err?.message || err,
+                });
+            });
+        }
+        if (didSync) {
+            await emitPaymentSuccessSubscribeNotifies({
+                outTradeNo: orderRow.out_trade_no,
+                transactionId: wxPay.transaction_id,
+                payTime: wxPay.success_time,
+            }).catch((err) => {
+                logger.warn('同步支付成功通知失败', {
+                    outTradeNo: orderRow.out_trade_no,
+                    err: err?.message || err,
+                });
+            });
+        }
         try {
             await fulfillPaidOrderInventory(orderRow.out_trade_no);
         } catch (inventoryErr) {
