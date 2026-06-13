@@ -2,6 +2,7 @@ const axios = require('axios')
 const db = require('../db')
 const logger = require('../utils/logger')
 const { getAccessToken } = require('./wechatMiniProgramToken')
+const { fireSubscribeNotify, notifyOrderShipped } = require('./subscribeMessageNotify')
 const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv')
 
 function adminResult(status, body) {
@@ -447,6 +448,17 @@ async function addOrder(req) {
         waybill_id: data.waybill_id
       })
     }
+
+    fireSubscribeNotify(
+      notifyOrderShipped({
+        orderId: internalOrderId,
+        outTradeNo: orderRow.out_trade_no,
+        waybillId: String(data.waybill_id).trim(),
+        deliveryId: delivery_id,
+        trackingHint: `${delivery_id} 已揽件，运单 ${String(data.waybill_id).trim()}`,
+      }),
+      'orderShipped',
+    )
 
     return adminResult(200, {
       internal_order_id: internalOrderId,

@@ -33,6 +33,15 @@ const {
     resolveSubmittedDigitalPriceYuan,
 } = require('../utils/digitalArtworkResolver');
 const { clearRightsInventoryCaches } = require('./rightsService');
+const {
+    fireSubscribeNotify,
+    notifyOrderPaid,
+    notifyPaymentPending,
+    notifyOrderCancelled,
+    notifyRefundSuccess,
+    notifyVirtualDeliveryPreparing,
+    notifyVirtualDeliveryShipped,
+} = require('./subscribeMessageNotify');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 const REDIS_PAY_INVENTORY_FULFILLED_PREFIX = 'pay:inventory:fulfilled:';
@@ -659,6 +668,10 @@ async function unifiedOrder(req) {
 
             if (response.status === 200) {
                 await connection.commit();
+                fireSubscribeNotify(
+                    notifyPaymentPending({ outTradeNo: cleanOutTradeNo, orderId }),
+                    'paymentPending',
+                );
                 return adminResult(200, {
                     success: true,
                     data: response.data
@@ -997,6 +1010,10 @@ async function singleOrder(req) {
 
             if (response.status === 200) {
                 await connection.commit();
+                fireSubscribeNotify(
+                    notifyPaymentPending({ outTradeNo: cleanOutTradeNo, orderId }),
+                    'paymentPending',
+                );
                 return adminResult(200, {
                     success: true,
                     data: response.data
@@ -1143,6 +1160,16 @@ async function payNotify(req) {
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                 console.log('支付回调处理完成');
 
+                fireSubscribeNotify(notifyOrderPaid({ outTradeNo: out_trade_no }), 'orderPaid');
+                fireSubscribeNotify(
+                    notifyVirtualDeliveryPreparing({
+                        outTradeNo: out_trade_no,
+                        transactionId: transaction_id,
+                        payTime: success_time,
+                    }),
+                    'virtualDeliveryPreparing',
+                );
+
                 return adminResult(200, {
                     code: 'SUCCESS',
                     message: 'OK'
@@ -1217,6 +1244,10 @@ async function closeOrder(req) {
         );
 
         if (response.status === 204) {
+            fireSubscribeNotify(
+                notifyOrderCancelled({ outTradeNo: cleanOutTradeNo, reason: '订单已关闭' }),
+                'orderCancelled',
+            );
             return adminResult(200, {
                 success: true,
                 message: '订单关闭成功'
@@ -1453,6 +1484,10 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
             await clearInventoryRelatedCaches(affected);
         }
         await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
+        fireSubscribeNotify(
+            notifyRefundSuccess({ outTradeNo: out_trade_no, outRefundNo: out_refund_no }),
+            'refundResult',
+        );
         return { alreadyDone: false };
     } catch (err) {
         await connection.rollback();
@@ -3717,6 +3752,15 @@ async function uploadDigitalItemQrCode(req) {
             qrCodeUrl: cleanUrl,
             qrCodeAt: new Date(),
         });
+
+        fireSubscribeNotify(
+            notifyVirtualDeliveryShipped({
+                orderId,
+                outTradeNo: orders[0].out_trade_no,
+                orderItemId: itemId,
+            }),
+            'virtualDeliveryShipped',
+        );
 
         return adminResult(200, {
             success: true,

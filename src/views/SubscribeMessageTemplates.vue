@@ -9,6 +9,33 @@
       </p>
     </div>
 
+    <Card class="shadow-none ring-1">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-base">已接入的业务场景</CardTitle>
+        <CardDescription>
+          以下场景会在后端自动下发；数字艺术品使用「虚拟发货」服务卡片（notify_type 2003），用户点击卡片进入订单详情查看领取二维码。
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="overflow-x-auto p-0 sm:p-6 sm:pt-0">
+        <table class="w-full min-w-[720px] text-sm">
+          <thead>
+            <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 px-3 text-left font-medium">场景</th>
+              <th class="h-10 px-3 text-left font-medium">模板标题</th>
+              <th class="h-10 px-3 text-left font-medium">触发时机</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in scenarioRows" :key="row.key" class="border-b border-border">
+              <td class="px-3 py-2.5 font-medium">{{ row.scene }}</td>
+              <td class="px-3 py-2.5 text-muted-foreground">{{ row.title }}</td>
+              <td class="px-3 py-2.5 text-muted-foreground">{{ row.trigger }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+
     <Tabs v-model="activeTab" class="flex flex-col gap-4">
       <TabsList class="w-full max-w-md">
         <TabsTrigger value="private" class="flex-1">
@@ -359,6 +386,15 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const activeTab = ref('private')
+
+const scenarioRows = [
+  { key: 'paid', scene: '支付成功', title: '订单支付成功通知', trigger: '微信支付成功回调' },
+  { key: 'pending', scene: '待付款', title: '待付款提醒', trigger: '统一下单成功（创建 NOTPAY 订单）' },
+  { key: 'shipped', scene: '发货', title: '订单发货提醒', trigger: '管理端微信物流发货成功' },
+  { key: 'refund', scene: '退款', title: '退款结果通知', trigger: '退款成功回调 / 审批完成' },
+  { key: 'cancel', scene: '取消', title: '订单取消通知', trigger: '关闭未支付订单' },
+  { key: 'virtual', scene: '数字艺术品交付', title: '购物（虚拟发货）服务动态', trigger: '支付成功激活「备货中」；管理员上传领取二维码后更新为「已发货」' },
+]
 
 const privateTemplates = ref([])
 const privateLoading = ref(false)
