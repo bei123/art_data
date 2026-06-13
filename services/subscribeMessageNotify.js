@@ -48,6 +48,15 @@ function clipText(value, maxLen) {
   return [...str].slice(0, maxLen).join('')
 }
 
+/** 微信 number 类型字段仅允许纯数字 */
+function formatSubscribeNumberValue(value, fallback = '0') {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  if (digits) return clipText(digits, 32)
+  const fallbackDigits = String(fallback ?? '').replace(/\D/g, '')
+  if (fallbackDigits) return clipText(fallbackDigits, 32)
+  return '0'
+}
+
 function formatAmountYuan(yuan) {
   const n = Number(yuan)
   if (!Number.isFinite(n)) return '0元'
@@ -411,7 +420,7 @@ async function notifyOrderPaid({ outTradeNo, orderId, force = false }) {
     outTradeNo: ctx.outTradeNo,
     force,
     data: {
-      number1: dataValue(clipText(ctx.outTradeNo, 32)),
+      number1: dataValue(formatSubscribeNumberValue(ctx.outTradeNo, ctx.orderId)),
       amount12: dataValue(formatAmountYuan(ctx.payAmountYuan)),
       thing4: dataValue(ctx.productTitle || '商品'),
       thing8: dataValue(addressText),
