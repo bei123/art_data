@@ -42,12 +42,14 @@ const {
     notifyRefundSuccess,
     notifyVirtualDeliveryPreparing,
     notifyVirtualDeliveryShipped,
+    hasPaymentSuccessNotifySent,
 } = require('./subscribeMessageNotify');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 const REDIS_PAY_INVENTORY_FULFILLED_PREFIX = 'pay:inventory:fulfilled:';
 const REDIS_REFUND_INVENTORY_RESTORED_PREFIX = 'refund:inventory:restored:';
 const INVENTORY_FLAG_EXPIRE_SEC = 60 * 60 * 24 * 90;
+const PAID_NOTIFY_RETRY_MS = parseInt(process.env.WX_SUBSCRIBE_PAID_NOTIFY_RETRY_MS || '8000', 10);
 
 async function loadOrderItemsForInventory(outTradeNo, connection = null) {
     const runner = connection || db;
@@ -189,7 +191,7 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
     }
 }
 
-async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, payTime }) {
+async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, payTime, scheduleRetry = true }) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
 
@@ -213,6 +215,34 @@ async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, 
         logger.info('支付成功订阅消息已发送', { outTradeNo: cleanOutTradeNo });
     }
 
+    if (
+        scheduleRetry
+        && PAID_NOTIFY_RETRY_MS > 0
+        && paidResult?.ok !== true
+        && !paidResult?.skipped
+    ) {
+        setTimeout(async () => {
+            try {
+                if (await hasPaymentSuccessNotifySent(cleanOutTradeNo)) return;
+                logger.info('支付成功订阅消息延迟重试', { outTradeNo: cleanOutTradeNo, delayMs: PAID_NOTIFY_RETRY_MS });
+                const retryResult = await notifyOrderPaid({ outTradeNo: cleanOutTradeNo });
+                if (retryResult?.ok) {
+                    logger.info('支付成功订阅消息延迟重试成功', { outTradeNo: cleanOutTradeNo });
+                } else if (retryResult?.skipped) {
+                    logger.info('支付成功订阅消息延迟重试跳过', { outTradeNo: cleanOutTradeNo, reason: retryResult.reason });
+                } else {
+                    logger.warn('支付成功订阅消息延迟重试仍未送达', {
+                        outTradeNo: cleanOutTradeNo,
+                        errcode: retryResult?.error?.errcode,
+                        error: retryResult?.error?.error || retryResult?.error?.errmsg || retryResult?.error,
+                    });
+                }
+            } catch (err) {
+                logger.warn('支付成功订阅消息延迟重试异常', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+            }
+        }, PAID_NOTIFY_RETRY_MS);
+    }
+
     fireSubscribeNotify(
         notifyVirtualDeliveryPreparing({
             outTradeNo: cleanOutTradeNo,
@@ -223,6 +253,21 @@ async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, 
     );
 
     return paidResult;
+}
+
+async function tryEmitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, payTime, source = 'sync' }) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+    if (await hasPaymentSuccessNotifySent(cleanOutTradeNo)) {
+        return { skipped: true, reason: 'already_sent' };
+    }
+    logger.info('补尝试发送支付成功订阅消息', { outTradeNo: cleanOutTradeNo, source });
+    return emitPaymentSuccessSubscribeNotifies({
+        outTradeNo: cleanOutTradeNo,
+        transactionId,
+        payTime,
+        scheduleRetry: false,
+    });
 }
 
 async function restoreRefundedOrderInventory(outTradeNo, options = {}) {
@@ -2087,13 +2132,21 @@ async function queryOrder(req) {
 
             const order = orders[0];
 
+            await syncOrderTradeStateFromWechat(order);
+
+            const [freshOrders] = await db.query(
+                'SELECT * FROM orders WHERE out_trade_no = ? LIMIT 1',
+                [cleanOutTradeNo]
+            );
+            const freshOrder = freshOrders[0] || order;
+
             // 查询订单项
             const [orderItems] = await db.query(
                 `SELECT oi.*, r.title, r.price, r.original_price, r.description, r.status, r.remaining_count
            FROM order_items oi
            JOIN rights r ON oi.right_id = r.id
            WHERE oi.order_id = ?`,
-                [order.id]
+                [freshOrder.id]
             );
 
             // 查询订单图片
@@ -2113,7 +2166,7 @@ async function queryOrder(req) {
                 data: {
                     ...response.data,
                     order_info: {
-                        ...order,
+                        ...freshOrder,
                         items: orderItemsWithImages
                     }
                 }
@@ -3732,12 +3785,25 @@ async function syncOrderTradeStateFromWechat(orderRow) {
             });
         }
         if (didSync) {
-            await emitPaymentSuccessSubscribeNotifies({
+            await tryEmitPaymentSuccessSubscribeNotifies({
                 outTradeNo: orderRow.out_trade_no,
                 transactionId: wxPay.transaction_id,
                 payTime: wxPay.success_time,
+                source: 'sync_did_sync',
             }).catch((err) => {
                 logger.warn('同步支付成功通知失败', {
+                    outTradeNo: orderRow.out_trade_no,
+                    err: err?.message || err,
+                });
+            });
+        } else if (!(await hasPaymentSuccessNotifySent(orderRow.out_trade_no))) {
+            await tryEmitPaymentSuccessSubscribeNotifies({
+                outTradeNo: orderRow.out_trade_no,
+                transactionId: wxPay.transaction_id,
+                payTime: wxPay.success_time,
+                source: 'sync_retry_unsent',
+            }).catch((err) => {
+                logger.warn('同步补发支付成功通知失败', {
                     outTradeNo: orderRow.out_trade_no,
                     err: err?.message || err,
                 });

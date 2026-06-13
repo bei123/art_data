@@ -190,6 +190,16 @@ async function markSubscribeSentOnce(redisKey) {
   return true
 }
 
+function buildPaymentSuccessNotifySentKey(outTradeNo) {
+  return `subscribe:sent:paid:${String(outTradeNo || '').trim()}`
+}
+
+async function hasPaymentSuccessNotifySent(outTradeNo) {
+  const clean = String(outTradeNo || '').trim()
+  if (!clean) return false
+  return Boolean(await redisClient.get(buildPaymentSuccessNotifySentKey(clean)))
+}
+
 async function loadOrderNotifyContext({ orderId, outTradeNo }) {
   const where = []
   const params = []
@@ -1037,4 +1047,5 @@ module.exports = {
   resendSubscribeNotify,
   fireSubscribeNotify,
   loadOrderNotifyContext,
+  hasPaymentSuccessNotifySent,
 }
