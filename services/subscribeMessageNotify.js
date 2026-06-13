@@ -16,7 +16,30 @@ const { sendSubscribeMessageDirect, setUserNotifyDirect } = require('./subscribe
 
 const SUBSCRIBE_SENT_TTL_SEC = 60 * 60 * 24 * 7
 const PAYMENT_DEADLINE_MINUTES = parseInt(process.env.WX_SUBSCRIBE_PAYMENT_DEADLINE_MINUTES || '30', 10)
+const PAYMENT_PENDING_REMIND_BEFORE_MINUTES = parseInt(
+  process.env.WX_SUBSCRIBE_PAYMENT_PENDING_REMIND_BEFORE_MINUTES || '5',
+  10,
+)
+const PENDING_SCHEDULE_KEY = 'subscribe:pending:schedule'
+const PENDING_SCHEDULE_POLL_MS = parseInt(process.env.WX_SUBSCRIBE_PAYMENT_PENDING_POLL_MS || '30000', 10)
 const VIRTUAL_DELIVERY_NOTIFY_RETRY_MS = parseInt(process.env.WX_VIRTUAL_DELIVERY_NOTIFY_RETRY_MS || '65000', 10)
+
+let paymentPendingSchedulerTimer = null
+
+function getPaymentDeadlineMs(createdAt) {
+  const created = createdAt ? new Date(createdAt) : new Date()
+  return created.getTime() + Math.max(5, PAYMENT_DEADLINE_MINUTES) * 60 * 1000
+}
+
+function getPaymentPendingSendAtMs(createdAt) {
+  const deadlineMs = getPaymentDeadlineMs(createdAt)
+  const remindBeforeMs = Math.max(0, PAYMENT_PENDING_REMIND_BEFORE_MINUTES) * 60 * 1000
+  return deadlineMs - remindBeforeMs
+}
+
+function isSubscribeUserRefused(result) {
+  return result?.body?.errcode === 43101
+}
 
 function clipText(value, maxLen) {
   if (value == null) return ''
@@ -259,14 +282,18 @@ async function dispatchVirtualDeliveryNotify({
   orderId,
   outTradeNo,
   allowRetry = false,
+  force = false,
 }) {
   if (!isVirtualDeliveryNotifyEnabled()) return { skipped: true, reason: 'virtual_delivery_disabled' }
   if (!openid) return { skipped: true, reason: 'missing_openid' }
   if (!notifyCode) return { skipped: true, reason: 'missing_notify_code' }
 
   if (redisKey) {
-    const shouldSend = await markSubscribeSentOnce(redisKey)
-    if (!shouldSend) return { skipped: true, reason: 'duplicate' }
+    if (force) await redisClient.del(redisKey)
+    else {
+      const shouldSend = await markSubscribeSentOnce(redisKey)
+      if (!shouldSend) return { skipped: true, reason: 'duplicate' }
+    }
   }
 
   const notifyType = getVirtualDeliveryNotifyType()
@@ -304,14 +331,28 @@ async function dispatchVirtualDeliveryNotify({
   return { ok: true }
 }
 
-async function dispatchSubscribeMessage({ scene, redisKey, openid, templateId, data, page, userId, orderId, outTradeNo }) {
+async function dispatchSubscribeMessage({
+  scene,
+  redisKey,
+  openid,
+  templateId,
+  data,
+  page,
+  userId,
+  orderId,
+  outTradeNo,
+  force = false,
+}) {
   if (!isWxSubscribeNotifyEnabled()) return { skipped: true, reason: 'disabled' }
   if (!templateId) return { skipped: true, reason: 'missing_template' }
   if (!openid) return { skipped: true, reason: 'missing_openid' }
 
   if (redisKey) {
-    const shouldSend = await markSubscribeSentOnce(redisKey)
-    if (!shouldSend) return { skipped: true, reason: 'duplicate' }
+    if (force) await redisClient.del(redisKey)
+    else {
+      const shouldSend = await markSubscribeSentOnce(redisKey)
+      if (!shouldSend) return { skipped: true, reason: 'duplicate' }
+    }
   }
 
   const result = await sendSubscribeMessageDirect({
@@ -322,14 +363,19 @@ async function dispatchSubscribeMessage({ scene, redisKey, openid, templateId, d
   })
 
   if (!result.ok) {
-    logger.warn('订阅消息发送失败', {
+    const logPayload = {
       scene,
       orderId,
       outTradeNo,
       userId,
       errcode: result.body?.errcode,
       error: result.body?.error,
-    })
+    }
+    if (isSubscribeUserRefused(result)) {
+      logger.info('订阅消息未送达（用户未订阅或已拒绝）', logPayload)
+    } else {
+      logger.warn('订阅消息发送失败', logPayload)
+    }
     if (redisKey) await redisClient.del(redisKey)
     return { ok: false, error: result.body }
   }
@@ -339,11 +385,11 @@ async function dispatchSubscribeMessage({ scene, redisKey, openid, templateId, d
 }
 
 /** 订单支付成功 */
-async function notifyOrderPaid({ outTradeNo, orderId }) {
+async function notifyOrderPaid({ outTradeNo, orderId, force = false, ignoreChecks = false }) {
   const templates = getWxSubscribeTemplates()
   const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
-  if (ctx.hasDigitalItem && !ctx.hasPhysicalItem) {
+  if (!ignoreChecks && ctx.hasDigitalItem && !ctx.hasPhysicalItem) {
     return { skipped: true, reason: 'digital_only_use_virtual_delivery' }
   }
 
@@ -355,6 +401,7 @@ async function notifyOrderPaid({ outTradeNo, orderId }) {
     userId: ctx.userId,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
     data: {
       number1: dataValue(clipText(String(ctx.orderId), 32)),
       amount12: dataValue(formatAmountYuan(ctx.payAmountYuan)),
@@ -364,16 +411,25 @@ async function notifyOrderPaid({ outTradeNo, orderId }) {
   })
 }
 
-/** 待付款提醒（下单后） */
-async function notifyPaymentPending({ outTradeNo, orderId }) {
+/** 待付款提醒（在支付截止前 N 分钟发送） */
+async function notifyPaymentPending({ outTradeNo, orderId, force = false, ignoreChecks = false }) {
   if (!isPaymentPendingNotifyEnabled()) return { skipped: true, reason: 'payment_pending_disabled' }
 
   const templates = getWxSubscribeTemplates()
   const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
+  if (!ignoreChecks && ctx.tradeState && ctx.tradeState !== 'NOTPAY') {
+    return { skipped: true, reason: 'order_not_unpaid' }
+  }
 
   const created = ctx.createdAt ? new Date(ctx.createdAt) : new Date()
-  const deadline = new Date(created.getTime() + Math.max(5, PAYMENT_DEADLINE_MINUTES) * 60 * 1000)
+  const deadlineMs = getPaymentDeadlineMs(created)
+  const deadline = new Date(deadlineMs)
+  if (!ignoreChecks && Date.now() >= deadlineMs) {
+    return { skipped: true, reason: 'past_deadline' }
+  }
+
+  const remindMinutes = Math.max(1, PAYMENT_PENDING_REMIND_BEFORE_MINUTES)
 
   return dispatchSubscribeMessage({
     scene: 'paymentPending',
@@ -383,18 +439,110 @@ async function notifyPaymentPending({ outTradeNo, orderId }) {
     userId: ctx.userId,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
     data: {
       thing1: dataValue(ctx.productTitle || '商品'),
       date2: dataValue(formatWechatDate(created)),
       amount3: dataValue(formatAmountYuan(ctx.payAmountYuan)),
-      thing6: dataValue(clipText(`请在${PAYMENT_DEADLINE_MINUTES}分钟内完成支付`, 20)),
+      thing6: dataValue(clipText(`距离支付截止仅剩${remindMinutes}分钟`, 20)),
       time8: dataValue(formatWechatTime(deadline)),
     },
   })
 }
 
+/** 统一下单成功后排期待付款提醒（截止前 N 分钟） */
+async function schedulePaymentPendingReminder({ outTradeNo, orderId, createdAt }) {
+  if (!isPaymentPendingNotifyEnabled()) return { skipped: true, reason: 'payment_pending_disabled' }
+  if (!outTradeNo && orderId == null) return { skipped: true, reason: 'missing_order_ref' }
+
+  const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
+  if (!ctx) return { skipped: true, reason: 'order_not_found' }
+  if (ctx.tradeState && ctx.tradeState !== 'NOTPAY') {
+    return { skipped: true, reason: 'order_not_unpaid' }
+  }
+
+  const created = createdAt ?? ctx.createdAt
+  const deadlineMs = getPaymentDeadlineMs(created)
+  const sendAtMs = getPaymentPendingSendAtMs(created)
+  if (Date.now() >= deadlineMs) {
+    return { skipped: true, reason: 'past_deadline' }
+  }
+
+  await redisClient.zAdd(PENDING_SCHEDULE_KEY, {
+    score: sendAtMs,
+    value: String(ctx.outTradeNo).trim(),
+  })
+
+  logger.info('待付款提醒已排期', {
+    outTradeNo: ctx.outTradeNo,
+    orderId: ctx.orderId,
+    sendAt: new Date(sendAtMs).toISOString(),
+    deadline: new Date(deadlineMs).toISOString(),
+    remindBeforeMinutes: PAYMENT_PENDING_REMIND_BEFORE_MINUTES,
+  })
+
+  return { ok: true, sendAtMs, deadlineMs }
+}
+
+async function cancelPaymentPendingReminder(outTradeNo) {
+  if (!outTradeNo) return { ok: true, removed: 0 }
+  const clean = String(outTradeNo).trim()
+  if (!clean) return { ok: true, removed: 0 }
+  const removed = await redisClient.zRem(PENDING_SCHEDULE_KEY, clean)
+  if (removed > 0) {
+    logger.info('待付款提醒排期已取消', { outTradeNo: clean })
+  }
+  return { ok: true, removed }
+}
+
+async function processDuePaymentPendingReminders() {
+  if (!isPaymentPendingNotifyEnabled()) return { processed: 0 }
+
+  const now = Date.now()
+  const dueItems = await redisClient.zRangeByScore(PENDING_SCHEDULE_KEY, 0, now, {
+    LIMIT: { offset: 0, count: 30 },
+  })
+
+  let processed = 0
+  for (const outTradeNo of dueItems || []) {
+    const removed = await redisClient.zRem(PENDING_SCHEDULE_KEY, outTradeNo)
+    if (!removed) continue
+    processed += 1
+    await notifyPaymentPending({ outTradeNo }).catch((err) => {
+      logger.warn('待付款提醒发送异常', { outTradeNo, err: err?.message || err })
+    })
+  }
+
+  return { processed }
+}
+
+function startPaymentPendingReminderScheduler() {
+  if (String(process.env.WX_SUBSCRIBE_PAYMENT_PENDING_SCHEDULER || 'true').toLowerCase() === 'false') {
+    return
+  }
+  if (paymentPendingSchedulerTimer) return
+
+  paymentPendingSchedulerTimer = setInterval(() => {
+    processDuePaymentPendingReminders().catch((err) => {
+      logger.warn('待付款提醒调度异常', { err: err?.message || err })
+    })
+  }, Math.max(10000, PENDING_SCHEDULE_POLL_MS))
+
+  setTimeout(() => {
+    processDuePaymentPendingReminders().catch((err) => {
+      logger.warn('待付款提醒启动扫描异常', { err: err?.message || err })
+    })
+  }, 5000)
+
+  logger.info('待付款提醒调度已启动', {
+    pollMs: PENDING_SCHEDULE_POLL_MS,
+    deadlineMinutes: PAYMENT_DEADLINE_MINUTES,
+    remindBeforeMinutes: PAYMENT_PENDING_REMIND_BEFORE_MINUTES,
+  })
+}
+
 /** 订单取消（关单） */
-async function notifyOrderCancelled({ outTradeNo, orderId, reason = '订单已关闭' }) {
+async function notifyOrderCancelled({ outTradeNo, orderId, reason = '订单已关闭', force = false }) {
   const templates = getWxSubscribeTemplates()
   const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
@@ -407,6 +555,7 @@ async function notifyOrderCancelled({ outTradeNo, orderId, reason = '订单已�
     userId: ctx.userId,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
     data: {
       thing2: dataValue(ctx.productTitle || '商品'),
       amount3: dataValue(formatAmountYuan(ctx.payAmountYuan)),
@@ -417,7 +566,13 @@ async function notifyOrderCancelled({ outTradeNo, orderId, reason = '订单已�
 }
 
 /** 退款成功 */
-async function notifyRefundSuccess({ outTradeNo, outRefundNo, refundYuan, refundMethod = '原路退回' }) {
+async function notifyRefundSuccess({
+  outTradeNo,
+  outRefundNo,
+  refundYuan,
+  refundMethod = '原路退回',
+  force = false,
+}) {
   const templates = getWxSubscribeTemplates()
   const ctx = await loadOrderNotifyContext({ outTradeNo })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
@@ -448,6 +603,7 @@ async function notifyRefundSuccess({ outTradeNo, outRefundNo, refundYuan, refund
     userId: ctx.userId,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
     data: {
       character_string2: dataValue(clipText(ctx.outTradeNo, 32)),
       amount1: dataValue(formatAmountYuan(amount)),
@@ -466,11 +622,13 @@ async function notifyOrderShipped({
   shipTime,
   trackingHint,
   etaText,
+  force = false,
+  ignoreChecks = false,
 }) {
   const templates = getWxSubscribeTemplates()
   const ctx = await loadOrderNotifyContext({ orderId, outTradeNo })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
-  if (!ctx.hasPhysicalItem) return { skipped: true, reason: 'no_physical_item' }
+  if (!ignoreChecks && !ctx.hasPhysicalItem) return { skipped: true, reason: 'no_physical_item' }
 
   const shippedAt = shipTime ? new Date(shipTime) : new Date()
   const tracking = clipText(trackingHint || `${deliveryId || '快递'} 已揽件`, 20)
@@ -486,6 +644,7 @@ async function notifyOrderShipped({
     userId: ctx.userId,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
     data: {
       thing1: dataValue(ctx.productTitle || '商品'),
       date4: dataValue(formatWechatDate(shippedAt)),
@@ -496,11 +655,262 @@ async function notifyOrderShipped({
   })
 }
 
+const RESEND_SCENES = [
+  {
+    key: 'paymentPending',
+    label: '待付款提醒（立即发送）',
+    description: '向未支付订单立即发送待付款订阅消息',
+  },
+  {
+    key: 'paymentPendingSchedule',
+    label: '待付款提醒（重新排期）',
+    description: '按截止前 N 分钟重新写入 Redis 排期；sendImmediately=true 则下一分钟扫描内发送',
+  },
+  {
+    key: 'orderPaid',
+    label: '订单支付成功',
+    description: '含实物/混合订单；纯数字订单请用 virtualDeliveryPreparing',
+  },
+  {
+    key: 'orderCancelled',
+    label: '订单取消',
+    description: '订单关闭/取消通知',
+  },
+  {
+    key: 'refundResult',
+    label: '退款结果',
+    description: '可传 out_refund_no；不传则取该订单最近一条成功退款',
+  },
+  {
+    key: 'orderShipped',
+    label: '订单发货',
+    description: '可传 waybill_id / delivery_id；不传则从 order_shipments 取最近一条',
+  },
+  {
+    key: 'virtualDeliveryPreparing',
+    label: '数字艺术品 · 备货中（服务卡片）',
+    description: '激活虚拟发货服务卡片 cur_status=2',
+  },
+  {
+    key: 'virtualDeliveryShipped',
+    label: '数字艺术品 · 已发货（服务卡片）',
+    description: '二维码已上传后更新服务卡片；可传 order_item_id',
+  },
+]
+
+function adminNotifyResult(status, body) {
+  return { ok: status >= 200 && status < 400, status, body }
+}
+
+function formatNotifyTaskResult(result) {
+  if (result?.skipped) {
+    return adminNotifyResult(409, {
+      success: false,
+      skipped: true,
+      reason: result.reason,
+      detail: result,
+    })
+  }
+  if (result?.ok === false) {
+    const errBody = result.error || {}
+    return adminNotifyResult(502, {
+      success: false,
+      error: errBody.error || errBody.errmsg || '发送失败',
+      errcode: errBody.errcode,
+      detail: result,
+    })
+  }
+  return adminNotifyResult(200, { success: true, detail: result })
+}
+
+async function loadLatestActiveShipment(orderId) {
+  try {
+    const [rows] = await db.query(
+      `SELECT waybill_id, delivery_id, created_at
+       FROM order_shipments
+       WHERE order_id = ? AND status = 'active'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [orderId],
+    )
+    return rows[0] || null
+  } catch {
+    return null
+  }
+}
+
+async function loadRefundForResend(outTradeNo, outRefundNo) {
+  if (outRefundNo) {
+    const [rows] = await db.query(
+      'SELECT out_refund_no, amount, status FROM refund_requests WHERE out_refund_no = ? LIMIT 1',
+      [outRefundNo],
+    )
+    return rows[0] || null
+  }
+  const [rows] = await db.query(
+    `SELECT out_refund_no, amount, status
+     FROM refund_requests
+     WHERE out_trade_no = ? AND status = 'SUCCESS'
+     ORDER BY id DESC
+     LIMIT 1`,
+    [outTradeNo],
+  )
+  return rows[0] || null
+}
+
+function getResendScenes() {
+  return adminNotifyResult(200, { scenes: RESEND_SCENES })
+}
+
+async function resendSubscribeNotify(req) {
+  const body = req.body || {}
+  const scene = String(body.scene || '').trim()
+  const force = Boolean(body.force)
+  const ignoreChecks = Boolean(body.ignoreChecks)
+  const orderIdRaw = body.orderId ?? body.order_id
+  const orderId = orderIdRaw != null && String(orderIdRaw).trim() !== ''
+    ? parseInt(String(orderIdRaw), 10)
+    : null
+  const outTradeNo = body.out_trade_no || body.outTradeNo || null
+
+  const sceneDef = RESEND_SCENES.find((item) => item.key === scene)
+  if (!sceneDef) {
+    return adminNotifyResult(400, {
+      error: '缺少或无效的 scene',
+      supportedScenes: RESEND_SCENES.map((item) => item.key),
+    })
+  }
+  if ((!orderId || Number.isNaN(orderId)) && !outTradeNo) {
+    return adminNotifyResult(400, { error: '请提供 orderId 或 out_trade_no' })
+  }
+
+  const base = {
+    orderId: orderId && !Number.isNaN(orderId) ? orderId : undefined,
+    outTradeNo: outTradeNo ? String(outTradeNo).trim() : undefined,
+    force,
+    ignoreChecks,
+  }
+
+  let result
+
+  switch (scene) {
+    case 'paymentPending':
+      result = await notifyPaymentPending(base)
+      break
+    case 'paymentPendingSchedule': {
+      if (body.sendImmediately) {
+        const ctx = await loadOrderNotifyContext(base)
+        if (!ctx) return adminNotifyResult(404, { error: '订单不存在' })
+        if (!ignoreChecks && ctx.tradeState && ctx.tradeState !== 'NOTPAY') {
+          return adminNotifyResult(409, { success: false, reason: 'order_not_unpaid' })
+        }
+        await redisClient.zAdd(PENDING_SCHEDULE_KEY, {
+          score: Date.now(),
+          value: String(ctx.outTradeNo).trim(),
+        })
+        result = {
+          ok: true,
+          scheduled: true,
+          immediate: true,
+          outTradeNo: ctx.outTradeNo,
+          sendAtMs: Date.now(),
+        }
+      } else {
+        result = await schedulePaymentPendingReminder(base)
+      }
+      break
+    }
+    case 'orderPaid':
+      result = await notifyOrderPaid(base)
+      break
+    case 'orderCancelled':
+      result = await notifyOrderCancelled({
+        ...base,
+        reason: body.reason || '订单已关闭',
+      })
+      break
+    case 'refundResult': {
+      const ctx = await loadOrderNotifyContext(base)
+      if (!ctx) return adminNotifyResult(404, { error: '订单不存在' })
+      const refundRow = await loadRefundForResend(ctx.outTradeNo, body.out_refund_no || body.outRefundNo)
+      if (!refundRow && !body.out_refund_no && !body.outRefundNo) {
+        return adminNotifyResult(404, { error: '未找到可补发的退款记录，请传 out_refund_no' })
+      }
+      result = await notifyRefundSuccess({
+        outTradeNo: ctx.outTradeNo,
+        outRefundNo: body.out_refund_no || body.outRefundNo || refundRow?.out_refund_no,
+        refundMethod: body.refund_method || body.refundMethod || '原路退回',
+        force,
+      })
+      break
+    }
+    case 'orderShipped': {
+      const ctx = await loadOrderNotifyContext(base)
+      if (!ctx) return adminNotifyResult(404, { error: '订单不存在' })
+      const shipment = await loadLatestActiveShipment(ctx.orderId)
+      const waybillId = body.waybill_id || body.waybillId || shipment?.waybill_id
+      const deliveryId = body.delivery_id || body.deliveryId || shipment?.delivery_id
+      if (!waybillId && !ignoreChecks) {
+        return adminNotifyResult(400, { error: '无发货记录，请传 waybill_id 或先完成物流发货' })
+      }
+      result = await notifyOrderShipped({
+        orderId: ctx.orderId,
+        outTradeNo: ctx.outTradeNo,
+        waybillId,
+        deliveryId,
+        shipTime: body.ship_time || body.shipTime || shipment?.created_at,
+        trackingHint: body.tracking_hint || body.trackingHint,
+        etaText: body.eta_text || body.etaText,
+        force,
+        ignoreChecks,
+      })
+      break
+    }
+    case 'virtualDeliveryPreparing':
+      result = await notifyVirtualDeliveryPreparing({
+        ...base,
+        transactionId: body.transaction_id || body.transactionId,
+        payTime: body.pay_time || body.payTime,
+        force,
+        allowRetry: true,
+      })
+      break
+    case 'virtualDeliveryShipped':
+      result = await notifyVirtualDeliveryShipped({
+        ...base,
+        orderItemId: body.order_item_id || body.orderItemId,
+        force,
+      })
+      break
+    default:
+      return adminNotifyResult(400, { error: '不支持的场景', scene })
+  }
+
+  const formatted = formatNotifyTaskResult(result)
+  if (formatted.ok) {
+    logger.info('订阅消息补发完成', {
+      scene,
+      orderId: base.orderId,
+      outTradeNo: base.outTradeNo,
+      force,
+      ignoreChecks,
+    })
+  }
+  return formatted
+}
+
 /**
  * 数字艺术品支付成功 — 激活「购物（虚拟发货）服务动态」卡片（备货中）
  * notify_code 使用微信支付订单号 transaction_id
  */
-async function notifyVirtualDeliveryPreparing({ outTradeNo, orderId, transactionId, payTime }) {
+async function notifyVirtualDeliveryPreparing({
+  outTradeNo,
+  orderId,
+  transactionId,
+  payTime,
+  force = false,
+  allowRetry = false,
+}) {
   const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
   if (!ctx.hasDigitalItem) return { skipped: true, reason: 'no_digital_item' }
@@ -534,7 +944,8 @@ async function notifyVirtualDeliveryPreparing({ outTradeNo, orderId, transaction
     checkJson,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
-    allowRetry: true,
+    allowRetry,
+    force,
   })
 }
 
@@ -542,7 +953,7 @@ async function notifyVirtualDeliveryPreparing({ outTradeNo, orderId, transaction
  * 数字艺术品交付二维码已上传 — 更新服务卡片为「已发货 / 部分发货」
  * 用户点击卡片进入订单详情页查看领取二维码
  */
-async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId }) {
+async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId, force = false }) {
   const ctx = await loadOrderNotifyContext({ orderId, outTradeNo })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
   if (!ctx.hasDigitalItem) return { skipped: true, reason: 'no_digital_item' }
@@ -578,6 +989,7 @@ async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId }
     contentJson,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
   })
 }
 
@@ -590,11 +1002,16 @@ function fireSubscribeNotify(taskPromise, scene) {
 module.exports = {
   notifyOrderPaid,
   notifyPaymentPending,
+  schedulePaymentPendingReminder,
+  cancelPaymentPendingReminder,
+  startPaymentPendingReminderScheduler,
   notifyOrderCancelled,
   notifyRefundSuccess,
   notifyOrderShipped,
   notifyVirtualDeliveryPreparing,
   notifyVirtualDeliveryShipped,
+  getResendScenes,
+  resendSubscribeNotify,
   fireSubscribeNotify,
   loadOrderNotifyContext,
 }

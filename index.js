@@ -48,6 +48,7 @@ const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
+const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
 const {
   applyCorsHeaders,
   corsPreflightMiddleware,
@@ -412,6 +413,8 @@ ensureDigitalArtworkIdColumns().catch((err) => {
 startDigitalArtworksSync();
 // 定时从 WMS 同步原作主档（价格、艺术家、仓库图路径等）
 startWmsProductSyncSchedule();
+// 待付款订阅消息：截止前 N 分钟扫描 Redis 排期并发送
+startPaymentPendingReminderScheduler();
 
 // 使用仪表盘路由
 app.use('/api/dashboard', dashboardRouter);

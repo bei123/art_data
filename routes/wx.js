@@ -7,6 +7,7 @@ const { authenticateToken, checkRole } = require('../auth');
 const svc = require('../services/wxService');
 const logisticsSvc = require('../services/logisticsService');
 const subscribeMessageSvc = require('../services/subscribeMessageService');
+const subscribeNotifySvc = require('../services/subscribeMessageNotify');
 
 router.post('/getPhoneNumber', async (req, res) => {
     try {
@@ -444,6 +445,28 @@ router.post('/subscribe-message/user-notify/query', authenticateToken, checkRole
     } catch (error) {
         logger.error('查询服务卡片状态失败', { err: error });
         res.status(500).json({ error: '查询服务卡片状态失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：补发场景列表（需 admin） */
+router.get('/subscribe-message/resend/scenes', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = subscribeNotifySvc.getResendScenes();
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取订阅消息补发场景失败', { err: error });
+        res.status(500).json({ error: '获取补发场景失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：按业务场景补发（需 admin） */
+router.post('/subscribe-message/resend', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeNotifySvc.resendSubscribeNotify(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('订阅消息补发失败', { err: error });
+        res.status(500).json({ error: '订阅消息补发失败', detail: error.message });
     }
 });
 

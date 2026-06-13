@@ -36,7 +36,8 @@ const { clearRightsInventoryCaches } = require('./rightsService');
 const {
     fireSubscribeNotify,
     notifyOrderPaid,
-    notifyPaymentPending,
+    schedulePaymentPendingReminder,
+    cancelPaymentPendingReminder,
     notifyOrderCancelled,
     notifyRefundSuccess,
     notifyVirtualDeliveryPreparing,
@@ -668,10 +669,9 @@ async function unifiedOrder(req) {
 
             if (response.status === 200) {
                 await connection.commit();
-                fireSubscribeNotify(
-                    notifyPaymentPending({ outTradeNo: cleanOutTradeNo, orderId }),
-                    'paymentPending',
-                );
+                schedulePaymentPendingReminder({ outTradeNo: cleanOutTradeNo, orderId }).catch((err) => {
+                    logger.warn('待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+                });
                 return adminResult(200, {
                     success: true,
                     data: response.data
@@ -1010,10 +1010,9 @@ async function singleOrder(req) {
 
             if (response.status === 200) {
                 await connection.commit();
-                fireSubscribeNotify(
-                    notifyPaymentPending({ outTradeNo: cleanOutTradeNo, orderId }),
-                    'paymentPending',
-                );
+                schedulePaymentPendingReminder({ outTradeNo: cleanOutTradeNo, orderId }).catch((err) => {
+                    logger.warn('待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+                });
                 return adminResult(200, {
                     success: true,
                     data: response.data
@@ -1160,6 +1159,9 @@ async function payNotify(req) {
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                 console.log('支付回调处理完成');
 
+                cancelPaymentPendingReminder(out_trade_no).catch((err) => {
+                    logger.warn('取消待付款提醒排期失败', { outTradeNo: out_trade_no, err: err?.message || err });
+                });
                 fireSubscribeNotify(notifyOrderPaid({ outTradeNo: out_trade_no }), 'orderPaid');
                 fireSubscribeNotify(
                     notifyVirtualDeliveryPreparing({
@@ -1244,6 +1246,9 @@ async function closeOrder(req) {
         );
 
         if (response.status === 204) {
+            cancelPaymentPendingReminder(cleanOutTradeNo).catch((err) => {
+                logger.warn('取消待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+            });
             fireSubscribeNotify(
                 notifyOrderCancelled({ outTradeNo: cleanOutTradeNo, reason: '订单已关闭' }),
                 'orderCancelled',

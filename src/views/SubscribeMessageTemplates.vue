@@ -36,6 +36,114 @@
       </CardContent>
     </Card>
 
+    <Card class="shadow-none ring-1">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-base">消息补发</CardTitle>
+        <CardDescription>
+          按订单补发订阅消息或服务卡片；勾选「强制补发」将忽略 Redis 去重。43101 表示用户未订阅该模板。
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="flex flex-col gap-4">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="grid gap-2">
+            <Label for="resend-scene">补发场景</Label>
+            <select
+              id="resend-scene"
+              v-model="resendForm.scene"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+            >
+              <option value="" disabled>
+                请选择场景
+              </option>
+              <option v-for="item in resendScenes" :key="item.key" :value="item.key">
+                {{ item.label }}
+              </option>
+            </select>
+            <p v-if="selectedResendScene?.description" class="text-xs text-muted-foreground">
+              {{ selectedResendScene.description }}
+            </p>
+          </div>
+          <div class="grid gap-2">
+            <Label for="resend-order-id">订单 ID</Label>
+            <Input
+              id="resend-order-id"
+              v-model="resendForm.orderId"
+              type="number"
+              placeholder="例如 316"
+            />
+          </div>
+          <div class="grid gap-2 sm:col-span-2">
+            <Label for="resend-out-trade-no">商户订单号 out_trade_no（与订单 ID 二选一）</Label>
+            <Input
+              id="resend-out-trade-no"
+              v-model="resendForm.outTradeNo"
+              placeholder="例如 R1781300185402306"
+            />
+          </div>
+          <div v-if="resendForm.scene === 'refundResult'" class="grid gap-2 sm:col-span-2">
+            <Label for="resend-refund-no">退款单号 out_refund_no（可选）</Label>
+            <Input
+              id="resend-refund-no"
+              v-model="resendForm.outRefundNo"
+              placeholder="不传则取最近一条成功退款"
+            />
+          </div>
+          <div v-if="resendForm.scene === 'virtualDeliveryShipped'" class="grid gap-2">
+            <Label for="resend-item-id">订单项 ID（可选）</Label>
+            <Input
+              id="resend-item-id"
+              v-model="resendForm.orderItemId"
+              type="number"
+              placeholder="digital order_item id"
+            />
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              :model-value="resendForm.force"
+              @update:model-value="(v) => { resendForm.force = v === true }"
+            />
+            强制补发（忽略去重）
+          </label>
+          <label class="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              :model-value="resendForm.ignoreChecks"
+              @update:model-value="(v) => { resendForm.ignoreChecks = v === true }"
+            />
+            忽略状态校验
+          </label>
+          <label
+            v-if="resendForm.scene === 'paymentPendingSchedule'"
+            class="flex cursor-pointer items-center gap-2 text-sm"
+          >
+            <Checkbox
+              :model-value="resendForm.sendImmediately"
+              @update:model-value="(v) => { resendForm.sendImmediately = v === true }"
+            />
+            立即进入排期队列
+          </label>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button :disabled="resendSubmitting" @click="handleResend">
+            {{ resendSubmitting ? '补发中…' : '执行补发' }}
+          </Button>
+        </div>
+        <Alert v-if="resendResult" :variant="resendResult.success ? 'default' : 'destructive'">
+          <AlertTitle>{{ resendResult.success ? '补发成功' : '补发未成功' }}</AlertTitle>
+          <AlertDescription class="break-all">
+            <template v-if="resendResult.success">
+              已向微信发起补发请求。
+            </template>
+            <template v-else>
+              {{ resendResult.error || resendResult.reason || '请检查订单状态与用户是否已订阅' }}
+              <span v-if="resendResult.errcode" class="ml-1 text-xs">（errcode: {{ resendResult.errcode }}）</span>
+            </template>
+          </AlertDescription>
+        </Alert>
+      </CardContent>
+    </Card>
+
     <Tabs v-model="activeTab" class="flex flex-col gap-4">
       <TabsList class="w-full max-w-md">
         <TabsTrigger value="private" class="flex-1">
@@ -353,7 +461,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2 } from 'lucide-vue-next'
 import axios from '@/utils/axios'
@@ -389,7 +497,7 @@ const activeTab = ref('private')
 
 const scenarioRows = [
   { key: 'paid', scene: '支付成功', title: '订单支付成功通知', trigger: '微信支付成功回调' },
-  { key: 'pending', scene: '待付款', title: '待付款提醒', trigger: '统一下单成功（创建 NOTPAY 订单）' },
+  { key: 'pending', scene: '待付款', title: '待付款提醒', trigger: '统一下单后排期，支付截止前 5 分钟发送' },
   { key: 'shipped', scene: '发货', title: '订单发货提醒', trigger: '管理端微信物流发货成功' },
   { key: 'refund', scene: '退款', title: '退款结果通知', trigger: '退款成功回调 / 审批完成' },
   { key: 'cancel', scene: '取消', title: '订单取消通知', trigger: '关闭未支付订单' },
@@ -422,6 +530,24 @@ const addSubmitting = ref(false)
 const deleteDialogOpen = ref(false)
 const deleteTarget = ref(null)
 const deleteSubmitting = ref(false)
+
+const resendScenes = ref([])
+const resendForm = ref({
+  scene: '',
+  orderId: '',
+  outTradeNo: '',
+  outRefundNo: '',
+  orderItemId: '',
+  force: true,
+  ignoreChecks: false,
+  sendImmediately: false,
+})
+const resendSubmitting = ref(false)
+const resendResult = ref(null)
+
+const selectedResendScene = computed(() =>
+  resendScenes.value.find((item) => item.key === resendForm.value.scene),
+)
 
 const publicPage = ref(1)
 
@@ -624,6 +750,54 @@ async function handleConfirmDelete() {
   }
 }
 
+async function fetchResendScenes() {
+  try {
+    const res = await axios.get('/wx/subscribe-message/resend/scenes', { timeout: 15000 })
+    resendScenes.value = Array.isArray(res?.data?.scenes) ? res.data.scenes : []
+  } catch {
+    resendScenes.value = []
+  }
+}
+
+async function handleResend() {
+  if (!resendForm.value.scene) {
+    ElMessage.warning('请选择补发场景')
+    return
+  }
+  if (!resendForm.value.orderId && !resendForm.value.outTradeNo) {
+    ElMessage.warning('请填写订单 ID 或商户订单号')
+    return
+  }
+
+  resendSubmitting.value = true
+  resendResult.value = null
+
+  try {
+    const payload = {
+      scene: resendForm.value.scene,
+      force: resendForm.value.force,
+      ignoreChecks: resendForm.value.ignoreChecks,
+    }
+    if (resendForm.value.orderId) payload.orderId = Number(resendForm.value.orderId)
+    if (resendForm.value.outTradeNo) payload.out_trade_no = String(resendForm.value.outTradeNo).trim()
+    if (resendForm.value.outRefundNo) payload.out_refund_no = String(resendForm.value.outRefundNo).trim()
+    if (resendForm.value.orderItemId) payload.order_item_id = Number(resendForm.value.orderItemId)
+    if (resendForm.value.scene === 'paymentPendingSchedule') {
+      payload.sendImmediately = resendForm.value.sendImmediately
+    }
+
+    const res = await axios.post('/wx/subscribe-message/resend', payload, { timeout: 30000 })
+    resendResult.value = res.data
+    if (res.data?.success) showLayoutSuccess('补发成功')
+  } catch (error) {
+    const data = error?.response?.data
+    resendResult.value = data || { success: false, error: extractErrorMessage(error) }
+    ElMessage.error(extractErrorMessage(error, '补发失败'))
+  } finally {
+    resendSubmitting.value = false
+  }
+}
+
 async function handleCopyPriTmplId(priTmplId) {
   if (!priTmplId) return
   try {
@@ -635,6 +809,6 @@ async function handleCopyPriTmplId(priTmplId) {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchPrivateTemplates(), fetchCategories()])
+  await Promise.all([fetchPrivateTemplates(), fetchCategories(), fetchResendScenes()])
 })
 </script>
