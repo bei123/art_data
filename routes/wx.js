@@ -6,6 +6,7 @@ const upload = multer();
 const { authenticateToken, checkRole } = require('../auth');
 const svc = require('../services/wxService');
 const logisticsSvc = require('../services/logisticsService');
+const subscribeMessageSvc = require('../services/subscribeMessageService');
 
 router.post('/getPhoneNumber', async (req, res) => {
     try {
@@ -333,6 +334,116 @@ router.post('/logistics/order/cancel', authenticateToken, checkRole(['admin']), 
     } catch (error) {
         logger.error('取消运单失败', { err: error });
         res.status(500).json({ error: '取消运单服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 订阅消息：获取类目（需 admin） */
+router.get('/subscribe-message/categories', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.getCategory();
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取订阅消息类目失败', { err: error });
+        res.status(500).json({ error: '获取订阅消息类目失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：获取类目下的公共模板（需 admin） */
+router.get('/subscribe-message/templates/public', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.getPubTemplateTitles(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取公共订阅模板失败', { err: error });
+        res.status(500).json({ error: '获取公共订阅模板失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：获取模板标题下的关键词（需 admin） */
+router.get('/subscribe-message/templates/public/:tid/keywords', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.getPubTemplateKeywords(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取订阅模板关键词失败', { err: error });
+        res.status(500).json({ error: '获取订阅模板关键词失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：获取已有私有模板列表（需 admin） */
+router.get('/subscribe-message/templates', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.getPrivateTemplates();
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取私有订阅模板失败', { err: error });
+        res.status(500).json({ error: '获取私有订阅模板失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：选用公共模板到私有库（需 admin） */
+router.post('/subscribe-message/templates', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.addTemplate(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('选用订阅模板失败', { err: error });
+        res.status(500).json({ error: '选用订阅模板失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：删除私有模板（需 admin） */
+router.delete('/subscribe-message/templates/:priTmplId', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.deleteTemplate(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('删除订阅模板失败', { err: error });
+        res.status(500).json({ error: '删除订阅模板失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：发送订阅消息（需 admin） */
+router.post('/subscribe-message/send', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.sendSubscribeMessage(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('发送订阅消息失败', { err: error });
+        res.status(500).json({ error: '发送订阅消息失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：激活与更新服务卡片（需 admin） */
+router.post('/subscribe-message/user-notify', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.setUserNotify(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('激活/更新服务卡片失败', { err: error });
+        res.status(500).json({ error: '激活/更新服务卡片失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：更新服务卡片扩展信息（需 admin） */
+router.post('/subscribe-message/user-notify/ext', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.setUserNotifyExt(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('更新服务卡片扩展信息失败', { err: error });
+        res.status(500).json({ error: '更新服务卡片扩展信息失败', detail: error.message });
+    }
+});
+
+/** 订阅消息：查询服务卡片状态（需 admin） */
+router.post('/subscribe-message/user-notify/query', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await subscribeMessageSvc.getUserNotify(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('查询服务卡片状态失败', { err: error });
+        res.status(500).json({ error: '查询服务卡片状态失败', detail: error.message });
     }
 });
 
