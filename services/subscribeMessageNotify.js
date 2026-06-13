@@ -385,13 +385,14 @@ async function dispatchSubscribeMessage({
 }
 
 /** 订单支付成功 */
-async function notifyOrderPaid({ outTradeNo, orderId, force = false, ignoreChecks = false }) {
+async function notifyOrderPaid({ outTradeNo, orderId, force = false }) {
   const templates = getWxSubscribeTemplates()
   const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
-  if (!ignoreChecks && ctx.hasDigitalItem && !ctx.hasPhysicalItem) {
-    return { skipped: true, reason: 'digital_only_use_virtual_delivery' }
-  }
+
+  const addressText = ctx.hasDigitalItem && !ctx.hasPhysicalItem
+    ? '线上交付'
+    : (ctx.fullAddress || '—')
 
   return dispatchSubscribeMessage({
     scene: 'orderPaid',
@@ -406,7 +407,7 @@ async function notifyOrderPaid({ outTradeNo, orderId, force = false, ignoreCheck
       number1: dataValue(clipText(String(ctx.orderId), 32)),
       amount12: dataValue(formatAmountYuan(ctx.payAmountYuan)),
       thing4: dataValue(ctx.productTitle || '商品'),
-      thing8: dataValue(ctx.fullAddress || '—'),
+      thing8: dataValue(addressText),
     },
   })
 }
@@ -669,7 +670,7 @@ const RESEND_SCENES = [
   {
     key: 'orderPaid',
     label: '订单支付成功',
-    description: '含实物/混合订单；纯数字订单请用 virtualDeliveryPreparing',
+    description: '支付成功订阅消息（含数字/实物/混合订单）',
   },
   {
     key: 'orderCancelled',
