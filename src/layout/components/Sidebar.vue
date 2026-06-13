@@ -52,6 +52,7 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
+  MessageSquare,
   Store,
   User,
   Wallet,
@@ -85,6 +86,7 @@ const navItems = [
   { path: '/merchants', label: '商家管理', icon: Store },
   { path: '/refund-approval', label: '退款审批', icon: Wallet, role: 'admin' },
   { path: '/orders', label: '订单管理', icon: FileText },
+  { path: '/subscribe-message/templates', label: '订阅消息', icon: MessageSquare, role: 'admin' },
 ]
 
 const visibleNavItems = computed(() =>

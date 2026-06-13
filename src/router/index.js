@@ -138,6 +138,16 @@ const routes = [
           title: '订单管理',
           requiresAuth: true
         }
+      },
+      {
+        path: 'subscribe-message/templates',
+        name: 'SubscribeMessageTemplates',
+        component: () => import('@/views/SubscribeMessageTemplates.vue'),
+        meta: {
+          title: '订阅消息模板',
+          requiresAuth: true,
+          roles: ['admin']
+        }
       }
     ]
   },
