@@ -46,6 +46,7 @@ const exhibitionsRouter = require('./routes/exhibitions');
 const dashboardRouter = require('./routes/dashboard');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
+const { ensureOrderShipmentsTable } = require('./utils/orderShipmentsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
@@ -405,6 +406,9 @@ app.use('/api/digital-artworks', digitalArtworksRouter);
 // 确保订单项交付二维码字段存在
 ensureOrderItemsQrCodeColumns().catch((err) => {
   logger.warn('order_items qr code columns ensure failed', { err: err.message });
+});
+ensureOrderShipmentsTable().catch((err) => {
+  logger.warn('order_shipments table ensure failed', { err: err.message });
 });
 ensureDigitalArtworkIdColumns().catch((err) => {
   logger.warn('digital_artwork_id column ensure failed', { err: err.message });

@@ -20,6 +20,7 @@ const {
     wechatPayOutTradeNoCloseUrl,
 } = require('../utils/safeOutboundUrl');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
+const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema');
 const {
     DIGITAL_ITEM_JOIN_SQL,
     DIGITAL_ITEM_SELECT_SQL,
@@ -3429,6 +3430,7 @@ async function orderDetailForActor(req, options = {}) {
 
         let shipmentRows = [];
         try {
+            await ensureOrderShipmentsTable();
             const [rows] = await db.query(
                 `SELECT id, order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
                 use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status, created_at, updated_at

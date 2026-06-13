@@ -6,6 +6,7 @@ const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessa
 const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
+const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema')
 const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv')
 
 function adminResult(status, body) {
@@ -422,12 +423,16 @@ async function addOrder(req) {
       : wechatOrderId
 
     let shipment_persisted = true
+    const companyName = b.delivery_name || b.company_name
+      ? clipUtf8(String(b.delivery_name || b.company_name).trim(), 64)
+      : null
     try {
+      await ensureOrderShipmentsTable()
       await db.query(
         `INSERT INTO order_shipments (
           order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
-          use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+          use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
         [
           internalOrderId,
           delivery_id,
@@ -440,7 +445,8 @@ async function addOrder(req) {
           Number.isFinite(Number(insured.insured_value)) ? Math.round(Number(insured.insured_value)) : 0,
           add_source,
           add_source === 2 ? clipUtf8(wx_appid, 64) : null,
-          JSON.stringify(data.waybill_data || [])
+          JSON.stringify(data.waybill_data || []),
+          companyName,
         ]
       )
     } catch (dbErr) {

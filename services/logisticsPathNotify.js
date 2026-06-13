@@ -3,7 +3,7 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
 const { getAccessToken } = require('./wechatMiniProgramToken')
-const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
+const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 
 const PATH_LAST_REDIS_PREFIX = 'logistics:path:last:'
@@ -250,6 +250,7 @@ function handleLogisticsPathNotifyAsync(params) {
 async function loadActiveShipmentsForPoll(limit) {
   const batch = Math.max(1, Math.min(Number(limit) || PATH_POLL_BATCH, 100))
   try {
+    await ensureOrderShipmentsTable()
     const [rows] = await db.query(
       `SELECT
           os.id AS shipment_id,
@@ -258,6 +259,7 @@ async function loadActiveShipmentsForPoll(limit) {
           os.waybill_id,
           os.add_source,
           os.wx_appid,
+          os.company_name,
           o.out_trade_no,
           o.trade_state,
           wu.openid
@@ -313,7 +315,7 @@ async function pollShipmentPathAndNotify(shipmentRow) {
     outTradeNo: shipmentRow.out_trade_no,
     deliveryId,
     waybillId,
-    companyName: null,
+    companyName: shipmentRow.company_name || null,
     pathItemList: fetchResult.data.path_item_list,
     source: 'scheduler',
   })

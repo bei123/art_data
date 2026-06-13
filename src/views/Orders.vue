@@ -477,8 +477,29 @@
               物流（微信物流助手）
             </h3>
             <p class="mb-3 text-sm text-muted-foreground leading-relaxed">
-              含实物且已支付成功时可发货；轨迹与面单需填写与下单一致的快递公司与运单号。本页成功发货后会暂存运单号便于查询。
+              含实物且已支付成功时可发货；发货成功后运单号会写入数据库，查询轨迹/面单时会自动带出。
             </p>
+            <div v-if="selectedOrder.shipments?.length" class="mb-4 space-y-2">
+              <div
+                v-for="shipment in selectedOrder.shipments"
+                :key="shipment.id || `${shipment.delivery_id}-${shipment.waybill_id}`"
+                class="rounded-md border border-border bg-background p-3 text-sm"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{{ shipment.delivery_id }}</Badge>
+                  <span v-if="shipment.company_name" class="text-muted-foreground">{{ shipment.company_name }}</span>
+                  <Badge :variant="shipment.status === 'active' ? 'default' : 'outline'">
+                    {{ shipment.status === 'active' ? '有效' : shipment.status }}
+                  </Badge>
+                </div>
+                <div class="mt-2 font-mono text-xs break-all">
+                  运单号：{{ shipment.waybill_id }}
+                </div>
+                <div v-if="shipment.created_at" class="mt-1 text-xs text-muted-foreground tabular-nums">
+                  发货时间：{{ shipment.created_at }}
+                </div>
+              </div>
+            </div>
             <div class="flex flex-wrap gap-2">
               <Button type="button" @click="openShipDialog">
                 发货
@@ -1006,7 +1027,7 @@ const viewOrderDetail = async (order) => {
   selectedOrder.value = order
   detailDialogVisible.value = true
   detailLoading.value = true
-  prefillTrackFormFromStorage(order.id)
+  prefillTrackFormFromOrder(order)
   try {
     await refreshSelectedOrderDetail(order.id)
   } finally {
@@ -1045,7 +1066,26 @@ function mergeAdminOrderDetail(listOrder, data) {
     pay_status: payStatus,
     items: mapDetailItemsToOrderItems(data.detail_items?.length ? data.detail_items : listOrder.items),
     refunds: data.refunds || [],
+    shipments: data.shipments || [],
   }
+}
+
+function getLatestActiveShipment(order) {
+  const list = order?.shipments
+  if (!Array.isArray(list) || !list.length) return null
+  const active = list.filter((row) => row?.status === 'active' && row?.waybill_id)
+  if (!active.length) return list.find((row) => row?.waybill_id) || null
+  return active[0]
+}
+
+function prefillTrackFormFromOrder(order) {
+  const shipment = getLatestActiveShipment(order)
+  if (shipment) {
+    trackForm.delivery_id = shipment.delivery_id || ''
+    trackForm.waybill_id = shipment.waybill_id || ''
+    return
+  }
+  if (order?.id) prefillTrackFormFromStorage(order.id)
 }
 
 async function refreshSelectedOrderDetail(orderId) {
@@ -1056,6 +1096,7 @@ async function refreshSelectedOrderDetail(orderId) {
 
   const listOrder = orders.value.find((row) => row.id === orderId) || selectedOrder.value
   selectedOrder.value = mergeAdminOrderDetail(listOrder || { id: orderId }, response.data)
+  prefillTrackFormFromOrder(selectedOrder.value)
   return selectedOrder.value
 }
 
@@ -1498,9 +1539,13 @@ async function submitShip() {
     }
   }
 
+  const deliveryMeta = deliveryList.value.find(
+    (d) => String(d.delivery_id) === String(shipForm.delivery_id),
+  )
   const payload = {
     internal_order_id: selectedOrder.value.id,
     delivery_id: shipForm.delivery_id.trim(),
+    delivery_name: deliveryMeta?.delivery_name || undefined,
     biz_id: shipForm.biz_id.trim() || LOGISTICS_BIZ_ID_CASH,
     service_type: shipForm.service_type,
     service_name: shipForm.service_name.trim(),
@@ -1522,12 +1567,15 @@ async function submitShip() {
     const res = await axios.post('/wx/logistics/orders', payload, { timeout: 60000 })
     if (res?.waybill_id) {
       saveLastWaybill(selectedOrder.value.id, shipForm.delivery_id.trim(), String(res.waybill_id))
-      prefillTrackFormFromStorage(selectedOrder.value.id)
       ElMessage.success(`发货成功，运单号：${res.waybill_id}`)
+      if (res.shipment_persisted === false) {
+        ElMessage.warning('运单号未能写入数据库，请联系管理员检查 order_shipments 表')
+      }
     } else {
       ElMessage.success('发货请求已提交')
     }
     shipDialogVisible.value = false
+    await refreshSelectedOrderDetail(selectedOrder.value.id)
   } catch (e) {
     const msg = e?.response?.data?.error || e?.message || '发货失败'
     ElMessage.error(msg)
