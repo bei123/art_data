@@ -687,6 +687,7 @@ async function notifyLogisticsStatus({
   companyName,
   logisticsStatus,
   trackingHint,
+  pathNodeFingerprint,
   force = false,
   ignoreChecks = false,
 }) {
@@ -702,11 +703,14 @@ async function notifyLogisticsStatus({
     20,
   )
   const waybill = formatSubscribeCharacterStringValue(waybillId, '0')
+  const nodeKey = pathNodeFingerprint
+    ? String(pathNodeFingerprint).replace(/[^a-zA-Z0-9|_-]/g, '').slice(0, 48)
+    : statusText.slice(0, 8)
 
   return dispatchSubscribeMessage({
     scene: 'logisticsStatus',
     redisKey: waybillId
-      ? `subscribe:sent:logistics:${ctx.orderId}:${waybill}:${statusText.slice(0, 8)}`
+      ? `subscribe:sent:logistics:${ctx.orderId}:${waybill}:${nodeKey}`
       : `subscribe:sent:logistics:${ctx.orderId}`,
     openid: ctx.openid,
     templateId,

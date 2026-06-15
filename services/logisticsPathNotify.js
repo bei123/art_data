@@ -7,23 +7,26 @@ const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
 const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 
-const PATH_LAST_REDIS_PREFIX = 'logistics:path:last:'
+const PATH_SEEN_REDIS_PREFIX = 'logistics:path:seen:'
 const PATH_TERMINAL_REDIS_PREFIX = 'logistics:path:terminal:'
-const PATH_LAST_TTL_SEC = parseInt(process.env.WX_LOGISTICS_PATH_LAST_TTL_SEC || `${60 * 60 * 24 * 45}`, 10)
+const PATH_SEEN_TTL_SEC = parseInt(process.env.WX_LOGISTICS_PATH_LAST_TTL_SEC || `${60 * 60 * 24 * 45}`, 10)
 const PATH_POLL_MS = parseInt(process.env.WX_LOGISTICS_PATH_POLL_MS || '300000', 10)
 const PATH_POLL_BATCH = parseInt(process.env.WX_LOGISTICS_PATH_POLL_BATCH || '20', 10)
+const PATH_NOTIFY_GAP_MS = parseInt(process.env.WX_LOGISTICS_PATH_NOTIFY_GAP_MS || '300', 10)
 
 const PATH_ACTION_LABELS = {
   100001: '揽件成功',
   100002: '揽件失败',
   100003: '分配业务员',
   200001: '运输中',
-  300002: '开始派送',
-  300003: '签收成功',
+  300002: '派送中',
+  300003: '已签收',
   300004: '签收失败',
   400001: '订单取消',
   400002: '订单滞留',
 }
+
+const MILESTONE_PATH_ACTION_TYPES = new Set([100001, 100002, 100003, 300002, 300003, 300004, 400001, 400002])
 
 const TERMINAL_PATH_ACTION_TYPES = new Set([300003, 300004, 400001])
 
@@ -38,13 +41,24 @@ function clipUtf8(str, maxBytes) {
   return buf.subarray(0, end).toString('utf8')
 }
 
+function clipText(value, maxLen) {
+  if (value == null) return ''
+  const str = String(value).trim()
+  if (!str) return ''
+  return [...str].slice(0, maxLen).join('')
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function isLogisticsPathNotifyEnabled() {
   if (String(process.env.WX_LOGISTICS_PATH_NOTIFY_ENABLED || 'true').toLowerCase() === 'false') return false
   return isWxSubscribeNotifyEnabled()
 }
 
-function pathLastRedisKey(orderId, waybillId) {
-  return `${PATH_LAST_REDIS_PREFIX}${orderId}:${String(waybillId || '').trim()}`
+function pathSeenRedisKey(orderId, waybillId) {
+  return `${PATH_SEEN_REDIS_PREFIX}${orderId}:${String(waybillId || '').trim()}`
 }
 
 function pathTerminalRedisKey(orderId, waybillId) {
@@ -80,12 +94,29 @@ function buildPathNodeFingerprint(node) {
   return `${actionTime}|${actionType}|${actionMsg}`
 }
 
+function sortPathNodesChronologically(pathItemList) {
+  return normalizePathItemList(pathItemList).slice().sort((a, b) => {
+    const ta = Number(a.action_time) || 0
+    const tb = Number(b.action_time) || 0
+    if (ta !== tb) return ta - tb
+    const typeA = Number(a.action_type) || 0
+    const typeB = Number(b.action_type) || 0
+    if (typeA !== typeB) return typeA - typeB
+    return String(a.action_msg || '').localeCompare(String(b.action_msg || ''))
+  })
+}
+
 function formatLogisticsStatusFromNode(node) {
   if (!node) return '物流状态已更新'
-  const msg = String(node.action_msg || '').trim()
-  if (msg) return clipUtf8(msg, 20)
   const actionType = Number(node.action_type)
-  if (PATH_ACTION_LABELS[actionType]) return clipUtf8(PATH_ACTION_LABELS[actionType], 20)
+  const label = PATH_ACTION_LABELS[actionType]
+  const msg = String(node.action_msg || '').trim()
+
+  if (label && MILESTONE_PATH_ACTION_TYPES.has(actionType)) {
+    return clipText(label, 20)
+  }
+  if (msg) return clipText(msg, 20)
+  if (label) return clipText(label, 20)
   return '物流状态已更新'
 }
 
@@ -94,22 +125,39 @@ function isTerminalPathNode(node) {
   return TERMINAL_PATH_ACTION_TYPES.has(actionType)
 }
 
-async function getLastPathFingerprint(orderId, waybillId) {
+function hasTerminalPathInList(pathItemList) {
+  return normalizePathItemList(pathItemList).some((node) => isTerminalPathNode(node))
+}
+
+async function loadSeenPathFingerprints(orderId, waybillId) {
   try {
-    return await redisClient.get(pathLastRedisKey(orderId, waybillId))
+    const raw = await redisClient.get(pathSeenRedisKey(orderId, waybillId))
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter(Boolean))
   } catch {
-    return null
+    return new Set()
   }
 }
 
-async function saveLastPathFingerprint(orderId, waybillId, fingerprint, node) {
+async function saveSeenPathFingerprints(orderId, waybillId, seenSet) {
   try {
-    await redisClient.setEx(pathLastRedisKey(orderId, waybillId), PATH_LAST_TTL_SEC, fingerprint)
-    if (isTerminalPathNode(node)) {
-      await redisClient.setEx(pathTerminalRedisKey(orderId, waybillId), PATH_LAST_TTL_SEC, '1')
-    }
+    await redisClient.setEx(
+      pathSeenRedisKey(orderId, waybillId),
+      PATH_SEEN_TTL_SEC,
+      JSON.stringify([...seenSet]),
+    )
   } catch (err) {
-    logger.warn('保存物流轨迹指纹失败', { orderId, waybillId, err: err?.message || err })
+    logger.warn('保存物流轨迹已通知节点失败', { orderId, waybillId, err: err?.message || err })
+  }
+}
+
+async function markShipmentPathTerminal(orderId, waybillId) {
+  try {
+    await redisClient.setEx(pathTerminalRedisKey(orderId, waybillId), PATH_SEEN_TTL_SEC, '1')
+  } catch (err) {
+    logger.warn('标记物流终态失败', { orderId, waybillId, err: err?.message || err })
   }
 }
 
@@ -172,8 +220,21 @@ async function fetchWechatPathRaw({
   }
 }
 
+function findNewPathNodes(pathItemList, seenSet) {
+  const sorted = sortPathNodesChronologically(pathItemList)
+  const newNodes = []
+
+  for (const node of sorted) {
+    const fingerprint = buildPathNodeFingerprint(node)
+    if (!fingerprint || seenSet.has(fingerprint)) continue
+    newNodes.push({ node, fingerprint })
+  }
+
+  return newNodes
+}
+
 /**
- * 对比最新轨迹节点，有变化则推送「物流状态提醒」
+ * 每个轨迹节点各推送一次；首次同步仅建立基线，不补发历史节点
  */
 async function handleLogisticsPathNotify({
   orderId,
@@ -192,55 +253,103 @@ async function handleLogisticsPathNotify({
     return { skipped: true, reason: 'missing_order_or_waybill' }
   }
 
-  const latestNode = pickLatestPathNode(pathItemList)
-  if (!latestNode) {
+  const nodes = sortPathNodesChronologically(pathItemList)
+  if (!nodes.length) {
     return { skipped: true, reason: 'empty_path_list' }
   }
 
-  const fingerprint = buildPathNodeFingerprint(latestNode)
-  if (!fingerprint) {
-    return { skipped: true, reason: 'invalid_path_node' }
+  const seenSet = await loadSeenPathFingerprints(orderId, waybillId)
+
+  if (!force && seenSet.size === 0) {
+    for (const node of nodes) {
+      const fingerprint = buildPathNodeFingerprint(node)
+      if (fingerprint) seenSet.add(fingerprint)
+    }
+    await saveSeenPathFingerprints(orderId, waybillId, seenSet)
+    if (hasTerminalPathInList(nodes)) {
+      await markShipmentPathTerminal(orderId, waybillId)
+    }
+    logger.info('物流轨迹基线已建立（不补发历史节点）', {
+      source,
+      orderId,
+      waybillId,
+      nodeCount: nodes.length,
+    })
+    return { ok: true, baselined: true, notifiedCount: 0, nodeCount: nodes.length }
   }
 
-  const lastFingerprint = await getLastPathFingerprint(orderId, waybillId)
-  if (!force && lastFingerprint === fingerprint) {
-    return { skipped: true, reason: 'path_unchanged', fingerprint }
+  const newNodes = findNewPathNodes(nodes, seenSet)
+  if (!newNodes.length) {
+    return { skipped: true, reason: 'no_new_path_nodes', nodeCount: nodes.length }
   }
 
-  const logisticsStatus = formatLogisticsStatusFromNode(latestNode)
-  const notifyResult = await notifyLogisticsStatus({
-    orderId,
-    outTradeNo,
-    waybillId,
-    deliveryId,
-    companyName,
-    logisticsStatus,
-    force,
-  })
+  let notifiedCount = 0
+  const notifyResults = []
 
-  if (notifyResult?.skipped && !force) {
-    return notifyResult
+  for (let i = 0; i < newNodes.length; i += 1) {
+    const { node, fingerprint } = newNodes[i]
+    const logisticsStatus = formatLogisticsStatusFromNode(node)
+
+    const notifyResult = await notifyLogisticsStatus({
+      orderId,
+      outTradeNo,
+      waybillId,
+      deliveryId,
+      companyName,
+      logisticsStatus,
+      pathNodeFingerprint: fingerprint,
+      force,
+    })
+
+    notifyResults.push({ fingerprint, logisticsStatus, result: notifyResult })
+
+    const shouldMarkSeen = notifyResult?.ok === true
+      || notifyResult?.skipped
+      || notifyResult?.error?.errcode === 43101
+
+    if (shouldMarkSeen) {
+      seenSet.add(fingerprint)
+      if (notifyResult?.ok === true) notifiedCount += 1
+    } else if (notifyResult?.ok === false) {
+      logger.warn('物流节点订阅消息未送达，稍后重试', {
+        source,
+        orderId,
+        waybillId,
+        actionType: node.action_type,
+        logisticsStatus,
+        error: notifyResult.error,
+      })
+      break
+    }
+
+    if (i < newNodes.length - 1 && PATH_NOTIFY_GAP_MS > 0) {
+      await sleep(PATH_NOTIFY_GAP_MS)
+    }
   }
-  if (notifyResult?.ok === false) {
-    return notifyResult
+
+  await saveSeenPathFingerprints(orderId, waybillId, seenSet)
+
+  if (hasTerminalPathInList(nodes)) {
+    await markShipmentPathTerminal(orderId, waybillId)
   }
 
-  await saveLastPathFingerprint(orderId, waybillId, fingerprint, latestNode)
-
-  logger.info('物流轨迹变更已推送订阅消息', {
-    source,
-    orderId,
-    waybillId,
-    actionType: latestNode.action_type,
-    logisticsStatus,
-  })
+  if (notifiedCount > 0) {
+    logger.info('物流轨迹新节点已推送订阅消息', {
+      source,
+      orderId,
+      waybillId,
+      notifiedCount,
+      newNodeCount: newNodes.length,
+    })
+  }
 
   return {
     ok: true,
-    notified: true,
-    fingerprint,
-    logisticsStatus,
-    detail: notifyResult,
+    notified: notifiedCount > 0,
+    notifiedCount,
+    newNodeCount: newNodes.length,
+    nodeCount: nodes.length,
+    details: notifyResults,
   }
 }
 
@@ -333,7 +442,7 @@ async function processLogisticsPathPollBatch() {
     processed += 1
     try {
       const result = await pollShipmentPathAndNotify(shipment)
-      if (result?.notified) notified += 1
+      if (result?.notifiedCount > 0) notified += result.notifiedCount
     } catch (err) {
       logger.warn('物流轨迹轮询异常', {
         orderId: shipment.order_id,
@@ -371,6 +480,7 @@ function startLogisticsPathNotifyScheduler() {
   logger.info('物流轨迹订阅推送调度已启动', {
     pollMs: Math.max(60000, PATH_POLL_MS),
     batch: PATH_POLL_BATCH,
+    perNodeNotify: true,
   })
 }
 
@@ -379,6 +489,8 @@ module.exports = {
   pickLatestPathNode,
   buildPathNodeFingerprint,
   formatLogisticsStatusFromNode,
+  sortPathNodesChronologically,
+  findNewPathNodes,
   handleLogisticsPathNotify,
   handleLogisticsPathNotifyAsync,
   processLogisticsPathPollBatch,
