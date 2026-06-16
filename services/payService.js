@@ -25,6 +25,8 @@ const {
     resolveOrderFulfillmentStatus,
     buildFulfillmentTimelineStages,
     pickFulfillmentPathNode,
+    pickEffectiveRefundRow,
+    mapRefundRowToStatus,
     FULFILLMENT_STATUS,
 } = require('../utils/orderFulfillmentStatus');
 const {
@@ -2366,7 +2368,7 @@ function getOrderStatusText(tradeState) {
         case 'REVOKED':
             return '已撤销';
         case 'REFUND':
-            return '转入退款';
+            return '已退款';
         default:
             return '未知状态';
     }
@@ -2387,6 +2389,44 @@ function resolveListStatusFilter(status) {
         REFUND: ['REFUND'],
     };
     return map[status] || null;
+}
+
+function resolveListStatusQuery(status) {
+    if (!status || status === 'all') return { type: 'all' };
+    if (status === 'refunding') return { type: 'refunding' };
+    if (status === 'refunded') return { type: 'refunded' };
+    const states = resolveListStatusFilter(status);
+    if (states) return { type: 'trade_state', states };
+    return { type: 'invalid' };
+}
+
+function appendListOrdersStatusWhere(whereParts, whereParams, statusQuery) {
+    if (!statusQuery || statusQuery.type === 'all') return;
+    if (statusQuery.type === 'trade_state' && statusQuery.states?.length) {
+        whereParts.push(`trade_state IN (${statusQuery.states.map(() => '?').join(', ')})`);
+        whereParams.push(...statusQuery.states);
+        return;
+    }
+    if (statusQuery.type === 'refunding') {
+        whereParts.push('trade_state = ?');
+        whereParams.push('SUCCESS');
+        whereParts.push(`EXISTS (
+            SELECT 1 FROM refund_requests rr
+            WHERE rr.out_trade_no = orders.out_trade_no
+              AND rr.status IN ('PENDING', 'APPROVED', 'PROCESSING')
+        )`);
+        return;
+    }
+    if (statusQuery.type === 'refunded') {
+        whereParts.push(`(
+            trade_state = 'REFUND'
+            OR EXISTS (
+                SELECT 1 FROM refund_requests rr
+                WHERE rr.out_trade_no = orders.out_trade_no
+                  AND rr.status = 'SUCCESS'
+            )
+        )`);
+    }
 }
 
 function mapListItemImage(item) {
@@ -2447,21 +2487,23 @@ async function fetchLatestRefundStatusByOutTradeNos(outTradeNos) {
 
     const placeholders = outTradeNos.map(() => '?').join(', ');
     const [rows] = await db.query(`
-        SELECT out_trade_no, status, wx_refund_id, created_at
+        SELECT id, out_trade_no, out_refund_no, status, wx_refund_id, created_at
         FROM refund_requests
         WHERE out_trade_no IN (${placeholders})
         ORDER BY id DESC
     `, outTradeNos);
 
+    const rowsByOutTradeNo = new Map();
+    for (const row of rows || []) {
+        const bucket = rowsByOutTradeNo.get(row.out_trade_no) || [];
+        bucket.push(row);
+        rowsByOutTradeNo.set(row.out_trade_no, bucket);
+    }
+
     const refundByOutTradeNo = new Map();
-    for (const row of rows) {
-        if (!refundByOutTradeNo.has(row.out_trade_no)) {
-            refundByOutTradeNo.set(row.out_trade_no, {
-                status: row.status,
-                wx_refund_id: row.wx_refund_id || null,
-                created_at: row.created_at,
-            });
-        }
+    for (const [outTradeNo, refundRows] of rowsByOutTradeNo) {
+        const effective = mapRefundRowToStatus(pickEffectiveRefundRow(refundRows));
+        if (effective) refundByOutTradeNo.set(outTradeNo, effective);
     }
     return refundByOutTradeNo;
 }
@@ -2537,7 +2579,7 @@ async function fetchFulfillmentContextByOrderIds(orderIds) {
     return contextByOrderId;
 }
 
-function resolveFulfillmentForOrder(order, fulfillmentContext) {
+function resolveFulfillmentForOrder(order, fulfillmentContext, refundStatus) {
     const ctx = fulfillmentContext || { items: [], shipment: null };
     const items = ctx.items.length
         ? ctx.items
@@ -2547,10 +2589,15 @@ function resolveFulfillmentForOrder(order, fulfillmentContext) {
             delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
         }));
 
+    const effectiveRefundStatus = refundStatus
+        || order.refund_status
+        || null;
+
     return resolveOrderFulfillmentStatus({
         tradeState: order.trade_state || order.pay_status?.trade_state,
         items,
         shipment: ctx.shipment,
+        refundStatus: effectiveRefundStatus,
     });
 }
 
@@ -2597,6 +2644,7 @@ async function listOrders(req) {
             'completed',
             'cancelled',
             'closed',
+            'refunding',
             'refunded',
             'NOTPAY',
             'SUCCESS',
@@ -2615,7 +2663,7 @@ async function listOrders(req) {
 
         if (status && !validStatusTypes.includes(String(status).trim())) {
             return adminResult(400, {
-                error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, closed, refunded, NOTPAY, SUCCESS, CLOSED, REVOKED, REFUND',
+                error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, closed, refunding, refunded, NOTPAY, SUCCESS, CLOSED, REVOKED, REFUND',
             });
         }
 
@@ -2638,14 +2686,14 @@ async function listOrders(req) {
         const cleanPage = parseInt(page, 10);
         const cleanLimit = parseInt(limit, 10);
         const cleanStatus = status ? String(status).trim() : 'all';
-        const statusStates = resolveListStatusFilter(cleanStatus);
+        const statusQuery = resolveListStatusQuery(cleanStatus);
+        if (statusQuery.type === 'invalid') {
+            return adminResult(400, { error: '无效的订单状态类型' });
+        }
 
         const whereParts = ['user_id = ?'];
         const whereParams = [cleanUserId];
-        if (statusStates?.length) {
-            whereParts.push(`trade_state IN (${statusStates.map(() => '?').join(', ')})`);
-            whereParams.push(...statusStates);
-        }
+        appendListOrdersStatusWhere(whereParts, whereParams, statusQuery);
 
         const whereSql = whereParts.join(' AND ');
         const offset = (cleanPage - 1) * cleanLimit;
@@ -2668,7 +2716,9 @@ async function listOrders(req) {
         ]);
 
         await refreshListOrdersPaymentState(orders);
-        const visibleOrders = filterOrdersByStatus(orders, statusStates);
+        const visibleOrders = statusQuery.type === 'trade_state'
+            ? filterOrdersByStatus(orders, statusQuery.states)
+            : orders;
 
         const orderIds = visibleOrders.map((order) => order.id);
         const [itemsByOrderId, refundByOutTradeNo, fulfillmentContextByOrderId] = await Promise.all([
@@ -2679,11 +2729,12 @@ async function listOrders(req) {
 
         const orderCards = visibleOrders.map((order) => {
             const fulfillmentCtx = fulfillmentContextByOrderId.get(order.id);
-            const fulfillmentStatus = resolveFulfillmentForOrder(order, fulfillmentCtx);
+            const refundStatus = refundByOutTradeNo.get(order.out_trade_no) || null;
+            const fulfillmentStatus = resolveFulfillmentForOrder(order, fulfillmentCtx, refundStatus);
             return mapOrderToListCard(
                 order,
                 itemsByOrderId.get(order.id) || [],
-                refundByOutTradeNo.get(order.out_trade_no) || null,
+                refundStatus,
                 fulfillmentStatus,
             );
         });
@@ -3053,8 +3104,13 @@ async function adminOrders(req) {
             ordersWithItems.map((order) => order.id),
         );
 
+        const refundByOutTradeNo = await fetchLatestRefundStatusByOutTradeNos(
+            ordersWithItems.map((order) => order.out_trade_no),
+        );
+
         const ordersWithFulfillment = ordersWithItems.map((order) => {
             const fulfillmentCtx = fulfillmentContextByOrderId.get(order.id);
+            const refundStatus = refundByOutTradeNo.get(order.out_trade_no) || null;
             const fulfillmentStatus = resolveFulfillmentForOrder(order, {
                 items: (order.items || []).map((item) => ({
                     type: item.type,
@@ -3062,9 +3118,10 @@ async function adminOrders(req) {
                     delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
                 })),
                 shipment: fulfillmentCtx?.shipment || null,
-            });
+            }, refundStatus);
             return {
                 ...order,
+                refund_status: refundStatus,
                 fulfillment_status: fulfillmentStatus,
             };
         });
@@ -3777,6 +3834,24 @@ async function orderDetailForActor(req, options = {}) {
             };
         });
 
+        const latestRefundRow = pickEffectiveRefundRow(refundRows || []);
+        const latestRefund = latestRefundRow
+            ? {
+                id: latestRefundRow.id,
+                out_refund_no: latestRefundRow.out_refund_no,
+                wx_refund_id: latestRefundRow.wx_refund_id || null,
+                status: latestRefundRow.status,
+                reason: latestRefundRow.reason || null,
+                reject_reason: latestRefundRow.reject_reason || null,
+                refund_amount_yuan: parseRefundAmountJson(latestRefundRow.amount).refund_yuan,
+                order_total_snapshot_yuan: parseRefundAmountJson(latestRefundRow.amount).total_yuan,
+                created_at: toIsoOrNull(latestRefundRow.created_at),
+                approved_at: toIsoOrNull(latestRefundRow.approved_at),
+                rejected_at: toIsoOrNull(latestRefundRow.rejected_at),
+                updated_at: toIsoOrNull(latestRefundRow.updated_at),
+            }
+            : null;
+
         const timeline = [];
 
         timeline.push({
@@ -3915,6 +3990,7 @@ async function orderDetailForActor(req, options = {}) {
                         created_at: primaryShipment.created_at,
                     }
                     : null,
+                refundStatus: latestRefund,
             }),
         );
 
@@ -3934,7 +4010,9 @@ async function orderDetailForActor(req, options = {}) {
                 .find(Boolean) || null,
             receivedAt,
         });
-        const shouldMergeFulfillmentTimeline = effectiveTradeState === 'SUCCESS' || effectiveTradeState === 'REFUND';
+        const shouldMergeFulfillmentTimeline = effectiveTradeState === 'SUCCESS'
+            || effectiveTradeState === 'REFUND'
+            || statusFields.fulfillment_status?.code === 'refunding';
         if (shouldMergeFulfillmentTimeline) {
             for (const stage of fulfillmentTimeline) {
                 if (!timeline.some((row) => row.stage === stage.stage)) {
@@ -3942,7 +4020,6 @@ async function orderDetailForActor(req, options = {}) {
                 }
             }
         }
-        const latestRefund = refunds.length > 0 ? refunds[refunds.length - 1] : null;
         const refundStatus = latestRefund
             ? {
                 status: latestRefund.status,

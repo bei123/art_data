@@ -25,7 +25,7 @@
               <option value="">全部</option>
               <option value="NOTPAY">未支付</option>
               <option value="SUCCESS">支付成功</option>
-              <option value="REFUND">转入退款</option>
+              <option value="REFUND">已退款</option>
               <option value="CLOSED">已关闭</option>
               <option value="REVOKED">已撤销</option>
               <option value="PAYERROR">支付失败</option>
@@ -46,6 +46,8 @@
               <option value="received">已收货</option>
               <option value="delivered">已交付</option>
               <option value="completed">订单完成</option>
+              <option value="refunding">退款中</option>
+              <option value="refunded">已退款</option>
             </select>
           </div>
           <div class="flex min-w-[9rem] flex-col gap-1.5">
@@ -1789,6 +1791,7 @@ function getFulfillmentBadgeVariant(code) {
     completed: 'default',
     cancelled: 'destructive',
     closed: 'destructive',
+    refunding: 'outline',
     refunded: 'secondary',
   }
   return map[code] || 'secondary'
@@ -1810,6 +1813,7 @@ function getFulfillmentLabel(fulfillment) {
     completed: '订单完成',
     cancelled: '已撤销',
     closed: '已关闭',
+    refunding: '退款中',
     refunded: '已退款',
   }
   return map[fulfillment.code] || '未知状态'
@@ -1831,7 +1835,7 @@ const getStatusLabel = (status) => {
   const statusMap = {
     SUCCESS: '支付成功',
     NOTPAY: '未支付',
-    REFUND: '转入退款',
+    REFUND: '已退款',
     CLOSED: '已关闭',
     REVOKED: '已撤销',
     PAYERROR: '支付失败',

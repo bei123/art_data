@@ -15,8 +15,12 @@ const FULFILLMENT_STATUS = {
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
   CLOSED: 'closed',
+  REFUNDING: 'refunding',
   REFUNDED: 'refunded',
 }
+
+const ACTIVE_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING']
+const COMPLETED_REFUND_STATUSES = ['SUCCESS']
 
 const STATUS_RANK = {
   [FULFILLMENT_STATUS.CREATED]: 10,
@@ -31,6 +35,7 @@ const STATUS_RANK = {
   [FULFILLMENT_STATUS.COMPLETED]: 60,
   [FULFILLMENT_STATUS.CANCELLED]: -1,
   [FULFILLMENT_STATUS.CLOSED]: -1,
+  [FULFILLMENT_STATUS.REFUNDING]: 65,
   [FULFILLMENT_STATUS.REFUNDED]: -1,
 }
 
@@ -47,6 +52,7 @@ const STATUS_LABELS = {
   [FULFILLMENT_STATUS.COMPLETED]: '订单完成',
   [FULFILLMENT_STATUS.CANCELLED]: '已撤销',
   [FULFILLMENT_STATUS.CLOSED]: '已关闭',
+  [FULFILLMENT_STATUS.REFUNDING]: '退款中',
   [FULFILLMENT_STATUS.REFUNDED]: '已退款',
 }
 
@@ -63,7 +69,8 @@ const STATUS_HINTS = {
   [FULFILLMENT_STATUS.COMPLETED]: '订单履约已完成。',
   [FULFILLMENT_STATUS.CANCELLED]: '订单已撤销。',
   [FULFILLMENT_STATUS.CLOSED]: '订单未支付或已超时关闭。',
-  [FULFILLMENT_STATUS.REFUNDED]: '订单已退款。',
+  [FULFILLMENT_STATUS.REFUNDING]: '退款申请已提交，等待微信退款到账。',
+  [FULFILLMENT_STATUS.REFUNDED]: '订单已完成退款。',
 }
 
 const TERMINAL_PHYSICAL = new Set([FULFILLMENT_STATUS.RECEIVED])
@@ -136,8 +143,58 @@ function buildFulfillmentResult(code, kind, hintOverride) {
   }
 }
 
+function resolveRefundFulfillmentStatus(tradeState, refundStatus, kind) {
+  const refundState = refundStatus?.status || null
+
+  if (tradeState === 'REFUND' || COMPLETED_REFUND_STATUSES.includes(refundState)) {
+    return buildFulfillmentResult(FULFILLMENT_STATUS.REFUNDED, kind)
+  }
+
+  if (ACTIVE_REFUND_STATUSES.includes(refundState)) {
+    let hint = STATUS_HINTS[FULFILLMENT_STATUS.REFUNDING]
+    if (refundState === 'PENDING') {
+      hint = '退款申请待审批，审批通过后将提交微信退款。'
+    } else if (refundState === 'APPROVED') {
+      hint = '退款已审批，正在提交微信处理。'
+    } else if (refundState === 'PROCESSING') {
+      hint = '退款已提交微信，等待到账。'
+    }
+    return buildFulfillmentResult(FULFILLMENT_STATUS.REFUNDING, kind, hint)
+  }
+
+  return null
+}
+
+function pickEffectiveRefundRow(rows) {
+  if (!Array.isArray(rows) || !rows.length) return null
+
+  const sorted = [...rows].sort((a, b) => {
+    const idA = Number(a.id) || 0
+    const idB = Number(b.id) || 0
+    return idB - idA
+  })
+
+  const active = sorted.find((row) => ACTIVE_REFUND_STATUSES.includes(row.status))
+  if (active) return active
+
+  const completed = sorted.find((row) => COMPLETED_REFUND_STATUSES.includes(row.status))
+  if (completed) return completed
+
+  return sorted[0]
+}
+
+function mapRefundRowToStatus(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    status: row.status,
+    wx_refund_id: row.wx_refund_id || null,
+    created_at: row.created_at,
+    out_refund_no: row.out_refund_no || null,
+  }
+}
+
 function resolvePaymentTerminalStatus(tradeState, kind) {
-  if (tradeState === 'REFUND') return buildFulfillmentResult(FULFILLMENT_STATUS.REFUNDED, kind)
   if (tradeState === 'CLOSED') return buildFulfillmentResult(FULFILLMENT_STATUS.CLOSED, kind)
   if (tradeState === 'REVOKED') return buildFulfillmentResult(FULFILLMENT_STATUS.CANCELLED, kind)
   if (tradeState === 'PAYERROR') return buildFulfillmentResult(FULFILLMENT_STATUS.PAYMENT_FAILED, kind)
@@ -149,8 +206,13 @@ function resolveOrderFulfillmentStatus({
   tradeState,
   items = [],
   shipment = null,
+  refundStatus = null,
 }) {
   const kind = resolveFulfillmentKind(items)
+
+  const refundFulfillment = resolveRefundFulfillmentStatus(tradeState, refundStatus, kind)
+  if (refundFulfillment) return refundFulfillment
+
   const paymentTerminal = resolvePaymentTerminalStatus(tradeState, kind)
   if (paymentTerminal) return paymentTerminal
 
@@ -194,6 +256,24 @@ function resolveOrderFulfillmentStatus({
 }
 
 function buildFulfillmentTimelineStages(fulfillment, { paidAt, shipmentCreatedAt, qrUploadedAt, receivedAt } = {}) {
+  if (fulfillment.code === FULFILLMENT_STATUS.REFUNDING) {
+    const stages = []
+    if (paidAt) {
+      stages.push({
+        stage: 'PAID',
+        at: paidAt,
+        title: '支付成功',
+        description: '用户已完成支付',
+      })
+    }
+    stages.push({
+      stage: 'REFUND_IN_PROGRESS',
+      title: '退款中',
+      description: fulfillment.hint,
+    })
+    return stages
+  }
+
   const terminalCodes = [
     FULFILLMENT_STATUS.REFUNDED,
     FULFILLMENT_STATUS.CLOSED,
@@ -366,6 +446,10 @@ function pickFulfillmentPathNode(pathItemList) {
 module.exports = {
   FULFILLMENT_STATUS,
   STATUS_LABELS,
+  ACTIVE_REFUND_STATUSES,
+  COMPLETED_REFUND_STATUSES,
+  pickEffectiveRefundRow,
+  mapRefundRowToStatus,
   mapPathActionToStatus,
   resolveFulfillmentKind,
   resolveOrderFulfillmentStatus,
