@@ -571,8 +571,8 @@
             <span class="font-mono text-xs break-all">{{ refundForm.out_trade_no }}</span>
           </div>
           <div class="grid gap-1 text-sm">
-            <span class="text-muted-foreground">实付金额</span>
-            <span class="font-medium tabular-nums">¥{{ refundForm.refund_amount_yuan }}</span>
+            <span class="text-muted-foreground">预计退款金额（服务端按微信实付计算）</span>
+            <span class="font-medium tabular-nums">¥{{ refundForm.display_payable_yuan }}</span>
           </div>
           <div class="flex flex-col gap-2">
             <Label for="refund-reason">退款原因 <span class="text-destructive">*</span></Label>
@@ -924,7 +924,7 @@ const syncingRefundId = ref(null)
 const refundForm = reactive({
   orderId: null,
   out_trade_no: '',
-  refund_amount_yuan: '',
+  display_payable_yuan: '',
   reason: '',
 })
 
@@ -1185,7 +1185,7 @@ function openRefundDialog(order) {
 
   refundForm.orderId = order.id
   refundForm.out_trade_no = order.out_trade_no || ''
-  refundForm.refund_amount_yuan = String(order.actual_fee ?? order.fee?.amount_payable_yuan ?? '')
+  refundForm.display_payable_yuan = String(order.actual_fee ?? order.fee?.amount_payable_yuan ?? '')
   refundForm.reason = ''
   refundDialogVisible.value = true
 }
@@ -1202,7 +1202,6 @@ async function submitOrderRefund() {
   try {
     const response = await axios.post(`/wx/pay/admin/orders/${refundForm.orderId}/refund`, {
       reason,
-      refund_amount_yuan: refundForm.refund_amount_yuan,
     })
 
     if (response.success) {
