@@ -5,6 +5,29 @@ import path from 'path'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
+/** Rolldown/Vite 8+ 仅支持函数式 manualChunks */
+const MANUAL_CHUNK_GROUPS = {
+  'vue-vendor': ['vue-router', 'vue'],
+  'element-plus': ['@element-plus/icons-vue', 'element-plus'],
+  pinia: ['pinia'],
+  utils: ['axios'],
+  editor: ['@wangeditor/editor-for-vue', '@wangeditor/editor'],
+  'image-utils': ['browser-image-compression'],
+}
+
+function resolveManualChunk(id) {
+  if (!id.includes('node_modules')) return undefined
+
+  for (const [chunkName, packages] of Object.entries(MANUAL_CHUNK_GROUPS)) {
+    for (const pkg of packages) {
+      const inPkg = id.includes(`/node_modules/${pkg}/`) || id.includes(`\\node_modules\\${pkg}\\`)
+      if (inPkg) return chunkName
+    }
+  }
+
+  return undefined
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const devProxyTarget = (env.VITE_DEV_PROXY_TARGET || 'http://localhost:2000').replace(/\/+$/, '')
@@ -58,14 +81,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           // 仅拆分前端实际依赖；勿把仅服务端使用的 @alicloud/*、ali-oss、sharp 写进来，否则会空 chunk 并触发 Node polyfill 告警
-          manualChunks: {
-            'vue-vendor': ['vue', 'vue-router'],
-            'element-plus': ['element-plus', '@element-plus/icons-vue'],
-            pinia: ['pinia'],
-            utils: ['axios'],
-            editor: ['@wangeditor/editor', '@wangeditor/editor-for-vue'],
-            'image-utils': ['browser-image-compression']
-          }
+          manualChunks: resolveManualChunk,
         }
       },
       chunkSizeWarningLimit: 1000,
