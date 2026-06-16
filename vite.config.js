@@ -28,6 +28,24 @@ function resolveManualChunk(id) {
   return undefined
 }
 
+/** @vueuse/core 等依赖的 #__PURE__ 注释位置与 Rolldown 不兼容，等待上游修复前忽略 */
+function shouldIgnoreRolldownPureAnnotationWarning(warning) {
+  const code = String(warning.code ?? '')
+  const message = String(warning.message ?? '')
+
+  if (code === 'INVALID_ANNOTATION') return true
+  if (message.includes('INVALID_ANNOTATION')) return true
+  if (message.includes('contains an annotation that Rolldown cannot interpret')) return true
+  if (message.includes('contains an annotation that Rollup cannot interpret')) return true
+
+  return false
+}
+
+function handleRolldownWarning(warning, warn) {
+  if (shouldIgnoreRolldownPureAnnotationWarning(warning)) return
+  warn(warning)
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const devProxyTarget = (env.VITE_DEV_PROXY_TARGET || 'http://localhost:2000').replace(/\/+$/, '')
@@ -79,6 +97,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
+        onwarn: handleRolldownWarning,
         output: {
           // 仅拆分前端实际依赖；勿把仅服务端使用的 @alicloud/*、ali-oss、sharp 写进来，否则会空 chunk 并触发 Node polyfill 告警
           manualChunks: resolveManualChunk,
