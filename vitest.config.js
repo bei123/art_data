@@ -8,6 +8,7 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.spec.js', 'src/**/*.spec.js'],
     passWithNoTests: true,
+    setupFiles: ['./tests/setup.js'],
   },
   resolve: {
     alias: {

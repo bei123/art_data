@@ -1,7 +1,9 @@
 const jwt = require('jsonwebtoken')
 const { query } = require('../db')
 
+const isTestRuntime = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test'
 const JWT_SECRET = process.env.JWT_SECRET
+  || (isTestRuntime ? 'vitest-jwt-secret-at-least-32-characters' : null)
 
 if (!JWT_SECRET) {
   console.error('错误: 缺少必要的环境变量 JWT_SECRET')

@@ -32,6 +32,10 @@ jobs:
 
       - name: Run tests
         run: npm run test
+        env:
+          NODE_ENV: test
+          DB_PASSWORD: ci-test-db-password
+          JWT_SECRET: ci-test-jwt-secret-key-at-least-32-characters
 
       - name: Production build
         run: npm run build

@@ -5,6 +5,7 @@ const { getRequestId } = require('./middleware/requestContext');
 const { redactLogValue } = require('./utils/redactLog');
 
 const isDev = process.env.NODE_ENV === 'development';
+const isTestRuntime = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
 
 // 数据库配置 - 最简化版本（只使用MySQL2核心支持的选项）
 const dbConfig = {
@@ -20,8 +21,12 @@ const dbConfig = {
 
 // 检查必要的环境变量
 if (!process.env.DB_PASSWORD) {
-    console.error('错误: 缺少必要的环境变量 DB_PASSWORD');
-    process.exit(1);
+    if (isTestRuntime) {
+        dbConfig.password = 'test-ci-db-password';
+    } else {
+        console.error('错误: 缺少必要的环境变量 DB_PASSWORD');
+        process.exit(1);
+    }
 }
 
 if (isDev) {
@@ -56,7 +61,8 @@ pool.on('enqueue', () => {
     if (isDev) console.log('等待可用的连接...');
 });
 
-// 启动时探测连接池（生产仅一条结构化就绪日志）
+// 启动时探测连接池（生产仅一条结构化就绪日志；测试环境跳过，避免无 MySQL 时刷屏）
+if (!isTestRuntime) {
 pool.getConnection()
     .then((connection) => {
         if (isDev) console.log('数据库连接成功');
@@ -70,6 +76,7 @@ pool.getConnection()
     .catch((err) => {
         logger.error('db_startup_failed', { err });
     });
+}
 
 // 执行查询的包装函数 - 性能优化版本
 const query = async (sql, params) => {

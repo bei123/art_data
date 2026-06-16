@@ -57,6 +57,10 @@ jobs:
 
       - name: Vitest
         run: npm run test
+        env:
+          NODE_ENV: test
+          DB_PASSWORD: ci-test-db-password
+          JWT_SECRET: ci-test-jwt-secret-key-at-least-32-characters
 
   build:
     name: Build

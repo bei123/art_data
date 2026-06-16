@@ -41,3 +41,7 @@ jobs:
 
       - name: Full CI smoke
         run: npm run ci
+        env:
+          NODE_ENV: test
+          DB_PASSWORD: ci-test-db-password
+          JWT_SECRET: ci-test-jwt-secret-key-at-least-32-characters
