@@ -17,7 +17,7 @@
         </div>
         <div class="flex flex-wrap items-end gap-2">
           <div class="flex min-w-[9rem] flex-col gap-1.5">
-            <span class="text-xs text-muted-foreground">订单状态</span>
+            <span class="text-xs text-muted-foreground">支付状态</span>
             <select
               v-model="filters.status"
               class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -29,6 +29,23 @@
               <option value="CLOSED">已关闭</option>
               <option value="REVOKED">已撤销</option>
               <option value="PAYERROR">支付失败</option>
+            </select>
+          </div>
+          <div class="flex min-w-[9rem] flex-col gap-1.5">
+            <span class="text-xs text-muted-foreground">履约状态</span>
+            <select
+              v-model="filters.fulfillment"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">全部</option>
+              <option value="created">创建订单</option>
+              <option value="awaiting_shipment">待发货</option>
+              <option value="awaiting_delivery">待交付</option>
+              <option value="shipped">已发货</option>
+              <option value="in_transit">运输中</option>
+              <option value="received">已收货</option>
+              <option value="delivered">已交付</option>
+              <option value="completed">订单完成</option>
             </select>
           </div>
           <div class="flex min-w-[9rem] flex-col gap-1.5">
@@ -73,7 +90,7 @@
         <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
       <CardContent class="overflow-x-auto p-0 sm:p-6">
-        <table class="w-full min-w-[1100px] text-sm">
+        <table class="w-full min-w-[1200px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
               <th class="h-10 w-44 px-3 text-left font-medium">订单号</th>
@@ -82,6 +99,7 @@
               <th class="h-10 w-28 px-3 text-left font-medium">订单金额</th>
               <th class="h-10 w-28 px-3 text-left font-medium">实付金额</th>
               <th class="h-10 w-28 px-3 text-left font-medium">支付状态</th>
+              <th class="h-10 w-28 px-3 text-left font-medium">履约状态</th>
               <th class="h-10 w-44 px-3 text-left font-medium">创建时间</th>
               <th class="h-10 w-28 px-3 text-right font-medium">操作</th>
             </tr>
@@ -150,6 +168,11 @@
                   {{ getStatusLabel(row.pay_status?.trade_state) }}
                 </Badge>
               </td>
+              <td class="px-3 py-2.5">
+                <Badge :variant="getFulfillmentBadgeVariant(row.fulfillment_status?.code)">
+                  {{ getFulfillmentLabel(row.fulfillment_status) }}
+                </Badge>
+              </td>
               <td class="px-3 py-2.5 tabular-nums text-muted-foreground">{{ row.created_at }}</td>
               <td class="px-3 py-2.5 text-right">
                 <div class="flex flex-wrap justify-end gap-1.5">
@@ -169,7 +192,7 @@
               </td>
             </tr>
             <tr v-if="orders.length === 0 && !loading">
-              <td colspan="8" class="px-3 py-12 text-center text-muted-foreground">
+              <td colspan="9" class="px-3 py-12 text-center text-muted-foreground">
                 暂无订单数据
               </td>
             </tr>
@@ -284,6 +307,20 @@
                     {{ getStatusLabel(selectedOrder.pay_status?.trade_state) }}
                   </Badge>
                 </div>
+              </div>
+              <div class="rounded-lg border border-border p-3">
+                <div class="text-xs text-muted-foreground">履约状态</div>
+                <div class="mt-2">
+                  <Badge :variant="getFulfillmentBadgeVariant(selectedOrder.fulfillment_status?.code)">
+                    {{ getFulfillmentLabel(selectedOrder.fulfillment_status) }}
+                  </Badge>
+                </div>
+                <p
+                  v-if="selectedOrder.fulfillment_status?.hint"
+                  class="mt-2 text-xs text-muted-foreground leading-relaxed"
+                >
+                  {{ selectedOrder.fulfillment_status.hint }}
+                </p>
               </div>
             </div>
           </div>
@@ -934,6 +971,7 @@ const cancelWaybillSubmitting = ref(false)
 const filters = reactive({
   keyword: '',
   status: '',
+  fulfillment: '',
   type: '',
 })
 
@@ -987,8 +1025,14 @@ const fetchOrders = async () => {
     const response = await axios.get('/wx/pay/admin/orders', { params })
 
     if (response.success) {
-      orders.value = response.data.orders
-      pagination.total = response.data.pagination.total
+      let rows = response.data.orders || []
+      if (filters.fulfillment) {
+        rows = rows.filter((row) => row.fulfillment_status?.code === filters.fulfillment)
+      }
+      orders.value = rows
+      pagination.total = filters.fulfillment
+        ? rows.length
+        : response.data.pagination.total
     } else {
       orders.value = []
       pagination.total = 0
@@ -1007,6 +1051,7 @@ const fetchOrders = async () => {
 const resetFilters = () => {
   filters.keyword = ''
   filters.status = ''
+  filters.fulfillment = ''
   filters.type = ''
   pagination.page = 1
   fetchOrders()
@@ -1064,6 +1109,7 @@ function mergeAdminOrderDetail(listOrder, data) {
     discount_amount: data.fee?.discount_yuan ?? listOrder.discount_amount,
     total_fee: data.fee?.order_total_before_discount_yuan ?? listOrder.total_fee ?? data.total_fee,
     pay_status: payStatus,
+    fulfillment_status: data.fulfillment_status || listOrder.fulfillment_status,
     items: mapDetailItemsToOrderItems(data.detail_items?.length ? data.detail_items : listOrder.items),
     refunds: data.refunds || [],
     shipments: data.shipments || [],
@@ -1096,6 +1142,13 @@ async function refreshSelectedOrderDetail(orderId) {
 
   const listOrder = orders.value.find((row) => row.id === orderId) || selectedOrder.value
   selectedOrder.value = mergeAdminOrderDetail(listOrder || { id: orderId }, response.data)
+  orders.value = orders.value.map((order) => {
+    if (order.id !== orderId) return order
+    return {
+      ...order,
+      fulfillment_status: selectedOrder.value.fulfillment_status,
+    }
+  })
   prefillTrackFormFromOrder(selectedOrder.value)
   return selectedOrder.value
 }
@@ -1369,6 +1422,7 @@ async function handleDigitalQrUpload(item, event) {
       qr_code_uploaded_at: saved.qr_code_uploaded_at,
       fulfillment: saved.fulfillment,
     })
+    await refreshSelectedOrderDetail(selectedOrder.value.id)
     ElMessage.success('二维码已保存，用户可在订单中查看')
   } catch (error) {
     console.error('上传数字藏品二维码失败:', error)
@@ -1719,6 +1773,46 @@ const getImageUrl = (url) => {
   if (!url) return ''
   if (isOssPublicUrl(url)) return url
   return url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+}
+
+function getFulfillmentBadgeVariant(code) {
+  const map = {
+    created: 'outline',
+    awaiting_payment: 'outline',
+    payment_failed: 'destructive',
+    awaiting_shipment: 'secondary',
+    awaiting_delivery: 'secondary',
+    shipped: 'default',
+    in_transit: 'default',
+    received: 'default',
+    delivered: 'default',
+    completed: 'default',
+    cancelled: 'destructive',
+    closed: 'destructive',
+    refunded: 'secondary',
+  }
+  return map[code] || 'secondary'
+}
+
+function getFulfillmentLabel(fulfillment) {
+  if (!fulfillment) return '—'
+  if (fulfillment.text) return fulfillment.text
+  const map = {
+    created: '创建订单',
+    awaiting_payment: '待支付',
+    payment_failed: '支付失败',
+    awaiting_shipment: '待发货',
+    awaiting_delivery: '待交付',
+    shipped: '已发货',
+    in_transit: '运输中',
+    received: '已收货',
+    delivered: '已交付',
+    completed: '订单完成',
+    cancelled: '已撤销',
+    closed: '已关闭',
+    refunded: '已退款',
+  }
+  return map[fulfillment.code] || '未知状态'
 }
 
 function getStatusBadgeVariant(status) {

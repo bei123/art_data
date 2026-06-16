@@ -22,6 +22,12 @@ const {
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema');
 const {
+    resolveOrderFulfillmentStatus,
+    buildFulfillmentTimelineStages,
+    pickLatestPathNode,
+    FULFILLMENT_STATUS,
+} = require('../utils/orderFulfillmentStatus');
+const {
     DIGITAL_ITEM_JOIN_SQL,
     DIGITAL_ITEM_SELECT_SQL,
     parseDigitalArtworkId,
@@ -2460,10 +2466,10 @@ async function fetchLatestRefundStatusByOutTradeNos(outTradeNos) {
     return refundByOutTradeNo;
 }
 
-function buildOrderStatusFields(tradeState, tradeStateDesc) {
+function buildOrderStatusFields(tradeState, tradeStateDesc, fulfillmentContext = null) {
     const state = tradeState || 'UNKNOWN';
     const displayText = tradeStateDesc || getOrderStatusText(state);
-    return {
+    const payload = {
         pay_status: {
             trade_state: state,
             trade_state_desc: displayText,
@@ -2473,6 +2479,79 @@ function buildOrderStatusFields(tradeState, tradeStateDesc) {
             text: displayText,
         },
     };
+    if (fulfillmentContext) {
+        payload.fulfillment_status = fulfillmentContext;
+    }
+    return payload;
+}
+
+async function fetchFulfillmentContextByOrderIds(orderIds) {
+    if (!orderIds.length) return new Map();
+
+    await ensureOrderItemsQrCodeColumns();
+    await ensureOrderShipmentsTable();
+
+    const placeholders = orderIds.map(() => '?').join(', ');
+
+    const [itemRows] = await db.query(
+        `SELECT order_id, type, delivery_qr_code_url, delivery_qr_code_at
+         FROM order_items
+         WHERE order_id IN (${placeholders})
+         ORDER BY id ASC`,
+        orderIds,
+    );
+
+    const [shipmentRows] = await db.query(
+        `SELECT order_id, id, waybill_id, status, latest_path_action_type, latest_path_action_at, created_at
+         FROM order_shipments
+         WHERE order_id IN (${placeholders}) AND status = 'active'
+         ORDER BY id DESC`,
+        orderIds,
+    );
+
+    const itemsByOrderId = new Map();
+    for (const row of itemRows || []) {
+        const bucket = itemsByOrderId.get(row.order_id) || [];
+        bucket.push({
+            type: row.type,
+            delivery_qr_code_url: row.delivery_qr_code_url,
+            delivery_qr_code_at: row.delivery_qr_code_at,
+        });
+        itemsByOrderId.set(row.order_id, bucket);
+    }
+
+    const shipmentByOrderId = new Map();
+    for (const row of shipmentRows || []) {
+        if (!shipmentByOrderId.has(row.order_id)) {
+            shipmentByOrderId.set(row.order_id, row);
+        }
+    }
+
+    const contextByOrderId = new Map();
+    for (const orderId of orderIds) {
+        contextByOrderId.set(orderId, {
+            items: itemsByOrderId.get(orderId) || [],
+            shipment: shipmentByOrderId.get(orderId) || null,
+        });
+    }
+    return contextByOrderId;
+}
+
+function resolveFulfillmentForOrder(order, fulfillmentContext) {
+    const ctx = fulfillmentContext || { items: [], shipment: null };
+    const items = ctx.items.length
+        ? ctx.items
+        : (order.items || []).map((item) => ({
+            type: item.type,
+            delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
+            delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
+        }));
+
+    return resolveOrderFulfillmentStatus({
+        tradeState: order.trade_state || order.pay_status?.trade_state,
+        items,
+        shipment: ctx.shipment,
+    });
 }
 
 async function refreshListOrdersPaymentState(orders) {
@@ -2487,8 +2566,12 @@ function filterOrdersByStatus(orders, statusStates) {
     return orders.filter((order) => statusStates.includes(order.trade_state));
 }
 
-function mapOrderToListCard(order, items, refundStatus) {
-    const statusFields = buildOrderStatusFields(order.trade_state, order.trade_state_desc);
+function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus) {
+    const statusFields = buildOrderStatusFields(
+        order.trade_state,
+        order.trade_state_desc,
+        fulfillmentStatus,
+    );
     return {
         out_trade_no: order.out_trade_no,
         created_at: toIsoOrNull(order.created_at),
@@ -2588,16 +2671,22 @@ async function listOrders(req) {
         const visibleOrders = filterOrdersByStatus(orders, statusStates);
 
         const orderIds = visibleOrders.map((order) => order.id);
-        const [itemsByOrderId, refundByOutTradeNo] = await Promise.all([
+        const [itemsByOrderId, refundByOutTradeNo, fulfillmentContextByOrderId] = await Promise.all([
             fetchListOrderItemsByOrderIds(orderIds),
             fetchLatestRefundStatusByOutTradeNos(visibleOrders.map((order) => order.out_trade_no)),
+            fetchFulfillmentContextByOrderIds(orderIds),
         ]);
 
-        const orderCards = visibleOrders.map((order) => mapOrderToListCard(
-            order,
-            itemsByOrderId.get(order.id) || [],
-            refundByOutTradeNo.get(order.out_trade_no) || null
-        ));
+        const orderCards = visibleOrders.map((order) => {
+            const fulfillmentCtx = fulfillmentContextByOrderId.get(order.id);
+            const fulfillmentStatus = resolveFulfillmentForOrder(order, fulfillmentCtx);
+            return mapOrderToListCard(
+                order,
+                itemsByOrderId.get(order.id) || [],
+                refundByOutTradeNo.get(order.out_trade_no) || null,
+                fulfillmentStatus,
+            );
+        });
 
         const totalCount = Number(total);
         const hasMore = cleanPage * cleanLimit < totalCount;
@@ -2960,10 +3049,30 @@ async function adminOrders(req) {
             }
         }));
 
+        const fulfillmentContextByOrderId = await fetchFulfillmentContextByOrderIds(
+            ordersWithItems.map((order) => order.id),
+        );
+
+        const ordersWithFulfillment = ordersWithItems.map((order) => {
+            const fulfillmentCtx = fulfillmentContextByOrderId.get(order.id);
+            const fulfillmentStatus = resolveFulfillmentForOrder(order, {
+                items: (order.items || []).map((item) => ({
+                    type: item.type,
+                    delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
+                    delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
+                })),
+                shipment: fulfillmentCtx?.shipment || null,
+            });
+            return {
+                ...order,
+                fulfillment_status: fulfillmentStatus,
+            };
+        });
+
         return adminResult(200, {
             success: true,
             data: {
-                orders: ordersWithItems,
+                orders: ordersWithFulfillment,
                 pagination: {
                     total: parseInt(total),
                     page: cleanPage,
@@ -3238,6 +3347,8 @@ function mapShipmentRowFromDb(row) {
         waybill_data: parseJsonColumn(row.waybill_data_json) || [],
         company_name: row.company_name,
         status: row.status,
+        latest_path_action_type: row.latest_path_action_type != null ? Number(row.latest_path_action_type) : null,
+        latest_path_action_at: toIsoOrNull(row.latest_path_action_at),
         created_at: toIsoOrNull(row.created_at),
         updated_at: toIsoOrNull(row.updated_at),
     };
@@ -3433,7 +3544,8 @@ async function orderDetailForActor(req, options = {}) {
             await ensureOrderShipmentsTable();
             const [rows] = await db.query(
                 `SELECT id, order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
-                use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status, created_at, updated_at
+                use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status,
+                latest_path_action_type, latest_path_action_at, created_at, updated_at
                 FROM order_shipments WHERE order_id = ? AND status = 'active' ORDER BY id DESC`,
                 [internalOrderId]
             );
@@ -3759,7 +3871,48 @@ async function orderDetailForActor(req, options = {}) {
             orderPayload.user_id = order.user_id;
         }
 
-        const statusFields = buildOrderStatusFields(effectiveTradeState, effectiveTradeStateDesc);
+        const statusFields = buildOrderStatusFields(
+            effectiveTradeState,
+            effectiveTradeStateDesc,
+            resolveOrderFulfillmentStatus({
+                tradeState: effectiveTradeState,
+                items: items.map((item) => ({
+                    type: item.type,
+                    delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
+                    delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
+                })),
+                shipment: (() => {
+                    if (!primaryShipment) return null;
+                    const pathNode = primaryShipment.wechat_path?.path_item_list
+                        ? pickLatestPathNode(primaryShipment.wechat_path.path_item_list)
+                        : null;
+                    const actionType = pathNode?.action_type != null
+                        ? Number(pathNode.action_type)
+                        : primaryShipment.latest_path_action_type;
+                    return {
+                        waybill_id: primaryShipment.waybill_id,
+                        status: primaryShipment.status,
+                        latest_path_action_type: actionType,
+                        created_at: primaryShipment.created_at,
+                    };
+                })(),
+            }),
+        );
+
+        const fulfillmentTimeline = buildFulfillmentTimelineStages(statusFields.fulfillment_status, {
+            paidAt: wxPay?.success_time || toIsoOrNull(order.success_time),
+            shipmentCreatedAt: primaryShipment?.created_at || null,
+            qrUploadedAt: items
+                .filter((item) => item.type === 'digital')
+                .map((item) => item.delivery_qr_code_at || item.qr_code_uploaded_at)
+                .find(Boolean) || null,
+            receivedAt: primaryShipment?.latest_path_action_at || null,
+        });
+        for (const stage of fulfillmentTimeline) {
+            if (!timeline.some((row) => row.stage === stage.stage)) {
+                timeline.push(stage);
+            }
+        }
         const latestRefund = refunds.length > 0 ? refunds[refunds.length - 1] : null;
         const refundStatus = latestRefund
             ? {

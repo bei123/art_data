@@ -4,7 +4,7 @@ const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
 const { getAccessToken } = require('./wechatMiniProgramToken')
 const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
-const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema')
+const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 
 const PATH_SEEN_REDIS_PREFIX = 'logistics:path:seen:'
@@ -256,6 +256,18 @@ async function handleLogisticsPathNotify({
   const nodes = sortPathNodesChronologically(pathItemList)
   if (!nodes.length) {
     return { skipped: true, reason: 'empty_path_list' }
+  }
+
+  const latestNode = pickLatestPathNode(nodes)
+  if (latestNode) {
+    const actionAtSec = Number(latestNode.action_time) || 0
+    const actionAt = actionAtSec > 0 ? new Date(actionAtSec * 1000) : new Date()
+    await persistShipmentLatestPath({
+      orderId,
+      waybillId,
+      actionType: latestNode.action_type,
+      actionAt,
+    })
   }
 
   const seenSet = await loadSeenPathFingerprints(orderId, waybillId)

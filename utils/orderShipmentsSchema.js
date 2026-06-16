@@ -16,6 +16,14 @@ const OPTIONAL_COLUMNS = [
     name: 'company_name',
     ddl: "VARCHAR(64) NULL COMMENT '快递公司名称'",
   },
+  {
+    name: 'latest_path_action_type',
+    ddl: "INT NULL COMMENT '微信物流最新轨迹 action_type'",
+  },
+  {
+    name: 'latest_path_action_at',
+    ddl: "DATETIME NULL COMMENT '微信物流最新轨迹时间'",
+  },
 ]
 
 async function hasTable(tableName) {
@@ -87,6 +95,26 @@ async function ensureOrderShipmentsTable() {
   ensured = true
 }
 
+async function persistShipmentLatestPath({ orderId, waybillId, actionType, actionAt }) {
+  if (!orderId || !waybillId || actionType == null) return
+  await ensureOrderShipmentsTable()
+  const actionTime = actionAt ? new Date(actionAt) : new Date()
+  if (Number.isNaN(actionTime.getTime())) return
+
+  try {
+    await db.query(
+      `UPDATE order_shipments
+       SET latest_path_action_type = ?,
+           latest_path_action_at = ?
+       WHERE order_id = ? AND waybill_id = ? AND status = 'active'`,
+      [Number(actionType), actionTime, orderId, String(waybillId).trim()],
+    )
+  } catch (err) {
+    logger.warn('persistShipmentLatestPath failed', { orderId, waybillId, err: err.message })
+  }
+}
+
 module.exports = {
   ensureOrderShipmentsTable,
+  persistShipmentLatestPath,
 }
