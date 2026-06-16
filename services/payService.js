@@ -2482,6 +2482,144 @@ async function fetchListOrderItemsByOrderIds(orderIds) {
     return itemsByOrderId;
 }
 
+function buildListPayStatusFromOrder(order) {
+    const actualFeeYuan = parseFloat(order.actual_fee) || parseFloat(order.total_fee) || 0;
+    const totalFen = Number.isFinite(actualFeeYuan) && actualFeeYuan > 0
+        ? Math.round(actualFeeYuan * 100)
+        : null;
+    const tradeState = order.trade_state || 'UNKNOWN';
+    return {
+        trade_state: tradeState,
+        trade_state_desc: order.trade_state_desc || getOrderStatusText(tradeState),
+        success_time: order.success_time || null,
+        amount: totalFen != null ? { total: totalFen, currency: 'CNY' } : null,
+        transaction_id: order.transaction_id || null,
+    };
+}
+
+function processAdminListOrderItem(item, orderTradeState) {
+    let processedItem = {
+        id: item.id,
+        type: item.type,
+        right_id: item.right_id != null ? item.right_id : null,
+        digital_artwork_id: item.digital_artwork_id != null ? item.digital_artwork_id : null,
+        artwork_id: item.artwork_id != null ? item.artwork_id : null,
+        quantity: item.quantity,
+        price: item.price,
+        address_id: item.address_id,
+        ...mapDigitalItemQrFields(item),
+        address: item.address_id ? {
+            id: item.address_id,
+            receiver_name: item.receiver_name,
+            receiver_phone: item.receiver_phone,
+            province: item.province,
+            city: item.city,
+            district: item.district,
+            detail_address: item.detail_address,
+            is_default: item.is_default === 1,
+            full_address: `${item.province} ${item.city} ${item.district} ${item.detail_address}`,
+        } : null,
+    };
+
+    if (item.type === 'right') {
+        processedItem = {
+            ...processedItem,
+            title: item.right_title,
+            original_price: item.right_original_price,
+            description: item.right_description,
+            status: item.right_status,
+            remaining_count: item.right_remaining_count,
+            images: item.right_image_url ? [item.right_image_url] : [],
+        };
+    } else if (item.type === 'digital') {
+        processedItem = {
+            ...processedItem,
+            title: item.digital_title,
+            description: item.digital_description,
+            images: item.digital_image_url ? [item.digital_image_url] : [],
+            fulfillment: buildDigitalItemFulfillment({
+                tradeState: orderTradeState,
+                qrCodeUrl: item.delivery_qr_code_url,
+                qrCodeAt: item.delivery_qr_code_at,
+            }),
+        };
+    } else if (item.type === 'artwork') {
+        processedItem = {
+            ...processedItem,
+            title: item.artwork_title,
+            original_price: item.artwork_original_price,
+            discount_price: item.artwork_discount_price,
+            description: item.artwork_description,
+            images: item.artwork_image ? [item.artwork_image] : [],
+        };
+    }
+
+    return {
+        ...processedItem,
+        business_ids: {
+            right_id: processedItem.right_id,
+            digital_artwork_id: processedItem.digital_artwork_id,
+            artwork_id: processedItem.artwork_id,
+        },
+    };
+}
+
+async function fetchAdminOrderItemsByOrderIds(orderIds) {
+    if (!orderIds.length) return new Map();
+
+    await ensureOrderItemsQrCodeColumns();
+
+    const placeholders = orderIds.map(() => '?').join(', ');
+    const [orderItems] = await db.query(`
+        SELECT
+            oi.order_id,
+            oi.id,
+            oi.type,
+            oi.right_id,
+            oi.digital_artwork_id,
+            oi.artwork_id,
+            oi.quantity,
+            oi.price,
+            oi.address_id,
+            oi.delivery_qr_code_url,
+            oi.delivery_qr_code_at,
+            r.title AS right_title,
+            r.original_price AS right_original_price,
+            r.description AS right_description,
+            r.status AS right_status,
+            r.remaining_count AS right_remaining_count,
+            (SELECT ri.image_url FROM right_images ri WHERE ri.right_id = oi.right_id ORDER BY ri.id ASC LIMIT 1) AS right_image_url,
+            ${DIGITAL_ITEM_SELECT_SQL},
+            oa.title AS artwork_title,
+            oa.original_price AS artwork_original_price,
+            oa.discount_price AS artwork_discount_price,
+            oa.description AS artwork_description,
+            oa.image AS artwork_image,
+            wa.receiver_name,
+            wa.receiver_phone,
+            wa.province,
+            wa.city,
+            wa.district,
+            wa.detail_address,
+            wa.is_default
+        FROM order_items oi
+        LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+        ${DIGITAL_ITEM_JOIN_SQL}
+        LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+        LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
+        WHERE oi.order_id IN (${placeholders})
+        ORDER BY oi.order_id ASC, oi.id ASC
+    `, orderIds);
+
+    const itemsByOrderId = new Map();
+    for (const item of orderItems || []) {
+        const bucket = itemsByOrderId.get(item.order_id) || [];
+        bucket.push(item);
+        itemsByOrderId.set(item.order_id, bucket);
+    }
+    return itemsByOrderId;
+}
+
 async function fetchLatestRefundStatusByOutTradeNos(outTradeNos) {
     if (!outTradeNos.length) return new Map();
 
@@ -2605,7 +2743,11 @@ async function refreshListOrdersPaymentState(orders) {
     const needSync = orders.filter((order) => order.trade_state === 'NOTPAY' || order.trade_state === 'PAYERROR');
     if (needSync.length === 0) return;
 
-    await Promise.all(needSync.map((order) => syncOrderTradeStateFromWechat(order)));
+    const syncBatchSize = 3;
+    for (let i = 0; i < needSync.length; i += syncBatchSize) {
+        const batch = needSync.slice(i, i + syncBatchSize);
+        await Promise.all(batch.map((order) => syncOrderTradeStateFromWechat(order)));
+    }
 }
 
 function filterOrdersByStatus(orders, statusStates) {
@@ -2926,201 +3068,56 @@ async function adminOrders(req) {
         const offset = (cleanPage - 1) * cleanLimit;
         params.push(cleanLimit, offset);
 
-        // 执行查询
-        const [orders] = await db.query(query, params);
-        const [[{ total }]] = await db.query(countQuery, countParams);
+        // 并行：订单列表 + 总数
+        const [[orders], [[{ total }]]] = await Promise.all([
+            db.query(query, params),
+            db.query(countQuery, countParams),
+        ]);
 
-        // 查询每个订单的订单项
-        const ordersWithItems = await Promise.all(orders.map(async (order) => {
-            // 查询订单项
-            const [orderItems] = await db.query(`
-                 SELECT 
-                     oi.id,
-                     oi.type,
-                     oi.right_id,
-                     oi.digital_artwork_id,
-                     oi.artwork_id,
-                     oi.quantity,
-                     oi.price,
-                     oi.address_id,
-                     oi.delivery_qr_code_url,
-                     oi.delivery_qr_code_at,
-                     r.title as right_title,
-                     r.price as right_price,
-                     r.original_price as right_original_price,
-                     r.description as right_description,
-                     r.status as right_status,
-                     r.remaining_count as right_remaining_count,
-                     ri.image_url as right_image_url,
-                     ${DIGITAL_ITEM_SELECT_SQL},
-                    oa.title as artwork_title,
-                    oa.original_price as artwork_original_price,
-                    oa.discount_price as artwork_discount_price,
-                    oa.description as artwork_description,
-                    oa.image as artwork_image,
-                    wa.receiver_name,
-                    wa.receiver_phone,
-                    wa.province,
-                    wa.city,
-                    wa.district,
-                    wa.detail_address,
-                    wa.is_default
-                FROM order_items oi
-                LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-                LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
-                ${DIGITAL_ITEM_JOIN_SQL}
-                LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
-                LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
-                WHERE oi.order_id = ?
-            `, [order.id]);
-
-            // 处理订单项数据
-            const orderItemsWithImages = orderItems.map(item => {
-                let processedItem = {
-                    id: item.id,
-                    type: item.type,
-                    right_id: item.right_id != null ? item.right_id : null,
-                    digital_artwork_id: item.digital_artwork_id != null ? item.digital_artwork_id : null,
-                    artwork_id: item.artwork_id != null ? item.artwork_id : null,
-                    quantity: item.quantity,
-                    price: item.price,
-                    address_id: item.address_id,
-                    ...mapDigitalItemQrFields(item),
-                    address: item.address_id ? {
-                        id: item.address_id,
-                        receiver_name: item.receiver_name,
-                        receiver_phone: item.receiver_phone,
-                        province: item.province,
-                        city: item.city,
-                        district: item.district,
-                        detail_address: item.detail_address,
-                        is_default: item.is_default === 1,
-                        full_address: `${item.province} ${item.city} ${item.district} ${item.detail_address}`
-                    } : null
-                };
-
-                // 根据类型设置相应的字段
-                if (item.type === 'right') {
-                    processedItem = {
-                        ...processedItem,
-                        title: item.right_title,
-                        original_price: item.right_original_price,
-                        description: item.right_description,
-                        status: item.right_status,
-                        remaining_count: item.right_remaining_count,
-                        images: item.right_image_url ? [item.right_image_url] : []
-                    };
-                } else if (item.type === 'digital') {
-                    const digitalFulfillment = buildDigitalItemFulfillment({
-                        tradeState: order.trade_state,
-                        qrCodeUrl: item.delivery_qr_code_url,
-                        qrCodeAt: item.delivery_qr_code_at,
-                    });
-                    processedItem = {
-                        ...processedItem,
-                        title: item.digital_title,
-                        description: item.digital_description,
-                        images: item.digital_image_url ? [item.digital_image_url] : [],
-                        fulfillment: digitalFulfillment,
-                    };
-                } else if (item.type === 'artwork') {
-                    processedItem = {
-                        ...processedItem,
-                        title: item.artwork_title,
-                        original_price: item.artwork_original_price,
-                        discount_price: item.artwork_discount_price,
-                        description: item.artwork_description,
-                        images: item.artwork_image ? [item.artwork_image] : []
-                    };
-                }
-
-                return {
-                    ...processedItem,
-                    business_ids: {
-                        right_id: processedItem.right_id,
-                        digital_artwork_id: processedItem.digital_artwork_id,
-                        artwork_id: processedItem.artwork_id,
+        if (!orders.length) {
+            return adminResult(200, {
+                success: true,
+                data: {
+                    orders: [],
+                    pagination: {
+                        total: parseInt(total, 10) || 0,
+                        page: cleanPage,
+                        limit: cleanLimit,
                     },
-                };
+                },
             });
+        }
 
-            // 查询微信支付订单状态
-            try {
-                const timestamp = Math.floor(Date.now() / 1000).toString();
-                const nonceStr = generateNonceStr();
-                const method = 'GET';
-                const url = `/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`;
-                const body = '';
-                const signature = generateSignV3(method, url, timestamp, nonceStr, body);
+        // 仅对未支付订单同步微信（列表不逐条查微信，详情页再实时同步）
+        await refreshListOrdersPaymentState(orders);
 
-                const response = await axios.get(
-                    `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${order.out_trade_no}?mchid=${WX_PAY_CONFIG.mchId}`,
-                    {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Authorization': `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
-                            'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
-                            'User-Agent': 'axios/1.9.0'
-                        }
-                    }
-                );
+        const orderIds = orders.map((order) => order.id);
+        const outTradeNos = orders.map((order) => order.out_trade_no);
 
-                const wxPayData = response.data;
-                return {
-                    ...order,
-                    items: orderItemsWithImages,
-                    pay_status: {
-                        trade_state: wxPayData.trade_state || 'UNKNOWN',
-                        trade_state_desc: wxPayData.trade_state_desc || '未知状态',
-                        success_time: wxPayData.success_time || null,
-                        amount: wxPayData.amount ? {
-                            total: wxPayData.amount.total,
-                            currency: wxPayData.amount.currency
-                        } : null,
-                        transaction_id: wxPayData.transaction_id || null
-                    }
-                };
-            } catch (error) {
-                logger.error('查询微信支付状态失败', { err: error });
-                // 如果查询微信支付状态失败，返回数据库中的订单信息
-                return {
-                    ...order,
-                    items: orderItemsWithImages,
-                    pay_status: {
-                        trade_state: order.trade_state || 'UNKNOWN',
-                        trade_state_desc: order.trade_state_desc || '支付状态查询失败',
-                        success_time: order.success_time || null,
-                        amount: order.total_fee ? {
-                            total: order.total_fee,
-                            currency: 'CNY'
-                        } : null,
-                        transaction_id: order.transaction_id || null
-                    }
-                };
-            }
-        }));
+        const [itemsByOrderId, refundByOutTradeNo, fulfillmentContextByOrderId] = await Promise.all([
+            fetchAdminOrderItemsByOrderIds(orderIds),
+            fetchLatestRefundStatusByOutTradeNos(outTradeNos),
+            fetchFulfillmentContextByOrderIds(orderIds),
+        ]);
 
-        const fulfillmentContextByOrderId = await fetchFulfillmentContextByOrderIds(
-            ordersWithItems.map((order) => order.id),
-        );
-
-        const refundByOutTradeNo = await fetchLatestRefundStatusByOutTradeNos(
-            ordersWithItems.map((order) => order.out_trade_no),
-        );
-
-        const ordersWithFulfillment = ordersWithItems.map((order) => {
-            const fulfillmentCtx = fulfillmentContextByOrderId.get(order.id);
+        const ordersWithFulfillment = orders.map((order) => {
+            const rawItems = itemsByOrderId.get(order.id) || [];
+            const items = rawItems.map((item) => processAdminListOrderItem(item, order.trade_state));
             const refundStatus = refundByOutTradeNo.get(order.out_trade_no) || null;
+            const fulfillmentCtx = fulfillmentContextByOrderId.get(order.id);
             const fulfillmentStatus = resolveFulfillmentForOrder(order, {
-                items: (order.items || []).map((item) => ({
+                items: items.map((item) => ({
                     type: item.type,
                     delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
                     delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
                 })),
                 shipment: fulfillmentCtx?.shipment || null,
             }, refundStatus);
+
             return {
                 ...order,
+                items,
+                pay_status: buildListPayStatusFromOrder(order),
                 refund_status: refundStatus,
                 fulfillment_status: fulfillmentStatus,
             };
@@ -3131,7 +3128,7 @@ async function adminOrders(req) {
             data: {
                 orders: ordersWithFulfillment,
                 pagination: {
-                    total: parseInt(total),
+                    total: parseInt(total, 10) || 0,
                     page: cleanPage,
                     limit: cleanLimit
                 }
