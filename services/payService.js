@@ -3858,11 +3858,19 @@ async function orderDetailForActor(req, options = {}) {
         }
 
         if (effectiveTradeState === 'CLOSED' || effectiveTradeState === 'REVOKED') {
+            if (!paidAt) {
+                timeline.push({
+                    stage: 'AWAITING_PAYMENT',
+                    at: toIsoOrNull(order.created_at),
+                    title: '待支付',
+                    description: '订单创建后未完成支付',
+                });
+            }
             timeline.push({
                 stage: 'ORDER_CLOSED',
                 at: toIsoOrNull(order.updated_at),
                 title: effectiveTradeState === 'REVOKED' ? '订单已撤销' : '订单已关闭',
-                description: effectiveTradeStateDesc || '',
+                description: effectiveTradeStateDesc || (paidAt ? '' : '订单未支付已关闭'),
             });
         }
 
@@ -3926,9 +3934,12 @@ async function orderDetailForActor(req, options = {}) {
                 .find(Boolean) || null,
             receivedAt,
         });
-        for (const stage of fulfillmentTimeline) {
-            if (!timeline.some((row) => row.stage === stage.stage)) {
-                timeline.push(stage);
+        const shouldMergeFulfillmentTimeline = effectiveTradeState === 'SUCCESS' || effectiveTradeState === 'REFUND';
+        if (shouldMergeFulfillmentTimeline) {
+            for (const stage of fulfillmentTimeline) {
+                if (!timeline.some((row) => row.stage === stage.stage)) {
+                    timeline.push(stage);
+                }
             }
         }
         const latestRefund = refunds.length > 0 ? refunds[refunds.length - 1] : null;

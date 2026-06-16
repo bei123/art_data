@@ -62,7 +62,7 @@ const STATUS_HINTS = {
   [FULFILLMENT_STATUS.DELIVERED]: '数字藏品交付二维码已上传，用户可领取。',
   [FULFILLMENT_STATUS.COMPLETED]: '订单履约已完成。',
   [FULFILLMENT_STATUS.CANCELLED]: '订单已撤销。',
-  [FULFILLMENT_STATUS.CLOSED]: '订单已关闭。',
+  [FULFILLMENT_STATUS.CLOSED]: '订单未支付或已超时关闭。',
   [FULFILLMENT_STATUS.REFUNDED]: '订单已退款。',
 }
 
@@ -194,6 +194,34 @@ function resolveOrderFulfillmentStatus({
 }
 
 function buildFulfillmentTimelineStages(fulfillment, { paidAt, shipmentCreatedAt, qrUploadedAt, receivedAt } = {}) {
+  const terminalCodes = [
+    FULFILLMENT_STATUS.REFUNDED,
+    FULFILLMENT_STATUS.CLOSED,
+    FULFILLMENT_STATUS.CANCELLED,
+  ]
+
+  if (terminalCodes.includes(fulfillment.code)) {
+    const stages = []
+    if (fulfillment.code === FULFILLMENT_STATUS.REFUNDED && paidAt) {
+      stages.push({
+        stage: 'PAID',
+        at: paidAt,
+        title: '支付成功',
+        description: '用户已完成支付',
+      })
+    }
+    stages.push({
+      stage: fulfillment.code === FULFILLMENT_STATUS.CANCELLED
+        ? 'ORDER_CANCELLED'
+        : fulfillment.code === FULFILLMENT_STATUS.REFUNDED
+          ? 'ORDER_REFUNDED'
+          : 'ORDER_CLOSED',
+      title: fulfillment.text,
+      description: fulfillment.hint,
+    })
+    return stages
+  }
+
   const stages = [{
     stage: 'ORDER_CREATED',
     title: '创建订单',
@@ -205,22 +233,13 @@ function buildFulfillmentTimelineStages(fulfillment, { paidAt, shipmentCreatedAt
     return stages
   }
 
-  if (fulfillment.code !== FULFILLMENT_STATUS.CREATED && fulfillment.code !== FULFILLMENT_STATUS.AWAITING_PAYMENT) {
+  if (paidAt && fulfillment.code !== FULFILLMENT_STATUS.CREATED && fulfillment.code !== FULFILLMENT_STATUS.AWAITING_PAYMENT) {
     stages.push({
       stage: 'PAID',
-      at: paidAt || null,
+      at: paidAt,
       title: '支付成功',
       description: '用户已完成支付',
     })
-  }
-
-  if ([FULFILLMENT_STATUS.REFUNDED, FULFILLMENT_STATUS.CLOSED, FULFILLMENT_STATUS.CANCELLED].includes(fulfillment.code)) {
-    stages.push({
-      stage: fulfillment.code.toUpperCase(),
-      title: fulfillment.text,
-      description: fulfillment.hint,
-    })
-    return stages
   }
 
   const kind = fulfillment.kind
