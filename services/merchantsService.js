@@ -7,6 +7,12 @@ const redisClient = require('../utils/redisClient');
 
 const REDIS_MERCHANTS_LIST_KEY_PREFIX = 'merchants:list:';
 const REDIS_MERCHANT_DETAIL_KEY_PREFIX = 'merchants:detail:';
+const REDIS_MERCHANT_LIST_TTL_SEC = parseInt(process.env.MERCHANT_LIST_CACHE_TTL_SEC || '1800', 10);
+const REDIS_MERCHANT_DETAIL_TTL_SEC = parseInt(process.env.MERCHANT_DETAIL_CACHE_TTL_SEC || '3600', 10);
+
+function buildMerchantsListCacheKey({ page, limit, search, status, sort_by, sort_order }) {
+  return `${REDIS_MERCHANTS_LIST_KEY_PREFIX}${page}:${limit}:${search || ''}:${status || ''}:${sort_by}:${sort_order}`;
+}
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -64,17 +70,37 @@ async function getPublicMerchantsList(query) {
   const sortField = allowedSortFields.includes(sort_by) ? sort_by : 'created_at';
   const orderDirection = String(sort_order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-  try {
-    const [countResult] = await db.query(`SELECT COUNT(*) as total FROM merchants ${whereClause}`, params);
-    const total = countResult[0].total;
+  const cacheKey = buildMerchantsListCacheKey({
+    page: cleanPage,
+    limit: cleanLimit,
+    search: search || '',
+    status: status || '',
+    sort_by: sortField,
+    sort_order: orderDirection,
+  });
 
-    const [merchants] = await db.query(
-      `SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants 
+  try {
+    try {
+      const cached = await redisClient.get(cacheKey);
+      if (cached) {
+        return adminResult(200, JSON.parse(cached));
+      }
+    } catch (redisError) {
+      logger.warn('读取商家列表缓存失败', { err: redisError?.message || redisError });
+    }
+
+    const [[countResult], [merchants]] = await Promise.all([
+      db.query(`SELECT COUNT(*) as total FROM merchants ${whereClause}`, params),
+      db.query(
+        `SELECT id, name, logo, description, address, phone, status, created_at, updated_at FROM merchants 
        ${whereClause}
        ORDER BY ${sortField} ${orderDirection}
        LIMIT ? OFFSET ?`,
-      [...params, cleanLimit, offset]
-    );
+        [...params, cleanLimit, offset]
+      ),
+    ]);
+
+    const total = countResult[0].total;
 
     const merchantIds = merchants.map((m) => m.id);
     const imagesMap = {};
@@ -108,8 +134,11 @@ async function getPublicMerchantsList(query) {
       },
     };
 
-    const cacheKey = `${REDIS_MERCHANTS_LIST_KEY_PREFIX}${page}:${limit}:${search}:${status}:${sort_by}:${sort_order}`;
-    await redisClient.set(cacheKey, JSON.stringify(payload));
+    try {
+      await redisClient.setEx(cacheKey, REDIS_MERCHANT_LIST_TTL_SEC, JSON.stringify(payload));
+    } catch (redisError) {
+      logger.warn('写入商家列表缓存失败', { err: redisError?.message || redisError });
+    }
 
     return adminResult(200, payload);
   } catch (error) {
@@ -159,7 +188,11 @@ async function getPublicMerchantDetail(rawId) {
       success: true,
       data: merchantWithProcessedImages,
     };
-    await redisClient.set(cacheKey, JSON.stringify(result));
+    try {
+      await redisClient.setEx(cacheKey, REDIS_MERCHANT_DETAIL_TTL_SEC, JSON.stringify(result));
+    } catch (redisError) {
+      logger.warn('写入商家详情缓存失败', { err: redisError?.message || redisError });
+    }
     return adminResult(200, result);
   } catch (error) {
     logger.error('getPublicMerchantDetail failed', { err: error });
