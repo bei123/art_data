@@ -16,11 +16,7 @@ const geocodeLimiter = rateLimit({
     max: parseInt(process.env.MAP_GEOCODE_RATE_LIMIT_PER_MIN || '30', 10),
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => {
-        const userId = req.user?.id;
-        if (userId) return `geocode:user:${userId}`;
-        return `geocode:ip:${req.ip}`;
-    },
+    keyGenerator: (req) => `geocode:ip:${req.ip}`,
     handler: (req, res) => {
         res.status(429).json({ error: '地理编码请求过于频繁，请稍后再试' });
     },
@@ -278,8 +274,8 @@ router.put('/addresses/:id/default', authenticateToken, async (req, res) => {
     }
 });
 
-/** 腾讯地图地理编码代理（Key 仅存服务端；需登录） */
-router.get('/map/geocode', authenticateToken, geocodeLimiter, async (req, res) => {
+/** 腾讯地图地理编码代理（Key 仅存服务端；按 IP 限流，无需登录） */
+router.get('/map/geocode', geocodeLimiter, async (req, res) => {
     try {
         const r = await mapGeocodeSvc.mapGeocode(req);
         return res.status(r.status).json(r.body);
