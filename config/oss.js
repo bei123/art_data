@@ -6,12 +6,26 @@ const http = require('http');
 const path = require('path');
 
 // 检查必要的环境变量
+const isTestRuntime = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
 const requiredEnvVars = ['OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_SECRET', 'OSS_BUCKET', 'OSS_REGION'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
-    console.error('缺少必要的环境变量:', missingEnvVars.join(', '));
-    throw new Error('缺少必要的环境变量');
+    if (!isTestRuntime) {
+        console.error('缺少必要的环境变量:', missingEnvVars.join(', '));
+        throw new Error('缺少必要的环境变量');
+    }
+
+    const testOssDefaults = {
+        OSS_ACCESS_KEY_ID: 'test-oss-access-key-id',
+        OSS_ACCESS_KEY_SECRET: 'test-oss-access-key-secret',
+        OSS_BUCKET: 'test-bucket',
+        OSS_REGION: 'oss-cn-hangzhou',
+    };
+
+    for (const varName of missingEnvVars) {
+        process.env[varName] = testOssDefaults[varName];
+    }
 }
 
 /**
