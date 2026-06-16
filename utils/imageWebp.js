@@ -44,7 +44,11 @@ async function bufferToWebpLimit5MB(buffer, baseName = 'image', options = {}) {
     ? options.qualitySteps
     : DEFAULT_QUALITY_STEPS
   const scaleSteps = options.scaleSteps?.length ? options.scaleSteps : DEFAULT_SCALE_STEPS
-  const webpEffort = Math.min(6, Math.max(0, Number(options.webpEffort) ?? 4))
+  const parsedWebpEffort = Number(options.webpEffort ?? 4)
+  const webpEffort = Math.min(
+    6,
+    Math.max(0, Number.isFinite(parsedWebpEffort) ? parsedWebpEffort : 4)
+  )
 
   const meta = await sharp(buffer, { failOn: 'none' }).metadata()
   const srcW = meta.width || 0

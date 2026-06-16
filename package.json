@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "ci": "npm run lint && npm run test && npm run build",
+    "audit:openapi": "node scripts/audit-openapi-routes.js",
+    "audit:deps": "npm audit --audit-level=high",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node index.js",

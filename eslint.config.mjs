@@ -12,6 +12,7 @@ export default [
       'node_modules/**',
       'uploads/**',
       'ssl/**',
+      '.tmp-rebuild/**',
       '**/.cursor/**',
       'package-lock.json',
     ],

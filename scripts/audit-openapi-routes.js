@@ -162,3 +162,8 @@ const useRe = /app\.use\(\s*['"]([^'"]+)['"]/g
 while ((m = useRe.exec(indexContent))) {
   if (m[1].startsWith('/api')) console.log(' ', m[1])
 }
+
+if (missingInOas.length) {
+  console.error(`\nAudit failed: ${missingInOas.length} route(s) missing from OpenAPI`)
+  process.exit(1)
+}
