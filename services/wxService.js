@@ -1029,6 +1029,20 @@ async function verifyPassword(req) {
 }
 }
 
+async function assertAddressOwned(userId, addressId) {
+    const [rows] = await db.query(
+        'SELECT id, user_id FROM wx_user_addresses WHERE id = ? LIMIT 1',
+        [addressId]
+    );
+    if (!rows.length) {
+        return { error: adminResult(404, { error: '地址不存在' }) };
+    }
+    if (Number(rows[0].user_id) !== Number(userId)) {
+        return { error: adminResult(403, { error: '无权访问该地址' }) };
+    }
+    return { ok: true };
+}
+
 async function listAddresses(req) {
     const session = await resolveWxSession(req)
     if (!session.ok) return session.result
@@ -1120,7 +1134,9 @@ async function getAddressById(req) {
 }
 
     try {
-        // 查询指定地址，确保只能查看自己的地址
+        const owned = await assertAddressOwned(payload.userId, addressId);
+        if (owned.error) return owned.error;
+
         const [addresses] = await db.query(`
             SELECT 
                 id,
@@ -1318,15 +1334,13 @@ async function updateAddress(req) {
 }
 
     try {
-        // 检查地址是否存在且属于当前用户
+        const owned = await assertAddressOwned(payload.userId, addressId);
+        if (owned.error) return owned.error;
+
         const [existingAddresses] = await db.query(`
             SELECT id, is_default FROM wx_user_addresses 
             WHERE id = ? AND user_id = ?
         `, [addressId, payload.userId]);
-
-        if (existingAddresses.length === 0) {
-            return adminResult(404, { error: '地址不存在' });
-}
 
         // 如果设置为默认地址，先取消其他默认地址
         if (is_default) {
@@ -1391,15 +1405,13 @@ async function deleteAddress(req) {
 }
 
     try {
-        // 检查地址是否存在且属于当前用户
+        const owned = await assertAddressOwned(payload.userId, addressId);
+        if (owned.error) return owned.error;
+
         const [existingAddresses] = await db.query(`
             SELECT id, is_default FROM wx_user_addresses 
             WHERE id = ? AND user_id = ?
         `, [addressId, payload.userId]);
-
-        if (existingAddresses.length === 0) {
-            return adminResult(404, { error: '地址不存在' });
-}
 
         const address = existingAddresses[0];
         let wasDefault = address.is_default === 1;
@@ -1442,15 +1454,8 @@ async function setAddressDefault(req) {
 }
 
     try {
-        // 检查地址是否存在且属于当前用户
-        const [existingAddresses] = await db.query(`
-            SELECT id FROM wx_user_addresses 
-            WHERE id = ? AND user_id = ?
-        `, [addressId, payload.userId]);
-
-        if (existingAddresses.length === 0) {
-            return adminResult(404, { error: '地址不存在' });
-}
+        const owned = await assertAddressOwned(payload.userId, addressId);
+        if (owned.error) return owned.error;
 
         // 先取消所有默认地址
         await db.query('UPDATE wx_user_addresses SET is_default = 0 WHERE user_id = ?', [payload.userId]);

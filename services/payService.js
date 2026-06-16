@@ -41,6 +41,8 @@ const {
     ensureDigitalArtworkIdColumns,
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
+const { resolveUserOutTradeNo } = require('../utils/orderTradeNo');
+const { ensureOrdersOutTradeNoUnique } = require('../utils/ordersSchema');
 const { clearRightsInventoryCaches } = require('./rightsService');
 const {
     fireSubscribeNotify,
@@ -434,6 +436,73 @@ function buildWechatRefundAmountPayload({ refundCents, totalCents, currency = 'C
     };
 }
 
+function buyerUserIdFromReq(req) {
+    const buyerId = Number(req.user?.id);
+    if (req.user?.id == null || Number.isNaN(buyerId) || buyerId <= 0) return null;
+    return buyerId;
+}
+
+function assertWxBuyerForPay(req, openid) {
+    const buyerId = buyerUserIdFromReq(req);
+    if (!buyerId) return { error: adminResult(401, { error: '请先登录' }) };
+    if (!req.user?.is_wx_user) return { error: adminResult(403, { error: '仅小程序用户可操作' }) };
+
+    const cleanOpenid = typeof openid === 'string' ? openid.trim() : '';
+    if (!cleanOpenid) return { error: adminResult(400, { error: '缺少有效的openid' }) };
+    if (req.user.openid && cleanOpenid !== req.user.openid) {
+        return { error: adminResult(403, { error: 'openid 与当前登录用户不一致' }) };
+    }
+
+    return { buyerId, cleanOpenid };
+}
+
+async function loadOrderForBuyer(req, outTradeNo, connection = null) {
+    const buyerId = buyerUserIdFromReq(req);
+    if (!buyerId) return { error: adminResult(401, { success: false, error: '请先登录' }) };
+
+    let cleanOutTradeNo;
+    try {
+        cleanOutTradeNo = assertWechatOutTradeNo(outTradeNo);
+    } catch {
+        return { error: adminResult(400, { error: '商户订单号格式无效' }) };
+    }
+
+    const runner = connection || db;
+    const [rows] = await runner.query(
+        `SELECT id, out_trade_no, transaction_id, trade_state, trade_state_desc,
+                actual_fee, total_fee, user_id, body, created_at, success_time
+         FROM orders WHERE out_trade_no = ? LIMIT 1`,
+        [cleanOutTradeNo]
+    );
+
+    if (!rows.length) {
+        return { error: adminResult(404, { success: false, error: '订单不存在或无权查看' }) };
+    }
+
+    const order = rows[0];
+    if (Number(order.user_id) !== buyerId) {
+        return { error: adminResult(403, { success: false, error: '无权操作该订单' }) };
+    }
+
+    return { order, buyerId, cleanOutTradeNo };
+}
+
+async function assertBuyerAddressId(connection, userId, addressId) {
+    if (!addressId) return { ok: true };
+    const parsedId = parseInt(addressId, 10);
+    if (Number.isNaN(parsedId) || parsedId <= 0) {
+        return { error: adminResult(400, { error: '地址ID格式无效' }) };
+    }
+    const [rows] = await connection.query(
+        'SELECT id FROM wx_user_addresses WHERE id = ? AND user_id = ? LIMIT 1',
+        [parsedId, userId]
+    );
+    if (!rows.length) {
+        return { error: adminResult(403, { error: '收货地址不属于当前用户' }) };
+    }
+    return { ok: true, addressId: parsedId };
+}
+
 // 生成签名
 function generateSignV3(method, url, timestamp, nonceStr, body) {
     // 1. 构造签名串
@@ -537,13 +606,13 @@ function computeDigitalUnitPriceYuan(goods) {
 async function unifiedOrder(req) {
     try {
         await ensureDigitalArtworkIdColumns();
+        await ensureOrdersOutTradeNoUnique();
 
         const { openid, body, out_trade_no, cart_items, address_id } = req.body;
 
-        // 输入验证
-        if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
-            return adminResult(400, { error: '缺少有效的openid' });
-        }
+        const buyerSession = assertWxBuyerForPay(req, openid);
+        if (buyerSession.error) return buyerSession.error;
+        const { buyerId: userId, cleanOpenid } = buyerSession;
 
         if (!body || typeof body !== 'string' || body.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的商品描述' });
@@ -551,14 +620,6 @@ async function unifiedOrder(req) {
 
         if (body.length > 128) {
             return adminResult(400, { error: '商品描述长度不能超过128个字符' });
-        }
-
-        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
-            return adminResult(400, { error: '缺少有效的订单号' });
-        }
-
-        if (out_trade_no.length > 64) {
-            return adminResult(400, { error: '订单号长度不能超过64个字符' });
         }
 
         if (!cart_items || !Array.isArray(cart_items) || cart_items.length === 0) {
@@ -576,33 +637,25 @@ async function unifiedOrder(req) {
             normalizedCartItems.push(normalized);
         }
 
-        // 验证地址ID（可选，但建议提供）
-        if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
-            return adminResult(400, { error: '地址ID格式无效' });
+        const tradeNoResolved = resolveUserOutTradeNo({ raw: out_trade_no, userId });
+        if (tradeNoResolved.error) {
+            return adminResult(400, { error: tradeNoResolved.error });
         }
 
-        // 清理输入
-        const cleanOpenid = openid.trim();
         const cleanBody = body.trim();
-        const cleanOutTradeNo = out_trade_no.trim();
+        const cleanOutTradeNo = tradeNoResolved.outTradeNo;
 
         // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
 
         try {
-            // 根据openid获取用户id
-            const [users] = await connection.query(
-                'SELECT id FROM wx_users WHERE openid = ?',
-                [cleanOpenid]
-            );
-
-            if (!users || users.length === 0) {
+            const addressCheck = await assertBuyerAddressId(connection, userId, address_id);
+            if (addressCheck.error) {
                 await connection.rollback();
-                return adminResult(404, { error: '用户不存在' });
+                return addressCheck.error;
             }
-
-            const userId = users[0].id;
+            const resolvedAddressId = addressCheck.addressId || address_id || null;
 
             // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
@@ -797,11 +850,11 @@ async function unifiedOrder(req) {
             // 创建订单项，支持三种类型
             const orderItems = pricedCartItems.map(item => {
                 if (item.type === 'right') {
-                    return [orderId, 'right', item.right_id, null, null, item.quantity, item.unitPriceYuan, address_id || null];
+                    return [orderId, 'right', item.right_id, null, null, item.quantity, item.unitPriceYuan, resolvedAddressId];
                 } else if (item.type === 'digital') {
-                    return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, item.unitPriceYuan, address_id || null];
+                    return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, item.unitPriceYuan, resolvedAddressId];
                 } else if (item.type === 'artwork') {
-                    return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, item.unitPriceYuan, address_id || null];
+                    return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, item.unitPriceYuan, resolvedAddressId];
                 }
             });
             await connection.query(
@@ -865,7 +918,10 @@ async function unifiedOrder(req) {
                 });
                 return adminResult(200, {
                     success: true,
-                    data: response.data
+                    data: {
+                        ...response.data,
+                        out_trade_no: cleanOutTradeNo,
+                    },
                 });
             } else {
                 await connection.rollback();
@@ -892,13 +948,14 @@ async function unifiedOrder(req) {
 async function singleOrder(req) {
     try {
         await ensureDigitalArtworkIdColumns();
+        await ensureOrdersOutTradeNoUnique();
 
         const { openid, type, quantity, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
 
-        // 输入验证
-        if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
-            return adminResult(400, { error: '缺少有效的openid' });
-        }
+        const buyerSession = assertWxBuyerForPay(req, openid);
+        if (buyerSession.error) return buyerSession.error;
+        const { buyerId: userId, cleanOpenid } = buyerSession;
+
         if (!type || !['right', 'digital', 'artwork'].includes(type)) {
             return adminResult(400, { error: 'type 必须是 right、digital 或 artwork' });
         }
@@ -912,11 +969,10 @@ async function singleOrder(req) {
         if (body.length > 128) {
             return adminResult(400, { error: '商品描述长度不能超过128个字符' });
         }
-        if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
-            return adminResult(400, { error: '缺少有效的订单号' });
-        }
-        if (out_trade_no.length > 64) {
-            return adminResult(400, { error: '订单号长度不能超过64个字符' });
+
+        const tradeNoResolved = resolveUserOutTradeNo({ raw: out_trade_no, userId });
+        if (tradeNoResolved.error) {
+            return adminResult(400, { error: tradeNoResolved.error });
         }
 
         // 只允许一个商品id
@@ -931,32 +987,20 @@ async function singleOrder(req) {
             return adminResult(400, { error: parsedDigitalId.error });
         }
 
-        // 验证地址ID（可选，但建议提供）
-        if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
-            return adminResult(400, { error: '地址ID格式无效' });
-        }
-
-        // 清理输入
-        const cleanOpenid = openid.trim();
         const cleanType = type;
         const cleanBody = body.trim();
-        const cleanOutTradeNo = out_trade_no.trim();
+        const cleanOutTradeNo = tradeNoResolved.outTradeNo;
 
-        // 开始事务
         const connection = await db.getConnection();
         await connection.beginTransaction();
 
         try {
-            // 根据openid获取用户id
-            const [users] = await connection.query(
-                'SELECT id FROM wx_users WHERE openid = ?',
-                [cleanOpenid]
-            );
-            if (!users || users.length === 0) {
+            const addressCheck = await assertBuyerAddressId(connection, userId, address_id);
+            if (addressCheck.error) {
                 await connection.rollback();
-                return adminResult(404, { error: '用户不存在' });
+                return addressCheck.error;
             }
-            const userId = users[0].id;
+            const resolvedAddressId = addressCheck.addressId || address_id || null;
 
             // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
@@ -1099,11 +1143,11 @@ async function singleOrder(req) {
             // 创建订单项
             let orderItem;
             if (cleanType === 'right') {
-                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, unitPriceYuan, address_id || null];
+                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, unitPriceYuan, resolvedAddressId];
             } else if (cleanType === 'digital') {
-                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, unitPriceYuan, address_id || null];
+                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, unitPriceYuan, resolvedAddressId];
             } else if (cleanType === 'artwork') {
-                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, unitPriceYuan, address_id || null];
+                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, unitPriceYuan, resolvedAddressId];
             }
             await connection.query(
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -1166,7 +1210,10 @@ async function singleOrder(req) {
                 });
                 return adminResult(200, {
                     success: true,
-                    data: response.data
+                    data: {
+                        ...response.data,
+                        out_trade_no: cleanOutTradeNo,
+                    },
                 });
             } else {
                 await connection.rollback();
@@ -1361,18 +1408,16 @@ async function closeOrder(req) {
     try {
         const { out_trade_no } = req.body;
 
-        // 输入验证
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的商户订单号' });
         }
 
-        if (out_trade_no.length > 64) {
-            return adminResult(400, { error: '商户订单号长度不能超过64个字符' });
-        }
+        const owned = await loadOrderForBuyer(req, out_trade_no);
+        if (owned.error) return owned.error;
 
         let cleanOutTradeNo;
         try {
-            cleanOutTradeNo = assertWechatOutTradeNo(out_trade_no);
+            cleanOutTradeNo = assertWechatOutTradeNo(owned.cleanOutTradeNo);
         } catch {
             return adminResult(400, { error: '商户订单号格式无效' });
         }
@@ -1447,11 +1492,6 @@ async function refund(req) {
             return adminResult(400, { error: '退款单号长度不能超过64个字符' });
         }
 
-        const cleanOutTradeNo = typeof out_trade_no === 'string' ? out_trade_no.trim() : '';
-        if (!cleanOutTradeNo) {
-            return adminResult(400, { error: '缺少有效的商户订单号' });
-        }
-
         if (reason && (typeof reason !== 'string' || reason.length > 80)) {
             return adminResult(400, { error: '退款原因长度不能超过80个字符' });
         }
@@ -1459,14 +1499,15 @@ async function refund(req) {
         const cleanOutRefundNo = out_refund_no.trim();
         const cleanReason = reason ? reason.trim() : '';
 
-        const [orders] = await db.query(
-            `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee
-             FROM orders WHERE out_trade_no = ? LIMIT 1`,
-            [cleanOutTradeNo]
-        );
-        if (!orders.length) {
-            return adminResult(404, { error: '订单不存在' });
+        if (!out_trade_no || typeof out_trade_no !== 'string' || !out_trade_no.trim()) {
+            return adminResult(400, { error: '缺少有效的商户订单号' });
         }
+
+        const owned = await loadOrderForBuyer(req, out_trade_no);
+        if (owned.error) return owned.error;
+
+        const cleanOutTradeNo = owned.cleanOutTradeNo;
+        const order = owned.order;
 
         const [existingRefunds] = await db.query(
             `SELECT id, status FROM refund_requests
@@ -1479,13 +1520,13 @@ async function refund(req) {
             });
         }
 
-        const amountResolved = await resolveRefundAmountCentsForOrder(orders[0]);
+        const amountResolved = await resolveRefundAmountCentsForOrder(order);
         if (amountResolved.error) {
             return adminResult(amountResolved.status || 400, { error: amountResolved.error });
         }
 
         const cleanAmount = buildWechatRefundAmountPayload(amountResolved);
-        const resolvedTransactionId = amountResolved.transactionId || transaction_id || orders[0].transaction_id || null;
+        const resolvedTransactionId = amountResolved.transactionId || transaction_id || order.transaction_id || null;
 
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -2266,21 +2307,15 @@ async function queryOrder(req) {
     try {
         const { out_trade_no } = req.query;
 
-        // 输入验证
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的商户订单号' });
         }
 
-        if (out_trade_no.length > 64) {
-            return adminResult(400, { error: '商户订单号长度不能超过64个字符' });
-        }
+        const owned = await loadOrderForBuyer(req, out_trade_no);
+        if (owned.error) return owned.error;
 
-        let cleanOutTradeNo;
-        try {
-            cleanOutTradeNo = assertWechatOutTradeNo(out_trade_no);
-        } catch {
-            return adminResult(400, { error: '商户订单号格式无效' });
-        }
+        const cleanOutTradeNo = owned.cleanOutTradeNo;
+        const freshOrder = owned.order;
 
         const timestamp = Math.floor(Date.now() / 1000).toString();
         const nonceStr = generateNonceStr();
@@ -2302,37 +2337,26 @@ async function queryOrder(req) {
         );
 
         if (response.status === 200) {
-            // 同时查询数据库中的订单信息
-            const [orders] = await db.query(
-                'SELECT * FROM orders WHERE out_trade_no = ?',
-                [cleanOutTradeNo]
+            await syncOrderTradeStateFromWechat(freshOrder);
+
+            const [updatedOrders] = await db.query(
+                'SELECT * FROM orders WHERE out_trade_no = ? AND user_id = ? LIMIT 1',
+                [cleanOutTradeNo, owned.buyerId]
             );
+            const orderAfterSync = updatedOrders[0] || freshOrder;
 
-            if (orders.length === 0) {
-                return adminResult(404, { error: '订单不存在' });
-            }
-
-            const order = orders[0];
-
-            await syncOrderTradeStateFromWechat(order);
-
-            const [freshOrders] = await db.query(
-                'SELECT * FROM orders WHERE out_trade_no = ? LIMIT 1',
-                [cleanOutTradeNo]
-            );
-            const freshOrder = freshOrders[0] || order;
-
-            // 查询订单项
             const [orderItems] = await db.query(
                 `SELECT oi.*, r.title, r.price, r.original_price, r.description, r.status, r.remaining_count
            FROM order_items oi
-           JOIN rights r ON oi.right_id = r.id
+           LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
            WHERE oi.order_id = ?`,
-                [freshOrder.id]
+                [orderAfterSync.id]
             );
 
-            // 查询订单图片
             const orderItemsWithImages = await Promise.all(orderItems.map(async (item) => {
+                if (!item.right_id) {
+                    return { ...item, images: [] };
+                }
                 const [images] = await db.query(
                     'SELECT image_url FROM right_images WHERE right_id = ?',
                     [item.right_id]
@@ -2348,7 +2372,7 @@ async function queryOrder(req) {
                 data: {
                     ...response.data,
                     order_info: {
-                        ...freshOrder,
+                        ...orderAfterSync,
                         items: orderItemsWithImages
                     }
                 }
@@ -3177,43 +3201,23 @@ async function adminOrders(req) {
 
 async function checkRepayable(req) {
     try {
-        const { out_trade_no, openid } = req.query;
+        const { out_trade_no } = req.query;
 
-        // 输入验证
         if (!out_trade_no || typeof out_trade_no !== 'string' || out_trade_no.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的商户订单号' });
         }
 
-        if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
-            return adminResult(400, { error: '缺少有效的openid' });
-        }
-
-        if (out_trade_no.length > 64) {
-            return adminResult(400, { error: '商户订单号长度不能超过64个字符' });
-        }
-
-        const cleanOutTradeNo = out_trade_no.trim();
-        const cleanOpenid = openid.trim();
-
-        // 查询订单信息
-        const [orders] = await db.query(`
-            SELECT o.*, u.id as user_id 
-            FROM orders o 
-            JOIN wx_users u ON o.user_id = u.id 
-            WHERE o.out_trade_no = ? AND u.openid = ?
-        `, [cleanOutTradeNo, cleanOpenid]);
-
-        if (orders.length === 0) {
-            return adminResult(404, {
-                error: '订单不存在或不属于当前用户',
+        const owned = await loadOrderForBuyer(req, out_trade_no);
+        if (owned.error) {
+            const body = owned.error.body || {};
+            return adminResult(owned.error.status, {
+                error: body.error || '订单不存在或不属于当前用户',
                 repayable: false,
-                reason: '订单不存在'
+                reason: body.error || '订单不存在',
             });
         }
 
-        const order = orders[0];
-
-        // 检查订单状态
+        const order = owned.order;
         if (order.trade_state === 'SUCCESS') {
             return adminResult(200, {
                 repayable: false,

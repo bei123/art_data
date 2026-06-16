@@ -191,7 +191,7 @@ router.post('/verifyPassword', async (req, res) => {
     }
 });
 
-router.get('/addresses', async (req, res) => {
+router.get('/addresses', authenticateToken, async (req, res) => {
     try {
         const r = await svc.listAddresses(req);
         return res.status(r.status).json(r.body);
@@ -201,7 +201,7 @@ router.get('/addresses', async (req, res) => {
     }
 });
 
-router.get('/addresses/default', async (req, res) => {
+router.get('/addresses/default', authenticateToken, async (req, res) => {
     try {
         const r = await svc.getAddressDefault(req);
         return res.status(r.status).json(r.body);
@@ -211,7 +211,7 @@ router.get('/addresses/default', async (req, res) => {
     }
 });
 
-router.get('/addresses/:id', async (req, res) => {
+router.get('/addresses/:id', authenticateToken, async (req, res) => {
     try {
         const r = await svc.getAddressById(req);
         return res.status(r.status).json(r.body);
@@ -221,7 +221,7 @@ router.get('/addresses/:id', async (req, res) => {
     }
 });
 
-router.post('/addresses', async (req, res) => {
+router.post('/addresses', authenticateToken, async (req, res) => {
     try {
         const r = await svc.createAddress(req);
         return res.status(r.status).json(r.body);
@@ -231,7 +231,7 @@ router.post('/addresses', async (req, res) => {
     }
 });
 
-router.put('/addresses/:id', async (req, res) => {
+router.put('/addresses/:id', authenticateToken, async (req, res) => {
     try {
         const r = await svc.updateAddress(req);
         return res.status(r.status).json(r.body);
@@ -241,7 +241,7 @@ router.put('/addresses/:id', async (req, res) => {
     }
 });
 
-router.delete('/addresses/:id', async (req, res) => {
+router.delete('/addresses/:id', authenticateToken, async (req, res) => {
     try {
         const r = await svc.deleteAddress(req);
         return res.status(r.status).json(r.body);
@@ -251,7 +251,7 @@ router.delete('/addresses/:id', async (req, res) => {
     }
 });
 
-router.put('/addresses/:id/default', async (req, res) => {
+router.put('/addresses/:id/default', authenticateToken, async (req, res) => {
     try {
         const r = await svc.setAddressDefault(req);
         return res.status(r.status).json(r.body);
