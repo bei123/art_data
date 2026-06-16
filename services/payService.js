@@ -3560,8 +3560,10 @@ async function orderDetailForActor(req, options = {}) {
 
         const shipments = shipmentRows.map((row) => mapShipmentRowFromDb(row));
 
-        if (includeWechatPath && shipments.length > 0) {
+        if (shipments.length > 0) {
             for (let i = 0; i < shipments.length; i += 1) {
+                if (shipments[i].status === 'cancelled' || !shipments[i].waybill_id) continue;
+
                 const pathBody = {
                     internal_order_id: internalOrderId,
                     delivery_id: shipments[i].delivery_id,
@@ -3572,15 +3574,31 @@ async function orderDetailForActor(req, options = {}) {
                 if (shipments[i].add_source === 2 && shipments[i].wx_appid) {
                     pathBody.wx_appid = shipments[i].wx_appid;
                 }
+
                 const r = await logisticsService.getPath({ body: pathBody });
-                if (r.ok && r.body) {
+                if (!r.ok || !r.body) {
+                    if (includeWechatPath) {
+                        shipments[i].wechat_path = null;
+                        shipments[i].wechat_path_error = r.body || { error: 'getPath failed' };
+                    }
+                    continue;
+                }
+
+                const pathItemList = r.body.path_item_list || [];
+                const latestNode = pathItemList.length ? pickLatestPathNode(pathItemList) : null;
+                if (latestNode?.action_type != null) {
+                    shipments[i].latest_path_action_type = Number(latestNode.action_type);
+                    const actionAtSec = Number(latestNode.action_time) || 0;
+                    if (actionAtSec > 0) {
+                        shipments[i].latest_path_action_at = new Date(actionAtSec * 1000).toISOString();
+                    }
+                }
+
+                if (includeWechatPath) {
                     shipments[i].wechat_path = {
                         path_item_num: r.body.path_item_num,
-                        path_item_list: r.body.path_item_list || [],
+                        path_item_list: pathItemList,
                     };
-                } else {
-                    shipments[i].wechat_path = null;
-                    shipments[i].wechat_path_error = r.body || { error: 'getPath failed' };
                 }
             }
         }
@@ -3881,23 +3899,23 @@ async function orderDetailForActor(req, options = {}) {
                     delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
                     delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
                 })),
-                shipment: (() => {
-                    if (!primaryShipment) return null;
-                    const pathNode = primaryShipment.wechat_path?.path_item_list
-                        ? pickLatestPathNode(primaryShipment.wechat_path.path_item_list)
-                        : null;
-                    const actionType = pathNode?.action_type != null
-                        ? Number(pathNode.action_type)
-                        : primaryShipment.latest_path_action_type;
-                    return {
+                shipment: primaryShipment
+                    ? {
                         waybill_id: primaryShipment.waybill_id,
                         status: primaryShipment.status,
-                        latest_path_action_type: actionType,
+                        latest_path_action_type: primaryShipment.latest_path_action_type,
                         created_at: primaryShipment.created_at,
-                    };
-                })(),
+                    }
+                    : null,
             }),
         );
+
+        const receivedAt = (() => {
+            if (!primaryShipment) return null;
+            const actionType = primaryShipment.latest_path_action_type;
+            if (Number(actionType) !== 300003) return null;
+            return primaryShipment.latest_path_action_at || null;
+        })();
 
         const fulfillmentTimeline = buildFulfillmentTimelineStages(statusFields.fulfillment_status, {
             paidAt: wxPay?.success_time || toIsoOrNull(order.success_time),
@@ -3906,7 +3924,7 @@ async function orderDetailForActor(req, options = {}) {
                 .filter((item) => item.type === 'digital')
                 .map((item) => item.delivery_qr_code_at || item.qr_code_uploaded_at)
                 .find(Boolean) || null,
-            receivedAt: primaryShipment?.latest_path_action_at || null,
+            receivedAt,
         });
         for (const stage of fulfillmentTimeline) {
             if (!timeline.some((row) => row.stage === stage.stage)) {

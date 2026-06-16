@@ -6,7 +6,8 @@ const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessa
 const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
-const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema')
+const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
+const { pickLatestPathNode } = require('../utils/orderFulfillmentStatus')
 const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv')
 
 function adminResult(status, body) {
@@ -536,6 +537,20 @@ async function getPath(req) {
 
     const pathItemList = data.path_item_list || []
     const skipPathNotify = b.skip_path_notify === true || b.skipPathNotify === true
+
+    if (ctx.internal_order_id && pathItemList.length) {
+      const latestNode = pickLatestPathNode(pathItemList)
+      if (latestNode?.action_type != null) {
+        const actionAtSec = Number(latestNode.action_time) || 0
+        const actionAt = actionAtSec > 0 ? new Date(actionAtSec * 1000) : new Date()
+        await persistShipmentLatestPath({
+          orderId: ctx.internal_order_id,
+          waybillId: waybill_id,
+          actionType: latestNode.action_type,
+          actionAt,
+        })
+      }
+    }
 
     if (ctx.internal_order_id && !skipPathNotify) {
       handleLogisticsPathNotifyAsync({
