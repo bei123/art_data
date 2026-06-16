@@ -442,14 +442,22 @@ function buyerUserIdFromReq(req) {
     return buyerId;
 }
 
-function assertWxBuyerForPay(req, openid) {
+async function assertWxBuyerForPay(req, openid, connection = null) {
     const buyerId = buyerUserIdFromReq(req);
     if (!buyerId) return { error: adminResult(401, { error: '请先登录' }) };
-    if (!req.user?.is_wx_user) return { error: adminResult(403, { error: '仅小程序用户可操作' }) };
 
     const cleanOpenid = typeof openid === 'string' ? openid.trim() : '';
     if (!cleanOpenid) return { error: adminResult(400, { error: '缺少有效的openid' }) };
-    if (req.user.openid && cleanOpenid !== req.user.openid) {
+
+    const runner = connection || db;
+    const [wxRows] = await runner.query(
+        'SELECT id, openid FROM wx_users WHERE id = ? LIMIT 1',
+        [buyerId]
+    );
+    if (!wxRows.length) {
+        return { error: adminResult(403, { error: '仅小程序用户可操作' }) };
+    }
+    if (String(wxRows[0].openid) !== cleanOpenid) {
         return { error: adminResult(403, { error: 'openid 与当前登录用户不一致' }) };
     }
 
@@ -610,7 +618,7 @@ async function unifiedOrder(req) {
 
         const { openid, body, out_trade_no, cart_items, address_id } = req.body;
 
-        const buyerSession = assertWxBuyerForPay(req, openid);
+        const buyerSession = await assertWxBuyerForPay(req, openid);
         if (buyerSession.error) return buyerSession.error;
         const { buyerId: userId, cleanOpenid } = buyerSession;
 
@@ -952,7 +960,7 @@ async function singleOrder(req) {
 
         const { openid, type, quantity, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
 
-        const buyerSession = assertWxBuyerForPay(req, openid);
+        const buyerSession = await assertWxBuyerForPay(req, openid);
         if (buyerSession.error) return buyerSession.error;
         const { buyerId: userId, cleanOpenid } = buyerSession;
 

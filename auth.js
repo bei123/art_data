@@ -30,6 +30,21 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = { userId: verified.userId, openid: verified.openid };
 
+    if (decoded.openid) {
+      const [wxUsers] = await query(
+        'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
+        [decoded.userId]
+      );
+
+      if (wxUsers && wxUsers.length > 0) {
+        if (String(wxUsers[0].openid) !== String(decoded.openid)) {
+          return res.status(403).json({ error: '无效的token' });
+        }
+        req.user = { ...wxUsers[0], is_wx_user: true };
+        return next();
+      }
+    }
+
     const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
 
     if (users.length > 0) {
@@ -70,15 +85,27 @@ const optionalAuthenticate = async (req, res, next) => {
 
     const decoded = { userId: verified.userId, openid: verified.openid };
 
-    const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
-    if (users.length > 0) {
-      req.user = users[0];
-    } else {
+    if (decoded.openid) {
       const [wxUsers] = await query(
         'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
         [decoded.userId]
       );
-      if (wxUsers && wxUsers.length > 0) req.user = { ...wxUsers[0], is_wx_user: true };
+      if (wxUsers && wxUsers.length > 0 && String(wxUsers[0].openid) === String(decoded.openid)) {
+        req.user = { ...wxUsers[0], is_wx_user: true };
+      }
+    }
+
+    if (!req.user) {
+      const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
+      if (users.length > 0) {
+        req.user = users[0];
+      } else {
+        const [wxUsers] = await query(
+          'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
+          [decoded.userId]
+        );
+        if (wxUsers && wxUsers.length > 0) req.user = { ...wxUsers[0], is_wx_user: true };
+      }
     }
 
     if (req.user && !req.user.is_wx_user) {
