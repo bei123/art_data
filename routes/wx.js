@@ -2,12 +2,29 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const upload = multer();
 const { authenticateToken, checkRole } = require('../auth');
 const svc = require('../services/wxService');
+const mapGeocodeSvc = require('../services/mapGeocodeService');
 const logisticsSvc = require('../services/logisticsService');
 const subscribeMessageSvc = require('../services/subscribeMessageService');
 const subscribeNotifySvc = require('../services/subscribeMessageNotify');
+
+const geocodeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: parseInt(process.env.MAP_GEOCODE_RATE_LIMIT_PER_MIN || '30', 10),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        const userId = req.user?.id;
+        if (userId) return `geocode:user:${userId}`;
+        return `geocode:ip:${req.ip}`;
+    },
+    handler: (req, res) => {
+        res.status(429).json({ error: '地理编码请求过于频繁，请稍后再试' });
+    },
+});
 
 router.post('/getPhoneNumber', async (req, res) => {
     try {
@@ -258,6 +275,17 @@ router.put('/addresses/:id/default', authenticateToken, async (req, res) => {
     } catch (error) {
         logger.error('设置默认地址失败', { err: error });
         res.status(500).json({ error: '设置默认地址服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 腾讯地图地理编码代理（Key 仅存服务端；需登录） */
+router.get('/map/geocode', authenticateToken, geocodeLimiter, async (req, res) => {
+    try {
+        const r = await mapGeocodeSvc.mapGeocode(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('地理编码失败', { err: error });
+        return res.status(500).json({ error: '地址解析失败' });
     }
 });
 
