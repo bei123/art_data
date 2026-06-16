@@ -39,8 +39,8 @@ const {
     isDigitalArtworkPurchasable,
     adjustDigitalArtworkStock,
     ensureDigitalArtworkIdColumns,
-    resolveSubmittedDigitalPriceYuan,
 } = require('../utils/digitalArtworkResolver');
+const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { clearRightsInventoryCaches } = require('./rightsService');
 const {
     fireSubscribeNotify,
@@ -411,19 +411,59 @@ function formatWechatTime(isoString) {
 //     res.json({ message: '退款路由正常工作', timestamp: new Date().toISOString() });
 // });
 
+const VALID_CART_ITEM_TYPES = ['right', 'digital', 'artwork'];
+const MAX_CART_ITEM_QUANTITY = 99;
+
+function parseOrderItemQuantity(raw) {
+    const qty = parseInt(raw, 10);
+    if (Number.isNaN(qty) || qty <= 0 || qty > MAX_CART_ITEM_QUANTITY) return null;
+    return qty;
+}
+
+function normalizeCartItemShape(rawItem) {
+    if (!rawItem || typeof rawItem !== 'object') return { error: '购物车商品格式无效' };
+    if (!VALID_CART_ITEM_TYPES.includes(rawItem.type)) return { error: '购物车商品 type 无效' };
+
+    const quantity = parseOrderItemQuantity(rawItem.quantity);
+    if (!quantity) return { error: '购物车商品数量必须在 1-99 之间' };
+
+    if (rawItem.type === 'right') {
+        const rightId = parseInt(rawItem.right_id, 10);
+        if (Number.isNaN(rightId) || rightId <= 0) return { error: '缺少有效的商品ID' };
+        return { type: 'right', quantity, right_id: rightId };
+    }
+
+    if (rawItem.type === 'artwork') {
+        const artworkId = parseInt(rawItem.artwork_id, 10);
+        if (Number.isNaN(artworkId) || artworkId <= 0) return { error: '缺少有效的艺术品ID' };
+        return { type: 'artwork', quantity, artwork_id: artworkId };
+    }
+
+    const parsedDigital = parseDigitalArtworkId(rawItem.digital_artwork_id);
+    if (parsedDigital.error) return { error: parsedDigital.error };
+    return { type: 'digital', quantity, digital_artwork_id: parsedDigital.id };
+}
+
+function computeArtworkUnitPriceYuan(goods) {
+    const originalPrice = parseMoney(goods.original_price);
+    const discountPrice = parseMoney(goods.discount_price);
+    if (discountPrice > 0 && discountPrice < originalPrice) return discountPrice;
+    return originalPrice;
+}
+
+function computeDigitalUnitPriceYuan(goods) {
+    return parseMoney(goods.price);
+}
+
 async function unifiedOrder(req) {
     try {
         await ensureDigitalArtworkIdColumns();
 
-        const { openid, total_fee, body, out_trade_no, cart_items, address_id } = req.body;
+        const { openid, body, out_trade_no, cart_items, address_id } = req.body;
 
         // 输入验证
         if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的openid' });
-        }
-
-        if (!total_fee || isNaN(parseFloat(total_fee)) || parseFloat(total_fee) <= 0) {
-            return adminResult(400, { error: '缺少有效的支付金额' });
         }
 
         if (!body || typeof body !== 'string' || body.trim().length === 0) {
@@ -450,6 +490,13 @@ async function unifiedOrder(req) {
             return adminResult(400, { error: '购物车商品数量不能超过20个' });
         }
 
+        const normalizedCartItems = [];
+        for (const rawItem of cart_items) {
+            const normalized = normalizeCartItemShape(rawItem);
+            if (normalized.error) return adminResult(400, { error: normalized.error });
+            normalizedCartItems.push(normalized);
+        }
+
         // 验证地址ID（可选，但建议提供）
         if (address_id && (isNaN(parseInt(address_id)) || parseInt(address_id) <= 0)) {
             return adminResult(400, { error: '地址ID格式无效' });
@@ -457,7 +504,6 @@ async function unifiedOrder(req) {
 
         // 清理输入
         const cleanOpenid = openid.trim();
-        const cleanTotalFee = parseFloat(total_fee);
         const cleanBody = body.trim();
         const cleanOutTradeNo = out_trade_no.trim();
 
@@ -537,17 +583,13 @@ async function unifiedOrder(req) {
             const artworkIds = [];
             const digitalIds = [];
 
-            cart_items.forEach(item => {
+            normalizedCartItems.forEach(item => {
                 if (item.type === 'right') {
                     rightIds.push(item.right_id);
                 } else if (item.type === 'artwork') {
                     artworkIds.push(item.artwork_id);
                 } else if (item.type === 'digital') {
-                    const parsedDigital = parseDigitalArtworkId(item.digital_artwork_id);
-                    if (!parsedDigital.error) {
-                        item.digital_artwork_id = parsedDigital.id;
-                        digitalIds.push(parsedDigital.id);
-                    }
+                    digitalIds.push(item.digital_artwork_id);
                 }
             });
 
@@ -555,6 +597,7 @@ async function unifiedOrder(req) {
             const goodsMap = new Map();
 
             // 批量查询rights
+            const rightsMapForPricing = {};
             if (rightIds.length > 0) {
                 const [rights] = await connection.query(
                     'SELECT id, price, discount_price, remaining_count FROM rights WHERE id IN (?) AND status = "onsale"',
@@ -562,8 +605,11 @@ async function unifiedOrder(req) {
                 );
                 rights.forEach(right => {
                     goodsMap.set(`right_${right.id}`, right);
+                    rightsMapForPricing[right.id] = right;
                 });
             }
+
+            const rightDiscountPricing = await buildRightDiscountPricingByUser(userId, rightsMapForPricing);
 
             // 批量查询artworks
             if (artworkIds.length > 0) {
@@ -588,17 +634,11 @@ async function unifiedOrder(req) {
                 });
             }
 
-            // 校验所有商品
-            for (const item of cart_items) {
-                if (item.type === 'digital') {
-                    const parsedDigital = parseDigitalArtworkId(item.digital_artwork_id);
-                    if (parsedDigital.error) {
-                        await connection.rollback();
-                        return adminResult(400, { error: parsedDigital.error });
-                    }
-                    item.digital_artwork_id = parsedDigital.id;
-                }
+            // 校验所有商品并由服务端算价
+            let serverTotalFee = 0;
+            const pricedCartItems = [];
 
+            for (const item of normalizedCartItems) {
                 const key = `${item.type}_${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id}`;
                 const goods = goodsMap.get(key);
 
@@ -626,58 +666,32 @@ async function unifiedOrder(req) {
                     return adminResult(400, { error: `数字艺术品ID ${item.digital_artwork_id} 库存不足` });
                 }
 
-                // 验证价格
-                const itemPrice = parseFloat(item.price);
-                let dbPrice;
+                let unitPriceYuan;
                 if (item.type === 'right') {
-                    // 判断是否享受优惠价
-                    let effectivePrice = parseFloat(goods.price);
-                    if (goods.discount_price && parseFloat(goods.discount_price) > 0) {
-                        // 查询权益的优惠资格所需数字资产列表
-                        const [eligible] = await connection.query(
-                            'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
-                            [item.right_id]
-                        );
-                        if (eligible && eligible.length > 0) {
-                            // 查询用户是否拥有其中任一数字资产
-                            const eligibleIds = eligible.map(e => e.digital_artwork_id);
-                            if (eligibleIds.length > 0) {
-                                const [owned] = await connection.query(
-                                    'SELECT 1 FROM digital_identity_purchases WHERE user_id = ? AND digital_artwork_id IN (?) LIMIT 1',
-                                    [userId, eligibleIds]
-                                );
-                                if (owned && owned.length > 0) {
-                                    effectivePrice = parseFloat(goods.discount_price);
-                                }
-                            }
-                        }
-                    }
-                    dbPrice = effectivePrice;
+                    const pricing = rightDiscountPricing[item.right_id];
+                    unitPriceYuan = pricing?.effective_price ?? parseMoney(goods.price);
                 } else if (item.type === 'digital') {
-                    dbPrice = parseFloat(goods.price);
-                    if (!Number.isFinite(dbPrice)) dbPrice = 0;
-                    itemPrice = resolveSubmittedDigitalPriceYuan(itemPrice, dbPrice);
-                    item.price = itemPrice;
-                } else if (item.type === 'artwork') {
-                    dbPrice = (goods.discount_price && goods.discount_price > 0 && goods.discount_price < goods.original_price)
-                        ? goods.discount_price
-                        : goods.original_price;
+                    unitPriceYuan = computeDigitalUnitPriceYuan(goods);
+                } else {
+                    unitPriceYuan = computeArtworkUnitPriceYuan(goods);
                 }
 
-                if (Math.abs(itemPrice - dbPrice) > 0.01) {
+                if (!Number.isFinite(unitPriceYuan) || unitPriceYuan < 0) {
                     await connection.rollback();
-                    return adminResult(400, {
-                        error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 价格不匹配`,
-                        detail: {
-                            expected: dbPrice,
-                            received: itemPrice
-                        }
-                    });
+                    return adminResult(400, { error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 价格无效` });
                 }
+
+                serverTotalFee += unitPriceYuan * item.quantity;
+                pricedCartItems.push({ ...item, unitPriceYuan });
             }
 
-            // 计算实际支付金额（考虑抵扣）
-            const actualTotalFee = Math.max(0, total_fee - availableDiscount);
+            if (!Number.isFinite(serverTotalFee) || serverTotalFee <= 0) {
+                await connection.rollback();
+                return adminResult(400, { error: '订单金额无效' });
+            }
+
+            const cleanTotalFee = serverTotalFee;
+            const actualTotalFee = Math.max(0, cleanTotalFee - availableDiscount);
 
             let orderId;
 
@@ -702,13 +716,13 @@ async function unifiedOrder(req) {
             }
 
             // 创建订单项，支持三种类型
-            const orderItems = cart_items.map(item => {
+            const orderItems = pricedCartItems.map(item => {
                 if (item.type === 'right') {
-                    return [orderId, 'right', item.right_id, null, null, item.quantity, parseFloat(item.price), address_id || null];
+                    return [orderId, 'right', item.right_id, null, null, item.quantity, item.unitPriceYuan, address_id || null];
                 } else if (item.type === 'digital') {
-                    return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, parseFloat(item.price), address_id || null];
+                    return [orderId, 'digital', null, item.digital_artwork_id, null, item.quantity, item.unitPriceYuan, address_id || null];
                 } else if (item.type === 'artwork') {
-                    return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, parseFloat(item.price), address_id || null];
+                    return [orderId, 'artwork', null, null, item.artwork_id, item.quantity, item.unitPriceYuan, address_id || null];
                 }
             });
             await connection.query(
@@ -800,7 +814,7 @@ async function singleOrder(req) {
     try {
         await ensureDigitalArtworkIdColumns();
 
-        const { openid, type, quantity, price, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
+        const { openid, type, quantity, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
 
         // 输入验证
         if (!openid || typeof openid !== 'string' || openid.trim().length === 0) {
@@ -809,11 +823,9 @@ async function singleOrder(req) {
         if (!type || !['right', 'digital', 'artwork'].includes(type)) {
             return adminResult(400, { error: 'type 必须是 right、digital 或 artwork' });
         }
-        if (!quantity || isNaN(parseInt(quantity)) || parseInt(quantity) <= 0) {
+        const cleanQuantity = parseOrderItemQuantity(quantity);
+        if (!cleanQuantity) {
             return adminResult(400, { error: '缺少有效的商品数量' });
-        }
-        if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
-            return adminResult(400, { error: '缺少有效的商品价格' });
         }
         if (!body || typeof body !== 'string' || body.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的商品描述' });
@@ -848,8 +860,6 @@ async function singleOrder(req) {
         // 清理输入
         const cleanOpenid = openid.trim();
         const cleanType = type;
-        const cleanQuantity = parseInt(quantity);
-        const cleanPrice = parseFloat(price);
         const cleanBody = body.trim();
         const cleanOutTradeNo = out_trade_no.trim();
 
@@ -921,9 +931,8 @@ async function singleOrder(req) {
             `, [userId]);
             const availableDiscount = discounts[0].total_discount || 0;
 
-            // 校验商品
-            let itemId, dbPrice, stock, actualPrice;
-            let unitPriceYuan = cleanPrice;
+            // 校验商品并由服务端算价
+            let itemId, unitPriceYuan;
             if (cleanType === 'right') {
                 itemId = parseInt(right_id);
                 const [rights] = await connection.query(
@@ -938,34 +947,8 @@ async function singleOrder(req) {
                     await connection.rollback();
                     return adminResult(400, { error: `商品ID ${itemId} 库存不足` });
                 }
-                // 计算有效价格（若满足资格则使用优惠价）
-                let effectivePrice = parseFloat(rights[0].price);
-                if (rights[0].discount_price && parseFloat(rights[0].discount_price) > 0) {
-                    const [eligible] = await connection.query(
-                        'SELECT digital_artwork_id FROM right_discount_eligibles WHERE right_id = ?',
-                        [itemId]
-                    );
-                    if (eligible && eligible.length > 0) {
-                        const eligibleIds = eligible.map(e => e.digital_artwork_id);
-                        if (eligibleIds.length > 0) {
-                            const [owned] = await connection.query(
-                                'SELECT 1 FROM digital_identity_purchases WHERE user_id = ? AND digital_artwork_id IN (?) LIMIT 1',
-                                [userId, eligibleIds]
-                            );
-                            if (owned && owned.length > 0) {
-                                effectivePrice = parseFloat(rights[0].discount_price);
-                            }
-                        }
-                    }
-                }
-                dbPrice = effectivePrice;
-                if (Math.abs(cleanPrice - dbPrice) > 0.01) {
-                    await connection.rollback();
-                    return adminResult(400, {
-                        error: `商品ID ${itemId} 价格不匹配`,
-                        detail: { expected: dbPrice, received: cleanPrice }
-                    });
-                }
+                const rightDiscountPricing = await buildRightDiscountPricingByUser(userId, { [itemId]: rights[0] });
+                unitPriceYuan = rightDiscountPricing[itemId]?.effective_price ?? parseMoney(rights[0].price);
             } else if (cleanType === 'artwork') {
                 itemId = parseInt(artwork_id);
                 const [artworks] = await connection.query(
@@ -984,16 +967,7 @@ async function singleOrder(req) {
                     await connection.rollback();
                     return adminResult(400, { error: `艺术品ID ${itemId} 库存不足` });
                 }
-                actualPrice = (artworks[0].discount_price && artworks[0].discount_price > 0 && artworks[0].discount_price < artworks[0].original_price)
-                    ? artworks[0].discount_price
-                    : artworks[0].original_price;
-                if (Math.abs(cleanPrice - actualPrice) > 0.01) {
-                    await connection.rollback();
-                    return adminResult(400, {
-                        error: `艺术品ID ${itemId} 价格不匹配`,
-                        detail: { expected: actualPrice, received: cleanPrice }
-                    });
-                }
+                unitPriceYuan = computeArtworkUnitPriceYuan(artworks[0]);
             } else if (cleanType === 'digital') {
                 itemId = parsedDigitalId.id;
                 const digital = await fetchDigitalArtworkById(itemId, connection);
@@ -1005,20 +979,20 @@ async function singleOrder(req) {
                     await connection.rollback();
                     return adminResult(400, { error: `数字艺术品ID ${itemId} 库存不足` });
                 }
-                dbPrice = parseFloat(digital.price);
-                if (!Number.isFinite(dbPrice)) dbPrice = 0;
-                unitPriceYuan = resolveSubmittedDigitalPriceYuan(cleanPrice, dbPrice);
-                if (Math.abs(unitPriceYuan - dbPrice) > 0.01) {
-                    await connection.rollback();
-                    return adminResult(400, {
-                        error: `数字艺术品ID ${itemId} 价格不匹配`,
-                        detail: { expected: dbPrice, received: cleanPrice }
-                    });
-                }
+                unitPriceYuan = computeDigitalUnitPriceYuan(digital);
+            }
+
+            if (!Number.isFinite(unitPriceYuan) || unitPriceYuan < 0) {
+                await connection.rollback();
+                return adminResult(400, { error: '商品价格无效' });
             }
 
             // 计算实际支付金额（考虑抵扣）
             const total_fee = unitPriceYuan * cleanQuantity;
+            if (!Number.isFinite(total_fee) || total_fee <= 0) {
+                await connection.rollback();
+                return adminResult(400, { error: '订单金额无效' });
+            }
             const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
             let orderId;
@@ -1046,11 +1020,11 @@ async function singleOrder(req) {
             // 创建订单项
             let orderItem;
             if (cleanType === 'right') {
-                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, cleanPrice, address_id || null];
+                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, unitPriceYuan, address_id || null];
             } else if (cleanType === 'digital') {
                 orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, unitPriceYuan, address_id || null];
             } else if (cleanType === 'artwork') {
-                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, cleanPrice, address_id || null];
+                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, unitPriceYuan, address_id || null];
             }
             await connection.query(
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
