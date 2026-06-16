@@ -17,6 +17,11 @@ const geocodeLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => `geocode:ip:${req.ip}`,
+    skip: async (req) => {
+        const address = String(req.query?.address || '').trim();
+        if (!address) return false;
+        return mapGeocodeSvc.isGeocodeCached(address);
+    },
     handler: (req, res) => {
         res.status(429).json({ error: '地理编码请求过于频繁，请稍后再试' });
     },

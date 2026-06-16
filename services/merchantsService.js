@@ -4,6 +4,7 @@ const { uploadToOSS } = require('../config/oss');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const redisClient = require('../utils/redisClient');
+const { invalidateGeocodeCaches } = require('./mapGeocodeService');
 
 const REDIS_MERCHANTS_LIST_KEY_PREFIX = 'merchants:list:';
 const REDIS_MERCHANT_DETAIL_KEY_PREFIX = 'merchants:detail:';
@@ -291,7 +292,11 @@ async function updateMerchantAdmin(rawId, body) {
     return adminResult(400, { error: '无效的Logo URL' });
   }
 
+  let previousAddress = null;
   try {
+    const [existingRows] = await db.query('SELECT address FROM merchants WHERE id = ?', [id]);
+    previousAddress = existingRows[0]?.address || null;
+
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
@@ -322,6 +327,7 @@ async function updateMerchantAdmin(rawId, body) {
 
     await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + id);
+    await invalidateGeocodeCaches([previousAddress, address]);
 
     return adminResult(200, {
       success: true,
@@ -340,7 +346,11 @@ async function deleteMerchantAdmin(rawId) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的商家ID' });
 
+  let previousAddress = null;
   try {
+    const [existingRows] = await db.query('SELECT address FROM merchants WHERE id = ?', [id]);
+    previousAddress = existingRows[0]?.address || null;
+
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
@@ -356,6 +366,7 @@ async function deleteMerchantAdmin(rawId) {
 
     await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + id);
+    await invalidateGeocodeCaches([previousAddress]);
 
     return adminResult(200, {
       success: true,
