@@ -7,7 +7,7 @@ const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
-const { pickLatestPathNode } = require('../utils/orderFulfillmentStatus')
+const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
 const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv')
 
 function adminResult(status, body) {
@@ -539,7 +539,7 @@ async function getPath(req) {
     const skipPathNotify = b.skip_path_notify === true || b.skipPathNotify === true
 
     if (ctx.internal_order_id && pathItemList.length) {
-      const latestNode = pickLatestPathNode(pathItemList)
+      const latestNode = pickFulfillmentPathNode(pathItemList)
       if (latestNode?.action_type != null) {
         const actionAtSec = Number(latestNode.action_time) || 0
         const actionAt = actionAtSec > 0 ? new Date(actionAtSec * 1000) : new Date()

@@ -5,6 +5,7 @@ const redisClient = require('../utils/redisClient')
 const { getAccessToken } = require('./wechatMiniProgramToken')
 const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
+const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 
 const PATH_SEEN_REDIS_PREFIX = 'logistics:path:seen:'
@@ -258,7 +259,7 @@ async function handleLogisticsPathNotify({
     return { skipped: true, reason: 'empty_path_list' }
   }
 
-  const latestNode = pickLatestPathNode(nodes)
+  const latestNode = pickFulfillmentPathNode(nodes)
   if (latestNode) {
     const actionAtSec = Number(latestNode.action_time) || 0
     const actionAt = actionAtSec > 0 ? new Date(actionAtSec * 1000) : new Date()

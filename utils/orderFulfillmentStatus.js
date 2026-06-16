@@ -285,20 +285,28 @@ function buildFulfillmentTimelineStages(fulfillment, { paidAt, shipmentCreatedAt
   return stages
 }
 
-module.exports = {
-  FULFILLMENT_STATUS,
-  STATUS_LABELS,
-  mapPathActionToStatus,
-  resolveFulfillmentKind,
-  resolveOrderFulfillmentStatus,
-  buildFulfillmentTimelineStages,
-  pickLatestPathNode,
+/** 微信物流 action_type 履约优先级（数值越大越代表履约进展越靠后） */
+const PATH_ACTION_FULFILLMENT_RANK = {
+  400001: 110,
+  300003: 100,
+  300004: 95,
+  300002: 80,
+  400002: 70,
+  200001: 60,
+  100001: 50,
+  100003: 45,
+  100002: 40,
+}
+
+function normalizePathItemList(pathItemList) {
+  if (!Array.isArray(pathItemList)) return []
+  return pathItemList.filter((item) => item && typeof item === 'object')
 }
 
 function pickLatestPathNode(pathItemList) {
-  if (!Array.isArray(pathItemList) || !pathItemList.length) return null
-  return pathItemList.reduce((latest, item) => {
-    if (!item || typeof item !== 'object') return latest
+  const list = normalizePathItemList(pathItemList)
+  if (!list.length) return null
+  return list.reduce((latest, item) => {
     if (!latest) return item
     const latestTs = Number(latest.action_time) || 0
     const itemTs = Number(item.action_time) || 0
@@ -308,4 +316,41 @@ function pickLatestPathNode(pathItemList) {
     const itemType = Number(item.action_type) || 0
     return itemType >= latestType ? item : latest
   }, null)
+}
+
+/**
+ * 选取用于履约状态的轨迹节点。
+ * 顺丰等在签收后可能追加时间更晚的 200001 说明节点，不能仅用 action_time 最大值。
+ */
+function pickFulfillmentPathNode(pathItemList) {
+  const list = normalizePathItemList(pathItemList)
+  if (!list.length) return null
+
+  return list.reduce((best, item) => {
+    if (!best) return item
+    const bestRank = PATH_ACTION_FULFILLMENT_RANK[Number(best.action_type)] || 0
+    const itemRank = PATH_ACTION_FULFILLMENT_RANK[Number(item.action_type)] || 0
+    if (itemRank > bestRank) return item
+    if (itemRank < bestRank) return best
+
+    const bestTs = Number(best.action_time) || 0
+    const itemTs = Number(item.action_time) || 0
+    if (itemTs > bestTs) return item
+    if (itemTs < bestTs) return best
+
+    const bestType = Number(best.action_type) || 0
+    const itemType = Number(item.action_type) || 0
+    return itemType >= bestType ? item : best
+  }, null)
+}
+
+module.exports = {
+  FULFILLMENT_STATUS,
+  STATUS_LABELS,
+  mapPathActionToStatus,
+  resolveFulfillmentKind,
+  resolveOrderFulfillmentStatus,
+  buildFulfillmentTimelineStages,
+  pickLatestPathNode,
+  pickFulfillmentPathNode,
 }

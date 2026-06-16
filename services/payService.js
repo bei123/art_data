@@ -24,7 +24,7 @@ const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema');
 const {
     resolveOrderFulfillmentStatus,
     buildFulfillmentTimelineStages,
-    pickLatestPathNode,
+    pickFulfillmentPathNode,
     FULFILLMENT_STATUS,
 } = require('../utils/orderFulfillmentStatus');
 const {
@@ -3585,7 +3585,7 @@ async function orderDetailForActor(req, options = {}) {
                 }
 
                 const pathItemList = r.body.path_item_list || [];
-                const latestNode = pathItemList.length ? pickLatestPathNode(pathItemList) : null;
+                const latestNode = pathItemList.length ? pickFulfillmentPathNode(pathItemList) : null;
                 if (latestNode?.action_type != null) {
                     shipments[i].latest_path_action_type = Number(latestNode.action_type);
                     const actionAtSec = Number(latestNode.action_time) || 0;
