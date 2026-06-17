@@ -14,6 +14,9 @@ const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { resolveAuthFromRequest } = require('../auth');
 
+const WX_TOKEN_TTL_DAYS = 7
+const WX_TOKEN_EXPIRES_IN = `${WX_TOKEN_TTL_DAYS}d`
+
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
 }
@@ -179,17 +182,22 @@ const { code } = req.body;
         }
 
         // 3. 生成你自己系统的 token（如 JWT）
-        const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: WX_TOKEN_EXPIRES_IN });
+        const decoded = jwt.decode(token)
+        const expiresAt = new Date(decoded.exp * 1000).toISOString()
+        const expiresIn = decoded.exp - Math.floor(Date.now() / 1000)
 
         // 与 auth.authenticateToken 一致：写入会话表，登出或过期即吊销
         await db.query(
-            'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))',
+            `INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ${WX_TOKEN_TTL_DAYS} DAY))`,
             [user.id, token]
         );
 
         // 4. 返回用户信息和 token, 过滤掉敏感字段
         return adminResult(200, {
             token,
+            expires_at: expiresAt,
+            expiresIn,
             user: {
                 id: user.id,
                 openid: user.openid,
