@@ -406,7 +406,7 @@
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
+          <AlertDialogCancel type="button" @click="closeToggleVisibilityDialog">
             取消
           </AlertDialogCancel>
           <Button
@@ -430,7 +430,7 @@
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
+          <AlertDialogCancel type="button" @click="closeDeleteDigitalDialog">
             取消
           </AlertDialogCancel>
           <Button
@@ -455,7 +455,7 @@
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter class="gap-2 sm:justify-end">
-          <AlertDialogCancel type="button">
+          <AlertDialogCancel type="button" @click="removeDigitalImageDialogOpen = false">
             取消
           </AlertDialogCancel>
           <Button type="button" variant="destructive" @click="confirmRemoveDigitalImage">
@@ -528,6 +528,7 @@ const associateArtistSearch = ref('')
 
 const toggleVisibilityDialogOpen = ref(false)
 const toggleVisibilityRow = ref(null)
+const toggleVisibilityTargetId = ref('')
 const toggleVisibilitySubmitting = ref(false)
 const toggleVisibilityDescription = computed(() => {
   const row = toggleVisibilityRow.value
@@ -538,6 +539,7 @@ const toggleVisibilityDescription = computed(() => {
 
 const deleteDigitalDialogOpen = ref(false)
 const deleteDigitalTarget = ref(null)
+const deleteDigitalTargetId = ref('')
 const deletingDigital = ref(false)
 
 const removeDigitalImageDialogOpen = ref(false)
@@ -749,22 +751,37 @@ const handlePurchaseLinkToggle = async (row, val) => {
 }
 
 function openToggleVisibilityDialog(row) {
+  const artworkId = row?.id == null ? '' : String(row.id).trim()
+  if (!artworkId) {
+    ElMessage.error('作品 ID 无效，无法切换显示状态')
+    return
+  }
   toggleVisibilityRow.value = row
+  toggleVisibilityTargetId.value = artworkId
   toggleVisibilityDialogOpen.value = true
+}
+
+function closeToggleVisibilityDialog() {
+  toggleVisibilityDialogOpen.value = false
+  toggleVisibilityRow.value = null
+  toggleVisibilityTargetId.value = ''
 }
 
 async function confirmToggleVisibility() {
   const row = toggleVisibilityRow.value
-  if (!row?.id) return
+  const artworkId = toggleVisibilityTargetId.value
+  if (!row || !artworkId) {
+    ElMessage.error('作品信息已失效，请关闭后重试')
+    return
+  }
   const action = row.is_hidden ? '显示' : '隐藏'
   toggleVisibilitySubmitting.value = true
   try {
-    await axios.patch(`/digital-artworks/${row.id}/hide`, {
+    await axios.patch(`/digital-artworks/${artworkId}/hide`, {
       is_hidden: !row.is_hidden
     })
     ElMessage.success(`${action}成功`)
-    toggleVisibilityDialogOpen.value = false
-    toggleVisibilityRow.value = null
+    closeToggleVisibilityDialog()
     fetchArtworks()
   } catch (error) {
     console.error(`${action}失败:`, error)
@@ -778,19 +795,34 @@ async function confirmToggleVisibility() {
 }
 
 function openDeleteDigitalDialog(row) {
+  const artworkId = row?.id == null ? '' : String(row.id).trim()
+  if (!artworkId) {
+    ElMessage.error('作品 ID 无效，无法删除')
+    return
+  }
   deleteDigitalTarget.value = row
+  deleteDigitalTargetId.value = artworkId
   deleteDigitalDialogOpen.value = true
+}
+
+function closeDeleteDigitalDialog() {
+  deleteDigitalDialogOpen.value = false
+  deleteDigitalTarget.value = null
+  deleteDigitalTargetId.value = ''
 }
 
 async function confirmDeleteDigital() {
   const row = deleteDigitalTarget.value
-  if (!row?.id) return
+  const artworkId = deleteDigitalTargetId.value
+  if (!row || !artworkId) {
+    ElMessage.error('作品信息已失效，请关闭后重试')
+    return
+  }
   deletingDigital.value = true
   try {
-    await axios.delete(`/digital-artworks/${row.id}`)
+    await axios.delete(`/digital-artworks/${artworkId}`)
     ElMessage.success('删除成功')
-    deleteDigitalDialogOpen.value = false
-    deleteDigitalTarget.value = null
+    closeDeleteDigitalDialog()
     fetchArtworks()
   } catch (error) {
     console.error('删除失败:', error)

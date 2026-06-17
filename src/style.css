@@ -128,3 +128,14 @@
     @apply font-sans;
     }
 }
+
+/* reka-ui 遮罩层内联 pointer-events:auto 会拦截弹窗按钮；内容层也可能被设为 none */
+[data-slot="alert-dialog-overlay"],
+[data-slot="dialog-overlay"] {
+  pointer-events: none !important;
+}
+
+[data-slot="alert-dialog-content"],
+[data-slot="dialog-content"] {
+  pointer-events: auto !important;
+}
