@@ -125,6 +125,17 @@ router.get('/orders/detail', authenticateToken, async (req, res) => {
   }
 });
 
+/** 小程序：确认收货组件回调后二次校验（服务端调用微信 getOrder） */
+router.post('/orders/confirm-receipt/verify', authenticateToken, async (req, res) => {
+  try {
+    const r = await svc.verifyBuyerConfirmReceipt(req);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('确认收货校验失败', { err: e });
+    return res.status(500).json({ success: false, error: '确认收货校验失败' });
+  }
+});
+
 /** 小程序订单列表：JWT 识别用户，支持 status 分页 */
 router.get('/orders', authenticateToken, async (req, res) => {
   try {

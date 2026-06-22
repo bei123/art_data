@@ -11,6 +11,10 @@ import {
   buildSetMsgJumpPathPayload,
   buildIsTradeManagementConfirmationCompletedPayload,
   isAutoNotifyConfirmReceiveEnabled,
+  buildWechatOrderConfirmExtraData,
+  hasWechatOrderConfirmExtraData,
+  isWechatOrderConfirmReceiptCompleted,
+  canOpenWechatOrderConfirmByWxState,
 } from '../services/wechatShippingInfoService.js'
 
 describe('wechatShippingInfoService helpers', () => {
@@ -227,5 +231,24 @@ describe('wechatShippingInfoService helpers', () => {
     expect(isAutoNotifyConfirmReceiveEnabled()).toBe(false)
     if (prev == null) delete process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED
     else process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED = prev
+  })
+
+  it('builds weappOrderConfirm extraData', () => {
+    expect(buildWechatOrderConfirmExtraData({
+      transactionId: '420000123',
+      merchantId: '1360639602',
+      outTradeNo: 'ORDER123',
+    })).toEqual({
+      transaction_id: '420000123',
+      merchant_id: '1360639602',
+      merchant_trade_no: 'ORDER123',
+    })
+    expect(hasWechatOrderConfirmExtraData({
+      merchant_id: '1360639602',
+      merchant_trade_no: 'ORDER123',
+    })).toBe(true)
+    expect(isWechatOrderConfirmReceiptCompleted(3)).toBe(true)
+    expect(isWechatOrderConfirmReceiptCompleted(2)).toBe(false)
+    expect(canOpenWechatOrderConfirmByWxState(2)).toBe(true)
   })
 })

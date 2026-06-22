@@ -926,6 +926,67 @@ async function getWechatOrderForInternalOrder(internalOrderId) {
   })
 }
 
+function buildWechatOrderConfirmExtraData({ transactionId, merchantId, outTradeNo }) {
+  const extra = {}
+  const tx = transactionId != null ? String(transactionId).trim() : ''
+  const mch = merchantId != null ? String(merchantId).trim() : ''
+  const outNo = outTradeNo != null ? String(outTradeNo).trim() : ''
+
+  if (tx) extra.transaction_id = tx
+  if (mch) extra.merchant_id = mch
+  if (outNo) extra.merchant_trade_no = outNo
+
+  return extra
+}
+
+function hasWechatOrderConfirmExtraData(extraData) {
+  if (!extraData || typeof extraData !== 'object') return false
+  if (extraData.transaction_id) return true
+  return Boolean(extraData.merchant_id && extraData.merchant_trade_no)
+}
+
+function isWechatOrderConfirmReceiptCompleted(orderState) {
+  const state = Number(orderState)
+  return state === 3 || state === 4
+}
+
+function canOpenWechatOrderConfirmByWxState(orderState) {
+  return Number(orderState) === 2
+}
+
+async function verifyWechatConfirmReceiptDirect({ transactionId, merchantTradeNo, buyerOpenid }) {
+  const result = await getWechatOrderDirect({
+    transactionId,
+    merchantTradeNo,
+  })
+  if (!result.ok) return result
+
+  const wxOrder = result.body?.order
+  if (!wxOrder) {
+    return adminResult(502, { error: '微信未返回订单信息' })
+  }
+
+  const wxOpenid = wxOrder.openid != null ? String(wxOrder.openid).trim() : ''
+  const expectedOpenid = buyerOpenid != null ? String(buyerOpenid).trim() : ''
+  if (expectedOpenid && wxOpenid && wxOpenid !== expectedOpenid) {
+    return adminResult(403, {
+      error: '支付单不属于当前用户',
+      errcode: 10060031,
+    })
+  }
+
+  const orderState = Number(wxOrder.order_state)
+  return adminResult(200, {
+    success: true,
+    verified: true,
+    confirm_receipt_completed: isWechatOrderConfirmReceiptCompleted(orderState),
+    can_open_confirm_component: canOpenWechatOrderConfirmByWxState(orderState),
+    order_state: orderState,
+    order_state_label: wxOrder.order_state_label || WECHAT_ORDER_STATE_LABELS[orderState] || null,
+    wx_order: wxOrder,
+  })
+}
+
 async function getWechatOrder(req) {
   const b = req.body && typeof req.body === 'object' ? req.body : {}
 
@@ -1233,6 +1294,11 @@ module.exports = {
   buildNotifyConfirmReceivePayload,
   buildSetMsgJumpPathPayload,
   buildIsTradeManagementConfirmationCompletedPayload,
+  buildWechatOrderConfirmExtraData,
+  hasWechatOrderConfirmExtraData,
+  isWechatOrderConfirmReceiptCompleted,
+  canOpenWechatOrderConfirmByWxState,
+  verifyWechatConfirmReceiptDirect,
   WECHAT_ORDER_STATE_LABELS,
   uploadShippingInfoDirect,
   uploadCombinedShippingInfoDirect,

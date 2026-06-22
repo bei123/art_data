@@ -21,7 +21,11 @@ const {
 } = require('../utils/safeOutboundUrl');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema');
-const { buildWechatOrderConfirmFields } = require('../utils/wechatOrderConfirm');
+const {
+    buildWechatOrderConfirmExtraData,
+    hasWechatOrderConfirmExtraData,
+    verifyWechatConfirmReceiptDirect,
+} = require('./wechatShippingInfoService');
 const {
     resolveOrderFulfillmentStatus,
     buildFulfillmentTimelineStages,
@@ -2559,7 +2563,6 @@ function buildListPayStatusFromOrder(order) {
         success_time: order.success_time || null,
         amount: totalFen != null ? { total: totalFen, currency: 'CNY' } : null,
         transaction_id: order.transaction_id || null,
-        merchant_id: WX_PAY_CONFIG.mchId || null,
     };
 }
 
@@ -2821,20 +2824,12 @@ function filterOrdersByStatus(orders, statusStates) {
     return orders.filter((order) => statusStates.includes(order.trade_state));
 }
 
-function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus, fulfillmentContext = null) {
+function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus) {
     const statusFields = buildOrderStatusFields(
         order.trade_state,
         order.trade_state_desc,
         fulfillmentStatus,
     );
-    const wechatConfirm = buildWechatOrderConfirmFields({
-        order,
-        tradeState: order.trade_state,
-        fulfillmentStatus,
-        items: fulfillmentContext?.items || items.map((item) => ({ type: item.type })),
-        shipment: fulfillmentContext?.shipment || null,
-        merchantId: WX_PAY_CONFIG.mchId,
-    });
     return {
         out_trade_no: order.out_trade_no,
         created_at: toIsoOrNull(order.created_at),
@@ -2842,12 +2837,6 @@ function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus, fulfi
         ...statusFields,
         refund_status: refundStatus || null,
         items,
-        can_confirm_receipt: wechatConfirm.can_confirm_receipt,
-        wechat_order_confirm: wechatConfirm.wechat_order_confirm,
-        payment: {
-            transaction_id: wechatConfirm.payment_transaction_id,
-            merchant_id: wechatConfirm.payment_merchant_id,
-        },
     };
 }
 
@@ -2922,7 +2911,7 @@ async function listOrders(req) {
 
         const [[orders], [[{ total }]]] = await Promise.all([
             db.query(
-                `SELECT id, out_trade_no, transaction_id, created_at, total_fee, trade_state, trade_state_desc
+                `SELECT id, out_trade_no, created_at, total_fee, trade_state, trade_state_desc
                  FROM orders FORCE INDEX (idx_orders_user_id)
                  WHERE ${whereSql}
                  ORDER BY created_at DESC
@@ -2958,7 +2947,6 @@ async function listOrders(req) {
                 itemsByOrderId.get(order.id) || [],
                 refundStatus,
                 fulfillmentStatus,
-                fulfillmentCtx,
             );
         });
 
@@ -3195,27 +3183,12 @@ async function adminOrders(req) {
                 shipment: fulfillmentCtx?.shipment || null,
             }, refundStatus);
 
-            const wechatConfirm = buildWechatOrderConfirmFields({
-                order,
-                tradeState: order.trade_state,
-                fulfillmentStatus,
-                items: fulfillmentCtx?.items || items.map((item) => ({ type: item.type })),
-                shipment: fulfillmentCtx?.shipment || null,
-                merchantId: WX_PAY_CONFIG.mchId,
-            });
-
             return {
                 ...order,
                 items,
                 pay_status: buildListPayStatusFromOrder(order),
                 refund_status: refundStatus,
                 fulfillment_status: fulfillmentStatus,
-                can_confirm_receipt: wechatConfirm.can_confirm_receipt,
-                wechat_order_confirm: wechatConfirm.wechat_order_confirm,
-                payment: {
-                    transaction_id: wechatConfirm.payment_transaction_id,
-                    merchant_id: wechatConfirm.payment_merchant_id,
-                },
             };
         });
 
@@ -4111,24 +4084,11 @@ async function orderDetailForActor(req, options = {}) {
             price: Number(item.price) || 0,
         }));
 
-        const wechatConfirm = buildWechatOrderConfirmFields({
-            order,
-            wxPay,
-            tradeState: effectiveTradeState,
-            fulfillmentStatus: statusFields.fulfillment_status,
-            items,
-            shipment: primaryShipment,
-            merchantId: WX_PAY_CONFIG.mchId,
-        });
-        payment.transaction_id = wechatConfirm.payment_transaction_id;
-
         const detailData = {
             out_trade_no: order.out_trade_no,
             created_at: toIsoOrNull(order.created_at),
             total_fee: Number(order.total_fee) || 0,
             ...statusFields,
-            can_confirm_receipt: wechatConfirm.can_confirm_receipt,
-            wechat_order_confirm: wechatConfirm.wechat_order_confirm,
             refund_status: refundStatus,
             items: listCompatibleItems,
             fee,
@@ -4138,6 +4098,16 @@ async function orderDetailForActor(req, options = {}) {
             shipments: shipmentsForResponse,
             detail_items: items,
         };
+
+        if (mode === 'buyer') {
+            detailData.wechat_confirm_receipt = buildBuyerWechatConfirmReceiptBlock({
+                order,
+                payment,
+                primaryShipment,
+                fulfillmentStatus: statusFields.fulfillment_status,
+                items,
+            });
+        }
 
         if (mode === 'buyer') {
             return adminResult(200, {
@@ -4169,6 +4139,89 @@ async function adminOrderDetail(req) {
 
 async function buyerOrderDetail(req) {
     return orderDetailForActor(req, { mode: 'buyer' });
+}
+
+function buildBuyerWechatConfirmReceiptBlock({
+    order,
+    payment,
+    primaryShipment,
+    fulfillmentStatus,
+    items,
+}) {
+    const extraData = buildWechatOrderConfirmExtraData({
+        transactionId: payment?.transaction_id,
+        merchantId: payment?.merchant_id || WX_PAY_CONFIG.mchId,
+        outTradeNo: order?.out_trade_no,
+    });
+
+    const hasPhysical = (items || []).some((item) => item.type === 'right' || item.type === 'artwork');
+    const paid = payment?.trade_state === 'SUCCESS';
+    const hasActiveShipment = Boolean(
+        primaryShipment?.status === 'active' && primaryShipment?.waybill_id,
+    );
+    const terminalCodes = new Set(['received', 'completed', 'refunded', 'cancelled', 'closed']);
+    const hasIdent = hasWechatOrderConfirmExtraData(extraData);
+
+    let canOpen = paid && hasPhysical && hasActiveShipment && hasIdent
+        && !terminalCodes.has(fulfillmentStatus?.code);
+    let hint = '可调用 wx.openBusinessView(businessType: weappOrderConfirm) 拉起确认收货组件';
+
+    if (!paid) {
+        canOpen = false;
+        hint = '订单未支付成功，无法确认收货';
+    } else if (!hasPhysical) {
+        canOpen = false;
+        hint = '非实物订单无需使用确认收货组件';
+    } else if (!hasActiveShipment) {
+        canOpen = false;
+        hint = '商家发货后可确认收货';
+    } else if (!hasIdent) {
+        canOpen = false;
+        hint = '缺少微信支付单号或商户订单号';
+    } else if (terminalCodes.has(fulfillmentStatus?.code)) {
+        canOpen = false;
+        hint = '订单已确认收货或已结束';
+    }
+
+    return {
+        business_type: 'weappOrderConfirm',
+        extra_data: hasIdent ? extraData : null,
+        can_open: canOpen,
+        verify_api: 'POST /api/wx/pay/orders/confirm-receipt/verify',
+        hint,
+        callback_appid: 'wx1183b055aeec94d1',
+    };
+}
+
+async function verifyBuyerConfirmReceipt(req) {
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const outTradeNo = b.out_trade_no ?? req.query?.out_trade_no;
+    if (!outTradeNo || typeof outTradeNo !== 'string' || !outTradeNo.trim()) {
+        return adminResult(400, { success: false, error: '缺少 out_trade_no' });
+    }
+
+    const owned = await loadOrderForBuyer(req, outTradeNo.trim());
+    if (owned.error) return owned.error;
+
+    const [wxUserRows] = await db.query(
+        'SELECT openid FROM wx_users WHERE id = ? LIMIT 1',
+        [owned.buyerId],
+    );
+    const buyerOpenid = wxUserRows?.[0]?.openid || null;
+
+    const result = await verifyWechatConfirmReceiptDirect({
+        transactionId: owned.order.transaction_id,
+        merchantTradeNo: owned.cleanOutTradeNo,
+        buyerOpenid,
+    });
+    if (!result.ok) {
+        return adminResult(result.status, {
+            success: false,
+            ...result.body,
+        });
+    }
+
+    return adminResult(200, result.body);
 }
 
 function isValidQrCodeUrl(raw) {
@@ -4423,6 +4476,7 @@ module.exports = {
   checkRepayable,
   adminOrderDetail,
   buyerOrderDetail,
+  verifyBuyerConfirmReceipt,
   uploadDigitalItemQrCode,
 };
 
