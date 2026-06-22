@@ -635,7 +635,7 @@
               <SelectTrigger class="w-full">
                 <SelectValue placeholder="加载产品中…" />
               </SelectTrigger>
-              <SelectContent class="z-[100]" @pointer-down-outside.prevent>
+              <SelectContent>
                 <SelectItem
                   v-for="(s, idx) in serviceTypeOptions"
                   :key="`${s.service_type}-${idx}`"

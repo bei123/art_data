@@ -139,3 +139,8 @@
 [data-slot="dialog-content"] {
   pointer-events: auto !important;
 }
+
+/* Select 下拉经 Portal 渲染，需叠在 Dialog (z-[51]) 之上 */
+[data-slot="select-content"] {
+  pointer-events: auto !important;
+}

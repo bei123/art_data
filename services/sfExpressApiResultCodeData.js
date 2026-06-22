@@ -45,7 +45,7 @@ const SF_API_RESULT_CODE_ROWS = [
   r(
     'A1006',
     '数字签名无效',
-    '请检查：1）checkWord 是否正确；2）msgDigest 加签是否正确；3）参数是否含特殊字符（如 &）；4）是否为 form 表单；5）非 Java 语言注意特殊字符编码；6）可改用 OAuth2 Token 鉴权',
+    '请检查：1）SF_CHECK_WORD 是否为当前环境（沙箱/正式）的「校验码」，不是生产校验码混用；2）partnerID 与校验码是否同一应用；3）可改用 OAuth2：SF_USE_OAUTH=true 并配置 SF_OAUTH_SECRET（通常与沙箱校验码相同）；4）参数含特殊字符时需正确 URL 编码',
   ),
   r(
     'A1007',

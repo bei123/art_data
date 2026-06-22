@@ -17,18 +17,34 @@ const BIZ_RESULT_OK = 'S0000'
 /** 顺丰统一接入平台地址（仅 HTTPS，POST form-urlencoded） */
 const SF_API_URL_PRODUCTION = 'https://bspgw.sf-express.com/std/service'
 const SF_API_URL_SANDBOX = 'https://sfapi-sbox.sf-express.com/std/service'
+const SF_OAUTH_URL_PRODUCTION = 'https://sfapi.sf-express.com/oauth2/accessToken'
+const SF_OAUTH_URL_SANDBOX = 'https://sfapi-sbox.sf-express.com/oauth2/accessToken'
 const DEFAULT_BASE_URL = SF_API_URL_SANDBOX
+
+let oauthTokenCache = { token: '', expiresAt: 0 }
+
+function resolveSfAuthMode({ accessToken, oauthSecret, useOAuth }) {
+  if (accessToken) return 'oauth2-static'
+  if (useOAuth || oauthSecret) return 'oauth2-fetch'
+  return 'md5'
+}
 
 function getSfConfig() {
   const accessToken = (process.env.SF_ACCESS_TOKEN || '').trim()
+  const oauthSecret = (process.env.SF_OAUTH_SECRET || '').trim()
+  const useOAuth = String(process.env.SF_USE_OAUTH || '').trim().toLowerCase() === 'true'
+  const baseUrl = (process.env.SF_API_BASE_URL || DEFAULT_BASE_URL).trim()
   return {
     partnerId: (process.env.SF_PARTNER_ID || '').trim(),
     checkWord: (process.env.SF_CHECK_WORD || '').trim(),
     accessToken,
-    authMode: accessToken ? 'oauth2' : 'md5',
-    baseUrl: (process.env.SF_API_BASE_URL || DEFAULT_BASE_URL).trim(),
+    oauthSecret,
+    useOAuth,
+    authMode: resolveSfAuthMode({ accessToken, oauthSecret, useOAuth }),
+    baseUrl,
     monthlyCard: (process.env.SF_MONTHLY_CARD || '').trim(),
     defaultExpressTypeId: parseInt(process.env.SF_DEFAULT_EXPRESS_TYPE_ID || '1', 10),
+    isSandbox: baseUrl.includes('sbox'),
   }
 }
 
@@ -40,11 +56,11 @@ function assertSfConfig() {
       error: '缺少 SF_PARTNER_ID（顾客编码 CustomerCode，顺丰开放平台获取）',
     }
   }
-  if (cfg.authMode === 'oauth2') return { ok: true, cfg }
+  if (cfg.authMode === 'oauth2-static' || cfg.authMode === 'oauth2-fetch') return { ok: true, cfg }
   if (!cfg.checkWord) {
     return {
       ok: false,
-      error: '缺少 SF_CHECK_WORD（MD5 数字签名鉴权）或 SF_ACCESS_TOKEN（OAuth2 鉴权）',
+      error: '缺少 SF_CHECK_WORD（MD5 鉴权）、SF_OAUTH_SECRET/SF_USE_OAUTH=true（OAuth2）或 SF_ACCESS_TOKEN',
     }
   }
   return { ok: true, cfg }
@@ -54,12 +70,79 @@ function buildRequestId() {
   return crypto.randomUUID()
 }
 
+/** 与 Java URLEncoder.encode(UTF-8) 对齐 */
+function sfUrlEncode(text) {
+  return encodeURIComponent(text).replace(/%20/g, '+')
+}
+
 /**
  * 标准 MD5 鉴权：URLEncode(msgData + timestamp + checkWord) → MD5 → Base64
  */
 function buildMsgDigest(msgData, timestamp, checkWord) {
-  const toVerifyText = encodeURIComponent(`${msgData}${timestamp}${checkWord}`)
+  const toVerifyText = sfUrlEncode(`${msgData}${timestamp}${checkWord}`)
   return crypto.createHash('md5').update(toVerifyText, 'utf8').digest('base64')
+}
+
+function getOAuthTokenUrl(baseUrl) {
+  return String(baseUrl).includes('sbox') ? SF_OAUTH_URL_SANDBOX : SF_OAUTH_URL_PRODUCTION
+}
+
+function resetSfOAuthTokenCache() {
+  oauthTokenCache = { token: '', expiresAt: 0 }
+}
+
+async function fetchSfOAuthAccessToken(cfg) {
+  const secret = cfg.oauthSecret || cfg.checkWord
+  if (!secret) {
+    return { ok: false, error: 'OAuth2 需要 SF_OAUTH_SECRET 或 SF_CHECK_WORD（应用校验码）' }
+  }
+
+  const form = new URLSearchParams()
+  form.set('partnerID', cfg.partnerId)
+  form.set('secret', secret)
+  form.set('grantType', 'password')
+
+  try {
+    const { data } = await axios.post(getOAuthTokenUrl(cfg.baseUrl), form.toString(), {
+      timeout: 15000,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      responseType: 'json',
+    })
+
+    const token = data?.accessToken != null ? String(data.accessToken).trim() : ''
+    if (!token) {
+      return {
+        ok: false,
+        error: data?.apiErrorMsg || data?.errorMsg || 'OAuth2 获取 accessToken 失败',
+        oauth_response: data,
+      }
+    }
+
+    const expiresInSec = Number(data.expiresIn) > 0 ? Number(data.expiresIn) : 7200
+    oauthTokenCache = {
+      token,
+      expiresAt: Date.now() + expiresInSec * 1000,
+    }
+    return { ok: true, accessToken: token, expiresIn: expiresInSec }
+  } catch (err) {
+    return {
+      ok: false,
+      error: 'OAuth2 请求失败',
+      detail: err?.response?.data || err?.message || String(err),
+    }
+  }
+}
+
+async function resolveSfAccessToken(cfg) {
+  if (cfg.authMode === 'oauth2-static') return { ok: true, accessToken: cfg.accessToken }
+  if (cfg.authMode !== 'oauth2-fetch') return { ok: true, accessToken: null }
+
+  const now = Date.now()
+  if (oauthTokenCache.token && oauthTokenCache.expiresAt > now + 60_000) {
+    return { ok: true, accessToken: oauthTokenCache.token, cached: true }
+  }
+
+  return fetchSfOAuthAccessToken(cfg)
 }
 
 function parseApiEnvelope(data) {
@@ -146,8 +229,10 @@ async function callSfService(serviceCode, msgDataObject, options = {}) {
   form.set('serviceCode', serviceCode)
   form.set('timestamp', timestamp)
   form.set('msgData', msgData)
-  if (cfg.authMode === 'oauth2') {
-    form.set('accessToken', cfg.accessToken)
+  if (cfg.authMode === 'oauth2-static' || cfg.authMode === 'oauth2-fetch') {
+    const tokenResult = await resolveSfAccessToken(cfg)
+    if (!tokenResult.ok) return tokenResult
+    form.set('accessToken', tokenResult.accessToken)
   } else {
     form.set('msgDigest', buildMsgDigest(msgData, timestamp, cfg.checkWord))
   }
@@ -360,9 +445,15 @@ module.exports = {
   BIZ_RESULT_OK,
   SF_API_URL_PRODUCTION,
   SF_API_URL_SANDBOX,
+  SF_OAUTH_URL_PRODUCTION,
+  SF_OAUTH_URL_SANDBOX,
   getSfConfig,
   assertSfConfig,
+  sfUrlEncode,
   buildMsgDigest,
+  fetchSfOAuthAccessToken,
+  resolveSfAccessToken,
+  resetSfOAuthTokenCache,
   buildRequestId,
   parseApiEnvelope,
   callSfService,
