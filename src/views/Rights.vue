@@ -379,6 +379,32 @@
                       />
                     </div>
                   </div>
+                  <div class="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                    <div>
+                      <p class="text-sm font-medium text-foreground">物流参数</p>
+                      <p class="mt-1 text-xs text-muted-foreground">
+                        用于结算预览计算运费；长宽高单位为厘米，重量单位为千克。留空则使用系统默认重量。
+                      </p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                      <div class="flex flex-col gap-2">
+                        <Label for="r-length">长 (cm)</Label>
+                        <Input id="r-length" v-model.number="form.length_cm" type="number" min="0" step="0.01" placeholder="如 30" />
+                      </div>
+                      <div class="flex flex-col gap-2">
+                        <Label for="r-width">宽 (cm)</Label>
+                        <Input id="r-width" v-model.number="form.width_cm" type="number" min="0" step="0.01" placeholder="如 20" />
+                      </div>
+                      <div class="flex flex-col gap-2">
+                        <Label for="r-height">高 (cm)</Label>
+                        <Input id="r-height" v-model.number="form.height_cm" type="number" min="0" step="0.01" placeholder="如 10" />
+                      </div>
+                      <div class="flex flex-col gap-2">
+                        <Label for="r-weight">重量 (kg)</Label>
+                        <Input id="r-weight" v-model.number="form.weight_kg" type="number" min="0" step="0.001" placeholder="如 0.5" />
+                      </div>
+                    </div>
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="discount" class="mt-0 space-y-4 p-4">
@@ -611,7 +637,11 @@ const form = ref({
   images: [],
   category_id: null,
   artist_id: null,
-  eligible_digital_artwork_ids: []
+  eligible_digital_artwork_ids: [],
+  length_cm: null,
+  width_cm: null,
+  height_cm: null,
+  weight_kg: null,
 })
 
 const eligibleIdSet = computed(() => new Set(form.value.eligible_digital_artwork_ids || []))
@@ -841,7 +871,11 @@ const handleAdd = () => {
     category_id: null,
     artist_id: null,
     rich_text: '',
-    eligible_digital_artwork_ids: []
+    eligible_digital_artwork_ids: [],
+    length_cm: null,
+    width_cm: null,
+    height_cm: null,
+    weight_kg: null,
   }
   digitalFilter.value = ''
   artistFilter.value = ''
@@ -873,7 +907,11 @@ const handleEdit = (row) => {
     category_id: row.category_id,
     artist_id: row.artist_id,
     rich_text: row.rich_text || '',
-    eligible_digital_artwork_ids: []
+    eligible_digital_artwork_ids: [],
+    length_cm: row.length_cm != null ? parseFloat(row.length_cm) : null,
+    width_cm: row.width_cm != null ? parseFloat(row.width_cm) : null,
+    height_cm: row.height_cm != null ? parseFloat(row.height_cm) : null,
+    weight_kg: row.weight_kg != null ? parseFloat(row.weight_kg) : null,
   }
   digitalFilter.value = ''
   artistFilter.value = ''

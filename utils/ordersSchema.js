@@ -2,6 +2,22 @@ const db = require('../db')
 const logger = require('./logger')
 
 let uniqueIndexEnsured = false
+let shippingColumnsEnsured = false
+
+const SHIPPING_COLUMNS = [
+  {
+    name: 'shipping_fee',
+    ddl: "DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '运费(元)'",
+  },
+  {
+    name: 'express_type_id',
+    ddl: 'INT NULL COMMENT \'顺丰产品类型\'',
+  },
+  {
+    name: 'shipping_snapshot',
+    ddl: "JSON NULL COMMENT '运费询价快照'",
+  },
+]
 
 async function hasIndex(tableName, indexName) {
   const [rows] = await db.query(
@@ -12,6 +28,19 @@ async function hasIndex(tableName, indexName) {
        AND INDEX_NAME = ?
      LIMIT 1`,
     [tableName, indexName]
+  )
+  return rows.length > 0
+}
+
+async function hasColumn(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
   )
   return rows.length > 0
 }
@@ -34,6 +63,24 @@ async function ensureOrdersOutTradeNoUnique() {
   uniqueIndexEnsured = true
 }
 
+/** 保证 orders 运费相关字段存在（幂等） */
+async function ensureOrdersShippingColumns() {
+  if (shippingColumnsEnsured) return
+
+  for (const col of SHIPPING_COLUMNS) {
+    try {
+      if (await hasColumn('orders', col.name)) continue
+      await db.query(`ALTER TABLE orders ADD COLUMN ${col.name} ${col.ddl}`)
+      logger.info('orders column added', { column: col.name })
+    } catch (err) {
+      logger.warn('ensureOrdersShippingColumns failed', { column: col.name, err: err.message })
+    }
+  }
+
+  shippingColumnsEnsured = true
+}
+
 module.exports = {
   ensureOrdersOutTradeNoUnique,
+  ensureOrdersShippingColumns,
 }

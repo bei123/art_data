@@ -3,6 +3,17 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const { authenticateToken, assertSelfOrAdmin, requireAdmin } = require('../auth');
 const svc = require('../services/payService');
+const checkoutPricing = require('../services/checkoutPricing');
+
+router.post('/checkout/preview', authenticateToken, async (req, res) => {
+  try {
+    const r = await checkoutPricing.checkoutPreview(req);
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    logger.error('结算预览失败', { err: e });
+    return res.status(500).json({ error: '结算预览失败' });
+  }
+});
 
 router.post('/unifiedorder', authenticateToken, async (req, res) => {
   try {

@@ -61,6 +61,10 @@ const {
   buildQueryDeliverTmPayload,
   assessQueryDeliverTmResponse,
 } = require('./sfExpressQueryDeliverTm')
+const {
+  buildShippingMetricsFromPhysicalItems,
+  applyShippingMetricsOverrides,
+} = require('./checkoutPricing')
 
 const DELIVERY_ID_SF = 'SF'
 const DELIVERY_NAME_SF = '顺丰速运'
@@ -152,8 +156,14 @@ async function loadShippableOrderContext(internalOrderId) {
         oi.id,
         oi.type,
         oi.quantity,
+        oi.right_id,
+        oi.artwork_id,
         oi.address_id,
         COALESCE(r.title, oa.title) AS item_title,
+        r.length_cm,
+        r.width_cm,
+        r.height_cm,
+        r.weight_kg,
         wa.receiver_name,
         wa.receiver_phone,
         wa.province,
@@ -203,7 +213,9 @@ async function loadShippableOrderContext(internalOrderId) {
     })),
   }
 
-  return { orderRow, receiver, cargoDefault, physicalItems }
+  const shippingMetrics = buildShippingMetricsFromPhysicalItems(physicalItems)
+
+  return { orderRow, receiver, cargoDefault, physicalItems, shippingMetrics }
 }
 
 /**
@@ -268,7 +280,8 @@ async function addOrder(req) {
   try {
     const shipCtx = await loadShippableOrderContext(internalOrderId)
     if (shipCtx.error) return shipCtx.error
-    const { orderRow, receiver, cargoDefault } = shipCtx
+    const { orderRow, receiver, cargoDefault, shippingMetrics } = shipCtx
+    const packageMetrics = applyShippingMetricsOverrides(shippingMetrics, b)
 
     const sfOrderIdRaw = b.sf_order_id != null && String(b.sf_order_id).trim() !== ''
       ? String(b.sf_order_id).trim()
@@ -331,6 +344,11 @@ async function addOrder(req) {
       parcelQty: b.parcel_qty,
       isDocall: b.is_docall,
       custReferenceNo: orderRow.out_trade_no || String(internalOrderId),
+      totalWeight: packageMetrics.totalWeight,
+      totalVolume: packageMetrics.totalVolume,
+      totalLength: packageMetrics.totalLength,
+      totalWidth: packageMetrics.totalWidth,
+      totalHeight: packageMetrics.totalHeight,
     })
 
     const sfResult = await createOrder(sfPayload)
@@ -456,6 +474,7 @@ async function addOrder(req) {
       filter_warning: filterAssessment.warning,
       origin_code: sfResult.msgData?.originCode,
       dest_code: sfResult.msgData?.destCode,
+      shipping_metrics: packageMetrics,
       shipment_persisted,
       wx_shipping_upload,
       provider: 'sf-express',

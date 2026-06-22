@@ -40,19 +40,31 @@ async function clearPhysicalCategoriesCache() {
   }
 }
 
+const RIGHTS_SHIPPING_COLUMNS = [
+  { name: 'length_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL' },
+  { name: 'width_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL' },
+  { name: 'height_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL' },
+  { name: 'weight_kg', ddl: 'DECIMAL(10,3) NULL DEFAULT NULL' },
+];
+
+async function ensureRightsColumn(connection, columnName, ddl) {
+  const [cols] = await connection.query(
+    `SELECT COUNT(*) AS cnt
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'rights'
+         AND COLUMN_NAME = ?`,
+    [columnName]
+  );
+  const exists = cols && cols[0] && cols[0].cnt > 0;
+  if (!exists) {
+    await connection.query(`ALTER TABLE rights ADD COLUMN ${columnName} ${ddl}`);
+  }
+}
+
 async function ensureDiscountSchema(connection) {
   try {
-    const [cols] = await connection.query(
-      `SELECT COUNT(*) AS cnt
-             FROM INFORMATION_SCHEMA.COLUMNS
-             WHERE TABLE_SCHEMA = DATABASE()
-               AND TABLE_NAME = 'rights'
-               AND COLUMN_NAME = 'discount_price'`
-    );
-    const exists = cols && cols[0] && cols[0].cnt > 0;
-    if (!exists) {
-      await connection.query('ALTER TABLE rights ADD COLUMN discount_price DECIMAL(10,2) NULL DEFAULT NULL');
-    }
+    await ensureRightsColumn(connection, 'discount_price', 'DECIMAL(10,2) NULL DEFAULT NULL');
   } catch (e) {
     logger.error('检查/新增 rights.discount_price 字段失败', { err: e });
     throw e;
@@ -73,6 +85,44 @@ async function ensureDiscountSchema(connection) {
     logger.error('创建 right_discount_eligibles 表失败', { err: e });
     throw e;
   }
+}
+
+async function ensureShippingSchema(connection) {
+  for (const column of RIGHTS_SHIPPING_COLUMNS) {
+    try {
+      await ensureRightsColumn(connection, column.name, column.ddl);
+    } catch (e) {
+      logger.error(`检查/新增 rights.${column.name} 字段失败`, { err: e });
+      throw e;
+    }
+  }
+}
+
+function parseOptionalPositiveNumber(raw) {
+  if (raw == null || raw === '') return null;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num;
+}
+
+function validateShippingDimensions(body) {
+  const fields = [
+    ['length_cm', '长度'],
+    ['width_cm', '宽度'],
+    ['height_cm', '高度'],
+    ['weight_kg', '重量'],
+  ];
+
+  for (const [key, label] of fields) {
+    const val = body?.[key];
+    if (val == null || val === '') continue;
+    const num = Number(val);
+    if (!Number.isFinite(num) || num <= 0) {
+      return adminResult(400, { error: `${label}必须是有效的正数` });
+    }
+  }
+
+  return null;
 }
 
 async function getPublicRightsList(query) {
@@ -136,6 +186,10 @@ async function getPublicRightsList(query) {
                 r.artist_id,
                 r.created_at,
                 r.updated_at,
+                r.length_cm,
+                r.width_cm,
+                r.height_cm,
+                r.weight_kg,
                 c.title as category_title,
                 a.id as artist_id,
                 a.name as artist_name,
@@ -259,6 +313,8 @@ function validateCreateRightBody(body) {
   if (images && !Array.isArray(images)) {
     return adminResult(400, { error: '图片必须是数组格式' });
   }
+  const shippingValidation = validateShippingDimensions(body);
+  if (shippingValidation) return shippingValidation;
   return null;
 }
 
@@ -281,6 +337,10 @@ async function createRightAdmin(body) {
     artist_id,
     rich_text,
     eligible_digital_artwork_ids,
+    length_cm,
+    width_cm,
+    height_cm,
+    weight_kg,
   } = body || {};
 
   let rightId;
@@ -289,8 +349,9 @@ async function createRightAdmin(body) {
     try {
       await connection.beginTransaction();
       await ensureDiscountSchema(connection);
+      await ensureShippingSchema(connection);
       const [insertResult] = await connection.query(
-        'INSERT INTO rights (title, status, price, discount_price, original_price, period, total_count, remaining_count, description, category_id, artist_id, rich_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO rights (title, status, price, discount_price, original_price, period, total_count, remaining_count, description, category_id, artist_id, rich_text, length_cm, width_cm, height_cm, weight_kg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           title.trim(),
           status,
@@ -304,6 +365,10 @@ async function createRightAdmin(body) {
           category_id,
           artist_id || null,
           rich_text,
+          parseOptionalPositiveNumber(length_cm),
+          parseOptionalPositiveNumber(width_cm),
+          parseOptionalPositiveNumber(height_cm),
+          parseOptionalPositiveNumber(weight_kg),
         ]
       );
       rightId = insertResult.insertId;
@@ -346,6 +411,10 @@ async function createRightAdmin(body) {
                     r.category_id,
                     r.artist_id,
                     r.rich_text,
+                    r.length_cm,
+                    r.width_cm,
+                    r.height_cm,
+                    r.weight_kg,
                     r.created_at,
                     r.updated_at,
                     c.title as category_title,
@@ -433,6 +502,8 @@ function validateUpdateRightBody(body) {
   if (images && !Array.isArray(images)) {
     return adminResult(400, { error: '图片必须是数组格式' });
   }
+  const shippingValidation = validateShippingDimensions(body);
+  if (shippingValidation) return shippingValidation;
   return null;
 }
 
@@ -458,6 +529,10 @@ async function updateRightAdmin(rawId, body) {
     artist_id,
     rich_text,
     eligible_digital_artwork_ids,
+    length_cm,
+    width_cm,
+    height_cm,
+    weight_kg,
   } = body || {};
 
   try {
@@ -465,6 +540,7 @@ async function updateRightAdmin(rawId, body) {
     try {
       await connection.beginTransaction();
       await ensureDiscountSchema(connection);
+      await ensureShippingSchema(connection);
       const [existing] = await connection.query('SELECT id FROM rights WHERE id = ?', [id]);
       if (!existing || existing.length === 0) {
         await connection.rollback();
@@ -472,7 +548,7 @@ async function updateRightAdmin(rawId, body) {
       }
 
       await connection.query(
-        'UPDATE rights SET title = ?, status = ?, price = ?, discount_price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, artist_id = ?, rich_text = ?, updated_at = NOW() WHERE id = ?',
+        'UPDATE rights SET title = ?, status = ?, price = ?, discount_price = ?, original_price = ?, period = ?, total_count = ?, remaining_count = ?, description = ?, category_id = ?, artist_id = ?, rich_text = ?, length_cm = ?, width_cm = ?, height_cm = ?, weight_kg = ?, updated_at = NOW() WHERE id = ?',
         [
           title.trim(),
           status,
@@ -486,6 +562,10 @@ async function updateRightAdmin(rawId, body) {
           category_id,
           artist_id || null,
           rich_text,
+          parseOptionalPositiveNumber(length_cm),
+          parseOptionalPositiveNumber(width_cm),
+          parseOptionalPositiveNumber(height_cm),
+          parseOptionalPositiveNumber(weight_kg),
           id,
         ]
       );
@@ -530,6 +610,10 @@ async function updateRightAdmin(rawId, body) {
                     r.category_id,
                     r.artist_id,
                     r.rich_text,
+                    r.length_cm,
+                    r.width_cm,
+                    r.height_cm,
+                    r.weight_kg,
                     r.created_at,
                     r.updated_at,
                     c.title as category_title,
@@ -658,6 +742,10 @@ async function getPublicRightDetail(rawId, userId = null) {
                 r.category_id,
                 r.artist_id,
                 r.rich_text,
+                r.length_cm,
+                r.width_cm,
+                r.height_cm,
+                r.weight_kg,
                 r.created_at,
                 r.updated_at,
                 c.title as category_title,

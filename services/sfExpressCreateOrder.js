@@ -4,6 +4,7 @@
  */
 
 const { buildContactInfo, buildCargoDetails } = require('./sfExpressClient')
+const { appendPackageSizeFields } = require('./sfExpressUpdateOrder')
 
 const SF_FILTER_RESULT = {
   MANUAL_CONFIRM: 1,
@@ -110,6 +111,10 @@ function buildCreateOrderPayload({
   custReferenceNo,
   cargoDesc,
   totalWeight,
+  totalVolume,
+  totalLength,
+  totalWidth,
+  totalHeight,
 }) {
   const payload = {
     language: 'zh-CN',
@@ -131,7 +136,13 @@ function buildCreateOrderPayload({
   if (custReferenceNo) payload.custReferenceNo = clipField(custReferenceNo, 100)
   if (cargoDesc) payload.cargoDesc = clipField(cargoDesc, 20)
   if (Array.isArray(serviceList) && serviceList.length) payload.serviceList = serviceList
-  if (totalWeight != null && Number(totalWeight) > 0) payload.totalWeight = Number(totalWeight)
+  appendPackageSizeFields(payload, {
+    totalWeight,
+    totalVolume,
+    totalLength,
+    totalWidth,
+    totalHeight,
+  })
 
   return payload
 }

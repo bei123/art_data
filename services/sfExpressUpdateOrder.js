@@ -89,6 +89,20 @@ function validateUpdateOrderInput({ orderId, dealType, waybillNoInfoList }) {
   return { ok: true, orderId: clippedOrderId, dealType: deal }
 }
 
+function appendPackageSizeFields(payload, {
+  totalWeight,
+  totalVolume,
+  totalLength,
+  totalWidth,
+  totalHeight,
+}) {
+  if (totalWeight != null && Number(totalWeight) > 0) payload.totalWeight = Number(totalWeight)
+  if (totalVolume != null && Number(totalVolume) > 0) payload.totalVolume = Number(totalVolume)
+  if (totalLength != null && Number(totalLength) > 0) payload.totalLength = Number(totalLength)
+  if (totalWidth != null && Number(totalWidth) > 0) payload.totalWidth = Number(totalWidth)
+  if (totalHeight != null && Number(totalHeight) > 0) payload.totalHeight = Number(totalHeight)
+}
+
 function appendNumericFields(payload, fields) {
   const {
     totalWeight,
@@ -102,11 +116,13 @@ function appendNumericFields(payload, fields) {
     isDocall,
   } = fields
 
-  if (totalWeight != null && Number(totalWeight) > 0) payload.totalWeight = Number(totalWeight)
-  if (totalVolume != null && Number(totalVolume) > 0) payload.totalVolume = Number(totalVolume)
-  if (totalLength != null && Number(totalLength) > 0) payload.totalLength = Number(totalLength)
-  if (totalWidth != null && Number(totalWidth) > 0) payload.totalWidth = Number(totalWidth)
-  if (totalHeight != null && Number(totalHeight) > 0) payload.totalHeight = Number(totalHeight)
+  appendPackageSizeFields(payload, {
+    totalWeight,
+    totalVolume,
+    totalLength,
+    totalWidth,
+    totalHeight,
+  })
   if (expressTypeId != null && !Number.isNaN(Number(expressTypeId))) {
     payload.expressTypeId = Number(expressTypeId)
   }
@@ -236,6 +252,7 @@ module.exports = {
   validateUpdateOrderInput,
   buildConfirmOrderPayload,
   buildCancelOrderPayload,
+  appendPackageSizeFields,
   getUpdateResStatusMeta,
   assessUpdateOrderResponse,
   extractUpdateOrderWaybills,

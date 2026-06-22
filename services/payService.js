@@ -51,7 +51,14 @@ const {
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { resolveUserOutTradeNo } = require('../utils/orderTradeNo');
-const { ensureOrdersOutTradeNoUnique } = require('../utils/ordersSchema');
+const { ensureOrdersOutTradeNoUnique, ensureOrdersShippingColumns } = require('../utils/ordersSchema');
+const {
+    normalizeCartItemShape,
+    normalizeSingleItemFromBody,
+    resolveCheckoutAmounts,
+    deleteCheckoutQuote,
+    hasPhysicalItems,
+} = require('./checkoutPricing');
 const { clearRightsInventoryCaches } = require('./rightsService');
 const {
     fireSubscribeNotify,
@@ -576,56 +583,13 @@ function formatWechatTime(isoString) {
 //     res.json({ message: '退款路由正常工作', timestamp: new Date().toISOString() });
 // });
 
-const VALID_CART_ITEM_TYPES = ['right', 'digital', 'artwork'];
-const MAX_CART_ITEM_QUANTITY = 99;
-
-function parseOrderItemQuantity(raw) {
-    const qty = parseInt(raw, 10);
-    if (Number.isNaN(qty) || qty <= 0 || qty > MAX_CART_ITEM_QUANTITY) return null;
-    return qty;
-}
-
-function normalizeCartItemShape(rawItem) {
-    if (!rawItem || typeof rawItem !== 'object') return { error: '购物车商品格式无效' };
-    if (!VALID_CART_ITEM_TYPES.includes(rawItem.type)) return { error: '购物车商品 type 无效' };
-
-    const quantity = parseOrderItemQuantity(rawItem.quantity);
-    if (!quantity) return { error: '购物车商品数量必须在 1-99 之间' };
-
-    if (rawItem.type === 'right') {
-        const rightId = parseInt(rawItem.right_id, 10);
-        if (Number.isNaN(rightId) || rightId <= 0) return { error: '缺少有效的商品ID' };
-        return { type: 'right', quantity, right_id: rightId };
-    }
-
-    if (rawItem.type === 'artwork') {
-        const artworkId = parseInt(rawItem.artwork_id, 10);
-        if (Number.isNaN(artworkId) || artworkId <= 0) return { error: '缺少有效的艺术品ID' };
-        return { type: 'artwork', quantity, artwork_id: artworkId };
-    }
-
-    const parsedDigital = parseDigitalArtworkId(rawItem.digital_artwork_id);
-    if (parsedDigital.error) return { error: parsedDigital.error };
-    return { type: 'digital', quantity, digital_artwork_id: parsedDigital.id };
-}
-
-function computeArtworkUnitPriceYuan(goods) {
-    const originalPrice = parseMoney(goods.original_price);
-    const discountPrice = parseMoney(goods.discount_price);
-    if (discountPrice > 0 && discountPrice < originalPrice) return discountPrice;
-    return originalPrice;
-}
-
-function computeDigitalUnitPriceYuan(goods) {
-    return parseMoney(goods.price);
-}
-
 async function unifiedOrder(req) {
     try {
         await ensureDigitalArtworkIdColumns();
         await ensureOrdersOutTradeNoUnique();
+        await ensureOrdersShippingColumns();
 
-        const { openid, body, out_trade_no, cart_items, address_id } = req.body;
+        const { openid, body, out_trade_no, cart_items, address_id, quote_token } = req.body;
 
         const buyerSession = await assertWxBuyerForPay(req, openid);
         if (buyerSession.error) return buyerSession.error;
@@ -667,13 +631,6 @@ async function unifiedOrder(req) {
         await connection.beginTransaction();
 
         try {
-            const addressCheck = await assertBuyerAddressId(connection, userId, address_id);
-            if (addressCheck.error) {
-                await connection.rollback();
-                return addressCheck.error;
-            }
-            const resolvedAddressId = addressCheck.addressId || address_id || null;
-
             // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
                 'SELECT id, trade_state, user_id FROM orders WHERE out_trade_no = ?',
@@ -718,139 +675,52 @@ async function unifiedOrder(req) {
                 }
             }
 
-            // 获取用户可用的抵扣金额
-            const [discounts] = await connection.query(`
-                SELECT COALESCE(SUM(dip.discount_amount), 0) as total_discount
-                FROM digital_identity_purchases dip
-                WHERE dip.user_id = ? AND dip.discount_amount > 0
-            `, [userId]);
-
-            const availableDiscount = discounts[0].total_discount || 0;
-
-            // 分类商品ID，批量查询
-            const rightIds = [];
-            const artworkIds = [];
-            const digitalIds = [];
-
-            normalizedCartItems.forEach(item => {
-                if (item.type === 'right') {
-                    rightIds.push(item.right_id);
-                } else if (item.type === 'artwork') {
-                    artworkIds.push(item.artwork_id);
-                } else if (item.type === 'digital') {
-                    digitalIds.push(item.digital_artwork_id);
-                }
-            });
-
-            // 批量查询商品信息
-            const goodsMap = new Map();
-
-            // 批量查询rights
-            const rightsMapForPricing = {};
-            if (rightIds.length > 0) {
-                const [rights] = await connection.query(
-                    'SELECT id, price, discount_price, remaining_count FROM rights WHERE id IN (?) AND status = "onsale"',
-                    [rightIds]
-                );
-                rights.forEach(right => {
-                    goodsMap.set(`right_${right.id}`, right);
-                    rightsMapForPricing[right.id] = right;
-                });
-            }
-
-            const rightDiscountPricing = await buildRightDiscountPricingByUser(userId, rightsMapForPricing);
-
-            // 批量查询artworks
-            if (artworkIds.length > 0) {
-                const [artworks] = await connection.query(
-                    `SELECT oa.id, oa.original_price, oa.discount_price, oa.stock
-                     FROM original_artworks oa
-                     INNER JOIN artists a ON a.id = oa.artist_id
-                     WHERE oa.id IN (?) AND oa.is_on_sale = 1
-                       AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
-                    [artworkIds]
-                );
-                artworks.forEach(artwork => {
-                    goodsMap.set(`artwork_${artwork.id}`, artwork);
-                });
-            }
-
-            // 批量查询 digitals（本地表 + 外部同步表）
-            if (digitalIds.length > 0) {
-                const digitalsMap = await fetchDigitalArtworksByIds(digitalIds, connection);
-                digitalsMap.forEach((digital, id) => {
-                    goodsMap.set(`digital_${id}`, digital);
-                });
-            }
-
-            // 校验所有商品并由服务端算价
-            let serverTotalFee = 0;
-            const pricedCartItems = [];
-
-            for (const item of normalizedCartItems) {
-                const key = `${item.type}_${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id}`;
-                const goods = goodsMap.get(key);
-
-                if (!goods) {
-                    await connection.rollback();
-                    return adminResult(404, { error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 不存在或已下架` });
-                }
-
-                if (item.type === 'digital' && !isDigitalArtworkPurchasable(goods)) {
-                    await connection.rollback();
-                    return adminResult(404, { error: `数字艺术品ID ${item.digital_artwork_id} 不存在或已下架` });
-                }
-
-                // 验证库存
-                if (item.type === 'right' && goods.remaining_count < item.quantity) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `商品ID ${item.right_id} 库存不足` });
-                }
-                if (item.type === 'artwork' && goods.stock < item.quantity) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `艺术品ID ${item.artwork_id} 库存不足` });
-                }
-                if (item.type === 'digital' && !hasEnoughDigitalStock(goods, item.quantity)) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `数字艺术品ID ${item.digital_artwork_id} 库存不足` });
-                }
-
-                let unitPriceYuan;
-                if (item.type === 'right') {
-                    const pricing = rightDiscountPricing[item.right_id];
-                    unitPriceYuan = pricing?.effective_price ?? parseMoney(goods.price);
-                } else if (item.type === 'digital') {
-                    unitPriceYuan = computeDigitalUnitPriceYuan(goods);
-                } else {
-                    unitPriceYuan = computeArtworkUnitPriceYuan(goods);
-                }
-
-                if (!Number.isFinite(unitPriceYuan) || unitPriceYuan < 0) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `商品ID ${item.type === 'right' ? item.right_id : item.type === 'artwork' ? item.artwork_id : item.digital_artwork_id} 价格无效` });
-                }
-
-                serverTotalFee += unitPriceYuan * item.quantity;
-                pricedCartItems.push({ ...item, unitPriceYuan });
-            }
-
-            if (!Number.isFinite(serverTotalFee) || serverTotalFee <= 0) {
+            const addressCheck = await assertBuyerAddressId(connection, userId, address_id);
+            if (addressCheck.error) {
                 await connection.rollback();
-                return adminResult(400, { error: '订单金额无效' });
+                return addressCheck.error;
             }
 
-            const cleanTotalFee = serverTotalFee;
-            const actualTotalFee = Math.max(0, cleanTotalFee - availableDiscount);
+            if (hasPhysicalItems(normalizedCartItems) && !address_id && !quote_token) {
+                await connection.rollback();
+                return adminResult(400, { error: '实物商品须选择收货地址' });
+            }
+
+            const checkoutAmounts = await resolveCheckoutAmounts({
+                connection,
+                userId,
+                normalizedCartItems,
+                addressId: address_id,
+                quoteToken: quote_token,
+            });
+            if (checkoutAmounts.error) {
+                await connection.rollback();
+                return checkoutAmounts.error;
+            }
+
+            const {
+                pricedCartItems,
+                totalFeeYuan: cleanTotalFee,
+                actualTotalFee,
+                discountYuan: availableDiscount,
+                shippingFeeYuan,
+                expressTypeId,
+                shippingSnapshot,
+                resolvedAddressId,
+                quoteToken: resolvedQuoteToken,
+            } = checkoutAmounts;
 
             let orderId;
+
+            const shippingSnapshotJson = shippingSnapshot ? JSON.stringify(shippingSnapshot) : null;
 
             // 检查是否已存在订单
             if (existingOrders.length > 0) {
                 // 更新已存在的订单
                 orderId = existingOrders[0].id;
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, body = ?, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, cleanBody, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderId]
                 );
 
                 // 删除旧的订单项
@@ -858,8 +728,8 @@ async function unifiedOrder(req) {
             } else {
                 // 创建新订单
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -930,6 +800,9 @@ async function unifiedOrder(req) {
 
             if (response.status === 200) {
                 await connection.commit();
+                if (resolvedQuoteToken) {
+                    await deleteCheckoutQuote(resolvedQuoteToken);
+                }
                 schedulePaymentPendingReminder({ outTradeNo: cleanOutTradeNo, orderId }).catch((err) => {
                     logger.warn('待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
                 });
@@ -966,20 +839,20 @@ async function singleOrder(req) {
     try {
         await ensureDigitalArtworkIdColumns();
         await ensureOrdersOutTradeNoUnique();
+        await ensureOrdersShippingColumns();
 
-        const { openid, type, quantity, body, out_trade_no, right_id, digital_artwork_id, artwork_id, address_id } = req.body;
+        const { openid, body, out_trade_no, address_id, quote_token, type, quantity, right_id, digital_artwork_id, artwork_id } = req.body;
 
         const buyerSession = await assertWxBuyerForPay(req, openid);
         if (buyerSession.error) return buyerSession.error;
         const { buyerId: userId, cleanOpenid } = buyerSession;
 
-        if (!type || !['right', 'digital', 'artwork'].includes(type)) {
-            return adminResult(400, { error: 'type 必须是 right、digital 或 artwork' });
+        const normalizedItem = normalizeSingleItemFromBody({ type, quantity, right_id, digital_artwork_id, artwork_id });
+        if (normalizedItem.error) {
+            return adminResult(400, { error: normalizedItem.error });
         }
-        const cleanQuantity = parseOrderItemQuantity(quantity);
-        if (!cleanQuantity) {
-            return adminResult(400, { error: '缺少有效的商品数量' });
-        }
+        const normalizedCartItems = [normalizedItem];
+
         if (!body || typeof body !== 'string' || body.trim().length === 0) {
             return adminResult(400, { error: '缺少有效的商品描述' });
         }
@@ -992,19 +865,6 @@ async function singleOrder(req) {
             return adminResult(400, { error: tradeNoResolved.error });
         }
 
-        // 只允许一个商品id
-        if (type === 'right' && (!right_id || isNaN(parseInt(right_id)))) {
-            return adminResult(400, { error: '缺少有效的商品ID' });
-        }
-        if (type === 'artwork' && (!artwork_id || isNaN(parseInt(artwork_id)))) {
-            return adminResult(400, { error: '缺少有效的商品ID' });
-        }
-        const parsedDigitalId = type === 'digital' ? parseDigitalArtworkId(digital_artwork_id) : null;
-        if (type === 'digital' && parsedDigitalId.error) {
-            return adminResult(400, { error: parsedDigitalId.error });
-        }
-
-        const cleanType = type;
         const cleanBody = body.trim();
         const cleanOutTradeNo = tradeNoResolved.outTradeNo;
 
@@ -1012,14 +872,6 @@ async function singleOrder(req) {
         await connection.beginTransaction();
 
         try {
-            const addressCheck = await assertBuyerAddressId(connection, userId, address_id);
-            if (addressCheck.error) {
-                await connection.rollback();
-                return addressCheck.error;
-            }
-            const resolvedAddressId = addressCheck.addressId || address_id || null;
-
-            // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
                 'SELECT id, trade_state, user_id FROM orders WHERE out_trade_no = ?',
                 [cleanOutTradeNo]
@@ -1028,25 +880,21 @@ async function singleOrder(req) {
             if (existingOrders.length > 0) {
                 const existingOrder = existingOrders[0];
 
-                // 如果订单已支付成功，不允许重复支付
                 if (existingOrder.trade_state === 'SUCCESS') {
                     await connection.rollback();
                     return adminResult(400, { error: '订单已支付成功，不能重复支付' });
                 }
 
-                // 如果订单已退款，不允许重复支付
                 if (existingOrder.trade_state === 'REFUND') {
                     await connection.rollback();
                     return adminResult(400, { error: '订单已退款，不能重复支付' });
                 }
 
-                // 检查是否是同一用户的订单
                 if (existingOrder.user_id !== userId) {
                     await connection.rollback();
                     return adminResult(403, { error: '只能支付自己的订单' });
                 }
 
-                // 如果是同一用户的未完成订单，允许重复支付，但需要幂等性锁防止并发
                 const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
                 const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
                 if (!lock) {
@@ -1054,7 +902,6 @@ async function singleOrder(req) {
                     return adminResult(429, { error: '订单正在处理中，请勿重复提交' });
                 }
             } else {
-                // 新订单，使用原有的幂等性锁
                 const lockKey = `pay:order:lock:${cleanOutTradeNo}`;
                 const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
                 if (!lock) {
@@ -1063,115 +910,71 @@ async function singleOrder(req) {
                 }
             }
 
-            // 获取用户可用的抵扣金额
-            const [discounts] = await connection.query(`
-                SELECT SUM(dip.discount_amount) as total_discount
-                FROM digital_identity_purchases dip
-                WHERE dip.user_id = ? AND dip.discount_amount > 0
-            `, [userId]);
-            const availableDiscount = discounts[0].total_discount || 0;
-
-            // 校验商品并由服务端算价
-            let itemId, unitPriceYuan;
-            if (cleanType === 'right') {
-                itemId = parseInt(right_id);
-                const [rights] = await connection.query(
-                    'SELECT id, price, discount_price, remaining_count FROM rights WHERE id = ? AND status = "onsale"',
-                    [itemId]
-                );
-                if (!rights || rights.length === 0) {
-                    await connection.rollback();
-                    return adminResult(404, { error: `商品ID ${itemId} 不存在或已下架` });
-                }
-                if (rights[0].remaining_count < cleanQuantity) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `商品ID ${itemId} 库存不足` });
-                }
-                const rightDiscountPricing = await buildRightDiscountPricingByUser(userId, { [itemId]: rights[0] });
-                unitPriceYuan = rightDiscountPricing[itemId]?.effective_price ?? parseMoney(rights[0].price);
-            } else if (cleanType === 'artwork') {
-                itemId = parseInt(artwork_id);
-                const [artworks] = await connection.query(
-                    `SELECT oa.id, oa.original_price, oa.discount_price, oa.stock
-                     FROM original_artworks oa
-                     INNER JOIN artists a ON a.id = oa.artist_id
-                     WHERE oa.id = ? AND oa.is_on_sale = 1
-                       AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
-                    [itemId]
-                );
-                if (!artworks || artworks.length === 0) {
-                    await connection.rollback();
-                    return adminResult(404, { error: `艺术品ID ${itemId} 不存在或已下架` });
-                }
-                if (artworks[0].stock < cleanQuantity) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `艺术品ID ${itemId} 库存不足` });
-                }
-                unitPriceYuan = computeArtworkUnitPriceYuan(artworks[0]);
-            } else if (cleanType === 'digital') {
-                itemId = parsedDigitalId.id;
-                const digital = await fetchDigitalArtworkById(itemId, connection);
-                if (!digital || !isDigitalArtworkPurchasable(digital)) {
-                    await connection.rollback();
-                    return adminResult(404, { error: `数字艺术品ID ${itemId} 不存在或已下架` });
-                }
-                if (!hasEnoughDigitalStock(digital, cleanQuantity)) {
-                    await connection.rollback();
-                    return adminResult(400, { error: `数字艺术品ID ${itemId} 库存不足` });
-                }
-                unitPriceYuan = computeDigitalUnitPriceYuan(digital);
-            }
-
-            if (!Number.isFinite(unitPriceYuan) || unitPriceYuan < 0) {
+            const addressCheck = await assertBuyerAddressId(connection, userId, address_id);
+            if (addressCheck.error) {
                 await connection.rollback();
-                return adminResult(400, { error: '商品价格无效' });
+                return addressCheck.error;
             }
 
-            // 计算实际支付金额（考虑抵扣）
-            const total_fee = unitPriceYuan * cleanQuantity;
-            if (!Number.isFinite(total_fee) || total_fee <= 0) {
+            if (hasPhysicalItems(normalizedCartItems) && !address_id && !quote_token) {
                 await connection.rollback();
-                return adminResult(400, { error: '订单金额无效' });
+                return adminResult(400, { error: '实物商品须选择收货地址' });
             }
-            const actualTotalFee = Math.max(0, total_fee - availableDiscount);
 
+            const checkoutAmounts = await resolveCheckoutAmounts({
+                connection,
+                userId,
+                normalizedCartItems,
+                addressId: address_id,
+                quoteToken: quote_token,
+            });
+            if (checkoutAmounts.error) {
+                await connection.rollback();
+                return checkoutAmounts.error;
+            }
+
+            const {
+                pricedCartItems,
+                totalFeeYuan: cleanTotalFee,
+                actualTotalFee,
+                discountYuan: availableDiscount,
+                shippingFeeYuan,
+                expressTypeId,
+                shippingSnapshot,
+                resolvedAddressId,
+                quoteToken: resolvedQuoteToken,
+            } = checkoutAmounts;
+
+            const pricedItem = pricedCartItems[0];
             let orderId;
+            const shippingSnapshotJson = shippingSnapshot ? JSON.stringify(shippingSnapshot) : null;
 
-            // 检查是否已存在订单
             if (existingOrders.length > 0) {
-                // 更新已存在的订单
                 orderId = existingOrders[0].id;
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, body = ?, updated_at = NOW() WHERE id = ?',
-                    [total_fee, actualTotalFee, availableDiscount, cleanBody, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderId]
                 );
-
-                // 删除旧的订单项
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
-                // 创建新订单
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, cleanOutTradeNo, total_fee, actualTotalFee, availableDiscount, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
 
-            // 创建订单项
-            let orderItem;
-            if (cleanType === 'right') {
-                orderItem = [orderId, 'right', itemId, null, null, cleanQuantity, unitPriceYuan, resolvedAddressId];
-            } else if (cleanType === 'digital') {
-                orderItem = [orderId, 'digital', null, itemId, null, cleanQuantity, unitPriceYuan, resolvedAddressId];
-            } else if (cleanType === 'artwork') {
-                orderItem = [orderId, 'artwork', null, null, itemId, cleanQuantity, unitPriceYuan, resolvedAddressId];
-            }
+            const orderItem = pricedItem.type === 'right'
+                ? [orderId, 'right', pricedItem.right_id, null, null, pricedItem.quantity, pricedItem.unitPriceYuan, resolvedAddressId]
+                : pricedItem.type === 'digital'
+                    ? [orderId, 'digital', null, pricedItem.digital_artwork_id, null, pricedItem.quantity, pricedItem.unitPriceYuan, resolvedAddressId]
+                    : [orderId, 'artwork', null, null, pricedItem.artwork_id, pricedItem.quantity, pricedItem.unitPriceYuan, resolvedAddressId];
+
             await connection.query(
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 orderItem
             );
 
-            // 如果使用了抵扣，更新抵扣记录
             if (availableDiscount > 0) {
                 await connection.query(`
                     UPDATE digital_identity_purchases 
@@ -1180,7 +983,6 @@ async function singleOrder(req) {
                 `, [userId]);
             }
 
-            // 构建统一下单参数
             const params = {
                 appid: WX_PAY_CONFIG.appId,
                 mchid: WX_PAY_CONFIG.mchId,
@@ -1188,7 +990,7 @@ async function singleOrder(req) {
                 out_trade_no: cleanOutTradeNo,
                 notify_url: WX_PAY_CONFIG.notifyUrl,
                 amount: {
-                    total: Math.round(actualTotalFee * 100), // 元转分
+                    total: Math.round(actualTotalFee * 100),
                     currency: 'CNY'
                 },
                 scene_info: {
@@ -1199,17 +1001,13 @@ async function singleOrder(req) {
                 }
             };
 
-            // 生成签名所需的参数
             const timestamp = Math.floor(Date.now() / 1000).toString();
             const nonceStr = generateNonceStr();
             const method = 'POST';
             const url = '/v3/pay/transactions/jsapi';
             const bodyStr = JSON.stringify(params);
-
-            // 生成签名
             const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
 
-            // 发送请求到微信支付
             const response = await axios.post('https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi', params, {
                 headers: {
                     'Content-Type': 'application/json',
@@ -1222,6 +1020,9 @@ async function singleOrder(req) {
 
             if (response.status === 200) {
                 await connection.commit();
+                if (resolvedQuoteToken) {
+                    await deleteCheckoutQuote(resolvedQuoteToken);
+                }
                 schedulePaymentPendingReminder({ outTradeNo: cleanOutTradeNo, orderId }).catch((err) => {
                     logger.warn('待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
                 });
@@ -1232,14 +1033,14 @@ async function singleOrder(req) {
                         out_trade_no: cleanOutTradeNo,
                     },
                 });
-            } else {
-                await connection.rollback();
-                return adminResult(400, {
-                    success: false,
-                    error: '统一下单失败',
-                    detail: response.data
-                });
             }
+
+            await connection.rollback();
+            return adminResult(400, {
+                success: false,
+                error: '单商品下单失败',
+                detail: response.data
+            });
         } catch (error) {
             await connection.rollback();
             throw error;
@@ -3259,6 +3060,7 @@ async function checkRepayable(req) {
                     out_trade_no: order.out_trade_no,
                     total_fee: order.total_fee,
                     actual_fee: order.actual_fee,
+                    shipping_fee: order.shipping_fee != null ? order.shipping_fee : 0,
                     trade_state: order.trade_state
                 }
             });
@@ -3335,6 +3137,7 @@ async function checkRepayable(req) {
                     out_trade_no: order.out_trade_no,
                     total_fee: order.total_fee,
                     actual_fee: order.actual_fee,
+                    shipping_fee: order.shipping_fee != null ? order.shipping_fee : 0,
                     trade_state: order.trade_state
                 }
             });
@@ -3833,13 +3636,13 @@ async function orderDetailForActor(req, options = {}) {
         const discountYuan = parseFloat(order.discount_amount) || 0;
         const totalFeeYuan = parseFloat(order.total_fee) || 0;
         const actualFeeYuan = parseFloat(order.actual_fee) || 0;
-        const shippingFeeYuan = 0;
+        const shippingFeeYuan = order.shipping_fee != null ? parseFloat(order.shipping_fee) || 0 : 0;
 
         const fee = {
             currency: 'CNY',
             items_subtotal_yuan: Math.round(itemsSubtotalYuan * 100) / 100,
-            shipping_fee_yuan: shippingFeeYuan,
-            shipping_note: '当前库表未单独记录运费，按 0 展示；若含运费请后续扩展字段。',
+            shipping_fee_yuan: Math.round(shippingFeeYuan * 100) / 100,
+            express_type_id: order.express_type_id != null ? Number(order.express_type_id) : null,
             discount_yuan: Math.round(discountYuan * 100) / 100,
             amount_payable_yuan: Math.round(actualFeeYuan * 100) / 100,
             amount_paid_yuan: effectiveTradeState === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null,
