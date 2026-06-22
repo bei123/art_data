@@ -41,14 +41,16 @@ async function clearPhysicalCategoriesCache() {
 }
 
 const RIGHTS_SHIPPING_COLUMNS = [
-  { name: 'length_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL' },
-  { name: 'width_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL' },
-  { name: 'height_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL' },
-  { name: 'weight_kg', ddl: 'DECIMAL(10,3) NULL DEFAULT NULL' },
+  { name: 'length_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL COMMENT \'长度(cm)\'' },
+  { name: 'width_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL COMMENT \'宽度(cm)\'' },
+  { name: 'height_cm', ddl: 'DECIMAL(10,2) NULL DEFAULT NULL COMMENT \'高度(cm)\'' },
+  { name: 'weight_kg', ddl: 'DECIMAL(10,3) NULL DEFAULT NULL COMMENT \'重量(kg)\'' },
 ];
 
-async function ensureRightsColumn(connection, columnName, ddl) {
-  const [cols] = await connection.query(
+let shippingSchemaEnsured = false;
+
+async function ensureRightsColumn(runner, columnName, ddl) {
+  const [cols] = await runner.query(
     `SELECT COUNT(*) AS cnt
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
@@ -58,8 +60,26 @@ async function ensureRightsColumn(connection, columnName, ddl) {
   );
   const exists = cols && cols[0] && cols[0].cnt > 0;
   if (!exists) {
-    await connection.query(`ALTER TABLE rights ADD COLUMN ${columnName} ${ddl}`);
+    await runner.query(`ALTER TABLE rights ADD COLUMN ${columnName} ${ddl}`);
+    logger.info('rights column added', { column: columnName });
   }
+}
+
+/** 保证 rights 运费尺寸字段存在（幂等；读/写前均可调用） */
+async function ensureRightsShippingColumns(connection = null) {
+  if (shippingSchemaEnsured) return;
+
+  const runner = connection || db;
+  for (const column of RIGHTS_SHIPPING_COLUMNS) {
+    try {
+      await ensureRightsColumn(runner, column.name, column.ddl);
+    } catch (e) {
+      logger.error(`检查/新增 rights.${column.name} 字段失败`, { err: e });
+      throw e;
+    }
+  }
+
+  shippingSchemaEnsured = true;
 }
 
 async function ensureDiscountSchema(connection) {
@@ -88,14 +108,7 @@ async function ensureDiscountSchema(connection) {
 }
 
 async function ensureShippingSchema(connection) {
-  for (const column of RIGHTS_SHIPPING_COLUMNS) {
-    try {
-      await ensureRightsColumn(connection, column.name, column.ddl);
-    } catch (e) {
-      logger.error(`检查/新增 rights.${column.name} 字段失败`, { err: e });
-      throw e;
-    }
-  }
+  await ensureRightsShippingColumns(connection);
 }
 
 function parseOptionalPositiveNumber(raw) {
@@ -126,6 +139,8 @@ function validateShippingDimensions(body) {
 }
 
 async function getPublicRightsList(query) {
+  await ensureRightsShippingColumns();
+
   const { page = 1, limit = 20, status, category_id, sort = 'created_at', order = 'desc' } = query || {};
 
   const cleanPage = Math.max(1, parseInt(page, 10) || 1);
@@ -719,6 +734,8 @@ async function getPublicRightDetail(rawId, userId = null) {
   if (!id) return adminResult(400, { error: '无效的版权实物ID' });
 
   try {
+    await ensureRightsShippingColumns();
+
     let result = null;
     const cache = await redisClient.get(REDIS_RIGHT_DETAIL_KEY_PREFIX + id);
     if (cache) {
@@ -814,4 +831,5 @@ module.exports = {
   deleteRightAdmin,
   getPublicRightDetail,
   clearRightsInventoryCaches,
+  ensureRightsShippingColumns,
 };

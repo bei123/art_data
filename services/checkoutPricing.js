@@ -10,6 +10,7 @@ const {
   ensureDigitalArtworkIdColumns,
 } = require('../utils/digitalArtworkResolver')
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing')
+const { ensureRightsShippingColumns } = require('./rightsService')
 const {
   assertSfConfig,
   resolvePayAndMonthlyCard,
@@ -464,6 +465,8 @@ async function computeShippingFee({ destAddress, expressTypeId, weightKg, volume
 }
 
 async function priceCartItems(connection, userId, normalizedCartItems) {
+  await ensureRightsShippingColumns(connection)
+
   const rightIds = []
   const artworkIds = []
   const digitalIds = []

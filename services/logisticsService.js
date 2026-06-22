@@ -17,6 +17,7 @@ const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
+const { ensureRightsShippingColumns } = require('./rightsService')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
 const {
   assertSfConfig,
@@ -127,6 +128,8 @@ async function resolveLogisticsOrderContext(b) {
 }
 
 async function loadShippableOrderContext(internalOrderId) {
+  await ensureRightsShippingColumns()
+
   const [orderRows] = await db.query(
     `SELECT o.id, o.out_trade_no, o.user_id, o.trade_state, o.body
      FROM orders o
