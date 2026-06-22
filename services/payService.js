@@ -25,6 +25,10 @@ const {
     buildWechatOrderConfirmExtraData,
     hasWechatOrderConfirmExtraData,
     verifyWechatConfirmReceiptDirect,
+    getWechatOrderDirect,
+    canOpenWechatOrderConfirmByWxState,
+    isWechatOrderConfirmReceiptCompleted,
+    WECHAT_ORDER_STATE_LABELS,
 } = require('./wechatShippingInfoService');
 const {
     resolveOrderFulfillmentStatus,
@@ -4100,12 +4104,16 @@ async function orderDetailForActor(req, options = {}) {
         };
 
         if (mode === 'buyer') {
+            const wxOrderState = await loadWxOrderStateForConfirmReceipt({
+                transactionId: payment?.transaction_id,
+                outTradeNo: order.out_trade_no,
+            });
             detailData.wechat_confirm_receipt = buildBuyerWechatConfirmReceiptBlock({
                 order,
                 payment,
                 primaryShipment,
-                fulfillmentStatus: statusFields.fulfillment_status,
                 items,
+                wxOrderState,
             });
         }
 
@@ -4141,12 +4149,45 @@ async function buyerOrderDetail(req) {
     return orderDetailForActor(req, { mode: 'buyer' });
 }
 
+function isShipmentLogisticsSigned(shipment) {
+    if (!shipment) return false;
+    if (Number(shipment.latest_path_action_type) === 300003) return true;
+    const pathList = shipment.wechat_path?.path_item_list;
+    if (!Array.isArray(pathList)) return false;
+    return pathList.some((node) => Number(node.action_type) === 300003);
+}
+
+async function loadWxOrderStateForConfirmReceipt({ transactionId, outTradeNo }) {
+    if (!transactionId && !outTradeNo) return null;
+    try {
+        const result = await getWechatOrderDirect({
+            transactionId,
+            merchantTradeNo: outTradeNo,
+        });
+        if (!result.ok || !result.body?.order) return null;
+        const wxOrder = result.body.order;
+        const orderState = Number(wxOrder.order_state);
+        return {
+            order_state: Number.isFinite(orderState) ? orderState : null,
+            order_state_label: wxOrder.order_state_label
+                || WECHAT_ORDER_STATE_LABELS[orderState]
+                || null,
+        };
+    } catch (err) {
+        logger.warn('查询微信发货状态失败（确认收货组件）', {
+            outTradeNo,
+            err: err?.message,
+        });
+        return null;
+    }
+}
+
 function buildBuyerWechatConfirmReceiptBlock({
     order,
     payment,
     primaryShipment,
-    fulfillmentStatus,
     items,
+    wxOrderState,
 }) {
     const extraData = buildWechatOrderConfirmExtraData({
         transactionId: payment?.transaction_id,
@@ -4159,34 +4200,57 @@ function buildBuyerWechatConfirmReceiptBlock({
     const hasActiveShipment = Boolean(
         primaryShipment?.status === 'active' && primaryShipment?.waybill_id,
     );
-    const terminalCodes = new Set(['received', 'completed', 'refunded', 'cancelled', 'closed']);
     const hasIdent = hasWechatOrderConfirmExtraData(extraData);
+    const logisticsSigned = isShipmentLogisticsSigned(primaryShipment);
+    const wxState = wxOrderState?.order_state != null ? Number(wxOrderState.order_state) : null;
+    const wxStateLabel = wxOrderState?.order_state_label || null;
+    const confirmReceiptCompleted = wxState != null
+        ? isWechatOrderConfirmReceiptCompleted(wxState)
+        : null;
 
-    let canOpen = paid && hasPhysical && hasActiveShipment && hasIdent
-        && !terminalCodes.has(fulfillmentStatus?.code);
+    let canOpen = false;
     let hint = '可调用 wx.openBusinessView(businessType: weappOrderConfirm) 拉起确认收货组件';
 
     if (!paid) {
-        canOpen = false;
         hint = '订单未支付成功，无法确认收货';
     } else if (!hasPhysical) {
-        canOpen = false;
         hint = '非实物订单无需使用确认收货组件';
     } else if (!hasActiveShipment) {
-        canOpen = false;
-        hint = '商家发货后可确认收货';
+        hint = '商家发货后可在小程序内确认收货';
     } else if (!hasIdent) {
-        canOpen = false;
         hint = '缺少微信支付单号或商户订单号';
-    } else if (terminalCodes.has(fulfillmentStatus?.code)) {
-        canOpen = false;
-        hint = '订单已确认收货或已结束';
+    } else if (wxState == null) {
+        canOpen = true;
+        hint = logisticsSigned
+            ? '物流已签收，请在小程序内点击「确认收货」'
+            : '商家已发货，签收后请在小程序内确认收货';
+    } else if (wxState === 1) {
+        hint = '微信侧显示待发货，请等待商家录入发货信息';
+    } else if (canOpenWechatOrderConfirmByWxState(wxState)) {
+        canOpen = true;
+        hint = logisticsSigned
+            ? '物流已签收，请在小程序内点击「确认收货」'
+            : '商家已发货，签收后请在小程序内确认收货';
+    } else if (wxState === 3) {
+        hint = '您已在小程序确认收货';
+    } else if (wxState === 4) {
+        hint = '交易已完成';
+    } else if (wxState === 5) {
+        hint = '订单已退款';
+    } else if (wxState === 6) {
+        hint = '资金待结算';
+    } else {
+        hint = wxStateLabel || '请稍后重试';
     }
 
     return {
         business_type: 'weappOrderConfirm',
         extra_data: hasIdent ? extraData : null,
         can_open: canOpen,
+        wx_order_state: wxState,
+        wx_order_state_label: wxStateLabel,
+        confirm_receipt_completed: confirmReceiptCompleted,
+        logistics_signed: logisticsSigned,
         verify_api: 'POST /api/wx/pay/orders/confirm-receipt/verify',
         hint,
         callback_appid: 'wx1183b055aeec94d1',
