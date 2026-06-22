@@ -513,10 +513,10 @@
 
           <div v-if="isOrderLogisticsEligible(selectedOrder)" class="rounded-lg border border-border bg-muted/10 p-4">
             <h3 class="mb-2 text-base font-semibold text-foreground">
-              物流（微信物流助手）
+              物流（顺丰开放平台）
             </h3>
             <p class="mb-3 text-sm text-muted-foreground leading-relaxed">
-              含实物且已支付成功时可发货；发货成功后运单号会写入数据库，查询轨迹/面单时会自动带出。
+              含实物且已支付成功时可发货；发货成功后运单号会写入数据库，查询轨迹/面单/取消时会自动带出订单号。
             </p>
             <div v-if="selectedOrder.shipments?.length" class="mb-4 space-y-2">
               <div
@@ -601,47 +601,30 @@
     <Dialog v-model:open="shipDialogVisible">
       <DialogContent class="max-h-[92vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>微信物流发货</DialogTitle>
+          <DialogTitle>顺丰物流发货</DialogTitle>
         </DialogHeader>
 
         <div class="grid max-h-[calc(92vh-10rem)] gap-4 overflow-y-auto py-2 pr-1">
           <div class="flex flex-col gap-2">
-            <Label>快递公司 <span class="text-destructive">*</span></Label>
-            <Select
-              :model-value="shipForm.delivery_id ? String(shipForm.delivery_id) : undefined"
-              @update:model-value="(v) => {
-                shipForm.delivery_id = v != null && v !== '' ? String(v) : ''
-                onShipDeliveryChange()
-              }"
-            >
-              <SelectTrigger class="w-full">
-                <SelectValue placeholder="请选择快递公司" />
-              </SelectTrigger>
-              <SelectContent class="z-[100]" @pointer-down-outside.prevent>
-                <SelectItem
-                  v-for="d in deliveryList"
-                  :key="String(d.delivery_id)"
-                  :value="String(d.delivery_id)"
-                >
-                  {{ d.delivery_name }}（{{ d.delivery_id }}）
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <Label>快递公司</Label>
+            <Input model-value="顺丰速运（SF）" readonly class="bg-muted" />
           </div>
           <div class="flex flex-col gap-2">
-            <Label>客户编码 biz_id <span class="text-destructive">*</span></Label>
+            <Label>付款方式 / 月结卡号</Label>
             <select
               v-model="shipForm.biz_id"
               class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
             >
-              <option value="SF_CASH">现付客户编码（SF_CASH）</option>
+              <option value="SF_CASH">寄方现付（无月结卡）</option>
             </select>
-            <p class="text-xs text-muted-foreground">暂固定为微信物流现付客户编码；与运力侧绑定一致即可。</p>
+            <p class="text-xs text-muted-foreground">
+              沙箱可先选现付；有月结卡时在 .env 配置 SF_MONTHLY_CARD，或后续扩展此下拉。
+            </p>
           </div>
           <div class="flex flex-col gap-2">
-            <Label>服务类型 <span class="text-destructive">*</span></Label>
+            <Label>快件产品 <span class="text-destructive">*</span></Label>
             <Select
-              :disabled="!shipForm.delivery_id || !serviceTypeOptions.length"
+              :disabled="!serviceTypeOptions.length"
               :model-value="shipServiceValue || undefined"
               @update:model-value="(v) => {
                 const s = typeof v === 'string' ? v : ''
@@ -650,7 +633,7 @@
               }"
             >
               <SelectTrigger class="w-full">
-                <SelectValue placeholder="先选快递公司" />
+                <SelectValue placeholder="加载产品中…" />
               </SelectTrigger>
               <SelectContent class="z-[100]" @pointer-down-outside.prevent>
                 <SelectItem
@@ -664,8 +647,67 @@
             </Select>
           </div>
 
-          <div v-if="shipForm.delivery_id === 'SF'" class="flex flex-col gap-2">
-            <Label>顺丰揽件时间 <span class="text-destructive">*</span></Label>
+          <Separator />
+          <div class="text-sm font-medium text-foreground">
+            运费时效查询
+          </div>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div class="flex flex-1 flex-col gap-2">
+              <Label for="ship-weight">预估重量（千克）</Label>
+              <Input
+                id="ship-weight"
+                v-model.number="shipCargoWeight"
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="默认 1"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              class="w-full sm:w-auto"
+              :disabled="deliverTmLoading"
+              @click="queryShipDeliverTm"
+            >
+              <Loader2 v-if="deliverTmLoading" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+              查询运费时效
+            </Button>
+          </div>
+          <p class="text-xs text-muted-foreground leading-relaxed">
+            根据发件人地址与订单收货地址查询顺丰时效与参考运费；已选快件产品时会按该产品查询，未选则返回默认可选产品列表。
+          </p>
+          <div v-if="deliverTmList.length" class="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+            <div
+              v-for="row in deliverTmList"
+              :key="`${row.business_type}-${row.business_type_desc}`"
+              class="rounded-md border border-border bg-background p-3 text-sm"
+            >
+              <div class="font-medium text-foreground">
+                {{ row.business_type_desc || '快件产品' }}
+                <span class="text-muted-foreground">（{{ row.business_type }}）</span>
+              </div>
+              <div v-if="row.deliver_time" class="mt-1 text-xs text-muted-foreground">
+                承诺时效：{{ row.deliver_time }}
+              </div>
+              <div v-if="row.close_time" class="mt-0.5 text-xs text-muted-foreground">
+                截单时间：{{ row.close_time }}
+              </div>
+              <div class="mt-1 text-sm font-medium tabular-nums text-foreground">
+                <template v-if="row.fee != null">参考运费：¥{{ row.fee }}</template>
+                <template v-else>未返回价格（可配置月结卡或检查 search_price）</template>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else-if="deliverTmQueried && !deliverTmLoading"
+            class="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
+          >
+            未查询到可用时效产品
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <Label>上门揽件时间 <span class="text-destructive">*</span></Label>
             <div class="flex flex-col gap-2">
               <div class="flex flex-wrap gap-2">
                 <Button
@@ -692,7 +734,7 @@
                 class="font-mono text-sm"
               />
               <p class="text-xs text-muted-foreground leading-relaxed">
-                微信要求顺丰必传 expect_time：须为<strong>晚于当前</strong>的时间；若已由快递员约定时间请选第二项传 0。
+                顺丰下单须传上门揽件时间：须为<strong>晚于当前</strong>的时间；若已与快递员约定取件请选第二项（不传具体时间）。
               </p>
             </div>
           </div>
@@ -715,7 +757,7 @@
               step="0.01"
               placeholder="如 100 表示保价 100 元"
             />
-            <p class="text-xs text-muted-foreground">微信侧保额单位为「分」，此处按「元」填写，提交时自动换算。</p>
+            <p class="text-xs text-muted-foreground">顺丰保价金额单位为元，此处按「元」填写。</p>
           </div>
 
           <Separator />
@@ -773,8 +815,8 @@
             <Input id="path-delivery" v-model="trackForm.delivery_id" placeholder="如 SF" autocomplete="off" />
           </div>
           <div class="flex flex-col gap-2">
-            <Label for="path-waybill">运单号</Label>
-            <Input id="path-waybill" v-model="trackForm.waybill_id" placeholder="发货成功返回的运单号" autocomplete="off" />
+            <Label for="path-waybill">运单号（可选）</Label>
+            <Input id="path-waybill" v-model="trackForm.waybill_id" placeholder="留空则按订单号查询" autocomplete="off" />
           </div>
           <Button type="button" class="w-fit" :disabled="pathLoading" @click="fetchPath">
             <Loader2 v-if="pathLoading" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
@@ -788,12 +830,17 @@
             >
               <span class="absolute -left-[9px] top-1.5 size-2 rounded-full bg-primary" aria-hidden="true" />
               <div class="text-xs text-muted-foreground">{{ formatPathTime(it.action_time) }}</div>
-              <div class="text-xs text-muted-foreground">{{ pathActionLabel(it.action_type) }}</div>
+              <div v-if="it.sf_secondary_status_name || it.sf_first_status_name" class="text-xs font-medium text-foreground">
+                {{ it.sf_secondary_status_name || it.sf_first_status_name }}
+              </div>
+              <div v-else class="text-xs text-muted-foreground">{{ pathActionLabel(it.action_type) }}</div>
               <div class="text-sm text-foreground">{{ it.action_msg }}</div>
+              <div v-if="it.sf_accept_address" class="text-xs text-muted-foreground">{{ it.sf_accept_address }}</div>
             </div>
           </div>
-          <div v-else-if="pathQueried && !pathLoading" class="rounded-md border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-            暂无轨迹数据
+          <div v-else-if="pathQueried && !pathLoading" class="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+            <p>暂无轨迹数据</p>
+            <p v-if="pathEmptyHint" class="mt-2 text-left text-xs leading-relaxed">{{ pathEmptyHint }}</p>
           </div>
         </div>
       </DialogContent>
@@ -810,30 +857,12 @@
             <Input id="wb-delivery" v-model="trackForm.delivery_id" autocomplete="off" />
           </div>
           <div class="flex flex-col gap-2">
-            <Label for="wb-waybill">运单号</Label>
+            <Label for="wb-waybill">运单号（可选）</Label>
             <Input id="wb-waybill" v-model="trackForm.waybill_id" autocomplete="off" />
           </div>
-          <div class="flex flex-col gap-2">
-            <Label>面单类型</Label>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                :variant="waybillPrintType === 0 ? 'default' : 'outline'"
-                @click="waybillPrintType = 0"
-              >
-                二联单
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                :variant="waybillPrintType === 1 ? 'default' : 'outline'"
-                @click="waybillPrintType = 1"
-              >
-                一联单
-              </Button>
-            </div>
-          </div>
+          <p class="text-xs text-muted-foreground">
+            顺丰面单由订单查询接口返回路由标签 HTML 预览；运单号留空时按订单号查询。
+          </p>
           <Button type="button" class="w-fit" :disabled="waybillLoading" @click="fetchWaybill">
             <Loader2 v-if="waybillLoading" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
             获取面单
@@ -850,7 +879,7 @@
         <AlertDialogHeader>
           <AlertDialogTitle>取消运单</AlertDialogTitle>
           <AlertDialogDescription>
-            确认向微信发起取消运单？需已填写与发货一致的快递公司与运单号。
+            确认向顺丰取消该订单运单？将使用当前订单的客户订单号，运单号可选填。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter class="gap-2 sm:justify-end">
@@ -908,7 +937,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 
 const WAYBILL_STORAGE_KEY = 'admin_orders_last_waybill_v1'
-const LOGISTICS_BIZ_ID_CASH = 'SF_CASH'
+const DELIVERY_ID_SF = 'SF'
+
+function formatSfApiError(e, fallback = '请求失败') {
+  const data = e?.response?.data
+  if (!data) return e?.message || fallback
+  let msg = data.error || fallback
+  if (data.sf_error?.suggestion) msg = `${msg}：${data.sf_error.suggestion}`
+  return msg
+}
 
 const orders = ref([])
 const loading = ref(false)
@@ -938,9 +975,13 @@ const shipInsured = reactive({
   enabled: false,
   amountYuan: undefined,
 })
+const shipCargoWeight = ref(1)
+const deliverTmLoading = ref(false)
+const deliverTmQueried = ref(false)
+const deliverTmList = ref([])
 const shipForm = reactive({
-  delivery_id: '',
-  biz_id: LOGISTICS_BIZ_ID_CASH,
+  delivery_id: DELIVERY_ID_SF,
+  biz_id: 'SF_CASH',
   service_type: null,
   service_name: '',
   sender: {
@@ -958,14 +999,14 @@ const pathLoading = ref(false)
 const pathQueried = ref(false)
 const pathItemList = ref([])
 const trackForm = reactive({
-  delivery_id: '',
+  delivery_id: DELIVERY_ID_SF,
   waybill_id: '',
 })
 
 const waybillDialogVisible = ref(false)
 const waybillLoading = ref(false)
-const waybillPrintType = ref(0)
 const waybillPreviewUrl = ref('')
+const pathEmptyHint = ref('')
 
 const cancelWaybillDialogOpen = ref(false)
 const cancelWaybillSubmitting = ref(false)
@@ -1435,11 +1476,7 @@ async function handleDigitalQrUpload(item, event) {
 }
 
 const serviceTypeOptions = computed(() => {
-  const id = shipForm.delivery_id != null && shipForm.delivery_id !== ''
-    ? String(shipForm.delivery_id)
-    : ''
-  if (!id) return []
-  const d = deliveryList.value.find((x) => String(x.delivery_id) === id)
+  const d = deliveryList.value.find((x) => String(x.delivery_id) === DELIVERY_ID_SF)
   if (!d || !Array.isArray(d.service_type)) return []
   return d.service_type
 })
@@ -1458,8 +1495,8 @@ function formatDatetimeLocalValue(d) {
 }
 
 function resetShipForm() {
-  shipForm.delivery_id = ''
-  shipForm.biz_id = LOGISTICS_BIZ_ID_CASH
+  shipForm.delivery_id = DELIVERY_ID_SF
+  shipForm.biz_id = 'SF_CASH'
   shipForm.service_type = null
   shipForm.service_name = ''
   sfExpectMode.value = 'pickup'
@@ -1473,15 +1510,120 @@ function resetShipForm() {
   shipForm.sender.address = ''
   shipInsured.enabled = false
   shipInsured.amountYuan = undefined
+  shipCargoWeight.value = 1
+  deliverTmList.value = []
+  deliverTmQueried.value = false
+}
+
+function getShipReceiverAddress(order) {
+  const items = order?.items
+  if (!Array.isArray(items)) return null
+  for (const item of items) {
+    const addr = item?.address
+    if (!addr) continue
+    if (addr.province || addr.city || addr.detail_address || addr.full_address) return addr
+  }
+  return null
+}
+
+function buildShipDeliverTmAddresses() {
+  const receiver = getShipReceiverAddress(selectedOrder.value)
+  if (!receiver) return { error: '订单无收货地址，无法查询运费时效' }
+
+  const srcProvince = shipForm.sender.province?.trim()
+  const srcCity = shipForm.sender.city?.trim()
+  const srcAddress = shipForm.sender.address?.trim()
+  if (!srcProvince && !srcCity && !srcAddress) {
+    return { error: '请先填写发件人省市区或详细地址' }
+  }
+
+  const destProvince = receiver.province?.trim()
+  const destCity = receiver.city?.trim()
+  const destAddress = receiver.detail_address?.trim() || receiver.full_address?.trim()
+  if (!destProvince && !destCity && !destAddress) {
+    return { error: '订单收货地址不完整，无法查询运费时效' }
+  }
+
+  return {
+    src_address: {
+      province: srcProvince || undefined,
+      city: srcCity || undefined,
+      district: shipForm.sender.area?.trim() || undefined,
+      address: srcAddress || undefined,
+    },
+    dest_address: {
+      province: destProvince || undefined,
+      city: destCity || undefined,
+      district: receiver.district?.trim() || undefined,
+      address: destAddress || undefined,
+    },
+  }
+}
+
+function resolveShipConsignedTimeUnix() {
+  if (sfExpectMode.value !== 'pickup' || !sfPickupLocalStr.value?.trim()) return undefined
+  const d = new Date(sfPickupLocalStr.value)
+  if (Number.isNaN(d.getTime())) return undefined
+  return Math.floor(d.getTime() / 1000)
+}
+
+async function queryShipDeliverTm() {
+  if (!selectedOrder.value) return
+  const addresses = buildShipDeliverTmAddresses()
+  if (addresses.error) {
+    ElMessage.warning(addresses.error)
+    return
+  }
+
+  const weight = Number(shipCargoWeight.value)
+  deliverTmLoading.value = true
+  deliverTmQueried.value = true
+  deliverTmList.value = []
+
+  try {
+    const body = {
+      delivery_id: DELIVERY_ID_SF,
+      search_price: '1',
+      biz_id: shipForm.biz_id?.trim() || 'SF_CASH',
+      src_address: addresses.src_address,
+      dest_address: addresses.dest_address,
+      weight: Number.isFinite(weight) && weight > 0 ? weight : 1,
+    }
+    if (shipForm.service_type != null) body.business_type = shipForm.service_type
+    const consignedTime = resolveShipConsignedTimeUnix()
+    if (consignedTime != null) body.consigned_time = consignedTime
+
+    const res = await axios.post('/wx/logistics/query-deliver-tm', body, { timeout: 30000 })
+    deliverTmList.value = Array.isArray(res?.deliver_tm_list) ? res.deliver_tm_list : []
+    if (!deliverTmList.value.length) {
+      ElMessage.info('未查询到可用时效产品')
+    }
+  } catch (e) {
+    ElMessage.error(formatSfApiError(e, '查询运费时效失败'))
+  } finally {
+    deliverTmLoading.value = false
+  }
 }
 
 async function fetchDeliveryList() {
   try {
     const data = await axios.get('/wx/logistics/deliveries', { timeout: 20000 })
     deliveryList.value = Array.isArray(data?.data) ? data.data : []
+    if (!data?.configured) {
+      ElMessage.warning(data?.error || '顺丰接口未配置，请在 .env 填写 SF_PARTNER_ID 与 SF_CHECK_WORD')
+    }
+    shipForm.delivery_id = DELIVERY_ID_SF
+    if (!shipForm.service_type && serviceTypeOptions.value.length) {
+      const first = serviceTypeOptions.value[0]
+      shipForm.service_type = first.service_type
+      shipForm.service_name = first.service_name
+      shipServiceValue.value = `${first.service_type}|||${first.service_name}`
+    }
+    sfExpectMode.value = 'pickup'
+    sfPickupLocalStr.value = formatDatetimeLocalValue(defaultSfPickupDate())
   } catch (e) {
     deliveryList.value = []
-    const msg = e?.response?.data?.error || '获取快递公司列表失败'
+    const msg = e?.response?.data?.error || '获取顺丰产品列表失败'
     ElMessage.error(msg)
   }
 }
@@ -1490,12 +1632,8 @@ function onShipDeliveryChange() {
   shipServiceValue.value = ''
   shipForm.service_type = null
   shipForm.service_name = ''
-  if (shipForm.delivery_id === 'SF') {
-    sfExpectMode.value = 'pickup'
-    sfPickupLocalStr.value = formatDatetimeLocalValue(defaultSfPickupDate())
-  } else {
-    sfPickupLocalStr.value = ''
-  }
+  sfExpectMode.value = 'pickup'
+  sfPickupLocalStr.value = formatDatetimeLocalValue(defaultSfPickupDate())
 }
 
 function onShipServiceChange(val) {
@@ -1511,6 +1649,8 @@ function onShipServiceChange(val) {
 
 function openShipDialog() {
   if (!selectedOrder.value) return
+  deliverTmList.value = []
+  deliverTmQueried.value = false
   shipDialogVisible.value = true
 }
 
@@ -1525,7 +1665,6 @@ function openPathDialog() {
 function openWaybillDialog() {
   if (!selectedOrder.value) return
   prefillTrackFormFromStorage(selectedOrder.value.id)
-  waybillPrintType.value = 0
   revokeWaybillPreview()
   waybillDialogVisible.value = true
 }
@@ -1539,16 +1678,8 @@ function revokeWaybillPreview() {
 
 async function submitShip() {
   if (!selectedOrder.value) return
-  if (!shipForm.delivery_id) {
-    ElMessage.warning('请选择快递公司')
-    return
-  }
-  if (!shipForm.biz_id?.trim()) {
-    ElMessage.warning('请选择客户编码 biz_id')
-    return
-  }
   if (shipForm.service_type == null || !shipForm.service_name?.trim()) {
-    ElMessage.warning('请选择服务类型')
+    ElMessage.warning('请选择快件产品')
     return
   }
   if (!shipForm.sender.mobile?.trim()) {
@@ -1560,24 +1691,22 @@ async function submitShip() {
     return
   }
   let expectTimeUnix
-  if (shipForm.delivery_id === 'SF') {
-    if (sfExpectMode.value === 'agreed') {
-      expectTimeUnix = 0
-    } else {
-      if (!sfPickupLocalStr.value?.trim()) {
-        ElMessage.warning('请选择顺丰预计上门揽件时间')
-        return
-      }
-      const d = new Date(sfPickupLocalStr.value)
-      if (Number.isNaN(d.getTime())) {
-        ElMessage.warning('揽件时间无效')
-        return
-      }
-      expectTimeUnix = Math.floor(d.getTime() / 1000)
-      if (expectTimeUnix <= Math.floor(Date.now() / 1000)) {
-        ElMessage.warning('揽件时间须晚于当前时间')
-        return
-      }
+  if (sfExpectMode.value === 'agreed') {
+    expectTimeUnix = 0
+  } else {
+    if (!sfPickupLocalStr.value?.trim()) {
+      ElMessage.warning('请选择预计上门揽件时间')
+      return
+    }
+    const d = new Date(sfPickupLocalStr.value)
+    if (Number.isNaN(d.getTime())) {
+      ElMessage.warning('揽件时间无效')
+      return
+    }
+    expectTimeUnix = Math.floor(d.getTime() / 1000)
+    if (expectTimeUnix <= Math.floor(Date.now() / 1000)) {
+      ElMessage.warning('揽件时间须晚于当前时间')
+      return
     }
   }
 
@@ -1594,14 +1723,11 @@ async function submitShip() {
     }
   }
 
-  const deliveryMeta = deliveryList.value.find(
-    (d) => String(d.delivery_id) === String(shipForm.delivery_id),
-  )
   const payload = {
     internal_order_id: selectedOrder.value.id,
-    delivery_id: shipForm.delivery_id.trim(),
-    delivery_name: deliveryMeta?.delivery_name || undefined,
-    biz_id: shipForm.biz_id.trim() || LOGISTICS_BIZ_ID_CASH,
+    delivery_id: DELIVERY_ID_SF,
+    delivery_name: '顺丰速运',
+    biz_id: shipForm.biz_id.trim() || 'SF_CASH',
     service_type: shipForm.service_type,
     service_name: shipForm.service_name.trim(),
     sender: {
@@ -1612,17 +1738,17 @@ async function submitShip() {
       area: shipForm.sender.area?.trim() || undefined,
       address: shipForm.sender.address?.trim(),
     },
-    add_source: 0,
+    expect_time: expectTimeUnix,
   }
-  if (shipForm.delivery_id === 'SF') payload.expect_time = expectTimeUnix
   if (insuredPayload) payload.insured = insuredPayload
 
   shipSubmitting.value = true
   try {
     const res = await axios.post('/wx/logistics/orders', payload, { timeout: 60000 })
     if (res?.waybill_id) {
-      saveLastWaybill(selectedOrder.value.id, shipForm.delivery_id.trim(), String(res.waybill_id))
+      saveLastWaybill(selectedOrder.value.id, DELIVERY_ID_SF, String(res.waybill_id))
       ElMessage.success(`发货成功，运单号：${res.waybill_id}`)
+      if (res.filter_warning) ElMessage.warning(res.filter_warning)
       if (res.shipment_persisted === false) {
         ElMessage.warning('运单号未能写入数据库，请联系管理员检查 order_shipments 表')
       }
@@ -1632,8 +1758,7 @@ async function submitShip() {
     shipDialogVisible.value = false
     await refreshSelectedOrderDetail(selectedOrder.value.id)
   } catch (e) {
-    const msg = e?.response?.data?.error || e?.message || '发货失败'
-    ElMessage.error(msg)
+    ElMessage.error(formatSfApiError(e, '发货失败'))
   } finally {
     shipSubmitting.value = false
   }
@@ -1664,30 +1789,33 @@ function formatPathTime(ts) {
 
 async function fetchPath() {
   if (!selectedOrder.value) return
-  if (!trackForm.delivery_id?.trim() || !trackForm.waybill_id?.trim()) {
-    ElMessage.warning('请填写快递公司与运单号')
+  if (!trackForm.delivery_id?.trim()) {
+    ElMessage.warning('请填写快递公司')
     return
   }
   pathLoading.value = true
   pathQueried.value = true
   pathItemList.value = []
+  pathEmptyHint.value = ''
   try {
-    const res = await axios.post(
-      '/wx/logistics/path',
-      {
-        internal_order_id: selectedOrder.value.id,
-        delivery_id: trackForm.delivery_id.trim(),
-        waybill_id: trackForm.waybill_id.trim(),
-        add_source: 0,
-      },
-      { timeout: 25000 },
-    )
+    const body = {
+      internal_order_id: selectedOrder.value.id,
+      delivery_id: trackForm.delivery_id.trim() || DELIVERY_ID_SF,
+    }
+    if (trackForm.waybill_id?.trim()) {
+      body.waybill_id = trackForm.waybill_id.trim()
+    } else {
+      body.tracking_type = 2
+    }
+    const res = await axios.post('/wx/logistics/path', body, { timeout: 25000 })
     const list = Array.isArray(res?.path_item_list) ? res.path_item_list : []
     pathItemList.value = [...list].sort((a, b) => Number(b.action_time) - Number(a.action_time))
-    if (!pathItemList.value.length) ElMessage.info('暂无轨迹节点')
+    if (!pathItemList.value.length) {
+      pathEmptyHint.value = res?.routes_empty_hint || ''
+      ElMessage.info(pathEmptyHint.value || '暂无轨迹节点')
+    }
   } catch (e) {
-    const msg = e?.response?.data?.error || e?.message || '查询轨迹失败'
-    ElMessage.error(msg)
+    ElMessage.error(formatSfApiError(e, '查询轨迹失败'))
   } finally {
     pathLoading.value = false
   }
@@ -1716,9 +1844,7 @@ async function fetchWaybill() {
   try {
     const body = {
       internal_order_id: selectedOrder.value.id,
-      delivery_id: trackForm.delivery_id.trim(),
-      add_source: 0,
-      print_type: waybillPrintType.value,
+      delivery_id: trackForm.delivery_id.trim() || DELIVERY_ID_SF,
     }
     if (trackForm.waybill_id?.trim()) body.waybill_id = trackForm.waybill_id.trim()
     const res = await axios.post('/wx/logistics/order/get', body, { timeout: 30000 })
@@ -1730,8 +1856,7 @@ async function fetchWaybill() {
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
     waybillPreviewUrl.value = URL.createObjectURL(blob)
   } catch (e) {
-    const msg = e?.response?.data?.error || e?.message || '获取面单失败'
-    ElMessage.error(msg)
+    ElMessage.error(formatSfApiError(e, '获取面单失败'))
   } finally {
     waybillLoading.value = false
   }
@@ -1739,10 +1864,6 @@ async function fetchWaybill() {
 
 function openCancelWaybillDialog() {
   if (!selectedOrder.value) return
-  if (!trackForm.delivery_id?.trim() || !trackForm.waybill_id?.trim()) {
-    ElMessage.warning('请先填写快递公司与运单号（可与发货记录一致）')
-    return
-  }
   cancelWaybillDialogOpen.value = true
 }
 
@@ -1750,21 +1871,17 @@ async function confirmCancelWaybill() {
   if (!selectedOrder.value) return
   cancelWaybillSubmitting.value = true
   try {
-    await axios.post(
-      '/wx/logistics/order/cancel',
-      {
-        internal_order_id: selectedOrder.value.id,
-        delivery_id: trackForm.delivery_id.trim(),
-        waybill_id: trackForm.waybill_id.trim(),
-        add_source: 0,
-      },
-      { timeout: 25000 },
-    )
+    const body = {
+      internal_order_id: selectedOrder.value.id,
+      delivery_id: trackForm.delivery_id.trim() || DELIVERY_ID_SF,
+    }
+    if (trackForm.waybill_id?.trim()) body.waybill_id = trackForm.waybill_id.trim()
+    await axios.post('/wx/logistics/order/cancel', body, { timeout: 25000 })
     ElMessage.success('取消运单成功')
     cancelWaybillDialogOpen.value = false
+    await refreshSelectedOrderDetail(selectedOrder.value.id)
   } catch (e) {
-    const msg = e?.response?.data?.error || e?.message || '取消运单失败'
-    ElMessage.error(msg)
+    ElMessage.error(formatSfApiError(e, '取消运单失败'))
   } finally {
     cancelWaybillSubmitting.value = false
   }

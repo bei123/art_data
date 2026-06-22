@@ -1,14 +1,57 @@
-const axios = require('axios')
 const db = require('../db')
 const logger = require('../utils/logger')
-const { getAccessToken } = require('./wechatMiniProgramToken')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
-const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv')
+const {
+  assertSfConfig,
+  getSfConfig,
+  createOrder,
+  updateOrder,
+  searchOrder,
+  fetchSfPathItemList,
+  formatSendStartTm,
+  resolvePayAndMonthlyCard,
+  buildWaybillPreviewHtml,
+  queryDeliverTm: sfQueryDeliverTm,
+} = require('./sfExpressClient')
+const { extractPrimaryWaybillNo } = require('./sfExpressPathMap')
+const { parseSfServiceTypesFromEnv, getAllSfServiceTypes } = require('./sfExpressConstants')
+const {
+  validateCreateOrderInput,
+  buildCreateOrderPayload,
+  assessCreateOrderResponse,
+  extractWaybillNoInfoList,
+} = require('./sfExpressCreateOrder')
+const {
+  SF_DEAL_TYPE,
+  resolveWaybillNoInfoList,
+  validateUpdateOrderInput,
+  buildConfirmOrderPayload,
+  buildCancelOrderPayload,
+  assessUpdateOrderResponse,
+} = require('./sfExpressUpdateOrder')
+const {
+  SF_SEARCH_TYPE,
+  validateSearchOrderInput,
+  buildSearchOrderPayload,
+  assessSearchOrderResponse,
+} = require('./sfExpressSearchOrder')
+const {
+  SF_TRACKING_TYPE,
+  normalizeCheckPhoneNo,
+  buildSearchRoutesPayload,
+} = require('./sfExpressSearchRoutes')
+const {
+  buildQueryDeliverTmPayload,
+  assessQueryDeliverTmResponse,
+} = require('./sfExpressQueryDeliverTm')
+
+const DELIVERY_ID_SF = 'SF'
+const DELIVERY_NAME_SF = '顺丰速运'
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
@@ -23,16 +66,6 @@ function clipUtf8(str, maxBytes) {
   return buf.subarray(0, end).toString('utf8')
 }
 
-function absolutizeAssetUrl(maybeUrl) {
-  if (!maybeUrl || typeof maybeUrl !== 'string') return ''
-  const u = maybeUrl.trim()
-  if (!u) return ''
-  if (/^https?:\/\//i.test(u)) return u
-  if (u.startsWith('//')) return `https:${u}`
-  if (u.startsWith('/')) return `${OSS_PUBLIC_ORIGIN}${u}`
-  return u
-}
-
 function hasTelOrMobile(obj) {
   if (!obj || typeof obj !== 'object') return false
   const tel = obj.tel != null && String(obj.tel).trim() !== ''
@@ -40,98 +73,156 @@ function hasTelOrMobile(obj) {
   return tel || mobile
 }
 
+function loadSfServiceTypes() {
+  const fromEnv = parseSfServiceTypesFromEnv(process.env.SF_EXPRESS_TYPES)
+  if ((process.env.SF_EXPRESS_TYPES || '').trim()) return fromEnv
+  return getAllSfServiceTypes()
+}
+
 /**
- * 补全 getPath / getOrder 所需的 order_id、openid（orders.user_id → wx_users.id）
- * 成功：{ order_id, buyerOpenid, add_source }；失败：{ error: adminResult(...) }
+ * 补全轨迹/面单/取消所需的客户订单号 orderId（orders.out_trade_no）
  */
-async function resolveWechatLogisticsOrderContext(b) {
-  const add_source = b.add_source === 2 ? 2 : 0
-  let order_id = b.order_id != null && String(b.order_id).trim() !== '' ? String(b.order_id).trim() : ''
-  let buyerOpenid = b.openid != null && String(b.openid).trim() !== '' ? String(b.openid).trim() : ''
+async function resolveLogisticsOrderContext(b) {
+  let orderId = b.order_id != null && String(b.order_id).trim() !== '' ? String(b.order_id).trim() : ''
 
   let internal_order_id = null
   const internalOrderId = parseInt(String(b.internal_order_id ?? ''), 10)
   if (!Number.isNaN(internalOrderId) && internalOrderId > 0) {
     internal_order_id = internalOrderId
     const [orderRows] = await db.query(
-      'SELECT id, out_trade_no, user_id FROM orders WHERE id = ? LIMIT 1',
+      'SELECT id, out_trade_no FROM orders WHERE id = ? LIMIT 1',
       [internalOrderId]
     )
     if (!orderRows || orderRows.length === 0) {
       return { error: adminResult(404, { error: '订单不存在' }) }
     }
-    const orow = orderRows[0]
-    if (!order_id) order_id = String(orow.out_trade_no || '').trim()
-    if (add_source === 0 && !buyerOpenid) {
-      const [wxUserRows] = await db.query(
-        'SELECT openid FROM wx_users WHERE id = ? LIMIT 1',
-        [orow.user_id]
-      )
-      buyerOpenid = wxUserRows && wxUserRows[0] && wxUserRows[0].openid != null
-        ? String(wxUserRows[0].openid).trim()
-        : ''
-    }
+    if (!orderId) orderId = String(orderRows[0].out_trade_no || '').trim()
   }
 
-  if (!order_id) {
-    return {
-      error: adminResult(400, { error: '缺少 order_id（微信物流单号）；可传 internal_order_id 以自动使用 out_trade_no' })
-    }
-  }
-  if (add_source === 0 && !buyerOpenid) {
+  if (!orderId) {
     return {
       error: adminResult(400, {
-        error: '缺少 openid；可传 internal_order_id 从 wx_users 读取，或直接传 openid；add_source=2 可不填'
-      })
+        error: '缺少 order_id（客户订单号）；可传 internal_order_id 以自动使用 out_trade_no',
+      }),
     }
   }
-  return { order_id, buyerOpenid, add_source, internal_order_id }
+
+  return { order_id: orderId, internal_order_id }
+}
+
+async function loadShippableOrderContext(internalOrderId) {
+  const [orderRows] = await db.query(
+    `SELECT o.id, o.out_trade_no, o.user_id, o.trade_state, o.body
+     FROM orders o
+     WHERE o.id = ?
+     LIMIT 1`,
+    [internalOrderId]
+  )
+  if (!orderRows || orderRows.length === 0) {
+    return { error: adminResult(404, { error: '订单不存在' }) }
+  }
+  const orderRow = orderRows[0]
+  if (orderRow.trade_state !== 'SUCCESS') {
+    return { error: adminResult(400, { error: '仅支付成功的订单可发货', trade_state: orderRow.trade_state }) }
+  }
+
+  const [refundBlocking] = await db.query(
+    `SELECT COUNT(*) AS c FROM refund_requests
+     WHERE out_trade_no = ? AND status IN ('APPROVED', 'PROCESSING')`,
+    [orderRow.out_trade_no]
+  )
+  if (refundBlocking && refundBlocking[0] && Number(refundBlocking[0].c) > 0) {
+    return { error: adminResult(400, { error: '订单存在进行中或已同意的退款，暂不可发货' }) }
+  }
+
+  const [physicalItems] = await db.query(
+    `SELECT
+        oi.id,
+        oi.type,
+        oi.quantity,
+        oi.address_id,
+        COALESCE(r.title, oa.title) AS item_title,
+        wa.receiver_name,
+        wa.receiver_phone,
+        wa.province,
+        wa.city,
+        wa.district,
+        wa.detail_address
+      FROM order_items oi
+      LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
+      LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+      LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
+      WHERE oi.order_id = ? AND oi.type IN ('right', 'artwork')`,
+    [internalOrderId]
+  )
+
+  if (!physicalItems || physicalItems.length === 0) {
+    return { error: adminResult(400, { error: '订单不含实物商品（权益/原作），无需发货' }) }
+  }
+
+  const missingAddr = physicalItems.filter((row) => !row.address_id || !row.receiver_phone)
+  if (missingAddr.length > 0) {
+    return { error: adminResult(400, { error: '存在未绑定收货地址的实物订单项，请先完善收货地址' }) }
+  }
+
+  const addrIds = [...new Set(physicalItems.map((r) => r.address_id))]
+  if (addrIds.length > 1) {
+    return { error: adminResult(400, { error: '实物商品存在多个不同收货地址，请拆分订单或统一地址后再发货' }) }
+  }
+
+  const firstAddr = physicalItems[0]
+  const receiver = {
+    name: clipUtf8(firstAddr.receiver_name || '', 64),
+    mobile: clipUtf8(String(firstAddr.receiver_phone || '').trim(), 32),
+    province: clipUtf8(firstAddr.province || '', 64),
+    city: clipUtf8(firstAddr.city || '', 64),
+    area: clipUtf8(firstAddr.district || '', 64),
+    address: clipUtf8(firstAddr.detail_address || '', 512),
+  }
+  if (!hasTelOrMobile(receiver)) {
+    return { error: adminResult(400, { error: '收件人手机号无效' }) }
+  }
+
+  const cargoDefault = {
+    count: physicalItems.reduce((sum, row) => sum + (Number(row.quantity) || 1), 0),
+    detail_list: physicalItems.map((row) => ({
+      name: clipUtf8(row.item_title || '商品', 128),
+      count: Number(row.quantity) > 0 ? Number(row.quantity) : 1,
+    })),
+  }
+
+  return { orderRow, receiver, cargoDefault, physicalItems }
 }
 
 /**
- * 微信物流助手：获取支持的快递公司列表（HTTPS getAllDelivery）
- * @see https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/express/by-business/get-all-delivery.html
+ * 顺丰：支持的快递公司与产品类型（固定顺丰）
  */
 async function getAllDelivery() {
-  const appid = process.env.WX_APPID
-  const secret = process.env.WX_SECRET
-  if (!appid || !secret) {
-    logger.error('getAllDelivery: 缺少 WX_APPID 或 WX_SECRET')
-    return adminResult(500, { error: '服务器配置错误' })
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    return adminResult(503, { error: auth.error, configured: false })
   }
 
-  try {
-    const access_token = await getAccessToken(appid, secret)
-    const url = `https://api.weixin.qq.com/cgi-bin/express/business/delivery/getall?access_token=${encodeURIComponent(access_token)}`
-    const { data } = await axios.get(url, { timeout: 15000 })
-    if (data.errcode != null && data.errcode !== 0) {
-      logger.warn('getAllDelivery 微信返回错误', { errcode: data.errcode, errmsg: data.errmsg })
-      return adminResult(502, {
-        error: data.errmsg || '微信物流接口返回错误',
-        errcode: data.errcode
-      })
-    }
-    return adminResult(200, {
-      count: data.count ?? (Array.isArray(data.data) ? data.data.length : 0),
-      data: data.data || []
-    })
-  } catch (err) {
-    logger.error('getAllDelivery 请求失败', { err })
-    return adminResult(500, { error: '获取快递公司列表失败', detail: err.message })
-  }
+  return adminResult(200, {
+    count: 1,
+    provider: 'sf-express',
+    configured: true,
+    data: [{
+      delivery_id: DELIVERY_ID_SF,
+      delivery_name: DELIVERY_NAME_SF,
+      service_type: loadSfServiceTypes(),
+    }],
+  })
 }
 
 /**
- * 微信物流助手：生成运单（HTTPS addOrder）
- * 仅允许：订单已支付成功、非退款态、且存在实物（权益/原作）与唯一收货地址。
- * @see https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/express/by-business/add-order.html
+ * 顺丰开放平台：下单（EXP_RECE_CREATE_ORDER）
  */
 async function addOrder(req) {
-  const appid = process.env.WX_APPID
-  const secret = process.env.WX_SECRET
-  if (!appid || !secret) {
-    logger.error('addOrder: 缺少 WX_APPID 或 WX_SECRET')
-    return adminResult(500, { error: '服务器配置错误' })
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    logger.error('addOrder: 顺丰配置不完整')
+    return adminResult(503, { error: auth.error })
   }
 
   const b = req.body && typeof req.body === 'object' ? req.body : {}
@@ -140,293 +231,131 @@ async function addOrder(req) {
     return adminResult(400, { error: '缺少有效的 internal_order_id（或 order_id）' })
   }
 
-  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : ''
-  if (!delivery_id) return adminResult(400, { error: '缺少 delivery_id' })
-
-  const biz_id = (b.biz_id != null && String(b.biz_id).trim() !== '')
-    ? String(b.biz_id).trim()
-    : (process.env.WX_LOGISTICS_DEFAULT_BIZ_ID || '').trim()
-  if (!biz_id) return adminResult(400, { error: '缺少 biz_id（可在请求体传入或配置 WX_LOGISTICS_DEFAULT_BIZ_ID）' })
-
-  const service_type = b.service_type
-  const service_name = b.service_name != null ? String(b.service_name).trim() : ''
-  if (service_type === undefined || service_type === null || Number.isNaN(Number(service_type))) {
-    return adminResult(400, { error: '缺少有效的 service_type' })
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return adminResult(400, { error: '当前仅支持顺丰（SF）发货' })
   }
-  if (!service_name) return adminResult(400, { error: '缺少 service_name' })
 
   const sender = b.sender
   if (!sender || typeof sender !== 'object') return adminResult(400, { error: '缺少发件人 sender' })
-  if (!hasTelOrMobile(sender)) return adminResult(400, { error: '发件人须填写 mobile 或 tel' })
 
-  const add_source = b.add_source === 2 ? 2 : 0
-  const wx_appid = b.wx_appid != null ? String(b.wx_appid).trim() : ''
-  if (add_source === 2 && !wx_appid) {
-    return adminResult(400, { error: 'add_source 为 2 时必须填写 wx_appid' })
+  const service_type = b.service_type
+  if (service_type === undefined || service_type === null || Number.isNaN(Number(service_type))) {
+    return adminResult(400, { error: '缺少有效的 service_type（快件产品 expressTypeId）' })
   }
 
+  const service_name = b.service_name != null ? String(b.service_name).trim() : ''
+  const cfg = getSfConfig()
+  const expressTypeId = Number(service_type) || cfg.defaultExpressTypeId
+
   const expect_time = b.expect_time
-  if (delivery_id === 'SF' && expect_time === undefined) {
+  if (expect_time === undefined) {
     return adminResult(400, { error: '顺丰发货须传 expect_time（Unix 秒；0 表示已约定取件时间）' })
   }
 
   try {
-    const [orderRows] = await db.query(
-      `SELECT o.id, o.out_trade_no, o.user_id, o.trade_state, o.body
-       FROM orders o
-       WHERE o.id = ?
-       LIMIT 1`,
-      [internalOrderId]
-    )
-    if (!orderRows || orderRows.length === 0) {
-      return adminResult(404, { error: '订单不存在' })
-    }
-    const orderRow = orderRows[0]
-    if (orderRow.trade_state !== 'SUCCESS') {
-      return adminResult(400, { error: '仅支付成功的订单可发货', trade_state: orderRow.trade_state })
-    }
+    const shipCtx = await loadShippableOrderContext(internalOrderId)
+    if (shipCtx.error) return shipCtx.error
+    const { orderRow, receiver, cargoDefault } = shipCtx
 
-    const [refundBlocking] = await db.query(
-      `SELECT COUNT(*) AS c FROM refund_requests
-       WHERE out_trade_no = ? AND status IN ('APPROVED', 'PROCESSING')`,
-      [orderRow.out_trade_no]
-    )
-    if (refundBlocking && refundBlocking[0] && Number(refundBlocking[0].c) > 0) {
-      return adminResult(400, { error: '订单存在进行中或已同意的退款，暂不可发货' })
-    }
-
-    // 买家 openid：orders.user_id 与 wx_users.id 对应，从 wx_users 读取
-    const [wxUserRows] = await db.query(
-      'SELECT openid FROM wx_users WHERE id = ? LIMIT 1',
-      [orderRow.user_id]
-    )
-    const buyerOpenid = wxUserRows && wxUserRows[0] && wxUserRows[0].openid != null
-      ? String(wxUserRows[0].openid).trim()
-      : ''
-    if (add_source === 0 && !buyerOpenid) {
-      return adminResult(400, {
-        error: 'wx_users 中未找到该买家的 openid（请确认 orders.user_id 对应 wx_users.id）；App/H5 订单请使用 add_source=2 并填写 wx_appid'
-      })
-    }
-
-    const [physicalItems] = await db.query(
-      `SELECT
-          oi.id,
-          oi.type,
-          oi.quantity,
-          oi.address_id,
-          COALESCE(r.title, oa.title) AS item_title,
-          COALESCE(r.description, oa.description) AS item_desc,
-          (SELECT ri.image_url FROM right_images ri WHERE ri.right_id = oi.right_id ORDER BY ri.id ASC LIMIT 1) AS right_image_url,
-          oa.image AS artwork_image,
-          wa.receiver_name,
-          wa.receiver_phone,
-          wa.province,
-          wa.city,
-          wa.district,
-          wa.detail_address
-        FROM order_items oi
-        LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-        LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
-        LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
-        WHERE oi.order_id = ? AND oi.type IN ('right', 'artwork')`,
-      [internalOrderId]
-    )
-
-    if (!physicalItems || physicalItems.length === 0) {
-      return adminResult(400, { error: '订单不含实物商品（权益/原作），无需走微信物流发货' })
-    }
-
-    const missingAddr = physicalItems.filter((row) => !row.address_id || !row.receiver_phone)
-    if (missingAddr.length > 0) {
-      return adminResult(400, { error: '存在未绑定收货地址的实物订单项，请先完善收货地址' })
-    }
-
-    const addrIds = [...new Set(physicalItems.map((r) => r.address_id))]
-    if (addrIds.length > 1) {
-      return adminResult(400, { error: '实物商品存在多个不同收货地址，请拆分订单或统一地址后再发货' })
-    }
-
-    const firstAddr = physicalItems[0]
-    const receiver = {
-      name: clipUtf8(firstAddr.receiver_name || '', 64),
-      mobile: clipUtf8(String(firstAddr.receiver_phone || '').trim(), 32),
-      province: clipUtf8(firstAddr.province || '', 64),
-      city: clipUtf8(firstAddr.city || '', 64),
-      area: clipUtf8(firstAddr.district || '', 64),
-      address: clipUtf8(firstAddr.detail_address || '', 512)
-    }
-    if (!hasTelOrMobile(receiver)) {
-      return adminResult(400, { error: '收件人手机号无效' })
-    }
-
-    const wechatOrderIdRaw = b.wechat_logistics_order_id != null && String(b.wechat_logistics_order_id).trim() !== ''
-      ? String(b.wechat_logistics_order_id).trim()
+    const sfOrderIdRaw = b.sf_order_id != null && String(b.sf_order_id).trim() !== ''
+      ? String(b.sf_order_id).trim()
       : String(orderRow.out_trade_no || '').trim()
-    const wechatOrderId = clipUtf8(wechatOrderIdRaw, 500)
-    if (!wechatOrderId) {
-      return adminResult(400, { error: '无法生成微信物流 order_id，请传 wechat_logistics_order_id' })
+    const sfOrderId = clipUtf8(sfOrderIdRaw, 64)
+    if (!sfOrderId) {
+      return adminResult(400, { error: '无法生成客户订单号 orderId，请传 sf_order_id' })
     }
 
-    const cargoDefault = {
-      count: physicalItems.reduce((sum, row) => sum + (Number(row.quantity) || 1), 0),
-      weight: 1,
-      space_x: 20,
-      space_y: 20,
-      space_z: 20,
-      detail_list: physicalItems.map((row) => ({
-        name: clipUtf8(row.item_title || '商品', 128),
-        count: Number(row.quantity) > 0 ? Number(row.quantity) : 1
-      }))
-    }
-    const cargo = b.cargo && typeof b.cargo === 'object'
-      ? {
-          count: b.cargo.count != null ? Number(b.cargo.count) : cargoDefault.count,
-          weight: b.cargo.weight != null ? Number(b.cargo.weight) : cargoDefault.weight,
-          space_x: b.cargo.space_x != null ? Number(b.cargo.space_x) : cargoDefault.space_x,
-          space_y: b.cargo.space_y != null ? Number(b.cargo.space_y) : cargoDefault.space_y,
-          space_z: b.cargo.space_z != null ? Number(b.cargo.space_z) : cargoDefault.space_z,
-          detail_list: Array.isArray(b.cargo.detail_list) && b.cargo.detail_list.length > 0
-            ? b.cargo.detail_list.map((d) => ({
-                name: clipUtf8(d.name, 128),
-                count: Number(d.count) > 0 ? Number(d.count) : 1
-              }))
-            : cargoDefault.detail_list
-        }
-      : cargoDefault
-
-    const shopDetailFromDb = physicalItems.map((row) => {
-      const imgRaw = row.type === 'artwork' ? row.artwork_image : row.right_image_url
-      const goods_img_url = absolutizeAssetUrl(imgRaw)
-      const descBase = row.item_desc ? String(row.item_desc) : ''
-      const qty = Number(row.quantity) > 1 ? `数量${row.quantity}` : ''
-      const goods_desc = clipUtf8([descBase, qty].filter(Boolean).join(' · '), 512)
-      return {
-        goods_name: clipUtf8(row.item_title || '商品', 128),
-        goods_img_url,
-        goods_desc: goods_desc || clipUtf8(row.item_title || '商品', 512)
-      }
-    })
-
-    const shopFromBody = b.shop && typeof b.shop === 'object' ? b.shop : null
-    const useBodyShopList = shopFromBody && Array.isArray(shopFromBody.detail_list) && shopFromBody.detail_list.length > 0
-    const resolvedShopDetail = useBodyShopList
-      ? shopFromBody.detail_list.map((g) => ({
-          goods_name: clipUtf8(g.goods_name, 128),
-          goods_img_url: absolutizeAssetUrl(g.goods_img_url) || String(g.goods_img_url || '').trim(),
-          goods_desc: clipUtf8(g.goods_desc, 512)
-        }))
-      : shopDetailFromDb
-
-    const badShopImg = resolvedShopDetail.some(
-      (x) => !x.goods_img_url || !/^https:\/\//i.test(String(x.goods_img_url))
-    )
-    if (badShopImg) {
-      return adminResult(400, {
-        error: 'shop.detail_list 中每项须含可用的 https goods_img_url；自动组单时请为实物商品配置图片'
-      })
-    }
-
-    const shop = {
-      wxa_path: shopFromBody && shopFromBody.wxa_path != null
-        ? clipUtf8(String(shopFromBody.wxa_path), 512)
-        : (process.env.WX_LOGISTICS_DEFAULT_WXA_PATH
-          ? clipUtf8(
-            String(process.env.WX_LOGISTICS_DEFAULT_WXA_PATH)
-              .replace(/\{order_id\}/g, String(internalOrderId))
-              .replace(/\{out_trade_no\}/g, String(orderRow.out_trade_no || '')),
-            512
-          )
-          : undefined),
-      detail_list: resolvedShopDetail
-    }
-    if (!shop.wxa_path) delete shop.wxa_path
-
-    const insuredIn = b.insured && typeof b.insured === 'object' ? b.insured : {}
-    const insured = {
-      use_insured: insuredIn.use_insured === 1 ? 1 : 0,
-      insured_value: insuredIn.insured_value != null ? Number(insuredIn.insured_value) : 0
-    }
-
+    const cargo = b.cargo && typeof b.cargo === 'object' ? b.cargo : cargoDefault
     const senderOut = {
       name: sender.name != null ? clipUtf8(String(sender.name), 64) : undefined,
       tel: sender.tel != null ? clipUtf8(String(sender.tel), 32) : undefined,
       mobile: sender.mobile != null ? clipUtf8(String(sender.mobile), 32) : undefined,
-      company: sender.company != null ? clipUtf8(String(sender.company), 64) : undefined,
-      post_code: sender.post_code != null ? clipUtf8(String(sender.post_code), 10) : undefined,
-      country: sender.country != null ? clipUtf8(String(sender.country), 64) : undefined,
+      company: sender.company != null ? clipUtf8(String(sender.company), 100) : undefined,
       province: sender.province != null ? clipUtf8(String(sender.province), 64) : undefined,
       city: sender.city != null ? clipUtf8(String(sender.city), 64) : undefined,
       area: sender.area != null ? clipUtf8(String(sender.area), 64) : undefined,
-      address: sender.address != null ? clipUtf8(String(sender.address), 512) : undefined
+      address: sender.address != null ? clipUtf8(String(sender.address), 200) : undefined,
+      country: sender.country != null ? clipUtf8(String(sender.country), 30) : undefined,
     }
-    Object.keys(senderOut).forEach((k) => {
-      if (senderOut[k] === undefined || senderOut[k] === '') delete senderOut[k]
-    })
 
-    const payload = {
-      order_id: wechatOrderId,
-      delivery_id,
-      biz_id,
-      add_source,
+    const inputCheck = validateCreateOrderInput({
+      orderId: sfOrderId,
       sender: senderOut,
       receiver,
       cargo,
-      shop,
-      insured,
-      service: {
-        service_type: Number(service_type),
-        service_name: clipUtf8(service_name, 64)
-      }
+      expressTypeId,
+    })
+    if (!inputCheck.ok) {
+      return adminResult(400, {
+        error: inputCheck.error,
+        errorCode: inputCheck.errorCode,
+      })
     }
 
-    if (add_source === 0) payload.openid = buyerOpenid
-    if (add_source === 2) payload.wx_appid = wx_appid
+    const payInfo = resolvePayAndMonthlyCard(b.biz_id)
+    const insuredIn = b.insured && typeof b.insured === 'object' ? b.insured : {}
+    const useInsured = insuredIn.use_insured === 1
+    const insuredValueFen = insuredIn.insured_value != null ? Number(insuredIn.insured_value) : 0
+    const sendStartTm = formatSendStartTm(expect_time)
 
-    if (b.custom_remark != null && String(b.custom_remark).trim() !== '') {
-      payload.custom_remark = clipUtf8(String(b.custom_remark), 1024)
-    }
-    if (b.tagid != null && !Number.isNaN(Number(b.tagid))) payload.tagid = Number(b.tagid)
-    if (expect_time !== undefined && expect_time !== null) payload.expect_time = Number(expect_time)
-    if (b.take_mode !== undefined && b.take_mode !== null && !Number.isNaN(Number(b.take_mode))) {
-      payload.take_mode = Number(b.take_mode)
+    let serviceList
+    if (useInsured && Number.isFinite(insuredValueFen) && insuredValueFen > 0) {
+      const insuredYuan = Math.max(1, Math.round(insuredValueFen / 100))
+      serviceList = [{ name: 'INSURE', value: String(insuredYuan) }]
     }
 
-    const access_token = await getAccessToken(appid, secret)
-    const url = `https://api.weixin.qq.com/cgi-bin/express/business/order/add?access_token=${encodeURIComponent(access_token)}`
-    const { data } = await axios.post(url, payload, {
-      timeout: 25000,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      responseType: 'json'
+    const sfPayload = buildCreateOrderPayload({
+      orderId: sfOrderId,
+      sender: inputCheck.sender,
+      receiver: inputCheck.receiver,
+      cargo,
+      expressTypeId,
+      payMethod: payInfo.payMethod,
+      monthlyCard: payInfo.monthlyCard ? clipUtf8(payInfo.monthlyCard, 20) : undefined,
+      sendStartTm,
+      remark: b.custom_remark != null ? clipUtf8(String(b.custom_remark), 100) : undefined,
+      serviceList,
+      parcelQty: b.parcel_qty,
+      isDocall: b.is_docall,
+      custReferenceNo: orderRow.out_trade_no || String(internalOrderId),
     })
 
-    if (data.errcode != null && data.errcode !== 0) {
-      logger.warn('addOrder 微信返回错误', {
-        errcode: data.errcode,
-        errmsg: data.errmsg,
-        delivery_resultcode: data.delivery_resultcode,
-        delivery_resultmsg: data.delivery_resultmsg
-      })
+    const sfResult = await createOrder(sfPayload)
+    if (!sfResult.ok) {
       return adminResult(502, {
-        error: data.errmsg || '微信物流下单失败',
-        errcode: data.errcode,
-        delivery_resultcode: data.delivery_resultcode,
-        delivery_resultmsg: data.delivery_resultmsg
+        error: sfResult.error || '顺丰下单失败',
+        errorCode: sfResult.errorCode,
+        apiResultCode: sfResult.apiResultCode,
+        sf_error: sfResult.sf_error,
       })
     }
 
-    if (!data.waybill_id) {
-      return adminResult(502, { error: '微信未返回运单号', wechat_response: data })
+    const waybillId = extractPrimaryWaybillNo(sfResult.msgData)
+    if (!waybillId) {
+      return adminResult(502, { error: '顺丰未返回运单号', sf_response: sfResult.msgData })
     }
 
-    const wechatReturnedOrderId = data.order_id != null && String(data.order_id).trim() !== ''
-      ? String(data.order_id).trim()
-      : wechatOrderId
+    const filterAssessment = assessCreateOrderResponse(sfResult.msgData)
+    if (!filterAssessment.ok) {
+      return adminResult(422, {
+        error: filterAssessment.error,
+        order_id: sfOrderId,
+        waybill_id: waybillId,
+        filter_result: filterAssessment.filterResult,
+        filter_remark: filterAssessment.filter_remark,
+        filter_meta: filterAssessment.filter_meta,
+        sf_response: sfResult.msgData,
+        provider: 'sf-express',
+      })
+    }
 
     let shipment_persisted = true
     const companyName = b.delivery_name || b.company_name
       ? clipUtf8(String(b.delivery_name || b.company_name).trim(), 64)
-      : null
+      : DELIVERY_NAME_SF
+    const bizIdStored = payInfo.monthlyCard || 'SF_CASH'
+
     try {
       await ensureOrderShipmentsTable()
       await db.query(
@@ -436,26 +365,26 @@ async function addOrder(req) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
         [
           internalOrderId,
-          delivery_id,
-          String(data.waybill_id).trim(),
-          clipUtf8(wechatReturnedOrderId, 512),
-          clipUtf8(biz_id, 64),
-          Number(service_type),
-          clipUtf8(service_name, 128),
-          insured.use_insured === 1 ? 1 : 0,
-          Number.isFinite(Number(insured.insured_value)) ? Math.round(Number(insured.insured_value)) : 0,
-          add_source,
-          add_source === 2 ? clipUtf8(wx_appid, 64) : null,
-          JSON.stringify(data.waybill_data || []),
+          DELIVERY_ID_SF,
+          String(waybillId).trim(),
+          clipUtf8(sfOrderId, 512),
+          clipUtf8(bizIdStored, 64),
+          expressTypeId,
+          clipUtf8(service_name || `expressTypeId:${expressTypeId}`, 128),
+          useInsured ? 1 : 0,
+          Number.isFinite(insuredValueFen) ? Math.round(insuredValueFen) : 0,
+          0,
+          null,
+          JSON.stringify(sfResult.msgData || {}),
           companyName,
         ]
       )
     } catch (dbErr) {
       shipment_persisted = false
-      logger.error('addOrder 微信已成功但写入 order_shipments 失败（未建表执行 001，缺 add_source/wx_appid 执行 002）', {
+      logger.error('addOrder 顺丰已成功但写入 order_shipments 失败', {
         err: dbErr,
         internalOrderId,
-        waybill_id: data.waybill_id
+        waybill_id: waybillId,
       })
     }
 
@@ -463,9 +392,9 @@ async function addOrder(req) {
       notifyLogisticsStatus({
         orderId: internalOrderId,
         outTradeNo: orderRow.out_trade_no,
-        waybillId: String(data.waybill_id).trim(),
-        deliveryId: delivery_id,
-        companyName: b.delivery_name || b.company_name,
+        waybillId: String(waybillId).trim(),
+        deliveryId: DELIVERY_ID_SF,
+        companyName,
         logisticsStatus: '包裹已发出，快递公司已揽件',
       }),
       'logisticsStatus',
@@ -474,10 +403,17 @@ async function addOrder(req) {
     return adminResult(200, {
       internal_order_id: internalOrderId,
       out_trade_no: orderRow.out_trade_no,
-      order_id: data.order_id,
-      waybill_id: data.waybill_id,
-      waybill_data: data.waybill_data || [],
-      shipment_persisted
+      order_id: sfOrderId,
+      waybill_id: waybillId,
+      waybill_data: extractWaybillNoInfoList(sfResult.msgData),
+      route_label_info: sfResult.msgData?.routeLabelInfo || null,
+      filter_result: filterAssessment.filterResult,
+      filter_remark: filterAssessment.filter_remark,
+      filter_warning: filterAssessment.warning,
+      origin_code: sfResult.msgData?.originCode,
+      dest_code: sfResult.msgData?.destCode,
+      shipment_persisted,
+      provider: 'sf-express',
     })
   } catch (err) {
     logger.error('addOrder 失败', { err })
@@ -486,56 +422,69 @@ async function addOrder(req) {
 }
 
 /**
- * 微信物流助手：查询运单轨迹（HTTPS getPath）
- * 请求体须含 delivery_id、waybill_id；order_id / openid 可传，或由 internal_order_id 从订单与 wx_users 补全。
- * @see https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/express/by-business/get-path.html
+ * 顺丰：查询运单轨迹（EXP_RECE_SEARCH_ROUTES）
+ * 支持三种查询：运单号（月结绑定）、客户订单号、运单号+收寄方电话后4位
  */
 async function getPath(req) {
-  const appid = process.env.WX_APPID
-  const secret = process.env.WX_SECRET
-  if (!appid || !secret) {
-    logger.error('getPath: 缺少 WX_APPID 或 WX_SECRET')
-    return adminResult(500, { error: '服务器配置错误' })
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    logger.error('getPath: 顺丰配置不完整')
+    return adminResult(503, { error: auth.error })
   }
 
   const b = req.body && typeof req.body === 'object' ? req.body : {}
-  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : ''
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
   const waybill_id = b.waybill_id != null ? String(b.waybill_id).trim() : ''
-  if (!delivery_id) return adminResult(400, { error: '缺少 delivery_id' })
-  if (!waybill_id) return adminResult(400, { error: '缺少 waybill_id' })
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return adminResult(400, { error: '当前仅支持顺丰（SF）轨迹查询' })
+  }
 
   try {
-    const ctx = await resolveWechatLogisticsOrderContext(b)
+    const ctx = await resolveLogisticsOrderContext(b)
     if (ctx.error) return ctx.error
 
-    const wxPayload = {
-      order_id: clipUtf8(ctx.order_id, 500),
-      delivery_id,
-      waybill_id
-    }
-    if (ctx.add_source === 0 && ctx.buyerOpenid) wxPayload.openid = ctx.buyerOpenid
-    if (ctx.add_source === 2) {
-      const wxa = b.wx_appid != null ? String(b.wx_appid).trim() : ''
-      if (wxa) wxPayload.wx_appid = clipUtf8(wxa, 64)
-    }
+    const trackingTypeRaw = b.tracking_type != null ? Number(b.tracking_type) : null
+    const trackingType = trackingTypeRaw === SF_TRACKING_TYPE.ORDER_ID
+      ? SF_TRACKING_TYPE.ORDER_ID
+      : (waybill_id ? SF_TRACKING_TYPE.WAYBILL : SF_TRACKING_TYPE.ORDER_ID)
 
-    const access_token = await getAccessToken(appid, secret)
-    const url = `https://api.weixin.qq.com/cgi-bin/express/business/path/get?access_token=${encodeURIComponent(access_token)}`
-    const { data } = await axios.post(url, wxPayload, {
-      timeout: 20000,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      responseType: 'json'
+    const trackingNumber = Array.isArray(b.tracking_numbers) && b.tracking_numbers.length
+      ? b.tracking_numbers
+      : (trackingType === SF_TRACKING_TYPE.WAYBILL
+        ? (waybill_id ? [waybill_id] : [])
+        : [ctx.order_id])
+
+    const routePayload = buildSearchRoutesPayload({
+      trackingType,
+      trackingNumber,
+      language: b.language,
+      methodType: b.method_type,
+      checkPhoneNo: normalizeCheckPhoneNo(b.check_phone_no ?? b.receiver_phone),
+      referenceNumber: b.reference_number,
     })
-
-    if (data.errcode != null && data.errcode !== 0) {
-      logger.warn('getPath 微信返回错误', { errcode: data.errcode, errmsg: data.errmsg })
-      return adminResult(502, {
-        error: data.errmsg || '查询运单轨迹失败',
-        errcode: data.errcode
+    if (!routePayload.ok) {
+      return adminResult(400, {
+        error: routePayload.error,
+        errorCode: routePayload.errorCode,
       })
     }
 
-    const pathItemList = data.path_item_list || []
+    const pathResult = await fetchSfPathItemList({
+      ...routePayload.payload,
+      waybillNo: waybill_id || undefined,
+      orderId: ctx.order_id,
+    })
+
+    if (!pathResult.ok) {
+      return adminResult(502, {
+        error: pathResult.error || '查询运单轨迹失败',
+        errorCode: pathResult.errorCode,
+        sf_error: pathResult.sf_error,
+      })
+    }
+
+    const pathItemList = pathResult.path_item_list || []
+    const resolvedWaybillId = waybill_id || pathResult.mail_no || ''
     const skipPathNotify = b.skip_path_notify === true || b.skipPathNotify === true
 
     if (ctx.internal_order_id && pathItemList.length) {
@@ -545,30 +494,35 @@ async function getPath(req) {
         const actionAt = actionAtSec > 0 ? new Date(actionAtSec * 1000) : new Date()
         await persistShipmentLatestPath({
           orderId: ctx.internal_order_id,
-          waybillId: waybill_id,
+          waybillId: resolvedWaybillId,
           actionType: latestNode.action_type,
           actionAt,
         })
       }
     }
 
-    if (ctx.internal_order_id && !skipPathNotify) {
+    if (ctx.internal_order_id && !skipPathNotify && pathItemList.length) {
       handleLogisticsPathNotifyAsync({
         orderId: ctx.internal_order_id,
         deliveryId: delivery_id,
-        waybillId: waybill_id,
-        companyName: b.delivery_name || b.company_name,
+        waybillId: resolvedWaybillId,
+        companyName: b.delivery_name || b.company_name || DELIVERY_NAME_SF,
         pathItemList,
         source: 'getPath',
       })
     }
 
     return adminResult(200, {
-      openid: data.openid,
-      delivery_id: data.delivery_id,
-      waybill_id: data.waybill_id,
-      path_item_num: data.path_item_num ?? (Array.isArray(pathItemList) ? pathItemList.length : 0),
-      path_item_list: pathItemList
+      delivery_id,
+      waybill_id: resolvedWaybillId || undefined,
+      mail_no: pathResult.mail_no || undefined,
+      tracking_type: trackingType,
+      path_item_num: pathItemList.length,
+      path_item_list: pathItemList,
+      route_resps: pathResult.route_resps || [],
+      has_routes: pathResult.has_routes,
+      routes_empty_hint: pathResult.routes_empty_hint,
+      provider: 'sf-express',
     })
   } catch (err) {
     logger.error('getPath 失败', { err })
@@ -577,69 +531,86 @@ async function getPath(req) {
 }
 
 /**
- * 微信物流助手：获取运单数据（HTTPS getOrder，含面单 print_html BASE64 等）
- * 请求体须含 delivery_id；waybill_id、print_type 可选；order_id / openid 规则同 getPath。
- * @see https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/express/by-business/get-order.html
+ * 顺丰：查询订单/面单信息（EXP_RECE_SEARCH_ORDER_RESP）
  */
 async function getOrder(req) {
-  const appid = process.env.WX_APPID
-  const secret = process.env.WX_SECRET
-  if (!appid || !secret) {
-    logger.error('getOrder: 缺少 WX_APPID 或 WX_SECRET')
-    return adminResult(500, { error: '服务器配置错误' })
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    logger.error('getOrder: 顺丰配置不完整')
+    return adminResult(503, { error: auth.error })
   }
 
   const b = req.body && typeof req.body === 'object' ? req.body : {}
-  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : ''
-  if (!delivery_id) return adminResult(400, { error: '缺少 delivery_id' })
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return adminResult(400, { error: '当前仅支持顺丰（SF）运单查询' })
+  }
 
   const waybill_id = b.waybill_id != null && String(b.waybill_id).trim() !== ''
     ? String(b.waybill_id).trim()
     : undefined
 
   try {
-    const ctx = await resolveWechatLogisticsOrderContext(b)
+    const ctx = await resolveLogisticsOrderContext(b)
     if (ctx.error) return ctx.error
 
-    const wxPayload = {
-      order_id: clipUtf8(ctx.order_id, 500),
-      delivery_id
-    }
-    if (waybill_id) wxPayload.waybill_id = waybill_id
-    if (ctx.add_source === 0 && ctx.buyerOpenid) wxPayload.openid = ctx.buyerOpenid
-    if (ctx.add_source === 2) {
-      const wxa = b.wx_appid != null ? String(b.wx_appid).trim() : ''
-      if (wxa) wxPayload.wx_appid = clipUtf8(wxa, 64)
+    const inputCheck = validateSearchOrderInput({ orderId: ctx.order_id })
+    if (!inputCheck.ok) {
+      return adminResult(400, { error: inputCheck.error })
     }
 
-    if (b.print_type !== undefined && b.print_type !== null && !Number.isNaN(Number(b.print_type))) {
-      const pt = Number(b.print_type)
-      if (pt === 0 || pt === 1) wxPayload.print_type = pt
-    }
-
-    const access_token = await getAccessToken(appid, secret)
-    const url = `https://api.weixin.qq.com/cgi-bin/express/business/order/get?access_token=${encodeURIComponent(access_token)}`
-    const { data } = await axios.post(url, wxPayload, {
-      timeout: 25000,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      responseType: 'json'
-    })
-
-    if (data.errcode != null && data.errcode !== 0) {
-      logger.warn('getOrder 微信返回错误', { errcode: data.errcode, errmsg: data.errmsg })
+    const sfResult = await searchOrder(buildSearchOrderPayload({
+      orderId: inputCheck.orderId,
+      searchType: b.search_type ?? SF_SEARCH_TYPE.FORWARD,
+      language: b.language,
+      mainWaybillNo: waybill_id,
+    }))
+    if (!sfResult.ok) {
       return adminResult(502, {
-        error: data.errmsg || '获取运单数据失败',
-        errcode: data.errcode
+        error: sfResult.error || '获取运单数据失败',
+        errorCode: sfResult.errorCode,
+        sf_error: sfResult.sf_error,
       })
     }
 
+    const assessment = assessSearchOrderResponse(sfResult.msgData)
+    if (!assessment.ok) {
+      return adminResult(404, {
+        error: assessment.error,
+        order_id: ctx.order_id,
+        provider: 'sf-express',
+      })
+    }
+
+    const resolvedWaybill = waybill_id
+      || assessment.waybill_data.find((item) => String(item.waybill_type) === '1')?.waybill_no
+      || assessment.waybill_data[0]?.waybill_no
+      || extractPrimaryWaybillNo(assessment.normalized)
+    const routeLabelInfo = assessment.route_label_info || null
+    const previewHtml = buildWaybillPreviewHtml({
+      orderId: assessment.order_id || ctx.order_id,
+      waybillId: resolvedWaybill,
+      routeLabelInfo,
+      waybillNoInfoList: assessment.normalized?.waybillNoInfoList,
+    })
+    const print_html = Buffer.from(previewHtml, 'utf8').toString('base64')
+
     return adminResult(200, {
-      print_html: data.print_html,
-      waybill_data: data.waybill_data || [],
-      order_id: data.order_id,
-      delivery_id: data.delivery_id,
-      waybill_id: data.waybill_id,
-      order_status: data.order_status
+      print_html,
+      waybill_data: assessment.waybill_data,
+      route_label_info: routeLabelInfo,
+      route_label_summary: assessment.route_label_summary,
+      order_id: assessment.order_id || ctx.order_id,
+      delivery_id,
+      waybill_id: resolvedWaybill,
+      origin_code: assessment.origin_code,
+      dest_code: assessment.dest_code,
+      filter_result: assessment.filter_result,
+      filter_meta: assessment.filter_meta,
+      filter_warning: assessment.filter_warning,
+      route_label_warning: assessment.route_label_warning,
+      return_extra_info_list: assessment.return_extra_info_list,
+      provider: 'sf-express',
     })
   } catch (err) {
     logger.error('getOrder 失败', { err })
@@ -648,74 +619,196 @@ async function getOrder(req) {
 }
 
 /**
- * 微信物流助手：取消运单（HTTPS cancelOrder）
- * 请求体须含 delivery_id、waybill_id；order_id / openid 规则同 getPath。
- * @see https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/express/by-business/cancel-order.html
+ * 顺丰：订单确认（EXP_RECE_UPDATE_ORDER, dealType=1）
+ * 丰桥默认自动确认；若控制台改为「不自动确认」，发货后需调用本接口。
  */
-async function cancelOrder(req) {
-  const appid = process.env.WX_APPID
-  const secret = process.env.WX_SECRET
-  if (!appid || !secret) {
-    logger.error('cancelOrder: 缺少 WX_APPID 或 WX_SECRET')
-    return adminResult(500, { error: '服务器配置错误' })
+async function confirmOrder(req) {
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    logger.error('confirmOrder: 顺丰配置不完整')
+    return adminResult(503, { error: auth.error })
   }
 
   const b = req.body && typeof req.body === 'object' ? req.body : {}
-  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : ''
-  const waybill_id = b.waybill_id != null ? String(b.waybill_id).trim() : ''
-  if (!delivery_id) return adminResult(400, { error: '缺少 delivery_id' })
-  if (!waybill_id) return adminResult(400, { error: '缺少 waybill_id' })
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return adminResult(400, { error: '当前仅支持顺丰（SF）订单确认' })
+  }
 
   try {
-    const ctx = await resolveWechatLogisticsOrderContext(b)
+    const ctx = await resolveLogisticsOrderContext(b)
     if (ctx.error) return ctx.error
 
-    const wxPayload = {
-      order_id: clipUtf8(ctx.order_id, 500),
-      delivery_id,
-      waybill_id
-    }
-    if (ctx.add_source === 0 && ctx.buyerOpenid) wxPayload.openid = ctx.buyerOpenid
-    if (ctx.add_source === 2) {
-      const wxa = b.wx_appid != null ? String(b.wx_appid).trim() : ''
-      if (wxa) wxPayload.wx_appid = clipUtf8(wxa, 64)
+    let storedWaybillData = null
+    if (ctx.internal_order_id != null) {
+      const [rows] = await db.query(
+        `SELECT waybill_id, waybill_data_json FROM order_shipments
+         WHERE order_id = ? AND delivery_id = ? AND status = 'active'
+         ORDER BY id DESC LIMIT 1`,
+        [ctx.internal_order_id, delivery_id],
+      )
+      if (rows && rows.length) {
+        storedWaybillData = rows[0].waybill_data_json
+        if (typeof storedWaybillData === 'string') {
+          try { storedWaybillData = JSON.parse(storedWaybillData) } catch { storedWaybillData = null }
+        }
+      }
     }
 
-    const access_token = await getAccessToken(appid, secret)
-    const url = `https://api.weixin.qq.com/cgi-bin/express/business/order/cancel?access_token=${encodeURIComponent(access_token)}`
-    const { data } = await axios.post(url, wxPayload, {
-      timeout: 20000,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      responseType: 'json'
+    const waybillNoInfoList = resolveWaybillNoInfoList({
+      waybillNoInfoList: b.waybill_no_info_list,
+      waybillId: b.waybill_id,
+      storedWaybillData,
     })
 
-    if (data.errcode != null && data.errcode !== 0) {
-      logger.warn('cancelOrder 微信返回错误', {
-        errcode: data.errcode,
-        errmsg: data.errmsg,
-        delivery_resultcode: data.delivery_resultcode,
-        delivery_resultmsg: data.delivery_resultmsg
-      })
-      return adminResult(502, {
-        error: data.errmsg || '取消运单失败',
-        errcode: data.errcode,
-        delivery_resultcode: data.delivery_resultcode,
-        delivery_resultmsg: data.delivery_resultmsg
+    const inputCheck = validateUpdateOrderInput({
+      orderId: ctx.order_id,
+      dealType: SF_DEAL_TYPE.CONFIRM,
+      waybillNoInfoList,
+    })
+    if (!inputCheck.ok) {
+      return adminResult(400, {
+        error: inputCheck.error,
+        errorCode: inputCheck.errorCode,
       })
     }
+
+    const sfPayload = buildConfirmOrderPayload({
+      orderId: inputCheck.orderId,
+      waybillNoInfoList,
+      totalWeight: b.total_weight,
+      totalVolume: b.total_volume,
+      totalLength: b.total_length,
+      totalWidth: b.total_width,
+      totalHeight: b.total_height,
+      expressTypeId: b.express_type_id ?? b.service_type,
+      remark: b.remark ?? b.custom_remark,
+      sendStartTm: formatSendStartTm(b.expect_time),
+      isDocall: b.is_docall,
+      isConfirmNew: b.is_confirm_new,
+    })
+
+    const sfResult = await updateOrder(sfPayload)
+    if (!sfResult.ok) {
+      return adminResult(502, {
+        error: sfResult.error || '订单确认失败',
+        errorCode: sfResult.errorCode,
+        apiResultCode: sfResult.apiResultCode,
+        sf_error: sfResult.sf_error,
+      })
+    }
+
+    const assessment = assessUpdateOrderResponse(sfResult.msgData)
+    if (!assessment.ok) {
+      return adminResult(422, {
+        error: assessment.error,
+        order_id: assessment.order_id,
+        res_status: assessment.resStatus,
+        res_status_meta: assessment.res_status_meta,
+        sf_response: sfResult.msgData,
+        provider: 'sf-express',
+      })
+    }
+
+    return adminResult(200, {
+      errcode: 0,
+      errmsg: 'ok',
+      order_id: assessment.order_id,
+      res_status: assessment.resStatus,
+      waybill_data: assessment.waybill_data,
+      provider: 'sf-express',
+      sf_result: sfResult.msgData,
+    })
+  } catch (err) {
+    logger.error('confirmOrder 失败', { err })
+    return adminResult(500, { error: '订单确认失败', detail: err.message })
+  }
+}
+
+/**
+ * 顺丰：取消运单（EXP_RECE_UPDATE_ORDER, dealType=2）
+ */
+async function cancelOrder(req) {
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    logger.error('cancelOrder: 顺丰配置不完整')
+    return adminResult(503, { error: auth.error })
+  }
+
+  const b = req.body && typeof req.body === 'object' ? req.body : {}
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
+  const waybill_id = b.waybill_id != null ? String(b.waybill_id).trim() : ''
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return adminResult(400, { error: '当前仅支持顺丰（SF）取消运单' })
+  }
+
+  try {
+    const ctx = await resolveLogisticsOrderContext(b)
+    if (ctx.error) return ctx.error
+
+    const inputCheck = validateUpdateOrderInput({
+      orderId: ctx.order_id,
+      dealType: SF_DEAL_TYPE.CANCEL,
+      waybillNoInfoList: [],
+    })
+    if (!inputCheck.ok) {
+      return adminResult(400, {
+        error: inputCheck.error,
+        errorCode: inputCheck.errorCode,
+      })
+    }
+
+    const sfPayload = buildCancelOrderPayload({
+      orderId: inputCheck.orderId,
+      totalWeight: b.total_weight,
+      remark: b.remark ?? b.custom_remark,
+    })
+
+    const sfResult = await updateOrder(sfPayload)
+    if (!sfResult.ok) {
+      return adminResult(502, {
+        error: sfResult.error || '取消运单失败',
+        errorCode: sfResult.errorCode,
+        sf_error: sfResult.sf_error,
+      })
+    }
+
+    const assessment = assessUpdateOrderResponse(sfResult.msgData)
+    if (!assessment.ok) {
+      return adminResult(422, {
+        error: assessment.error,
+        order_id: assessment.order_id,
+        res_status: assessment.resStatus,
+        res_status_meta: assessment.res_status_meta,
+        sf_response: sfResult.msgData,
+        provider: 'sf-express',
+      })
+    }
+
+    const resolvedWaybillId = waybill_id
+      || assessment.waybill_data?.[0]?.waybill_no
+      || ''
 
     try {
       if (ctx.internal_order_id != null) {
-        await db.query(
-          `UPDATE order_shipments SET status = 'cancelled', updated_at = NOW()
-           WHERE order_id = ? AND delivery_id = ? AND waybill_id = ? AND status = 'active'`,
-          [ctx.internal_order_id, delivery_id, waybill_id]
-        )
-      } else {
+        if (resolvedWaybillId) {
+          await db.query(
+            `UPDATE order_shipments SET status = 'cancelled', updated_at = NOW()
+             WHERE order_id = ? AND delivery_id = ? AND waybill_id = ? AND status = 'active'`,
+            [ctx.internal_order_id, delivery_id, resolvedWaybillId],
+          )
+        } else {
+          await db.query(
+            `UPDATE order_shipments SET status = 'cancelled', updated_at = NOW()
+             WHERE order_id = ? AND delivery_id = ? AND status = 'active'`,
+            [ctx.internal_order_id, delivery_id],
+          )
+        }
+      } else if (resolvedWaybillId) {
         await db.query(
           `UPDATE order_shipments SET status = 'cancelled', updated_at = NOW()
            WHERE delivery_id = ? AND waybill_id = ? AND status = 'active'`,
-          [delivery_id, waybill_id]
+          [delivery_id, resolvedWaybillId],
         )
       }
     } catch (dbErr) {
@@ -723,10 +816,14 @@ async function cancelOrder(req) {
     }
 
     return adminResult(200, {
-      errcode: data.errcode ?? 0,
-      errmsg: data.errmsg ?? 'ok',
-      delivery_resultcode: data.delivery_resultcode ?? 0,
-      delivery_resultmsg: data.delivery_resultmsg ?? ''
+      errcode: 0,
+      errmsg: 'ok',
+      order_id: assessment.order_id,
+      waybill_id: resolvedWaybillId || undefined,
+      res_status: assessment.resStatus,
+      waybill_data: assessment.waybill_data,
+      provider: 'sf-express',
+      sf_result: sfResult.msgData,
     })
   } catch (err) {
     logger.error('cancelOrder 失败', { err })
@@ -740,9 +837,6 @@ function buyerUserIdFromReq(req) {
   return Number.isNaN(id) ? null : id
 }
 
-/**
- * 买家查看物流：校验订单归属与支付状态；不信任 body 中的 order_id / openid（防越权）
- */
 async function assertBuyerLogisticsOrder(req, body, { requireWaybill }) {
   const buyerId = buyerUserIdFromReq(req)
   if (buyerId == null) return { error: adminResult(401, { error: '未登录' }) }
@@ -753,8 +847,10 @@ async function assertBuyerLogisticsOrder(req, body, { requireWaybill }) {
     return { error: adminResult(400, { error: '缺少 internal_order_id' }) }
   }
 
-  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : ''
-  if (!delivery_id) return { error: adminResult(400, { error: '缺少 delivery_id' }) }
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return { error: adminResult(400, { error: '当前仅支持顺丰（SF）物流' }) }
+  }
 
   const waybillTrim = b.waybill_id != null ? String(b.waybill_id).trim() : ''
   const waybill_id = waybillTrim || undefined
@@ -778,7 +874,6 @@ async function assertBuyerLogisticsOrder(req, body, { requireWaybill }) {
   return { internalOrderId, delivery_id, waybill_id }
 }
 
-/** 买家：查询运单轨迹（内部复用 getPath，仅传 internal_order_id 解析出的 order_id / openid） */
 async function getPathAsBuyer(req) {
   const a = await assertBuyerLogisticsOrder(req, req.body, { requireWaybill: true })
   if (a.error) return a.error
@@ -787,27 +882,89 @@ async function getPathAsBuyer(req) {
       internal_order_id: a.internalOrderId,
       delivery_id: a.delivery_id,
       waybill_id: a.waybill_id,
-      add_source: 0
-    }
+    },
   })
 }
 
-/** 买家：获取运单数据/面单（内部复用 getOrder） */
 async function getOrderAsBuyer(req) {
   const a = await assertBuyerLogisticsOrder(req, req.body, { requireWaybill: false })
   if (a.error) return a.error
-  const b = req.body && typeof req.body === 'object' ? req.body : {}
   const body = {
     internal_order_id: a.internalOrderId,
     delivery_id: a.delivery_id,
-    add_source: 0
   }
   if (a.waybill_id) body.waybill_id = a.waybill_id
-  if (b.print_type !== undefined && b.print_type !== null && !Number.isNaN(Number(b.print_type))) {
-    const pt = Number(b.print_type)
-    if (pt === 0 || pt === 1) body.print_type = pt
-  }
   return getOrder({ body })
+}
+
+/**
+ * 顺丰：时效标准及价格查询（EXP_RECE_QUERY_DELIVERTM）
+ */
+async function queryDeliverTm(req) {
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    logger.error('queryDeliverTm: 顺丰配置不完整')
+    return adminResult(503, { error: auth.error })
+  }
+
+  const b = req.body && typeof req.body === 'object' ? req.body : {}
+  const delivery_id = b.delivery_id != null ? String(b.delivery_id).trim() : DELIVERY_ID_SF
+  if (delivery_id !== DELIVERY_ID_SF) {
+    return adminResult(400, { error: '当前仅支持顺丰（SF）时效价格查询' })
+  }
+
+  const srcAddress = b.src_address || b.srcAddress || b.sender
+  const destAddress = b.dest_address || b.destAddress || b.receiver
+  const payInfo = resolvePayAndMonthlyCard(b.biz_id)
+  const monthlyCard = b.monthly_card != null && String(b.monthly_card).trim() !== ''
+    ? String(b.monthly_card).trim()
+    : payInfo.monthlyCard
+
+  const built = buildQueryDeliverTmPayload({
+    srcAddress,
+    destAddress,
+    businessType: b.business_type ?? b.businessType ?? b.express_type_id ?? b.service_type,
+    weight: b.weight,
+    volume: b.volume,
+    consignedTime: b.consigned_time ?? b.consignedTime ?? b.expect_time,
+    searchPrice: b.search_price ?? b.searchPrice,
+    monthlyCard,
+  })
+
+  if (!built.ok) {
+    return adminResult(400, { error: built.error })
+  }
+
+  try {
+    const sfResult = await sfQueryDeliverTm(built.payload)
+    if (!sfResult.ok) {
+      return adminResult(502, {
+        error: sfResult.error || '时效价格查询失败',
+        errorCode: sfResult.errorCode,
+        apiResultCode: sfResult.apiResultCode,
+        sf_error: sfResult.sf_error,
+      })
+    }
+
+    const assessment = assessQueryDeliverTmResponse(sfResult.msgData)
+    if (!assessment.ok) {
+      return adminResult(502, {
+        error: assessment.error,
+        provider: 'sf-express',
+      })
+    }
+
+    return adminResult(200, {
+      deliver_tm_list: assessment.deliver_tm_list,
+      count: assessment.count,
+      search_price: built.payload.searchPrice,
+      business_type: built.payload.businessType || undefined,
+      provider: 'sf-express',
+    })
+  } catch (err) {
+    logger.error('queryDeliverTm 失败', { err })
+    return adminResult(500, { error: '时效价格查询失败', detail: err.message })
+  }
 }
 
 module.exports = {
@@ -815,7 +972,9 @@ module.exports = {
   addOrder,
   getPath,
   getOrder,
+  confirmOrder,
   cancelOrder,
+  queryDeliverTm,
   getPathAsBuyer,
-  getOrderAsBuyer
+  getOrderAsBuyer,
 }

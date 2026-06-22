@@ -1,8 +1,7 @@
-const axios = require('axios')
 const db = require('../db')
 const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
-const { getAccessToken } = require('./wechatMiniProgramToken')
+const { fetchSfPathItemList, assertSfConfig } = require('./sfExpressClient')
 const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
@@ -170,50 +169,32 @@ async function isShipmentPathTerminal(orderId, waybillId) {
   }
 }
 
-async function fetchWechatPathRaw({
-  orderIdForWx,
-  deliveryId,
-  waybillId,
-  buyerOpenid,
-  addSource = 0,
-  wxAppid,
-}) {
-  const appid = process.env.WX_APPID
-  const secret = process.env.WX_SECRET
-  if (!appid || !secret) {
-    return { ok: false, error: 'missing_wx_config' }
+async function fetchSfPathRaw({ orderIdForSf, waybillId }) {
+  const auth = assertSfConfig()
+  if (!auth.ok) {
+    return { ok: false, error: auth.error || 'missing_sf_config' }
   }
-
-  const wxPayload = {
-    order_id: clipUtf8(orderIdForWx, 500),
-    delivery_id: String(deliveryId || '').trim(),
-    waybill_id: String(waybillId || '').trim(),
-  }
-  if (addSource === 0 && buyerOpenid) wxPayload.openid = String(buyerOpenid).trim()
-  if (addSource === 2 && wxAppid) wxPayload.wx_appid = clipUtf8(wxAppid, 64)
 
   try {
-    const access_token = await getAccessToken(appid, secret)
-    const url = `https://api.weixin.qq.com/cgi-bin/express/business/path/get?access_token=${encodeURIComponent(access_token)}`
-    const { data } = await axios.post(url, wxPayload, {
-      timeout: 20000,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      responseType: 'json',
+    const result = await fetchSfPathItemList({
+      waybillNo: String(waybillId || '').trim(),
+      orderId: clipUtf8(orderIdForSf, 500),
     })
 
-    if (data.errcode != null && data.errcode !== 0) {
+    if (!result.ok) {
       return {
         ok: false,
-        error: data.errmsg || 'wechat_path_error',
-        errcode: data.errcode,
+        error: result.error || 'sf_path_error',
+        errorCode: result.errorCode,
       }
     }
 
+    const pathItemList = result.path_item_list || []
     return {
       ok: true,
       data: {
-        path_item_num: data.path_item_num ?? (Array.isArray(data.path_item_list) ? data.path_item_list.length : 0),
-        path_item_list: data.path_item_list || [],
+        path_item_num: pathItemList.length,
+        path_item_list: pathItemList,
       },
     }
   } catch (err) {
@@ -415,18 +396,9 @@ async function pollShipmentPathAndNotify(shipmentRow) {
     return { skipped: true, reason: 'terminal' }
   }
 
-  const addSource = shipmentRow.add_source === 2 ? 2 : 0
-  if (addSource === 0 && !shipmentRow.openid) {
-    return { skipped: true, reason: 'missing_openid' }
-  }
-
-  const fetchResult = await fetchWechatPathRaw({
-    orderIdForWx: shipmentRow.out_trade_no,
-    deliveryId,
+  const fetchResult = await fetchSfPathRaw({
+    orderIdForSf: shipmentRow.out_trade_no,
     waybillId,
-    buyerOpenid: shipmentRow.openid,
-    addSource,
-    wxAppid: shipmentRow.wx_appid,
   })
 
   if (!fetchResult.ok) {

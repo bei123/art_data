@@ -312,7 +312,7 @@ router.post('/logistics/me/order', authenticateToken, async (req, res) => {
     }
 });
 
-/** 微信物流助手：支持的快递公司列表（需 admin，供发货页下拉） */
+/** 顺丰开放平台：支持的快递产品（固定顺丰，需 admin） */
 router.get('/logistics/deliveries', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
         const r = await logisticsSvc.getAllDelivery();
@@ -323,7 +323,7 @@ router.get('/logistics/deliveries', authenticateToken, checkRole(['admin']), asy
     }
 });
 
-/** 微信物流助手：生成运单 addOrder（需 admin） */
+/** 顺丰开放平台：生成运单（需 admin） */
 router.post('/logistics/orders', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
         const r = await logisticsSvc.addOrder(req);
@@ -334,7 +334,7 @@ router.post('/logistics/orders', authenticateToken, checkRole(['admin']), async 
     }
 });
 
-/** 微信物流助手：查询运单轨迹 getPath（需 admin） */
+/** 顺丰开放平台：查询运单轨迹（需 admin） */
 router.post('/logistics/path', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
         const r = await logisticsSvc.getPath(req);
@@ -345,7 +345,7 @@ router.post('/logistics/path', authenticateToken, checkRole(['admin']), async (r
     }
 });
 
-/** 微信物流助手：获取运单数据 getOrder（需 admin，含面单 BASE64） */
+/** 顺丰开放平台：获取运单/面单数据（需 admin） */
 router.post('/logistics/order/get', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
         const r = await logisticsSvc.getOrder(req);
@@ -356,7 +356,29 @@ router.post('/logistics/order/get', authenticateToken, checkRole(['admin']), asy
     }
 });
 
-/** 微信物流助手：取消运单 cancelOrder（需 admin） */
+/** 顺丰开放平台：订单确认（需 admin） */
+router.post('/logistics/order/confirm', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.confirmOrder(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('订单确认失败', { err: error });
+        res.status(500).json({ error: '订单确认服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 顺丰开放平台：时效标准及价格查询（需 admin） */
+router.post('/logistics/query-deliver-tm', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.queryDeliverTm(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('时效价格查询失败', { err: error });
+        res.status(500).json({ error: '时效价格查询服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 顺丰开放平台：取消运单（需 admin） */
 router.post('/logistics/order/cancel', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
         const r = await logisticsSvc.cancelOrder(req);
