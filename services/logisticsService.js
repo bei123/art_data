@@ -2,6 +2,18 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 const {
+  isWechatShippingUploadEnabled,
+  uploadShippingInfoForOrder,
+  uploadShippingInfo: uploadWechatShippingInfo,
+  uploadCombinedShippingInfo: uploadWechatCombinedShippingInfo,
+  getWechatOrder: queryWechatOrderShippingStatus,
+  getWechatOrderList: queryWechatOrderList,
+  notifyConfirmReceive: notifyWechatConfirmReceive,
+  setMsgJumpPath: setWechatMsgJumpPath,
+  isTradeManagementConfirmationCompleted: queryWechatTradeManagementConfirmation,
+  buildShippingItemDesc,
+} = require('./wechatShippingInfoService')
+const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
@@ -400,6 +412,38 @@ async function addOrder(req) {
       'logisticsStatus',
     )
 
+    let wx_shipping_upload = { skipped: true, reason: 'disabled' }
+    if (isWechatShippingUploadEnabled()) {
+      const wxUploadResult = await uploadShippingInfoForOrder({
+        internalOrderId,
+        waybillId: String(waybillId).trim(),
+        deliveryId: DELIVERY_ID_SF,
+        itemDesc: buildShippingItemDesc(
+          (cargo?.detail_list || []).map((row) => ({
+            item_title: row.name,
+            quantity: row.count,
+          })),
+        ),
+        receiverPhone: receiver.mobile || receiver.tel,
+        consignorPhone: senderOut.mobile || senderOut.tel,
+      })
+      if (wxUploadResult.ok) {
+        wx_shipping_upload = { ok: true, errcode: wxUploadResult.body?.errcode ?? 0 }
+      } else {
+        wx_shipping_upload = {
+          ok: false,
+          errcode: wxUploadResult.body?.errcode,
+          error: wxUploadResult.body?.error,
+          errmsg: wxUploadResult.body?.errmsg,
+        }
+        logger.warn('顺丰发货成功但微信发货信息录入失败', {
+          internalOrderId,
+          waybill_id: waybillId,
+          wx_shipping_upload,
+        })
+      }
+    }
+
     return adminResult(200, {
       internal_order_id: internalOrderId,
       out_trade_no: orderRow.out_trade_no,
@@ -413,6 +457,7 @@ async function addOrder(req) {
       origin_code: sfResult.msgData?.originCode,
       dest_code: sfResult.msgData?.destCode,
       shipment_persisted,
+      wx_shipping_upload,
       provider: 'sf-express',
     })
   } catch (err) {
@@ -977,4 +1022,11 @@ module.exports = {
   queryDeliverTm,
   getPathAsBuyer,
   getOrderAsBuyer,
+  uploadShippingInfo: uploadWechatShippingInfo,
+  uploadCombinedShippingInfo: uploadWechatCombinedShippingInfo,
+  getWechatOrder: queryWechatOrderShippingStatus,
+  getWechatOrderList: queryWechatOrderList,
+  notifyConfirmReceive: notifyWechatConfirmReceive,
+  setMsgJumpPath: setWechatMsgJumpPath,
+  isTradeManagementConfirmationCompleted: queryWechatTradeManagementConfirmation,
 }

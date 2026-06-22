@@ -1752,6 +1752,9 @@ async function submitShip() {
       if (res.shipment_persisted === false) {
         ElMessage.warning('运单号未能写入数据库，请联系管理员检查 order_shipments 表')
       }
+      if (res.wx_shipping_upload?.ok === false) {
+        ElMessage.warning(`微信发货信息录入失败：${res.wx_shipping_upload.error || '请稍后在「补录发货信息」重试'}`)
+      }
     } else {
       ElMessage.success('发货请求已提交')
     }

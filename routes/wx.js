@@ -389,6 +389,83 @@ router.post('/logistics/order/cancel', authenticateToken, checkRole(['admin']), 
     }
 });
 
+/** 微信小程序：发货信息录入 uploadShippingInfo（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/upload-shipping-info', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.uploadShippingInfo(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信发货信息录入失败', { err: error });
+        res.status(500).json({ error: '微信发货信息录入服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信小程序：合单发货信息录入 uploadCombinedShippingInfo（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/upload-combined-shipping-info', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.uploadCombinedShippingInfo(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信合单发货信息录入失败', { err: error });
+        res.status(500).json({ error: '微信合单发货信息录入服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信小程序：查询订单发货状态 getOrder（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/wechat-order/get', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.getWechatOrder(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信订单发货状态查询失败', { err: error });
+        res.status(500).json({ error: '微信订单发货状态查询服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信小程序：查询订单列表 getOrderList（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/wechat-order/list', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.getWechatOrderList(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信订单列表查询失败', { err: error });
+        res.status(500).json({ error: '微信订单列表查询服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信小程序：确认收货提醒 notifyConfirmReceive（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/wechat-order/notify-confirm-receive', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.notifyConfirmReceive(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信确认收货提醒失败', { err: error });
+        res.status(500).json({ error: '微信确认收货提醒服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信小程序：消息跳转路径设置 setMsgJumpPath（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/wechat-order/set-msg-jump-path', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.setMsgJumpPath(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信消息跳转路径设置失败', { err: error });
+        res.status(500).json({ error: '微信消息跳转路径设置服务暂时不可用', detail: error.message });
+    }
+});
+
+/** 微信小程序：查询是否已完成交易结算管理确认（需 admin；仅服务端调用微信 OpenAPI） */
+router.post('/logistics/wechat-order/is-trade-management-completed', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.isTradeManagementConfirmationCompleted(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('微信交易结算管理确认查询失败', { err: error });
+        res.status(500).json({ error: '微信交易结算管理确认查询服务暂时不可用', detail: error.message });
+    }
+});
+
 /** 订阅消息：获取类目（需 admin） */
 router.get('/subscribe-message/categories', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
