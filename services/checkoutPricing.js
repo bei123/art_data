@@ -313,7 +313,7 @@ async function loadBuyerAddressRow(connection, userId, addressId) {
   if (Number.isNaN(parsedId) || parsedId <= 0) return null
 
   const [rows] = await connection.query(
-    `SELECT id, province, city, district, detail_address, full_address, receiver_name, receiver_phone
+    `SELECT id, province, city, district, detail_address, receiver_name, receiver_phone
      FROM wx_user_addresses
      WHERE id = ? AND user_id = ?
      LIMIT 1`,
@@ -322,13 +322,22 @@ async function loadBuyerAddressRow(connection, userId, addressId) {
   return rows[0] || null
 }
 
+function composeAddressLine(row) {
+  if (!row) return ''
+  return [row.province, row.city, row.district, row.detail_address]
+    .filter(Boolean)
+    .map((part) => String(part).trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
 function buildDestAddressFromRow(row) {
   if (!row) return null
   return normalizeAddress({
     province: row.province,
     city: row.city,
     district: row.district,
-    address: row.detail_address || row.full_address,
+    address: row.detail_address || composeAddressLine(row),
   })
 }
 
