@@ -6,6 +6,10 @@ const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
 const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
+const {
+  maybeNotifyConfirmReceiveOnSignOff,
+  fireWechatConfirmReceiveNotify,
+} = require('./wechatShippingInfoService')
 
 const PATH_SEEN_REDIS_PREFIX = 'logistics:path:seen:'
 const PATH_TERMINAL_REDIS_PREFIX = 'logistics:path:terminal:'
@@ -325,6 +329,19 @@ async function handleLogisticsPathNotify({
 
   if (hasTerminalPathInList(nodes)) {
     await markShipmentPathTerminal(orderId, waybillId)
+  }
+
+  const signedNodeEntry = newNodes.find(({ node }) => Number(node.action_type) === 300003)
+  if (signedNodeEntry) {
+    fireWechatConfirmReceiveNotify(
+      maybeNotifyConfirmReceiveOnSignOff({
+        orderId,
+        actionType: signedNodeEntry.node.action_type,
+        actionTime: signedNodeEntry.node.action_time,
+        force,
+      }),
+      { orderId, waybillId, source },
+    )
   }
 
   if (notifiedCount > 0) {

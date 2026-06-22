@@ -1,6 +1,7 @@
 const axios = require('axios')
 const db = require('../db')
 const logger = require('../utils/logger')
+const redisClient = require('../utils/redisClient')
 const { getAccessToken } = require('./wechatMiniProgramToken')
 
 const WECHAT_API_BASE = 'https://api.weixin.qq.com'
@@ -11,6 +12,13 @@ const GET_ORDER_LIST_PATH = '/wxa/sec/order/get_order_list'
 const NOTIFY_CONFIRM_RECEIVE_PATH = '/wxa/sec/order/notify_confirm_receive'
 const SET_MSG_JUMP_PATH = '/wxa/sec/order/set_msg_jump_path'
 const IS_TRADE_MANAGEMENT_CONFIRMATION_COMPLETED_PATH = '/wxa/sec/order/is_trade_management_confirmation_completed'
+
+const NOTIFY_CONFIRM_RECEIVE_SENT_PREFIX = 'wx:notify_confirm_receive:sent:'
+const NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC = parseInt(
+  process.env.WX_NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC || `${60 * 60 * 24 * 365}`,
+  10,
+)
+const SF_SIGN_OFF_ACTION_TYPE = 300003
 
 const LOGISTICS_TYPE_EXPRESS = 1
 const DELIVERY_MODE_UNIFIED = 1
@@ -61,6 +69,16 @@ function isWechatShippingUploadEnabled() {
   const raw = process.env.WX_UPLOAD_SHIPPING_INFO_ENABLED
   if (raw == null || String(raw).trim() === '') return true
   return raw === 'true' || raw === '1'
+}
+
+function isAutoNotifyConfirmReceiveEnabled() {
+  const raw = process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED
+  if (raw == null || String(raw).trim() === '') return true
+  return raw === 'true' || raw === '1'
+}
+
+function buildNotifyConfirmReceiveSentKey(orderId) {
+  return `${NOTIFY_CONFIRM_RECEIVE_SENT_PREFIX}${orderId}`
 }
 
 function clipItemDesc(value, maxLen = 120) {
@@ -1007,7 +1025,9 @@ async function notifyConfirmReceive(req) {
 
   const internalOrderId = parseInt(String(b.internal_order_id ?? b.order_id ?? ''), 10)
   if (!Number.isNaN(internalOrderId) && internalOrderId > 0) {
-    return notifyConfirmReceiveForInternalOrder(internalOrderId, receivedTime)
+    const result = await notifyConfirmReceiveForInternalOrder(internalOrderId, receivedTime)
+    if (result.ok) await markNotifyConfirmReceiveSent(internalOrderId)
+    return result
   }
 
   return notifyConfirmReceiveDirect({
@@ -1016,6 +1036,65 @@ async function notifyConfirmReceive(req) {
     merchantTradeNo: b.merchant_trade_no ?? b.out_trade_no,
     subMerchantId: b.sub_merchant_id,
     receivedTime,
+  })
+}
+
+async function hasNotifyConfirmReceiveSent(orderId) {
+  const id = parseInt(String(orderId ?? ''), 10)
+  if (!id || Number.isNaN(id) || id <= 0) return false
+  try {
+    return Boolean(await redisClient.get(buildNotifyConfirmReceiveSentKey(id)))
+  } catch (err) {
+    logger.warn('读取确认收货提醒 Redis 标记失败', { orderId: id, err: err?.message || err })
+    return false
+  }
+}
+
+async function markNotifyConfirmReceiveSent(orderId) {
+  const id = parseInt(String(orderId ?? ''), 10)
+  if (!id || Number.isNaN(id) || id <= 0) return
+  try {
+    const ttl = Number.isFinite(NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC) && NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC > 0
+      ? NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC
+      : 60 * 60 * 24 * 365
+    await redisClient.setEx(buildNotifyConfirmReceiveSentKey(id), ttl, '1')
+  } catch (err) {
+    logger.warn('写入确认收货提醒 Redis 标记失败', { orderId: id, err: err?.message || err })
+  }
+}
+
+async function maybeNotifyConfirmReceiveOnSignOff({
+  orderId,
+  actionType,
+  actionTime,
+  force = false,
+}) {
+  if (!isAutoNotifyConfirmReceiveEnabled()) {
+    return { skipped: true, reason: 'auto_notify_disabled' }
+  }
+  if (Number(actionType) !== SF_SIGN_OFF_ACTION_TYPE) {
+    return { skipped: true, reason: 'not_signed' }
+  }
+
+  const id = parseInt(String(orderId ?? ''), 10)
+  if (!id || Number.isNaN(id) || id <= 0) {
+    return { skipped: true, reason: 'missing_order_id' }
+  }
+
+  if (!force && await hasNotifyConfirmReceiveSent(id)) {
+    return { skipped: true, reason: 'already_sent' }
+  }
+
+  const actionAtSec = Number(actionTime) || 0
+  const receivedTime = actionAtSec > 0 ? Math.floor(actionAtSec) : Math.floor(Date.now() / 1000)
+  const result = await notifyConfirmReceiveForInternalOrder(id, receivedTime)
+  if (result.ok) await markNotifyConfirmReceiveSent(id)
+  return result
+}
+
+function fireWechatConfirmReceiveNotify(taskPromise, meta = {}) {
+  Promise.resolve(taskPromise).catch((err) => {
+    logger.warn('微信确认收货提醒异步任务异常', { ...meta, err: err?.message || err })
   })
 }
 
@@ -1165,6 +1244,9 @@ module.exports = {
   notifyConfirmReceiveDirect,
   notifyConfirmReceiveForInternalOrder,
   notifyConfirmReceive,
+  isAutoNotifyConfirmReceiveEnabled,
+  maybeNotifyConfirmReceiveOnSignOff,
+  fireWechatConfirmReceiveNotify,
   setMsgJumpPathDirect,
   setMsgJumpPath,
   isTradeManagementConfirmationCompletedDirect,

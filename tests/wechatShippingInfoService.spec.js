@@ -10,6 +10,7 @@ import {
   buildNotifyConfirmReceivePayload,
   buildSetMsgJumpPathPayload,
   buildIsTradeManagementConfirmationCompletedPayload,
+  isAutoNotifyConfirmReceiveEnabled,
 } from '../services/wechatShippingInfoService.js'
 
 describe('wechatShippingInfoService helpers', () => {
@@ -216,5 +217,15 @@ describe('wechatShippingInfoService helpers', () => {
     })
 
     process.env.WX_APPID = prev
+  })
+
+  it('auto notify confirm receive is enabled by default', () => {
+    const prev = process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED
+    delete process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED
+    expect(isAutoNotifyConfirmReceiveEnabled()).toBe(true)
+    process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED = 'false'
+    expect(isAutoNotifyConfirmReceiveEnabled()).toBe(false)
+    if (prev == null) delete process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED
+    else process.env.WX_AUTO_NOTIFY_CONFIRM_RECEIVE_ENABLED = prev
   })
 })

@@ -21,6 +21,7 @@ const {
 } = require('../utils/safeOutboundUrl');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema');
+const { buildWechatOrderConfirmFields } = require('../utils/wechatOrderConfirm');
 const {
     resolveOrderFulfillmentStatus,
     buildFulfillmentTimelineStages,
@@ -2558,6 +2559,7 @@ function buildListPayStatusFromOrder(order) {
         success_time: order.success_time || null,
         amount: totalFen != null ? { total: totalFen, currency: 'CNY' } : null,
         transaction_id: order.transaction_id || null,
+        merchant_id: WX_PAY_CONFIG.mchId || null,
     };
 }
 
@@ -2819,12 +2821,20 @@ function filterOrdersByStatus(orders, statusStates) {
     return orders.filter((order) => statusStates.includes(order.trade_state));
 }
 
-function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus) {
+function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus, fulfillmentContext = null) {
     const statusFields = buildOrderStatusFields(
         order.trade_state,
         order.trade_state_desc,
         fulfillmentStatus,
     );
+    const wechatConfirm = buildWechatOrderConfirmFields({
+        order,
+        tradeState: order.trade_state,
+        fulfillmentStatus,
+        items: fulfillmentContext?.items || items.map((item) => ({ type: item.type })),
+        shipment: fulfillmentContext?.shipment || null,
+        merchantId: WX_PAY_CONFIG.mchId,
+    });
     return {
         out_trade_no: order.out_trade_no,
         created_at: toIsoOrNull(order.created_at),
@@ -2832,6 +2842,12 @@ function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus) {
         ...statusFields,
         refund_status: refundStatus || null,
         items,
+        can_confirm_receipt: wechatConfirm.can_confirm_receipt,
+        wechat_order_confirm: wechatConfirm.wechat_order_confirm,
+        payment: {
+            transaction_id: wechatConfirm.payment_transaction_id,
+            merchant_id: wechatConfirm.payment_merchant_id,
+        },
     };
 }
 
@@ -2906,7 +2922,7 @@ async function listOrders(req) {
 
         const [[orders], [[{ total }]]] = await Promise.all([
             db.query(
-                `SELECT id, out_trade_no, created_at, total_fee, trade_state, trade_state_desc
+                `SELECT id, out_trade_no, transaction_id, created_at, total_fee, trade_state, trade_state_desc
                  FROM orders FORCE INDEX (idx_orders_user_id)
                  WHERE ${whereSql}
                  ORDER BY created_at DESC
@@ -2942,6 +2958,7 @@ async function listOrders(req) {
                 itemsByOrderId.get(order.id) || [],
                 refundStatus,
                 fulfillmentStatus,
+                fulfillmentCtx,
             );
         });
 
@@ -3178,12 +3195,27 @@ async function adminOrders(req) {
                 shipment: fulfillmentCtx?.shipment || null,
             }, refundStatus);
 
+            const wechatConfirm = buildWechatOrderConfirmFields({
+                order,
+                tradeState: order.trade_state,
+                fulfillmentStatus,
+                items: fulfillmentCtx?.items || items.map((item) => ({ type: item.type })),
+                shipment: fulfillmentCtx?.shipment || null,
+                merchantId: WX_PAY_CONFIG.mchId,
+            });
+
             return {
                 ...order,
                 items,
                 pay_status: buildListPayStatusFromOrder(order),
                 refund_status: refundStatus,
                 fulfillment_status: fulfillmentStatus,
+                can_confirm_receipt: wechatConfirm.can_confirm_receipt,
+                wechat_order_confirm: wechatConfirm.wechat_order_confirm,
+                payment: {
+                    transaction_id: wechatConfirm.payment_transaction_id,
+                    merchant_id: wechatConfirm.payment_merchant_id,
+                },
             };
         });
 
@@ -3839,6 +3871,7 @@ async function orderDetailForActor(req, options = {}) {
 
         const payment = {
             transaction_id: wxPay?.transaction_id || order.transaction_id || null,
+            merchant_id: WX_PAY_CONFIG.mchId || null,
             trade_state: effectiveTradeState,
             trade_state_desc: effectiveTradeStateDesc,
             trade_type: wxPay?.trade_type || order.trade_type || null,
@@ -4078,11 +4111,24 @@ async function orderDetailForActor(req, options = {}) {
             price: Number(item.price) || 0,
         }));
 
+        const wechatConfirm = buildWechatOrderConfirmFields({
+            order,
+            wxPay,
+            tradeState: effectiveTradeState,
+            fulfillmentStatus: statusFields.fulfillment_status,
+            items,
+            shipment: primaryShipment,
+            merchantId: WX_PAY_CONFIG.mchId,
+        });
+        payment.transaction_id = wechatConfirm.payment_transaction_id;
+
         const detailData = {
             out_trade_no: order.out_trade_no,
             created_at: toIsoOrNull(order.created_at),
             total_fee: Number(order.total_fee) || 0,
             ...statusFields,
+            can_confirm_receipt: wechatConfirm.can_confirm_receipt,
+            wechat_order_confirm: wechatConfirm.wechat_order_confirm,
             refund_status: refundStatus,
             items: listCompatibleItems,
             fee,

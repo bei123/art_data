@@ -82,6 +82,66 @@
       </AlertDescription>
     </Alert>
 
+    <Alert
+      v-if="wxTradeMgmtChecked && wxTradeMgmtCompleted === false"
+      variant="destructive"
+    >
+      <AlertCircle class="size-4 shrink-0" aria-hidden="true" />
+      <AlertTitle>微信小程序尚未完成交易结算管理确认</AlertTitle>
+      <AlertDescription class="mt-1 text-sm leading-relaxed">
+        关联商户号的订单需通过发货信息管理服务发货。请登录
+        <a
+          href="https://mp.weixin.qq.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="underline underline-offset-2"
+        >微信公众平台</a>
+        完成订单管理授权，或在小程序后台发货信息管理页确认。
+      </AlertDescription>
+    </Alert>
+
+    <Card v-if="wxTradeMgmtChecked" class="shadow-none ring-1">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-base">微信发货消息配置</CardTitle>
+        <CardDescription>
+          设置发货/确认收货消息点击后跳转的小程序页面；平台会自动追加 transaction_id 等参数。
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="flex flex-col gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div class="grid flex-1 gap-2">
+            <Label for="wx-jump-path">消息跳转路径 path</Label>
+            <Input
+              id="wx-jump-path"
+              v-model="wxJumpPath"
+              placeholder="pages/orders/detail"
+              autocomplete="off"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            :disabled="wxJumpPathSubmitting"
+            @click="submitWxJumpPath"
+          >
+            <Loader2 v-if="wxJumpPathSubmitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            保存跳转路径
+          </Button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" @click="openWxOrderListDialog('pending')">
+            微信待发货订单
+          </Button>
+          <Button type="button" variant="outline" size="sm" @click="openWxOrderListDialog()">
+            微信订单列表
+          </Button>
+          <Button type="button" variant="outline" size="sm" @click="openWxCombinedShippingDialog">
+            合单发货补录
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+
     <Card class="relative overflow-hidden shadow-none ring-1">
       <div
         v-if="loading"
@@ -513,10 +573,10 @@
 
           <div v-if="isOrderLogisticsEligible(selectedOrder)" class="rounded-lg border border-border bg-muted/10 p-4">
             <h3 class="mb-2 text-base font-semibold text-foreground">
-              物流（顺丰开放平台）
+              物流（顺丰 + 微信发货管理）
             </h3>
             <p class="mb-3 text-sm text-muted-foreground leading-relaxed">
-              含实物且已支付成功时可发货；发货成功后运单号会写入数据库，查询轨迹/面单/取消时会自动带出订单号。
+              含实物且已支付成功时可发货；顺丰下单成功后会自动向微信录入发货信息。
             </p>
             <div v-if="selectedOrder.shipments?.length" class="mb-4 space-y-2">
               <div
@@ -552,6 +612,89 @@
               <Button type="button" variant="destructive" @click="openCancelWaybillDialog">
                 取消运单
               </Button>
+            </div>
+
+            <div class="mt-4 border-t border-border pt-4">
+              <h4 class="mb-2 text-sm font-semibold text-foreground">
+                微信小程序发货状态
+              </h4>
+              <p class="mb-3 text-xs text-muted-foreground leading-relaxed">
+                查询微信侧订单发货状态；补录用于顺丰已成功但微信录入失败的情况；确认收货提醒每个订单仅可发送一次。
+              </p>
+
+              <div
+                v-if="wxOrderShipping.order"
+                class="mb-3 rounded-md border border-border bg-background p-3 text-sm"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">
+                    {{ wxOrderShipping.order.order_state_label || `状态 ${wxOrderShipping.order.order_state}` }}
+                  </Badge>
+                  <span
+                    v-if="wxOrderShipping.order.in_complaint"
+                    class="text-xs text-destructive"
+                  >
+                    交易纠纷中
+                  </span>
+                </div>
+                <div
+                  v-if="wxOrderShipping.order.shipping?.shipping_list?.length"
+                  class="mt-2 space-y-1 text-xs text-muted-foreground"
+                >
+                  <div
+                    v-for="(ship, idx) in wxOrderShipping.order.shipping.shipping_list"
+                    :key="`${ship.tracking_no}-${idx}`"
+                    class="font-mono break-all"
+                  >
+                    {{ ship.express_company }} · {{ ship.tracking_no }}
+                    <span v-if="ship.goods_desc"> · {{ ship.goods_desc }}</span>
+                  </div>
+                </div>
+                <p v-else-if="wxOrderShipping.order.shipping" class="mt-2 text-xs text-muted-foreground">
+                  微信侧暂无物流单详情
+                </p>
+              </div>
+
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="wxOrderShippingLoading"
+                  @click="fetchWxOrderShippingStatus"
+                >
+                  <Loader2
+                    v-if="wxOrderShippingLoading"
+                    class="mr-1.5 size-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
+                  查询微信发货状态
+                </Button>
+                <Button
+                  v-if="selectedOrder.shipments?.length"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  :disabled="wxUploadShippingSubmitting"
+                  @click="submitWxUploadShippingInfo"
+                >
+                  <Loader2
+                    v-if="wxUploadShippingSubmitting"
+                    class="mr-1.5 size-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
+                  补录微信发货信息
+                </Button>
+                <Button
+                  v-if="selectedOrder.shipments?.length"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  @click="openWxConfirmReceiveDialog"
+                >
+                  确认收货提醒
+                </Button>
+              </div>
             </div>
           </div>
           </template>
@@ -893,6 +1036,191 @@
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <Dialog v-model:open="wxConfirmReceiveDialogVisible">
+      <DialogContent class="max-w-[calc(100%-2rem)] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>微信确认收货提醒</DialogTitle>
+        </DialogHeader>
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          向买家发送确认收货提醒（每个订单仅可调用一次）。签收时间须晚于发货时间。
+        </p>
+        <div class="grid gap-2 py-2">
+          <Label for="wx-received-time">快递签收时间</Label>
+          <Input
+            id="wx-received-time"
+            v-model="wxConfirmReceiveForm.receivedTimeLocal"
+            type="datetime-local"
+          />
+        </div>
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="wxConfirmReceiveDialogVisible = false">
+            取消
+          </Button>
+          <Button
+            type="button"
+            :disabled="wxConfirmReceiveSubmitting"
+            @click="submitWxConfirmReceive"
+          >
+            <Loader2
+              v-if="wxConfirmReceiveSubmitting"
+              class="mr-1.5 size-3.5 animate-spin"
+              aria-hidden="true"
+            />
+            发送提醒
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="wxOrderListDialogVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>微信订单列表</DialogTitle>
+        </DialogHeader>
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          从微信发货信息管理服务拉取支付单列表，可用于对账或查找待发货订单。
+        </p>
+        <div class="grid gap-3 py-2 sm:grid-cols-2">
+          <div class="grid gap-2">
+            <Label for="wx-list-order-state">微信订单状态</Label>
+            <select
+              id="wx-list-order-state"
+              v-model="wxOrderListForm.order_state"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+            >
+              <option value="">全部</option>
+              <option value="1">待发货</option>
+              <option value="2">已发货</option>
+              <option value="3">确认收货</option>
+              <option value="4">交易完成</option>
+              <option value="5">已退款</option>
+              <option value="6">资金待结算</option>
+            </select>
+          </div>
+          <div class="grid gap-2">
+            <Label for="wx-list-page-size">每页条数</Label>
+            <Input
+              id="wx-list-page-size"
+              v-model.number="wxOrderListForm.page_size"
+              type="number"
+              min="1"
+              max="100"
+            />
+          </div>
+          <div class="grid gap-2">
+            <Label for="wx-list-openid">买家 openid（可选）</Label>
+            <Input id="wx-list-openid" v-model="wxOrderListForm.openid" autocomplete="off" />
+          </div>
+          <div class="grid gap-2">
+            <Label for="wx-list-begin">支付开始时间（可选）</Label>
+            <Input id="wx-list-begin" v-model="wxOrderListForm.beginTimeLocal" type="datetime-local" />
+          </div>
+          <div class="grid gap-2 sm:col-span-2">
+            <Label for="wx-list-end">支付结束时间（可选）</Label>
+            <Input id="wx-list-end" v-model="wxOrderListForm.endTimeLocal" type="datetime-local" />
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <Button type="button" :disabled="wxOrderListLoading" @click="fetchWxOrderList(true)">
+            <Loader2 v-if="wxOrderListLoading" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            查询
+          </Button>
+          <Button
+            v-if="wxOrderListHasMore"
+            type="button"
+            variant="outline"
+            :disabled="wxOrderListLoading"
+            @click="fetchWxOrderList(false)"
+          >
+            加载更多
+          </Button>
+        </div>
+        <div v-if="wxOrderListRows.length" class="overflow-x-auto rounded-md border border-border">
+          <table class="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr class="border-b border-border bg-muted/40">
+                <th class="h-9 px-3 text-left font-medium">商户订单号</th>
+                <th class="h-9 px-3 text-left font-medium">微信状态</th>
+                <th class="h-9 px-3 text-left font-medium">金额</th>
+                <th class="h-9 px-3 text-left font-medium">支付时间</th>
+                <th class="h-9 px-3 text-left font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in wxOrderListRows"
+                :key="row.transaction_id || row.merchant_trade_no"
+                class="border-b border-border last:border-0"
+              >
+                <td class="px-3 py-2 font-mono text-xs break-all">{{ row.merchant_trade_no || '—' }}</td>
+                <td class="px-3 py-2">
+                  <Badge variant="secondary">
+                    {{ row.order_state_label || row.order_state }}
+                  </Badge>
+                </td>
+                <td class="px-3 py-2 tabular-nums">
+                  {{ row.paid_amount != null ? `¥${(row.paid_amount / 100).toFixed(2)}` : '—' }}
+                </td>
+                <td class="px-3 py-2 text-xs text-muted-foreground tabular-nums">
+                  {{ formatWxPayTime(row.pay_time) }}
+                </td>
+                <td class="px-3 py-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    @click="searchLocalOrderFromWxRow(row)"
+                  >
+                    查本地订单
+                  </Button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else-if="wxOrderListQueried && !wxOrderListLoading" class="text-sm text-muted-foreground">
+          暂无数据
+        </p>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="wxCombinedShippingDialogVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>微信合单发货信息补录</DialogTitle>
+        </DialogHeader>
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          合单支付场景使用 uploadCombinedShippingInfo。请按微信文档填写 JSON；upload_time 留空则由服务端自动生成。
+        </p>
+        <div class="grid gap-2 py-2">
+          <Label for="wx-combined-json">请求 JSON</Label>
+          <Textarea
+            id="wx-combined-json"
+            v-model="wxCombinedShippingJson"
+            class="min-h-[280px] font-mono text-xs"
+            spellcheck="false"
+          />
+        </div>
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="wxCombinedShippingDialogVisible = false">
+            取消
+          </Button>
+          <Button
+            type="button"
+            :disabled="wxCombinedShippingSubmitting"
+            @click="submitWxCombinedShippingInfo"
+          >
+            <Loader2
+              v-if="wxCombinedShippingSubmitting"
+              class="mr-1.5 size-3.5 animate-spin"
+              aria-hidden="true"
+            />
+            提交合单发货
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -915,7 +1243,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -944,6 +1272,14 @@ function formatSfApiError(e, fallback = '请求失败') {
   if (!data) return e?.message || fallback
   let msg = data.error || fallback
   if (data.sf_error?.suggestion) msg = `${msg}：${data.sf_error.suggestion}`
+  return msg
+}
+
+function formatWxApiError(e, fallback = '请求失败') {
+  const data = e?.response?.data
+  if (!data) return e?.message || fallback
+  const msg = data.error || data.errmsg || fallback
+  if (data.errcode != null) return `${msg}（${data.errcode}）`
   return msg
 }
 
@@ -1011,6 +1347,67 @@ const pathEmptyHint = ref('')
 const cancelWaybillDialogOpen = ref(false)
 const cancelWaybillSubmitting = ref(false)
 
+const wxTradeMgmtChecked = ref(false)
+const wxTradeMgmtCompleted = ref(null)
+const wxJumpPath = ref('pages/orders/detail')
+const wxJumpPathSubmitting = ref(false)
+
+const wxOrderShippingLoading = ref(false)
+const wxOrderShipping = ref({ order: null })
+const wxUploadShippingSubmitting = ref(false)
+
+const wxConfirmReceiveDialogVisible = ref(false)
+const wxConfirmReceiveSubmitting = ref(false)
+const wxConfirmReceiveForm = reactive({
+  receivedTimeLocal: '',
+})
+
+const wxOrderListDialogVisible = ref(false)
+const wxOrderListLoading = ref(false)
+const wxOrderListQueried = ref(false)
+const wxOrderListRows = ref([])
+const wxOrderListHasMore = ref(false)
+const wxOrderListLastIndex = ref('')
+const wxOrderListForm = reactive({
+  order_state: '',
+  openid: '',
+  beginTimeLocal: '',
+  endTimeLocal: '',
+  page_size: 20,
+})
+
+const wxCombinedShippingDialogVisible = ref(false)
+const wxCombinedShippingSubmitting = ref(false)
+const wxCombinedShippingJson = ref('')
+
+const WX_COMBINED_SHIPPING_TEMPLATE = `{
+  "order_key": {
+    "order_number_type": 1,
+    "mchid": "商户号",
+    "out_trade_no": "合单主单号"
+  },
+  "sub_orders": [
+    {
+      "order_key": {
+        "order_number_type": 1,
+        "mchid": "商户号",
+        "out_trade_no": "子单01"
+      },
+      "delivery_mode": 1,
+      "logistics_type": 1,
+      "shipping_list": [
+        {
+          "tracking_no": "运单号",
+          "express_company": "SF",
+          "item_desc": "商品*1",
+          "contact": { "receiver_contact": "138****5678" }
+        }
+      ]
+    }
+  ],
+  "payer": { "openid": "用户openid" }
+}`
+
 const filters = reactive({
   keyword: '',
   status: '',
@@ -1027,7 +1424,10 @@ const pagination = reactive({
 const totalPages = computed(() => Math.max(1, Math.ceil(pagination.total / pagination.limit)))
 
 watch(detailDialogVisible, (v) => {
-  if (!v) selectedOrder.value = null
+  if (!v) {
+    selectedOrder.value = null
+    wxOrderShipping.value = { order: null }
+  }
 })
 
 watch(waybillDialogVisible, (v) => {
@@ -1193,6 +1593,9 @@ async function refreshSelectedOrderDetail(orderId) {
     }
   })
   prefillTrackFormFromOrder(selectedOrder.value)
+  if (isOrderLogisticsEligible(selectedOrder.value)) {
+    await fetchWxOrderShippingStatus({ silent: true })
+  }
   return selectedOrder.value
 }
 
@@ -1890,6 +2293,220 @@ async function confirmCancelWaybill() {
   }
 }
 
+async function fetchWxTradeManagementStatus() {
+  try {
+    const res = await axios.post('/wx/logistics/wechat-order/is-trade-management-completed', {}, { timeout: 15000 })
+    wxTradeMgmtCompleted.value = res?.completed === true
+  } catch {
+    wxTradeMgmtCompleted.value = null
+  } finally {
+    wxTradeMgmtChecked.value = true
+  }
+}
+
+async function submitWxJumpPath() {
+  const path = wxJumpPath.value?.trim()
+  if (!path) {
+    ElMessage.warning('请填写消息跳转路径')
+    return
+  }
+  wxJumpPathSubmitting.value = true
+  try {
+    await axios.post('/wx/logistics/wechat-order/set-msg-jump-path', { path }, { timeout: 15000 })
+    ElMessage.success('消息跳转路径已保存')
+  } catch (e) {
+    ElMessage.error(formatWxApiError(e, '保存跳转路径失败'))
+  } finally {
+    wxJumpPathSubmitting.value = false
+  }
+}
+
+async function fetchWxOrderShippingStatus(options = {}) {
+  const silent = options.silent === true
+  if (!selectedOrder.value?.id) return
+  wxOrderShippingLoading.value = true
+  try {
+    const res = await axios.post(
+      '/wx/logistics/wechat-order/get',
+      { internal_order_id: selectedOrder.value.id },
+      { timeout: 15000 },
+    )
+    wxOrderShipping.value = { order: res?.order || null }
+    if (!silent) {
+      if (res?.order?.order_state_label) {
+        ElMessage.success(`微信发货状态：${res.order.order_state_label}`)
+      } else {
+        ElMessage.success('已查询微信发货状态')
+      }
+    }
+  } catch (e) {
+    wxOrderShipping.value = { order: null }
+    if (!silent) ElMessage.error(formatWxApiError(e, '查询微信发货状态失败'))
+  } finally {
+    wxOrderShippingLoading.value = false
+  }
+}
+
+async function submitWxUploadShippingInfo() {
+  if (!selectedOrder.value?.id) return
+  wxUploadShippingSubmitting.value = true
+  try {
+    await axios.post(
+      '/wx/logistics/upload-shipping-info',
+      { internal_order_id: selectedOrder.value.id },
+      { timeout: 20000 },
+    )
+    ElMessage.success('微信发货信息补录成功')
+    await fetchWxOrderShippingStatus({ silent: true })
+  } catch (e) {
+    ElMessage.error(formatWxApiError(e, '补录微信发货信息失败'))
+  } finally {
+    wxUploadShippingSubmitting.value = false
+  }
+}
+
+function openWxConfirmReceiveDialog() {
+  const now = new Date()
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset())
+  wxConfirmReceiveForm.receivedTimeLocal = now.toISOString().slice(0, 16)
+  wxConfirmReceiveDialogVisible.value = true
+}
+
+async function submitWxConfirmReceive() {
+  if (!selectedOrder.value?.id) return
+  if (!wxConfirmReceiveForm.receivedTimeLocal?.trim()) {
+    ElMessage.warning('请选择签收时间')
+    return
+  }
+  const receivedDate = new Date(wxConfirmReceiveForm.receivedTimeLocal)
+  if (Number.isNaN(receivedDate.getTime())) {
+    ElMessage.warning('签收时间无效')
+    return
+  }
+  wxConfirmReceiveSubmitting.value = true
+  try {
+    await axios.post(
+      '/wx/logistics/wechat-order/notify-confirm-receive',
+      {
+        internal_order_id: selectedOrder.value.id,
+        received_time: Math.floor(receivedDate.getTime() / 1000),
+      },
+      { timeout: 15000 },
+    )
+    ElMessage.success('确认收货提醒已发送')
+    wxConfirmReceiveDialogVisible.value = false
+    await fetchWxOrderShippingStatus({ silent: true })
+  } catch (e) {
+    ElMessage.error(formatWxApiError(e, '发送确认收货提醒失败'))
+  } finally {
+    wxConfirmReceiveSubmitting.value = false
+  }
+}
+
+function formatWxPayTime(ts) {
+  if (ts == null || Number.isNaN(Number(ts))) return '—'
+  return new Date(Number(ts) * 1000).toLocaleString('zh-CN')
+}
+
+function buildWxOrderListRequestBody(reset) {
+  const body = {
+    page_size: Number(wxOrderListForm.page_size) > 0 ? Number(wxOrderListForm.page_size) : 20,
+  }
+  if (wxOrderListForm.order_state) body.order_state = Number(wxOrderListForm.order_state)
+  if (wxOrderListForm.openid?.trim()) body.openid = wxOrderListForm.openid.trim()
+  if (!reset && wxOrderListLastIndex.value) body.last_index = wxOrderListLastIndex.value
+
+  const payTimeRange = {}
+  if (wxOrderListForm.beginTimeLocal) {
+    payTimeRange.begin_time = Math.floor(new Date(wxOrderListForm.beginTimeLocal).getTime() / 1000)
+  }
+  if (wxOrderListForm.endTimeLocal) {
+    payTimeRange.end_time = Math.floor(new Date(wxOrderListForm.endTimeLocal).getTime() / 1000)
+  }
+  if (Object.keys(payTimeRange).length) body.pay_time_range = payTimeRange
+  return body
+}
+
+function openWxOrderListDialog(preset) {
+  wxOrderListForm.order_state = preset === 'pending' ? '1' : ''
+  wxOrderListDialogVisible.value = true
+  wxOrderListRows.value = []
+  wxOrderListLastIndex.value = ''
+  wxOrderListHasMore.value = false
+  wxOrderListQueried.value = false
+  if (preset === 'pending') fetchWxOrderList(true)
+}
+
+async function fetchWxOrderList(reset = true) {
+  wxOrderListLoading.value = true
+  try {
+    const res = await axios.post(
+      '/wx/logistics/wechat-order/list',
+      buildWxOrderListRequestBody(reset),
+      { timeout: 20000 },
+    )
+    const list = Array.isArray(res?.order_list) ? res.order_list : []
+    wxOrderListRows.value = reset ? list : [...wxOrderListRows.value, ...list]
+    wxOrderListHasMore.value = res?.has_more === true
+    wxOrderListLastIndex.value = res?.last_index || ''
+    wxOrderListQueried.value = true
+    if (reset) ElMessage.success(`已加载 ${list.length} 条微信订单`)
+  } catch (e) {
+    ElMessage.error(formatWxApiError(e, '查询微信订单列表失败'))
+  } finally {
+    wxOrderListLoading.value = false
+  }
+}
+
+function searchLocalOrderFromWxRow(row) {
+  const keyword = row?.merchant_trade_no || row?.transaction_id || ''
+  if (!keyword) {
+    ElMessage.warning('该行缺少可搜索的订单号')
+    return
+  }
+  filters.keyword = keyword
+  wxOrderListDialogVisible.value = false
+  pagination.page = 1
+  fetchOrders()
+  ElMessage.info(`已在本地订单中搜索：${keyword}`)
+}
+
+function openWxCombinedShippingDialog() {
+  if (!wxCombinedShippingJson.value?.trim()) {
+    wxCombinedShippingJson.value = WX_COMBINED_SHIPPING_TEMPLATE
+  }
+  wxCombinedShippingDialogVisible.value = true
+}
+
+async function submitWxCombinedShippingInfo() {
+  const raw = wxCombinedShippingJson.value?.trim()
+  if (!raw) {
+    ElMessage.warning('请填写合单发货 JSON')
+    return
+  }
+  let payload
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    ElMessage.error('JSON 格式无效')
+    return
+  }
+  if (!payload?.order_key || !Array.isArray(payload?.sub_orders) || !payload.sub_orders.length) {
+    ElMessage.warning('须包含 order_key 与 sub_orders')
+    return
+  }
+  wxCombinedShippingSubmitting.value = true
+  try {
+    await axios.post('/wx/logistics/upload-combined-shipping-info', payload, { timeout: 25000 })
+    ElMessage.success('合单发货信息已提交')
+    wxCombinedShippingDialogVisible.value = false
+  } catch (e) {
+    ElMessage.error(formatWxApiError(e, '合单发货信息提交失败'))
+  } finally {
+    wxCombinedShippingSubmitting.value = false
+  }
+}
+
 const getImageUrl = (url) => {
   if (!url) return ''
   if (isOssPublicUrl(url)) return url
@@ -1973,5 +2590,6 @@ const getTypeLabel = (type) => {
 
 onMounted(() => {
   fetchOrders()
+  fetchWxTradeManagementStatus()
 })
 </script>
