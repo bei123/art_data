@@ -70,6 +70,7 @@ function mapLegacyRow(row) {
     title: row.title || null,
     price: parseFloat(row.price),
     batch_quantity: row.batch_quantity,
+    image_url: row.image_url || null,
     is_hidden: false,
     lv3_goods_number: null,
     lv3_total_num: null,
@@ -83,6 +84,7 @@ function mapExternalRow(row) {
     title: row.title || null,
     price: normalizeWespacePriceToYuan(row.price),
     batch_quantity: null,
+    image_url: row.image_url || null,
     is_hidden: row.is_hidden === 1 || row.is_hidden === true,
     lv3_goods_number: row.lv3_goods_number,
     lv3_total_num: row.lv3_total_num,
@@ -130,7 +132,7 @@ async function fetchDigitalArtworkById(id, connection = null) {
 
   const [legacyRows] = await queryWithConnection(
     connection,
-    'SELECT id, title, price, batch_quantity FROM digital_artworks WHERE id = ? LIMIT 1',
+    'SELECT id, title, price, batch_quantity, image_url FROM digital_artworks WHERE id = ? LIMIT 1',
     [sid]
   )
   if (legacyRows && legacyRows.length > 0) {
@@ -139,7 +141,7 @@ async function fetchDigitalArtworkById(id, connection = null) {
 
   const [externalRows] = await queryWithConnection(
     connection,
-    `SELECT id, title, price, is_hidden, lv3_goods_number, lv3_total_num, lv3_row_is_sell
+    `SELECT id, title, price, image_url, is_hidden, lv3_goods_number, lv3_total_num, lv3_row_is_sell
      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
      WHERE id = ?
      LIMIT 1`,
@@ -165,7 +167,7 @@ async function fetchDigitalArtworksByIds(ids, connection = null) {
 
   const [legacyRows] = await queryWithConnection(
     connection,
-    'SELECT id, title, price, batch_quantity FROM digital_artworks WHERE id IN (?)',
+    'SELECT id, title, price, batch_quantity, image_url FROM digital_artworks WHERE id IN (?)',
     [uniqueIds]
   )
   for (const row of legacyRows || []) {
@@ -178,7 +180,7 @@ async function fetchDigitalArtworksByIds(ids, connection = null) {
 
   const [externalRows] = await queryWithConnection(
     connection,
-    `SELECT id, title, price, is_hidden, lv3_goods_number, lv3_total_num, lv3_row_is_sell
+    `SELECT id, title, price, image_url, is_hidden, lv3_goods_number, lv3_total_num, lv3_row_is_sell
      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
      WHERE id IN (?)`,
     [remainingIds]

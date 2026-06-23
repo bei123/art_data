@@ -493,7 +493,8 @@ function buildPreviewItemImageFields(item, goods, rightImagesMap) {
   }
 
   if (item.type === 'digital') {
-    const image = processImageUrl(goods.image_url || '') || ''
+    const rawImage = goods.image_url || goods.digital_image_url || goods.image || ''
+    const image = processImageUrl(rawImage) || ''
     return {
       image,
       images: image ? [image] : [],
