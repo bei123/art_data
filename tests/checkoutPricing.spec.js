@@ -113,4 +113,30 @@ describe('checkoutPricing', () => {
     expect(metrics.totalWidth).toBe(30)
     expect(metrics.totalHeight).toBe(10)
   })
+
+  it('buildPreviewItemImageFields returns image and images for each type', () => {
+    const { buildPreviewItemImageFields } = require('../services/checkoutPricing.js')
+
+    const rightImages = buildPreviewItemImageFields(
+      { type: 'right', right_id: 1 },
+      { title: '权益' },
+      { 1: ['https://cdn.example.com/a.jpg', 'https://cdn.example.com/b.jpg'] },
+    )
+    expect(rightImages.image).toBe('https://cdn.example.com/a.jpg')
+    expect(rightImages.images).toHaveLength(2)
+
+    const artworkImages = buildPreviewItemImageFields(
+      { type: 'artwork', artwork_id: 2 },
+      { image: 'https://cdn.example.com/art.jpg' },
+      {},
+    )
+    expect(artworkImages.image).toBe('https://cdn.example.com/art.jpg')
+
+    const digitalImages = buildPreviewItemImageFields(
+      { type: 'digital', digital_artwork_id: '3' },
+      { image_url: 'https://cdn.example.com/digital.jpg' },
+      {},
+    )
+    expect(digitalImages.image).toBe('https://cdn.example.com/digital.jpg')
+  })
 })

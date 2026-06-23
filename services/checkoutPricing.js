@@ -10,6 +10,7 @@ const {
   ensureDigitalArtworkIdColumns,
 } = require('../utils/digitalArtworkResolver')
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing')
+const { processImageUrl } = require('../utils/image')
 const { ensureRightsShippingColumns } = require('./rightsService')
 const {
   assertSfConfig,
@@ -473,6 +474,35 @@ async function computeShippingFee({ destAddress, expressTypeId, weightKg, volume
   }
 }
 
+function buildPreviewItemImageFields(item, goods, rightImagesMap) {
+  if (item.type === 'right') {
+    const rawImages = rightImagesMap[item.right_id] || []
+    const images = rawImages.map((url) => processImageUrl(url)).filter(Boolean)
+    return {
+      image: images[0] || '',
+      images,
+    }
+  }
+
+  if (item.type === 'artwork') {
+    const image = processImageUrl(goods.image || '') || ''
+    return {
+      image,
+      images: image ? [image] : [],
+    }
+  }
+
+  if (item.type === 'digital') {
+    const image = processImageUrl(goods.image_url || '') || ''
+    return {
+      image,
+      images: image ? [image] : [],
+    }
+  }
+
+  return { image: '', images: [] }
+}
+
 async function priceCartItems(connection, userId, normalizedCartItems) {
   await ensureRightsShippingColumns(connection)
 
@@ -504,9 +534,21 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
 
   const rightDiscountPricing = await buildRightDiscountPricingByUser(userId, rightsMapForPricing)
 
+  const rightImagesMap = {}
+  if (rightIds.length > 0) {
+    const [rightImages] = await connection.query(
+      'SELECT right_id, image_url FROM right_images WHERE right_id IN (?) ORDER BY id',
+      [rightIds]
+    )
+    ;(rightImages || []).forEach((row) => {
+      if (!rightImagesMap[row.right_id]) rightImagesMap[row.right_id] = []
+      if (row.image_url) rightImagesMap[row.right_id].push(row.image_url)
+    })
+  }
+
   if (artworkIds.length > 0) {
     const [artworks] = await connection.query(
-      `SELECT oa.id, oa.title, oa.original_price, oa.discount_price, oa.stock
+      `SELECT oa.id, oa.title, oa.image, oa.original_price, oa.discount_price, oa.stock
        FROM original_artworks oa
        INNER JOIN artists a ON a.id = oa.artist_id
        WHERE oa.id IN (?) AND oa.is_on_sale = 1
@@ -577,6 +619,7 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
     const lineSubtotalYuan = roundYuan(unitPriceYuan * item.quantity)
     itemsSubtotalYuan += lineSubtotalYuan
     pricedCartItems.push({ ...item, unitPriceYuan })
+    const imageFields = buildPreviewItemImageFields(item, goods, rightImagesMap)
     previewItems.push({
       type: item.type,
       id: itemId,
@@ -584,6 +627,8 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
       quantity: item.quantity,
       unit_price_yuan: roundYuan(unitPriceYuan),
       line_subtotal_yuan: lineSubtotalYuan,
+      image: imageFields.image,
+      images: imageFields.images,
     })
   }
 
@@ -925,4 +970,5 @@ module.exports = {
   computeItemShippingMetrics,
   buildShippingMetricsFromPhysicalItems,
   applyShippingMetricsOverrides,
+  buildPreviewItemImageFields,
 }
