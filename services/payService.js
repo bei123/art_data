@@ -494,7 +494,8 @@ async function loadOrderForBuyer(req, outTradeNo, connection = null) {
     const runner = connection || db;
     const [rows] = await runner.query(
         `SELECT id, out_trade_no, transaction_id, trade_state, trade_state_desc,
-                actual_fee, total_fee, user_id, body, created_at, success_time
+                actual_fee, total_fee, shipping_fee, discount_amount, user_id, body,
+                created_at, updated_at, success_time
          FROM orders WHERE out_trade_no = ? LIMIT 1`,
         [cleanOutTradeNo]
     );
@@ -3017,6 +3018,75 @@ async function adminOrders(req) {
     }
 }
 
+function buildOrderItemAddress(row) {
+    if (!row?.address_id) return null;
+    return {
+        id: row.address_id,
+        receiver_name: row.receiver_name,
+        receiver_phone: row.receiver_phone,
+        province: row.province,
+        city: row.city,
+        district: row.district,
+        detail_address: row.detail_address,
+        is_default: row.is_default === 1,
+        full_address: [row.province, row.city, row.district, row.detail_address].filter(Boolean).join(' '),
+    };
+}
+
+async function fetchOrderShippingAddress(orderId) {
+    const [rows] = await db.query(
+        `SELECT
+            oi.address_id,
+            wa.receiver_name,
+            wa.receiver_phone,
+            wa.province,
+            wa.city,
+            wa.district,
+            wa.detail_address,
+            wa.is_default
+         FROM order_items oi
+         LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
+         WHERE oi.order_id = ? AND oi.address_id IS NOT NULL
+         ORDER BY oi.id ASC
+         LIMIT 1`,
+        [orderId]
+    );
+    return buildOrderItemAddress(rows[0]);
+}
+
+function buildCheckRepayableOrderInfo(order, extra = {}) {
+    return {
+        out_trade_no: order.out_trade_no,
+        total_fee: order.total_fee,
+        actual_fee: order.actual_fee,
+        shipping_fee: order.shipping_fee != null ? order.shipping_fee : 0,
+        discount_amount: order.discount_amount != null ? order.discount_amount : 0,
+        trade_state: order.trade_state,
+        ...extra,
+    };
+}
+
+function mapCheckRepayableOrderItems(orderItems) {
+    return (orderItems || []).map((item) => ({
+        id: item.id,
+        sku_id: item.type === 'right' ? item.right_id : item.type === 'digital' ? item.digital_artwork_id : item.artwork_id,
+        type: item.type,
+        quantity: item.quantity,
+        price: item.price,
+        address_id: item.address_id,
+        address: buildOrderItemAddress(item),
+        title: item.type === 'right' ? item.right_title :
+            item.type === 'digital' ? item.digital_title :
+                item.artwork_title,
+        description: item.type === 'right' ? item.right_description :
+            item.type === 'digital' ? item.digital_description :
+                item.artwork_description,
+        image: item.type === 'right' ? item.right_image_url :
+            item.type === 'digital' ? item.digital_image_url :
+                item.artwork_image,
+    }));
+}
+
 async function checkRepayable(req) {
     try {
         const { out_trade_no } = req.query;
@@ -3036,18 +3106,18 @@ async function checkRepayable(req) {
         }
 
         const order = owned.order;
+        const address = await fetchOrderShippingAddress(order.id);
+        const orderInfoBase = buildCheckRepayableOrderInfo(order);
+
         if (order.trade_state === 'SUCCESS') {
             return adminResult(200, {
                 repayable: false,
                 reason: '订单已支付成功，不能重复支付',
                 order_status: 'SUCCESS',
-                order_info: {
-                    out_trade_no: order.out_trade_no,
-                    total_fee: order.total_fee,
-                    actual_fee: order.actual_fee,
-                    trade_state: order.trade_state,
-                    success_time: order.success_time
-                }
+                address,
+                order_info: buildCheckRepayableOrderInfo(order, {
+                    success_time: order.success_time,
+                }),
             });
         }
 
@@ -3056,17 +3126,11 @@ async function checkRepayable(req) {
                 repayable: false,
                 reason: '订单已退款，不能重复支付',
                 order_status: 'REFUND',
-                order_info: {
-                    out_trade_no: order.out_trade_no,
-                    total_fee: order.total_fee,
-                    actual_fee: order.actual_fee,
-                    shipping_fee: order.shipping_fee != null ? order.shipping_fee : 0,
-                    trade_state: order.trade_state
-                }
+                address,
+                order_info: orderInfoBase,
             });
         }
 
-        // 查询订单项信息
         const [orderItems] = await db.query(`
              SELECT 
                  oi.*,
@@ -3083,16 +3147,23 @@ async function checkRepayable(req) {
                 oa.discount_price as artwork_discount_price,
                 oa.description as artwork_description,
                 oa.image as artwork_image,
-                oa.stock as artwork_stock
+                oa.stock as artwork_stock,
+                wa.receiver_name,
+                wa.receiver_phone,
+                wa.province,
+                wa.city,
+                wa.district,
+                wa.detail_address,
+                wa.is_default
             FROM order_items oi
             LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
             LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
             ${DIGITAL_ITEM_JOIN_SQL}
             LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
+            LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id
             WHERE oi.order_id = ?
         `, [order.id]);
 
-        // 检查商品库存和状态
         const stockCheck = orderItems.map(item => {
             if (item.type === 'right') {
                 return {
@@ -3133,45 +3204,22 @@ async function checkRepayable(req) {
                 reason: '部分商品库存不足或已下架',
                 unavailable_items: unavailableItems,
                 order_status: order.trade_state || 'NOTPAY',
-                order_info: {
-                    out_trade_no: order.out_trade_no,
-                    total_fee: order.total_fee,
-                    actual_fee: order.actual_fee,
-                    shipping_fee: order.shipping_fee != null ? order.shipping_fee : 0,
-                    trade_state: order.trade_state
-                }
+                address,
+                order_info: orderInfoBase,
+                items: mapCheckRepayableOrderItems(orderItems),
             });
         }
 
-        // 可以重复支付
         return adminResult(200, {
             repayable: true,
             reason: '订单可以重复支付',
             order_status: order.trade_state || 'NOTPAY',
-            order_info: {
-                out_trade_no: order.out_trade_no,
-                total_fee: order.total_fee,
-                actual_fee: order.actual_fee,
-                trade_state: order.trade_state,
+            address,
+            order_info: buildCheckRepayableOrderInfo(order, {
                 created_at: order.created_at,
-                updated_at: order.updated_at
-            },
-            items: orderItems.map(item => ({
-                id: item.id,
-                sku_id: item.sku_id = item.type === 'right' ? item.right_id : item.type === 'digital' ? item.digital_artwork_id : item.artwork_id,
-                type: item.type,
-                quantity: item.quantity,
-                price: item.price,
-                title: item.type === 'right' ? item.right_title :
-                    item.type === 'digital' ? item.digital_title :
-                        item.artwork_title,
-                description: item.type === 'right' ? item.right_description :
-                    item.type === 'digital' ? item.digital_description :
-                        item.artwork_description,
-                image: item.type === 'right' ? item.right_image_url :
-                    item.type === 'digital' ? item.digital_image_url :
-                        item.artwork_image
-            }))
+                updated_at: order.updated_at,
+            }),
+            items: mapCheckRepayableOrderItems(orderItems),
         });
 
     } catch (error) {
