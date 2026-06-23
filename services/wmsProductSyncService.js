@@ -156,12 +156,17 @@ function parseMoneyToNumber(raw) {
 function buildCollectionSize(elements) {
   const changEl = findElement(elements, 'chang')
   const kuanEl = findElement(elements, 'kuan')
-  const c = changEl ? parseMoneyToNumber(changEl.value) : null
-  const k = kuanEl ? parseMoneyToNumber(kuanEl.value) : null
-  if (c != null && k != null) return `${c}×${k}cm`
-  if (c != null) return `${c}cm`
-  if (k != null) return `${k}cm`
-  return ''
+  const lengthCm = changEl ? parseMoneyToNumber(changEl.value) : null
+  const widthCm = kuanEl ? parseMoneyToNumber(kuanEl.value) : null
+  let collection_size = ''
+  if (lengthCm != null && widthCm != null) collection_size = `${lengthCm}×${widthCm}cm`
+  else if (lengthCm != null) collection_size = `${lengthCm}cm`
+  else if (widthCm != null) collection_size = `${widthCm}cm`
+  return {
+    collection_size,
+    length_cm: lengthCm,
+    width_cm: widthCm,
+  }
 }
 
 /**
@@ -177,7 +182,7 @@ function mapElementsToSyncPayload(elements, listHint) {
   const yearRaw = elementTextValue(findElement(elements, 'chuangzuoniandai'))
   const year = yearRaw || null
   const priceNum = parseMoneyToNumber(elementTextValue(findElement(elements, 'UnitPrice')))
-  const collection_size = buildCollectionSize(elements)
+  const sizeFields = buildCollectionSize(elements)
   const zuopinleixing = findElement(elements, 'zuopinleixing')
   const collection_material = picklistDisplayText(zuopinleixing)
   return {
@@ -185,7 +190,9 @@ function mapElementsToSyncPayload(elements, listHint) {
     artistName,
     year,
     price: priceNum,
-    collection_size,
+    collection_size: sizeFields.collection_size,
+    length_cm: sizeFields.length_cm,
+    width_cm: sizeFields.width_cm,
     collection_material,
   }
 }
@@ -277,12 +284,15 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
   const price = payload.price != null ? payload.price : 0
   const collection_size = payload.collection_size || null
   const collection_material = payload.collection_material || null
+  const length_cm = payload.length_cm != null ? payload.length_cm : null
+  const width_cm = payload.width_cm != null ? payload.width_cm : null
 
   if (existing) {
     await db.query(
       `UPDATE original_artworks SET
         title = ?, artist_id = ?, year = ?, price = ?, original_price = ?,
-        collection_size = ?, collection_material = ?, wms_image_paths = ?, wms_last_modified = ?
+        collection_size = ?, collection_material = ?, length_cm = ?, width_cm = ?,
+        wms_image_paths = ?, wms_last_modified = ?
       WHERE id = ?`,
       [
         payload.title,
@@ -292,6 +302,8 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
         price,
         collection_size,
         collection_material,
+        length_cm,
+        width_cm,
         wmsImagePathsJson,
         lastModified,
         existing.id,
@@ -305,9 +317,10 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
     `INSERT INTO original_artworks (
       title, image, artist_id, year, description, long_description,
       background, features, collection_location, collection_number,
-      collection_size, collection_material, price, original_price, discount_price,
+      collection_size, collection_material, length_cm, width_cm,
+      price, original_price, discount_price,
       stock, sales, is_on_sale, wms_record_id, wms_last_modified, wms_image_paths
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.title,
       image,
@@ -321,6 +334,8 @@ async function upsertOneProductFromWms(cookie, recordId, listHint, artistIdByNam
       null,
       collection_size,
       collection_material,
+      length_cm,
+      width_cm,
       price,
       price,
       null,

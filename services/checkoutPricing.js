@@ -13,6 +13,12 @@ const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightD
 const { processImageUrl } = require('../utils/image')
 const { ensureRightsShippingColumns } = require('./rightsService')
 const {
+  resolveArtworkShippingGoods,
+  resolveArtworkHeightCmForVolume,
+  ensureArtworksShippingColumns,
+  normalizePhysicalOrderItemForShipping,
+} = require('../utils/artworkShippingDimensions')
+const {
   assertSfConfig,
   resolvePayAndMonthlyCard,
   queryDeliverTm: sfQueryDeliverTm,
@@ -170,9 +176,17 @@ function computeItemShippingMetrics(item, goods) {
   const defaultWeightKg = getDefaultPackageWeightKg()
   const unitWeightKg = parsePositiveShippingNumber(goods?.weight_kg) ?? defaultWeightKg
 
-  const lengthCm = parsePositiveShippingNumber(goods?.length_cm)
-  const widthCm = parsePositiveShippingNumber(goods?.width_cm)
-  const heightCm = parsePositiveShippingNumber(goods?.height_cm)
+  let lengthCm = parsePositiveShippingNumber(goods?.length_cm)
+  let widthCm = parsePositiveShippingNumber(goods?.width_cm)
+  let heightCm = parsePositiveShippingNumber(goods?.height_cm)
+
+  if (item.type === 'artwork') {
+    const resolved = resolveArtworkHeightCmForVolume(goods)
+    lengthCm = resolved.lengthCm
+    widthCm = resolved.widthCm
+    heightCm = resolved.heightCm
+  }
+
   const unitVolumeCm3 = lengthCm && widthCm && heightCm ? lengthCm * widthCm * heightCm : null
 
   return {
@@ -215,18 +229,23 @@ function resolvePackageDimensionsFromPhysicalItems(physicalItems) {
     return { totalLength: null, totalWidth: null, totalHeight: null }
   }
 
-  const row = shippableRows[0]
-  const lengthCm = parsePositiveShippingNumber(row.length_cm)
-  const widthCm = parsePositiveShippingNumber(row.width_cm)
-  const heightCm = parsePositiveShippingNumber(row.height_cm)
-  if (!lengthCm || !widthCm || !heightCm) {
+  const row = normalizePhysicalOrderItemForShipping(shippableRows[0])
+  const resolved = row.type === 'artwork'
+    ? resolveArtworkHeightCmForVolume(row)
+    : {
+      lengthCm: parsePositiveShippingNumber(row.length_cm),
+      widthCm: parsePositiveShippingNumber(row.width_cm),
+      heightCm: parsePositiveShippingNumber(row.height_cm),
+    }
+
+  if (!resolved.lengthCm || !resolved.widthCm || !resolved.heightCm) {
     return { totalLength: null, totalWidth: null, totalHeight: null }
   }
 
   return {
-    totalLength: lengthCm,
-    totalWidth: widthCm,
-    totalHeight: heightCm,
+    totalLength: resolved.lengthCm,
+    totalWidth: resolved.widthCm,
+    totalHeight: resolved.heightCm,
   }
 }
 
@@ -234,7 +253,8 @@ function buildShippingMetricsFromPhysicalItems(physicalItems) {
   const normalizedCartItems = []
   const goodsMap = new Map()
 
-  for (const row of physicalItems || []) {
+  for (const rawRow of physicalItems || []) {
+    const row = normalizePhysicalOrderItemForShipping(rawRow)
     const quantity = Number(row.quantity) > 0 ? Number(row.quantity) : 1
     if (row.type === 'right' && row.right_id) {
       normalizedCartItems.push({ type: 'right', right_id: row.right_id, quantity })
@@ -246,7 +266,12 @@ function buildShippingMetricsFromPhysicalItems(physicalItems) {
       })
     } else if (row.type === 'artwork' && row.artwork_id) {
       normalizedCartItems.push({ type: 'artwork', artwork_id: row.artwork_id, quantity })
-      goodsMap.set(`artwork_${row.artwork_id}`, {})
+      goodsMap.set(`artwork_${row.artwork_id}`, {
+        weight_kg: row.weight_kg,
+        length_cm: row.length_cm,
+        width_cm: row.width_cm,
+        height_cm: row.height_cm,
+      })
     }
   }
 
@@ -506,6 +531,7 @@ function buildPreviewItemImageFields(item, goods, rightImagesMap) {
 
 async function priceCartItems(connection, userId, normalizedCartItems) {
   await ensureRightsShippingColumns(connection)
+  await ensureArtworksShippingColumns(connection)
 
   const rightIds = []
   const artworkIds = []
@@ -549,7 +575,8 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
 
   if (artworkIds.length > 0) {
     const [artworks] = await connection.query(
-      `SELECT oa.id, oa.title, oa.image, oa.original_price, oa.discount_price, oa.stock
+      `SELECT oa.id, oa.title, oa.image, oa.original_price, oa.discount_price, oa.stock,
+              oa.collection_size, oa.length_cm, oa.width_cm, oa.height_cm, oa.weight_kg
        FROM original_artworks oa
        INNER JOIN artists a ON a.id = oa.artist_id
        WHERE oa.id IN (?) AND oa.is_on_sale = 1
@@ -557,7 +584,10 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
       [artworkIds]
     )
     artworks.forEach((artwork) => {
-      goodsMap.set(`artwork_${artwork.id}`, artwork)
+      goodsMap.set(`artwork_${artwork.id}`, {
+        ...artwork,
+        ...resolveArtworkShippingGoods(artwork),
+      })
     })
   }
 

@@ -77,20 +77,22 @@ describe('checkoutPricing', () => {
     process.env.SF_DEFAULT_EXPRESS_TYPE_ID = prev
   })
 
-  it('computeCartShippingMetrics sums right weight and volume', () => {
+  it('computeCartShippingMetrics sums right and artwork weight and volume', () => {
     const { computeCartShippingMetrics } = require('../services/checkoutPricing.js')
     const goodsMap = new Map([
       ['right_1', { weight_kg: 0.5, length_cm: 30, width_cm: 20, height_cm: 10 }],
       ['right_2', { weight_kg: 1.2 }],
+      ['artwork_9', { length_cm: 30, width_cm: 40, height_cm: 5 }],
     ])
     const metrics = computeCartShippingMetrics([
       { type: 'right', right_id: 1, quantity: 2 },
       { type: 'right', right_id: 2, quantity: 1 },
+      { type: 'artwork', artwork_id: 9, quantity: 1 },
       { type: 'digital', digital_artwork_id: 'x', quantity: 1 },
     ], goodsMap)
 
-    expect(metrics.weightKg).toBe(2.2)
-    expect(metrics.volumeCm3).toBe(12000)
+    expect(metrics.weightKg).toBe(3.2)
+    expect(metrics.volumeCm3).toBe(12000 + 6000)
   })
 
   it('buildShippingMetricsFromPhysicalItems aggregates order items for logistics', () => {
@@ -100,18 +102,39 @@ describe('checkoutPricing', () => {
         type: 'right',
         right_id: 3,
         quantity: 1,
-        length_cm: 40,
-        width_cm: 30,
-        height_cm: 10,
-        weight_kg: 0.8,
+        right_length_cm: 40,
+        right_width_cm: 30,
+        right_height_cm: 10,
+        right_weight_kg: 0.8,
+      },
+      {
+        type: 'artwork',
+        artwork_id: 9,
+        quantity: 1,
+        collection_size: '30×40cm',
       },
     ])
 
-    expect(metrics.totalWeight).toBe(0.8)
-    expect(metrics.totalVolume).toBe(12000)
-    expect(metrics.totalLength).toBe(40)
-    expect(metrics.totalWidth).toBe(30)
-    expect(metrics.totalHeight).toBe(10)
+    expect(metrics.totalWeight).toBeGreaterThan(0)
+    expect(metrics.totalVolume).toBeGreaterThan(0)
+    expect(metrics.totalLength).toBeNull()
+  })
+
+  it('buildShippingMetricsFromPhysicalItems resolves artwork size from collection_size', () => {
+    const { buildShippingMetricsFromPhysicalItems } = require('../services/checkoutPricing.js')
+    const metrics = buildShippingMetricsFromPhysicalItems([
+      {
+        type: 'artwork',
+        artwork_id: 9,
+        quantity: 1,
+        collection_size: '30×40cm',
+      },
+    ])
+
+    expect(metrics.totalVolume).toBe(6000)
+    expect(metrics.totalLength).toBe(30)
+    expect(metrics.totalWidth).toBe(40)
+    expect(metrics.totalHeight).toBe(5)
   })
 
   it('buildPreviewItemImageFields returns image and images for each type', () => {

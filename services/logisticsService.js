@@ -18,6 +18,7 @@ const {
 } = require('./logisticsPathNotify')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { ensureRightsShippingColumns } = require('./rightsService')
+const { ensureArtworksShippingColumns } = require('../utils/artworkShippingDimensions')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
 const {
   assertSfConfig,
@@ -129,6 +130,7 @@ async function resolveLogisticsOrderContext(b) {
 
 async function loadShippableOrderContext(internalOrderId) {
   await ensureRightsShippingColumns()
+  await ensureArtworksShippingColumns()
 
   const [orderRows] = await db.query(
     `SELECT o.id, o.out_trade_no, o.user_id, o.trade_state, o.body
@@ -163,10 +165,15 @@ async function loadShippableOrderContext(internalOrderId) {
         oi.artwork_id,
         oi.address_id,
         COALESCE(r.title, oa.title) AS item_title,
-        r.length_cm,
-        r.width_cm,
-        r.height_cm,
-        r.weight_kg,
+        r.length_cm AS right_length_cm,
+        r.width_cm AS right_width_cm,
+        r.height_cm AS right_height_cm,
+        r.weight_kg AS right_weight_kg,
+        oa.collection_size,
+        oa.length_cm AS artwork_length_cm,
+        oa.width_cm AS artwork_width_cm,
+        oa.height_cm AS artwork_height_cm,
+        oa.weight_kg AS artwork_weight_kg,
         wa.receiver_name,
         wa.receiver_phone,
         wa.province,

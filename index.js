@@ -50,6 +50,7 @@ const { ensureOrderShipmentsTable } = require('./utils/orderShipmentsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { ensureOrdersShippingColumns } = require('./utils/ordersSchema');
 const { ensureRightsShippingColumns } = require('./services/rightsService');
+const { ensureArtworksShippingColumns } = require('./utils/artworkShippingDimensions');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
 const { startLogisticsPathNotifyScheduler } = require('./services/logisticsPathNotify');
@@ -420,6 +421,9 @@ ensureOrdersShippingColumns().catch((err) => {
 });
 ensureRightsShippingColumns().catch((err) => {
   logger.warn('rights shipping columns ensure failed', { err: err.message });
+});
+ensureArtworksShippingColumns().catch((err) => {
+  logger.warn('original_artworks shipping columns ensure failed', { err: err.message });
 });
 
 // 定时同步外部数字艺术品到缓存表（用于列表/影藏展示）
