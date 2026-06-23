@@ -47,6 +47,16 @@ router.post('/login', async (req, res) => {
     }
 });
 
+router.post('/refresh', async (req, res) => {
+    try {
+        const r = await svc.refreshToken(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('刷新 token 失败', { err: error });
+        res.status(500).json({ error: '刷新登录状态失败', detail: error.message });
+    }
+});
+
 router.post('/bindUserInfo', async (req, res) => {
     try {
         const r = await svc.bindUserInfo(req);

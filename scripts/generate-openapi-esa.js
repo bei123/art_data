@@ -116,6 +116,7 @@ const BODY_REF_RULES = [
   [/\/cart\/\{id\}$/, 'CartUpdateQuantity', 'put'],
   [/\/favorites$/, 'FavoriteAdd', 'post'],
   [/wx\/login$/, 'WxCodeBody', 'post'],
+  [/wx\/refresh$/, 'WxRefreshTokenBody', 'post'],
   [/wx\/getPhoneNumber$/, 'WxCodeBody', 'post'],
   [/wx\/pay\/unifiedorder$/, 'PayOrderBody', 'post'],
   [/wx\/pay\/singleorder$/, 'PayOrderBody', 'post'],
@@ -257,6 +258,13 @@ function buildSpec() {
           type: 'object',
           properties: {
             code: { type: 'string' },
+          },
+        },
+        WxRefreshTokenBody: {
+          type: 'object',
+          required: ['refreshToken'],
+          properties: {
+            refreshToken: { type: 'string' },
           },
         },
         CartAddItem: {

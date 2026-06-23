@@ -1,5 +1,4 @@
 const axios = require('axios');
-const jwt = require('jsonwebtoken');
 const db = require('../db');
 const { uploadToOSS } = require('../config/oss');
 const { OSS_PUBLIC_ORIGIN } = require('../config/publicEnv');
@@ -13,9 +12,7 @@ const { getAccessToken } = require('./wechatMiniProgramToken');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { resolveAuthFromRequest } = require('../auth');
-
-const WX_TOKEN_TTL_DAYS = 7
-const WX_TOKEN_EXPIRES_IN = `${WX_TOKEN_TTL_DAYS}d`
+const { issueWxTokenPair, refreshWxAccessToken } = require('../utils/wxSessionTokens');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -181,23 +178,16 @@ const { code } = req.body;
             user = users[0];
         }
 
-        // 3. 生成你自己系统的 token（如 JWT）
-        const token = jwt.sign({ userId: user.id, openid }, process.env.JWT_SECRET, { expiresIn: WX_TOKEN_EXPIRES_IN });
-        const decoded = jwt.decode(token)
-        const expiresAt = new Date(decoded.exp * 1000).toISOString()
-        const expiresIn = decoded.exp - Math.floor(Date.now() / 1000)
-
-        // 与 auth.authenticateToken 一致：写入会话表，登出或过期即吊销
-        await db.query(
-            `INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ${WX_TOKEN_TTL_DAYS} DAY))`,
-            [user.id, token]
-        );
+        const tokenPair = await issueWxTokenPair({ userId: user.id, openid });
 
         // 4. 返回用户信息和 token, 过滤掉敏感字段
         return adminResult(200, {
-            token,
-            expires_at: expiresAt,
-            expiresIn,
+            token: tokenPair.token,
+            refreshToken: tokenPair.refreshToken,
+            expires_at: tokenPair.expires_at,
+            expiresIn: tokenPair.expiresIn,
+            refresh_expires_at: tokenPair.refresh_expires_at,
+            refreshExpiresIn: tokenPair.refreshExpiresIn,
             user: {
                 id: user.id,
                 openid: user.openid,
@@ -212,6 +202,29 @@ const { code } = req.body;
         logger.error('登录失败', { err });
         return adminResult(500, { error: '获取用户信息服务暂时不可用', detail: err.message });
 }
+}
+
+async function refreshToken(req) {
+    const { refreshToken: refreshTokenValue } = req.body || {};
+
+    try {
+        const result = await refreshWxAccessToken(refreshTokenValue);
+        if (!result.ok) {
+            return adminResult(result.status, { error: result.error });
+        }
+
+        return adminResult(200, {
+            token: result.token,
+            refreshToken: result.refreshToken,
+            expires_at: result.expires_at,
+            expiresIn: result.expiresIn,
+            refresh_expires_at: result.refresh_expires_at,
+            refreshExpiresIn: result.refreshExpiresIn,
+        });
+    } catch (err) {
+        logger.error('刷新 token 失败', { err });
+        return adminResult(500, { error: '刷新登录状态失败', detail: err.message });
+    }
 }
 
 async function bindUserInfo(req) {
@@ -1484,6 +1497,7 @@ async function setAddressDefault(req) {
 module.exports = {
   getPhoneNumber,
   login,
+  refreshToken,
   bindUserInfo,
   userInfo,
   updateProfile,
