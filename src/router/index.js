@@ -168,6 +168,26 @@ const routes = [
           requiresAuth: true,
           roles: ['admin']
         }
+      },
+      {
+        path: 'referral/withdrawals',
+        name: 'ReferralWithdrawals',
+        component: () => import('@/views/ReferralWithdrawals.vue'),
+        meta: {
+          title: '推荐官提现',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
+        path: 'referral/coupons',
+        name: 'ReferralCoupons',
+        component: () => import('@/views/ReferralCoupons.vue'),
+        meta: {
+          title: '推荐优惠券',
+          requiresAuth: true,
+          roles: ['admin']
+        }
       }
     ]
   },

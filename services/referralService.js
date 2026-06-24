@@ -7,6 +7,8 @@ const {
   isRecommenderOrAbove,
 } = require('./userTierService')
 const { getWalletSummary } = require('./commissionService')
+const { MIN_WITHDRAW_YUAN } = require('./withdrawService')
+const { FIRST_REFERRAL_BONUS_YUAN } = require('./referralRewardService')
 
 const REFERRAL_BINDING_DAYS = parseInt(process.env.REFERRAL_BINDING_DAYS || '365', 10)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -299,6 +301,11 @@ async function getReferralCenter(userId) {
     referral_code: codeRow?.status === 'active' ? codeRow.code : null,
     my_binding: formatBinding(binding),
     binding_days: REFERRAL_BINDING_DAYS,
+    withdraw: {
+      min_yuan: MIN_WITHDRAW_YUAN,
+      requires_real_name: false,
+    },
+    first_referral_bonus_yuan: FIRST_REFERRAL_BONUS_YUAN,
     stats: {
       referred_order_count: Number(orderStats[0]?.referred_order_count || 0),
       share_count: Number(shareStats[0]?.share_count || 0),

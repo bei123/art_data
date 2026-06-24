@@ -114,6 +114,7 @@ async function ensureShareEventsTable() {
 }
 
 const { ensureCommissionSchema } = require('./commissionSchema')
+const { ensureReferralRewardsSchema } = require('./referralRewardsSchema')
 
 async function ensureOrdersReferrerColumn() {
   try {
@@ -137,6 +138,7 @@ async function ensureReferralSchema() {
   await ensureShareEventsTable()
   await ensureOrdersReferrerColumn()
   await ensureCommissionSchema()
+  await ensureReferralRewardsSchema()
 
   schemaReady = true
 }

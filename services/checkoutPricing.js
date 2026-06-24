@@ -712,15 +712,28 @@ function parseCheckoutPreviewBody(body) {
     }
   }
 
+  const referralCouponId = payload.referral_coupon_id != null
+    ? parseInt(payload.referral_coupon_id, 10)
+    : null
+
   return {
     mode,
     normalizedCartItems,
     addressId: payload.address_id,
     expressTypeId,
+    referralCouponId: Number.isNaN(referralCouponId) ? null : referralCouponId,
   }
 }
 
-async function buildCheckoutQuote({ connection, userId, mode, normalizedCartItems, addressId, expressTypeId }) {
+async function buildCheckoutQuote({
+  connection,
+  userId,
+  mode,
+  normalizedCartItems,
+  addressId,
+  expressTypeId,
+  referralCouponId,
+}) {
   const priced = await priceCartItems(connection, userId, normalizedCartItems)
   if (priced.error) return priced
 
@@ -765,7 +778,30 @@ async function buildCheckoutQuote({ connection, userId, mode, normalizedCartItem
     deliverTmList = shipping.deliverTmList || []
   }
 
-  const discountYuan = await getAvailableDiscount(connection, userId)
+  const identityDiscountYuan = await getAvailableDiscount(connection, userId)
+  let referralCouponDiscountYuan = 0
+  let referralCouponMeta = null
+
+  if (referralCouponId) {
+    const { resolveReferralCouponDiscount } = require('./referralRewardService')
+    const couponResolved = await resolveReferralCouponDiscount(
+      connection,
+      userId,
+      referralCouponId,
+      priced.itemsSubtotalYuan
+    )
+    if (couponResolved.error) {
+      return { error: adminResult(400, { error: couponResolved.error }) }
+    }
+    referralCouponDiscountYuan = couponResolved.discountYuan
+    referralCouponMeta = {
+      id: couponResolved.coupon.id,
+      title: couponResolved.coupon.title,
+      discount_yuan: couponResolved.discountYuan,
+    }
+  }
+
+  const discountYuan = roundYuan(identityDiscountYuan + referralCouponDiscountYuan)
   const fee = buildFeeBreakdown({
     itemsSubtotalYuan: priced.itemsSubtotalYuan,
     shippingFeeYuan,
@@ -788,6 +824,9 @@ async function buildCheckoutQuote({ connection, userId, mode, normalizedCartItem
       items_subtotal_yuan: priced.itemsSubtotalYuan,
       shipping_fee_yuan: shippingFeeYuan,
       discount_yuan: discountYuan,
+      identity_discount_yuan: identityDiscountYuan,
+      referral_coupon_discount_yuan: referralCouponDiscountYuan,
+      referral_coupon: referralCouponMeta,
       total_fee_yuan: fee.order_total_before_discount_yuan,
       amount_payable_yuan: fee.amount_payable_yuan,
       shipping_snapshot: shippingSnapshot,
@@ -873,6 +912,7 @@ async function resolveCheckoutAmounts({
       normalizedCartItems,
       addressId: quote.address_id,
       expressTypeId: quote.express_type_id || expressTypeId || getDefaultExpressTypeId(),
+      referralCouponId: quote.referral_coupon?.id || null,
     })
     if (repriced.error) return repriced
 
@@ -894,6 +934,7 @@ async function resolveCheckoutAmounts({
       shippingSnapshot: fresh.shipping_snapshot,
       resolvedAddressId: fresh.address_id,
       quoteToken: loaded.token,
+      referralCouponId: fresh.referral_coupon?.id || null,
     }
   }
 
@@ -951,6 +992,7 @@ async function checkoutPreview(req) {
         normalizedCartItems: parsed.normalizedCartItems,
         addressId: parsed.addressId,
         expressTypeId: parsed.expressTypeId,
+        referralCouponId: parsed.referralCouponId,
       })
       if (quote.error) return quote.error
 

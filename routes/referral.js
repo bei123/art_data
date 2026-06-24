@@ -92,4 +92,55 @@ router.get('/commissions', authenticateToken, async (req, res) => {
   }
 })
 
+router.post('/withdraw', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { requestWithdraw } = require('../services/withdrawService')
+    const { amount_yuan: amountYuan, withdraw_all: withdrawAll } = req.body || {}
+    const r = await requestWithdraw(session.userId, {
+      amountYuan,
+      withdrawAll: withdrawAll === true || withdrawAll === 1 || withdrawAll === '1',
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('提现申请失败', { err: error })
+    res.status(500).json({ error: '提现申请失败' })
+  }
+})
+
+router.get('/withdrawals', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { listUserWithdrawals } = require('../services/withdrawService')
+    const data = await listUserWithdrawals(session.userId, {
+      page: parseInt(req.query.page, 10) || 1,
+      pageSize: parseInt(req.query.pageSize, 10) || 20,
+    })
+    return res.json(data)
+  } catch (error) {
+    logger.error('获取提现记录失败', { err: error })
+    res.status(500).json({ error: '获取提现记录失败' })
+  }
+})
+
+router.get('/coupons', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { listUserCoupons } = require('../services/referralRewardService')
+    const items = await listUserCoupons(session.userId, {
+      status: req.query.status || 'available',
+    })
+    return res.json({ items })
+  } catch (error) {
+    logger.error('获取优惠券失败', { err: error })
+    res.status(500).json({ error: '获取优惠券失败' })
+  }
+})
+
 module.exports = router
