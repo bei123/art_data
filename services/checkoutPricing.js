@@ -801,7 +801,12 @@ async function buildCheckoutQuote({
       priced.itemsSubtotalYuan
     )
     if (couponResolved.error) {
-      return { error: adminResult(400, { error: couponResolved.error }) }
+      return {
+        error: adminResult(400, {
+          error: couponResolved.error,
+          code: 'REFERRAL_COUPON_INVALID',
+        }),
+      }
     }
     referralCouponDiscountYuan = couponResolved.discountYuan
     referralCouponMeta = {
