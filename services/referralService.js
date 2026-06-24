@@ -347,15 +347,19 @@ async function tryBindReferralOnLogin(userId, body) {
 }
 
 async function resolveWxUserId(req) {
+  if (req.user?.is_wx_user && req.user?.id) {
+    return { ok: true, userId: Number(req.user.id) }
+  }
+
   const { resolveAuthFromRequest } = require('../auth')
   const auth = await resolveAuthFromRequest(req)
   if (!auth.ok) {
     return { ok: false, result: adminResult(auth.status, { error: auth.error }) }
   }
-  if (!auth.user?.is_wx_user) {
+  if (!auth.openid) {
     return { ok: false, result: adminResult(403, { error: '仅微信用户可访问' }) }
   }
-  return { ok: true, userId: auth.user.id }
+  return { ok: true, userId: auth.userId }
 }
 
 async function getTierForRequest(req) {
