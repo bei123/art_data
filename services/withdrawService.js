@@ -4,7 +4,18 @@ const logger = require('../utils/logger')
 const { ensureReferralRewardsSchema } = require('../utils/referralRewardsSchema')
 const { ensureCommissionSchema } = require('../utils/commissionSchema')
 const { ensureWallet, adjustWalletBalances, roundMoney, parseMoney } = require('./commissionService')
-const { createTransferToWallet, isTransferConfigured } = require('./wechatTransferService')
+const {
+  createTransferToWallet,
+  isTransferConfigured,
+  queryTransferByOutBillNo,
+  getTransferClientConfig,
+  normalizeTransferBill,
+  TERMINAL_SUCCESS_STATES,
+  TERMINAL_FAIL_STATES,
+  AWAIT_CONFIRM_STATES,
+} = require('./wechatTransferService')
+
+const ACTIVE_WITHDRAWAL_STATUSES = ['pending', 'processing', 'await_confirm']
 
 const MIN_WITHDRAW_YUAN = parseFloat(process.env.MIN_WITHDRAW_YUAN || '0')
 const MAX_WITHDRAW_YUAN = parseFloat(process.env.MAX_WITHDRAW_YUAN || '20000')
@@ -32,7 +43,7 @@ async function sumTodayWithdrawnYuan(userId, connection = db) {
     `SELECT COALESCE(SUM(amount), 0) AS total
      FROM withdrawal_requests
      WHERE user_id = ?
-       AND status IN ('pending', 'processing', 'success')
+       AND status IN ('pending', 'processing', 'await_confirm', 'success')
        AND created_at >= CURDATE()`,
     [userId]
   )
@@ -42,7 +53,7 @@ async function sumTodayWithdrawnYuan(userId, connection = db) {
 async function hasActiveWithdrawal(userId, connection = db) {
   const [rows] = await connection.query(
     `SELECT id FROM withdrawal_requests
-     WHERE user_id = ? AND status IN ('pending', 'processing')
+     WHERE user_id = ? AND status IN ('pending', 'processing', 'await_confirm')
      LIMIT 1`,
     [userId]
   )
@@ -225,6 +236,7 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
       withdrawal_id: withdrawalId,
       amount_yuan: validation.amount,
       status: transferResult.status || 'pending',
+      need_user_confirm: Boolean(transferResult.needUserConfirm),
       manual_review: transferResult.manualReview || false,
     })
   } catch (err) {
@@ -236,6 +248,129 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
   }
 }
 
+async function mapWechatStateToWithdrawalStatus(wxState) {
+  if (TERMINAL_SUCCESS_STATES.has(wxState)) return 'success'
+  if (TERMINAL_FAIL_STATES.has(wxState)) return 'failed'
+  if (AWAIT_CONFIRM_STATES.has(wxState)) return 'await_confirm'
+  return 'processing'
+}
+
+async function completeWithdrawalSuccess(withdrawalId, { transferBillNo, wxState, packageInfo } = {}) {
+  const connection = await db.getConnection()
+  try {
+    await connection.beginTransaction()
+
+    const [rows] = await connection.query(
+      `SELECT id, user_id, amount, status FROM withdrawal_requests WHERE id = ? FOR UPDATE`,
+      [withdrawalId]
+    )
+    const row = rows[0]
+    if (!row) {
+      await connection.rollback()
+      return { ok: false, status: null }
+    }
+    if (row.status === 'success') {
+      await connection.commit()
+      return { ok: true, status: 'success', alreadyDone: true }
+    }
+
+    await connection.query(
+      `UPDATE withdrawal_requests
+       SET status = 'success',
+           wx_transfer_id = COALESCE(?, wx_transfer_id),
+           wx_state = ?,
+           wx_package_info = COALESCE(?, wx_package_info),
+           fail_reason = NULL,
+           processed_at = NOW(),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [transferBillNo || null, wxState || 'SUCCESS', packageInfo || null, withdrawalId]
+    )
+
+    await connection.query(
+      `UPDATE user_wallets
+       SET total_withdrawn = total_withdrawn + ?, updated_at = NOW()
+       WHERE user_id = ?`,
+      [row.amount, row.user_id]
+    )
+
+    await connection.commit()
+    return { ok: true, status: 'success' }
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+async function applyWechatBillToWithdrawal(withdrawalId, bill) {
+  if (!bill || !bill.state) {
+    return { ok: false, error: '转账单状态无效' }
+  }
+
+  const wxState = bill.state
+  const mappedStatus = await mapWechatStateToWithdrawalStatus(wxState)
+
+  if (TERMINAL_SUCCESS_STATES.has(wxState)) {
+    const result = await completeWithdrawalSuccess(withdrawalId, {
+      transferBillNo: bill.transferBillNo,
+      wxState,
+      packageInfo: bill.packageInfo,
+    })
+    return { ...result, needUserConfirm: false }
+  }
+
+  if (TERMINAL_FAIL_STATES.has(wxState)) {
+    await failWithdrawal(withdrawalId, bill.failReason || '微信转账失败')
+    return { ok: false, status: 'failed', needUserConfirm: false }
+  }
+
+  const packageInfo = bill.packageInfo || null
+  await db.query(
+    `UPDATE withdrawal_requests
+     SET status = ?,
+         wx_transfer_id = COALESCE(?, wx_transfer_id),
+         wx_state = ?,
+         wx_package_info = COALESCE(?, wx_package_info),
+         updated_at = NOW()
+     WHERE id = ?`,
+    [
+      mappedStatus,
+      bill.transferBillNo || null,
+      wxState,
+      packageInfo,
+      withdrawalId,
+    ]
+  )
+
+  return {
+    ok: true,
+    status: mappedStatus,
+    needUserConfirm: mappedStatus === 'await_confirm',
+    packageInfo,
+  }
+}
+
+async function resolveTransferCreateFailure(withdrawalId, outBillNo, errorMessage) {
+  const queried = await queryTransferByOutBillNo(outBillNo)
+  if (queried.ok && queried.bill) {
+    return applyWechatBillToWithdrawal(withdrawalId, queried.bill)
+  }
+
+  if (queried.httpStatus === 404) {
+    await failWithdrawal(withdrawalId, errorMessage || '微信转账失败')
+    return { ok: false, status: 'failed', error: errorMessage }
+  }
+
+  return {
+    ok: false,
+    status: 'processing',
+    error: errorMessage || '转账结果待确认，请稍后查询',
+    shouldRetryLater: true,
+  }
+}
+
 async function processWithdrawTransfer(withdrawalId) {
   await ensureReferralRewardsSchema()
 
@@ -244,7 +379,7 @@ async function processWithdrawTransfer(withdrawalId) {
     [withdrawalId]
   )
   const row = rows[0]
-  if (!row || !['pending', 'processing'].includes(row.status)) {
+  if (!row || !ACTIVE_WITHDRAWAL_STATUSES.includes(row.status)) {
     return { ok: false, status: row?.status }
   }
 
@@ -253,10 +388,22 @@ async function processWithdrawTransfer(withdrawalId) {
   }
 
   const openid = await getUserOpenid(row.user_id)
-  await db.query(
-    `UPDATE withdrawal_requests SET status = 'processing', updated_at = NOW() WHERE id = ?`,
-    [withdrawalId]
-  )
+  if (!openid) {
+    await failWithdrawal(withdrawalId, '用户 openid 缺失')
+    return { ok: false, status: 'failed', error: '用户 openid 缺失' }
+  }
+
+  if (row.status === 'pending') {
+    await db.query(
+      `UPDATE withdrawal_requests SET status = 'processing', updated_at = NOW() WHERE id = ?`,
+      [withdrawalId]
+    )
+  } else {
+    const queried = await queryTransferByOutBillNo(row.out_bill_no)
+    if (queried.ok && queried.bill) {
+      return applyWechatBillToWithdrawal(withdrawalId, queried.bill)
+    }
+  }
 
   const transfer = await createTransferToWallet({
     openid,
@@ -265,33 +412,96 @@ async function processWithdrawTransfer(withdrawalId) {
   })
 
   if (!transfer.ok) {
-    await failWithdrawal(withdrawalId, transfer.error || '微信转账失败')
-    return { ok: false, status: 'failed', error: transfer.error }
+    return resolveTransferCreateFailure(withdrawalId, row.out_bill_no, transfer.error)
   }
 
-  await db.query(
-    `UPDATE withdrawal_requests
-     SET status = 'success',
-         wx_transfer_id = ?,
-         wx_state = ?,
-         processed_at = NOW(),
-         updated_at = NOW()
-     WHERE id = ?`,
-    [transfer.transferId, transfer.state || 'SUCCESS', withdrawalId]
-  )
+  const bill = transfer.bill || {
+    transferBillNo: transfer.transferId,
+    state: transfer.state,
+    packageInfo: transfer.packageInfo,
+  }
 
-  await adjustWalletBalances(row.user_id, {
-    earnedDelta: 0,
+  return applyWechatBillToWithdrawal(withdrawalId, bill)
+}
+
+async function syncWithdrawalFromWechat(withdrawalId, { userId } = {}) {
+  await ensureReferralRewardsSchema()
+
+  const [rows] = await db.query(
+    `SELECT id, user_id, out_bill_no, status FROM withdrawal_requests WHERE id = ? LIMIT 1`,
+    [withdrawalId]
+  )
+  const row = rows[0]
+  if (!row) {
+    return adminResult(404, { error: '提现记录不存在' })
+  }
+  if (userId && row.user_id !== userId) {
+    return adminResult(403, { error: '无权操作该提现记录' })
+  }
+  if (!row.out_bill_no) {
+    return adminResult(400, { error: '缺少商户单号' })
+  }
+  if (!isTransferConfigured()) {
+    return adminResult(400, { error: '微信自动转账未启用' })
+  }
+
+  const queried = await queryTransferByOutBillNo(row.out_bill_no)
+  if (!queried.ok) {
+    return adminResult(502, { error: queried.error || '查询转账单失败' })
+  }
+
+  const result = await applyWechatBillToWithdrawal(withdrawalId, queried.bill)
+  return adminResult(200, {
+    success: Boolean(result.ok),
+    status: result.status,
+    need_user_confirm: Boolean(result.needUserConfirm),
+    wx_state: queried.bill.state,
   })
+}
 
-  await db.query(
-    `UPDATE user_wallets
-     SET total_withdrawn = total_withdrawn + ?, updated_at = NOW()
-     WHERE user_id = ?`,
-    [row.amount, row.user_id]
+async function getWithdrawalConfirmInfo(userId, withdrawalId) {
+  await ensureReferralRewardsSchema()
+
+  const syncResult = await syncWithdrawalFromWechat(withdrawalId, { userId })
+  if (!syncResult.ok) return syncResult
+
+  const [rows] = await db.query(
+    `SELECT id, status, wx_state, wx_package_info, amount
+     FROM withdrawal_requests
+     WHERE id = ? AND user_id = ?
+     LIMIT 1`,
+    [withdrawalId, userId]
   )
+  const row = rows[0]
+  if (!row) {
+    return adminResult(404, { error: '提现记录不存在' })
+  }
 
-  return { ok: true, status: 'success' }
+  if (row.status !== 'await_confirm' || row.wx_state !== 'WAIT_USER_CONFIRM') {
+    return adminResult(400, {
+      error: '当前状态不可拉起确认收款',
+      status: row.status,
+      wx_state: row.wx_state,
+    })
+  }
+  if (!row.wx_package_info) {
+    return adminResult(400, { error: '缺少收款确认参数，请稍后重试' })
+  }
+
+  const clientConfig = getTransferClientConfig()
+  if (!clientConfig.mchId || !clientConfig.appId) {
+    return adminResult(500, { error: '商户转账配置不完整' })
+  }
+
+  return adminResult(200, {
+    withdrawal_id: row.id,
+    amount_yuan: parseMoney(row.amount),
+    status: row.status,
+    wx_state: row.wx_state,
+    mch_id: clientConfig.mchId,
+    app_id: clientConfig.appId,
+    package: row.wx_package_info,
+  })
 }
 
 async function failWithdrawal(withdrawalId, reason) {
@@ -350,7 +560,7 @@ async function approveWithdrawalManually(withdrawalId) {
       await connection.rollback()
       return adminResult(200, { success: true, alreadyDone: true })
     }
-    if (!['pending', 'processing', 'failed'].includes(row.status)) {
+    if (!['pending', 'processing', 'await_confirm', 'failed'].includes(row.status)) {
       await connection.rollback()
       return adminResult(400, { error: '当前状态不可确认打款' })
     }
@@ -454,14 +664,160 @@ async function listAdminWithdrawals({
   }
 }
 
+const TRANSFER_NOTIFY_EVENT = 'MCHTRANSFER.BILL.FINISHED'
+const EXPECTED_MCH_ID = process.env.WX_PAY_MCH_ID || null
+
+async function applyTransferNotifyBill(bill, { notifyId } = {}) {
+  await ensureReferralRewardsSchema()
+
+  if (!bill || !bill.outBillNo || !bill.state) {
+    return { ok: false, error: '转账通知数据无效' }
+  }
+
+  if (!TERMINAL_SUCCESS_STATES.has(bill.state) && !TERMINAL_FAIL_STATES.has(bill.state)) {
+    logger.info('transfer notify ignored non-terminal state', {
+      notifyId,
+      outBillNo: bill.outBillNo,
+      state: bill.state,
+    })
+    return { ok: true, ignored: true }
+  }
+
+  if (EXPECTED_MCH_ID && bill.mchId && bill.mchId !== EXPECTED_MCH_ID) {
+    logger.error('transfer notify mch_id mismatch', {
+      notifyId,
+      outBillNo: bill.outBillNo,
+      expected: EXPECTED_MCH_ID,
+      got: bill.mchId,
+    })
+    return { ok: false, error: '商户号不匹配' }
+  }
+
+  const [rows] = await db.query(
+    `SELECT id, amount, status FROM withdrawal_requests WHERE out_bill_no = ? LIMIT 1`,
+    [bill.outBillNo]
+  )
+  const row = rows[0]
+  if (!row) {
+    logger.warn('transfer notify withdrawal not found', {
+      notifyId,
+      outBillNo: bill.outBillNo,
+      state: bill.state,
+    })
+    return { ok: true, ignored: true, notFound: true }
+  }
+
+  if (bill.transferAmount != null) {
+    const expectedFen = Math.round(parseMoney(row.amount) * 100)
+    if (expectedFen !== bill.transferAmount) {
+      logger.error('transfer notify amount mismatch', {
+        notifyId,
+        outBillNo: bill.outBillNo,
+        expectedFen,
+        gotFen: bill.transferAmount,
+      })
+      return { ok: false, error: '转账金额不匹配' }
+    }
+  }
+
+  if (row.status === 'success' && bill.state === 'SUCCESS') {
+    return { ok: true, status: 'success', alreadyDone: true }
+  }
+  if (row.status === 'failed' && TERMINAL_FAIL_STATES.has(bill.state)) {
+    return { ok: true, status: 'failed', alreadyDone: true }
+  }
+  if (row.status === 'cancelled' && bill.state === 'CANCELLED') {
+    return { ok: true, status: 'cancelled', alreadyDone: true }
+  }
+
+  return applyWechatBillToWithdrawal(row.id, bill)
+}
+
+async function handleTransferNotify(req) {
+  const {
+    parseAndVerifyWechatPayNotify,
+    decryptWechatPayNotifyPayload,
+    notifySuccessResult,
+    notifyFailResult,
+  } = require('../utils/wechatPayNotify')
+
+  const verified = parseAndVerifyWechatPayNotify(req)
+  if (!verified.ok) {
+    return notifyFailResult(verified.status, verified.error)
+  }
+
+  const { payload } = verified
+  const notifyId = payload.id || null
+
+  if (payload.event_type !== TRANSFER_NOTIFY_EVENT) {
+    logger.info('transfer notify ignored event', {
+      notifyId,
+      eventType: payload.event_type,
+    })
+    return notifySuccessResult()
+  }
+
+  if (!payload.resource) {
+    return notifyFailResult(400, '回调数据格式错误')
+  }
+
+  let billData
+  try {
+    billData = decryptWechatPayNotifyPayload(payload)
+  } catch (err) {
+    logger.error('transfer notify decrypt failed', { notifyId, err: err.message })
+    return notifyFailResult(400, '解密失败')
+  }
+
+  const bill = normalizeTransferBill(billData)
+  if (!bill) {
+    return notifyFailResult(400, '转账通知解析失败')
+  }
+
+  try {
+    const result = await applyTransferNotifyBill(bill, { notifyId })
+    if (!result.ok && !result.ignored) {
+      logger.error('transfer notify business failed', {
+        notifyId,
+        outBillNo: bill.outBillNo,
+        state: bill.state,
+        error: result.error,
+      })
+      return notifyFailResult(500, result.error || '处理失败')
+    }
+
+    logger.info('transfer notify handled', {
+      notifyId,
+      outBillNo: bill.outBillNo,
+      state: bill.state,
+      status: result.status,
+      alreadyDone: Boolean(result.alreadyDone),
+      ignored: Boolean(result.ignored),
+    })
+    return notifySuccessResult()
+  } catch (err) {
+    logger.error('transfer notify handle failed', {
+      notifyId,
+      outBillNo: bill.outBillNo,
+      err: err.message,
+    })
+    return notifyFailResult(500, '处理失败')
+  }
+}
+
 module.exports = {
   adminResult,
   MIN_WITHDRAW_YUAN,
   requestWithdraw,
   processWithdrawTransfer,
+  syncWithdrawalFromWechat,
+  getWithdrawalConfirmInfo,
   approveWithdrawalManually,
   failWithdrawal,
   listUserWithdrawals,
   listAdminWithdrawals,
   validateWithdrawAmount,
+  mapWechatStateToWithdrawalStatus,
+  handleTransferNotify,
+  applyTransferNotifyBill,
 }

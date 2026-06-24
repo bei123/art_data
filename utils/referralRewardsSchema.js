@@ -20,10 +20,11 @@ async function ensureWithdrawalRequestsTable() {
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       user_id INT NOT NULL,
       amount DECIMAL(12,2) NOT NULL,
-      status ENUM('pending','processing','success','failed','cancelled') NOT NULL DEFAULT 'pending',
+      status ENUM('pending','processing','await_confirm','success','failed','cancelled') NOT NULL DEFAULT 'pending',
       out_bill_no VARCHAR(64) NOT NULL,
       wx_transfer_id VARCHAR(64) NULL,
       wx_state VARCHAR(32) NULL,
+      wx_package_info TEXT NULL,
       fail_reason VARCHAR(255) NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       processed_at DATETIME NULL,
@@ -127,6 +128,43 @@ async function ensureCommissionLedgerBonusType() {
   }
 }
 
+async function ensureWithdrawalUserConfirmColumns() {
+  try {
+    const [statusRows] = await db.query(
+      `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'withdrawal_requests'
+         AND COLUMN_NAME = 'status'
+       LIMIT 1`
+    )
+    const statusType = String(statusRows[0]?.COLUMN_TYPE || '')
+    if (statusType && !statusType.includes('await_confirm')) {
+      await db.query(
+        `ALTER TABLE withdrawal_requests
+         MODIFY status ENUM('pending','processing','await_confirm','success','failed','cancelled')
+         NOT NULL DEFAULT 'pending'`
+      )
+      logger.info('withdrawal_requests.status extended with await_confirm')
+    }
+
+    const [packageRows] = await db.query(
+      `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'withdrawal_requests'
+         AND COLUMN_NAME = 'wx_package_info'
+       LIMIT 1`
+    )
+    if (!packageRows.length) {
+      await db.query(
+        'ALTER TABLE withdrawal_requests ADD COLUMN wx_package_info TEXT NULL AFTER wx_state'
+      )
+      logger.info('withdrawal_requests.wx_package_info column added')
+    }
+  } catch (err) {
+    logger.warn('ensureWithdrawalUserConfirmColumns failed', { err: err.message })
+  }
+}
+
 async function ensureOrdersReferralCouponColumn() {
   try {
     const [rows] = await db.query(
@@ -151,6 +189,7 @@ async function ensureReferralRewardsSchema() {
   if (schemaReady) return
 
   await ensureWithdrawalRequestsTable()
+  await ensureWithdrawalUserConfirmColumns()
   await ensureReferralBonusGrantsTable()
   await ensureReferralCouponTemplatesTable()
   await ensureUserReferralCouponsTable()

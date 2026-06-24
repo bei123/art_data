@@ -10,6 +10,7 @@
         <option value="">全部</option>
         <option value="pending">待处理</option>
         <option value="processing">处理中</option>
+        <option value="await_confirm">待确认收款</option>
         <option value="success">已到账</option>
         <option value="failed">失败</option>
       </select>
@@ -53,7 +54,7 @@
                     确认打款
                   </Button>
                   <Button
-                    v-if="row.status === 'pending' || row.status === 'processing'"
+                    v-if="row.status === 'pending' || row.status === 'processing' || row.status === 'await_confirm'"
                     size="sm"
                     variant="outline"
                     @click="handleRetry(row)"
@@ -99,6 +100,7 @@ function statusLabel(status) {
   const map = {
     pending: '待处理',
     processing: '处理中',
+    await_confirm: '待确认收款',
     success: '已到账',
     failed: '失败',
     cancelled: '已取消',

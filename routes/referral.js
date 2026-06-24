@@ -92,6 +92,20 @@ router.get('/commissions', authenticateToken, async (req, res) => {
   }
 })
 
+router.post('/withdraw/notify', async (req, res) => {
+  try {
+    const { handleTransferNotify } = require('../services/withdrawService')
+    const result = await handleTransferNotify(req)
+    if (result.noContent) {
+      return res.status(result.status).end()
+    }
+    return res.status(result.status).json(result.body)
+  } catch (error) {
+    logger.error('商家转账回调处理失败', { err: error })
+    return res.status(500).json({ code: 'FAIL', message: '处理失败' })
+  }
+})
+
 router.post('/withdraw', authenticateToken, async (req, res) => {
   try {
     const session = await svc.resolveWxUserId(req)
@@ -124,6 +138,44 @@ router.get('/withdrawals', authenticateToken, async (req, res) => {
   } catch (error) {
     logger.error('获取提现记录失败', { err: error })
     res.status(500).json({ error: '获取提现记录失败' })
+  }
+})
+
+router.get('/withdrawals/:id/confirm-info', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const withdrawalId = parseInt(req.params.id, 10)
+    if (!Number.isFinite(withdrawalId) || withdrawalId <= 0) {
+      return res.status(400).json({ error: '无效的提现记录' })
+    }
+
+    const { getWithdrawalConfirmInfo } = require('../services/withdrawService')
+    const r = await getWithdrawalConfirmInfo(session.userId, withdrawalId)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('获取提现确认信息失败', { err: error })
+    res.status(500).json({ error: '获取提现确认信息失败' })
+  }
+})
+
+router.post('/withdrawals/:id/sync', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const withdrawalId = parseInt(req.params.id, 10)
+    if (!Number.isFinite(withdrawalId) || withdrawalId <= 0) {
+      return res.status(400).json({ error: '无效的提现记录' })
+    }
+
+    const { syncWithdrawalFromWechat } = require('../services/withdrawService')
+    const r = await syncWithdrawalFromWechat(withdrawalId, { userId: session.userId })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('同步提现状态失败', { err: error })
+    res.status(500).json({ error: '同步提现状态失败' })
   }
 })
 
