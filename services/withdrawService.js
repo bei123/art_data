@@ -18,8 +18,44 @@ const {
 const ACTIVE_WITHDRAWAL_STATUSES = ['pending', 'processing', 'await_confirm']
 
 const MIN_WITHDRAW_YUAN = parseFloat(process.env.MIN_WITHDRAW_YUAN || '0')
-const MAX_WITHDRAW_YUAN = parseFloat(process.env.MAX_WITHDRAW_YUAN || '20000')
-const DAILY_WITHDRAW_LIMIT_YUAN = parseFloat(process.env.DAILY_WITHDRAW_LIMIT_YUAN || '50000')
+const MAX_WITHDRAW_YUAN = parseFloat(process.env.MAX_WITHDRAW_YUAN || '200')
+const USER_DAILY_WITHDRAW_LIMIT_YUAN = parseFloat(
+  process.env.USER_DAILY_WITHDRAW_LIMIT_YUAN
+  || process.env.DAILY_WITHDRAW_LIMIT_YUAN
+  || '2000'
+)
+const MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN = parseFloat(
+  process.env.MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN || '50000'
+)
+
+function getWithdrawPolicy() {
+  return {
+    min_yuan: MIN_WITHDRAW_YUAN,
+    max_yuan: MAX_WITHDRAW_YUAN,
+    user_daily_limit_yuan: USER_DAILY_WITHDRAW_LIMIT_YUAN,
+    merchant_daily_limit_yuan: MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN,
+  }
+}
+
+function computeWithdrawCap({
+  availableYuan,
+  userTodayYuan = 0,
+  merchantTodayYuan = 0,
+}) {
+  const available = roundMoney(availableYuan)
+  if (available <= 0) return 0
+
+  const caps = [available]
+  if (MAX_WITHDRAW_YUAN > 0) caps.push(MAX_WITHDRAW_YUAN)
+  if (USER_DAILY_WITHDRAW_LIMIT_YUAN > 0) {
+    caps.push(Math.max(0, roundMoney(USER_DAILY_WITHDRAW_LIMIT_YUAN - roundMoney(userTodayYuan))))
+  }
+  if (MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN > 0) {
+    caps.push(Math.max(0, roundMoney(MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN - roundMoney(merchantTodayYuan))))
+  }
+
+  return roundMoney(Math.min(...caps))
+}
 
 function isAdminApprovalRequiredForTransfer() {
   return String(process.env.WX_WITHDRAW_REQUIRE_ADMIN_APPROVAL || 'false').toLowerCase() === 'true'
@@ -56,6 +92,16 @@ async function sumTodayWithdrawnYuan(userId, connection = db) {
        AND status IN ('pending', 'processing', 'await_confirm', 'success')
        AND created_at >= CURDATE()`,
     [userId]
+  )
+  return parseMoney(rows[0]?.total)
+}
+
+async function sumMerchantTodayWithdrawnYuan(connection = db) {
+  const [rows] = await connection.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total
+     FROM withdrawal_requests
+     WHERE status IN ('pending', 'processing', 'await_confirm', 'success')
+       AND created_at >= CURDATE()`
   )
   return parseMoney(rows[0]?.total)
 }
@@ -119,7 +165,7 @@ async function allocateSettlableForWithdraw(userId, amountYuan, connection) {
   }
 
   if (remaining > 0.01) {
-    return { ok: false, error: '请提现全部可提现余额' }
+    return { ok: false, error: '当前佣金明细暂不支持该金额提现，请尝试更低金额或联系客服' }
   }
 
   return { ok: true, allocated }
@@ -200,7 +246,28 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
     )
     const available = parseMoney(walletRows[0]?.available_balance)
 
-    const targetAmount = withdrawAll ? available : parseMoney(amountYuan)
+    const todayUserTotal = await sumTodayWithdrawnYuan(userId, connection)
+    const todayMerchantTotal = await sumMerchantTodayWithdrawnYuan(connection)
+
+    const targetAmount = withdrawAll
+      ? computeWithdrawCap({
+        availableYuan: available,
+        userTodayYuan: todayUserTotal,
+        merchantTodayYuan: todayMerchantTotal,
+      })
+      : parseMoney(amountYuan)
+
+    if (withdrawAll && targetAmount <= 0) {
+      await connection.rollback()
+      if (USER_DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayUserTotal >= USER_DAILY_WITHDRAW_LIMIT_YUAN) {
+        return adminResult(400, { error: `您今日提现已达上限 ${USER_DAILY_WITHDRAW_LIMIT_YUAN} 元` })
+      }
+      if (MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayMerchantTotal >= MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN) {
+        return adminResult(400, { error: '商户今日转账额度已用尽，请明日再试' })
+      }
+      return adminResult(400, { error: '当前暂无可提现金额' })
+    }
+
     const validation = validateWithdrawAmount(targetAmount, available)
     if (!validation.ok) {
       await connection.rollback()
@@ -209,13 +276,22 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
 
     if (await hasActiveWithdrawal(userId, connection)) {
       await connection.rollback()
-      return adminResult(409, { error: '已有进行中的提现申请' })
+      return adminResult(409, { error: '已有进行中的提现申请，请完成后再试' })
     }
 
-    const todayTotal = await sumTodayWithdrawnYuan(userId, connection)
-    if (DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayTotal + validation.amount > DAILY_WITHDRAW_LIMIT_YUAN) {
+    if (USER_DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayUserTotal + validation.amount > USER_DAILY_WITHDRAW_LIMIT_YUAN) {
       await connection.rollback()
-      return adminResult(400, { error: '已超过今日提现限额' })
+      const remain = roundMoney(USER_DAILY_WITHDRAW_LIMIT_YUAN - todayUserTotal)
+      return adminResult(400, {
+        error: remain > 0
+          ? `今日剩余可提现 ${remain} 元`
+          : `您今日提现已达上限 ${USER_DAILY_WITHDRAW_LIMIT_YUAN} 元`,
+      })
+    }
+
+    if (MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayMerchantTotal + validation.amount > MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN) {
+      await connection.rollback()
+      return adminResult(400, { error: '商户今日转账额度已用尽，请明日再试' })
     }
 
     const allocation = await allocateSettlableForWithdraw(userId, validation.amount, connection)
@@ -253,6 +329,8 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
       need_user_confirm: Boolean(transferResult.needUserConfirm),
       manual_review: transferResult.manualReview || !shouldTransferOnUserRequest(),
       awaiting_admin_approval: !shouldTransferOnUserRequest() && isTransferConfigured(),
+      withdraw_cap_yuan: validation.amount,
+      limits: getWithdrawPolicy(),
     })
   } catch (err) {
     await connection.rollback()
@@ -641,6 +719,18 @@ async function listUserWithdrawals(userId, { page = 1, pageSize = 20 } = {}) {
   await ensureReferralRewardsSchema()
   const limit = Math.max(1, Math.min(pageSize, 50))
   const offset = (Math.max(1, page) - 1) * limit
+  const todayUserTotal = await sumTodayWithdrawnYuan(userId)
+  const todayMerchantTotal = await sumMerchantTodayWithdrawnYuan()
+  const [walletRows] = await db.query(
+    'SELECT available_balance FROM user_wallets WHERE user_id = ? LIMIT 1',
+    [userId]
+  )
+  const available = parseMoney(walletRows[0]?.available_balance)
+  const withdrawCapYuan = computeWithdrawCap({
+    availableYuan: available,
+    userTodayYuan: todayUserTotal,
+    merchantTodayYuan: todayMerchantTotal,
+  })
 
   const [rows] = await db.query(
     `SELECT id, amount, status, fail_reason, created_at, processed_at
@@ -661,7 +751,9 @@ async function listUserWithdrawals(userId, { page = 1, pageSize = 20 } = {}) {
     total: Number(countRows[0]?.total || 0),
     page: Math.max(1, page),
     pageSize: limit,
-    min_withdraw_yuan: MIN_WITHDRAW_YUAN,
+    ...getWithdrawPolicy(),
+    withdraw_cap_yuan: withdrawCapYuan,
+    user_today_withdrawn_yuan: todayUserTotal,
     auto_transfer_enabled: isTransferConfigured(),
     require_admin_approval: isAdminApprovalRequiredForTransfer(),
   }
@@ -710,6 +802,7 @@ async function listAdminWithdrawals({
     total: Number(countRows[0]?.total || 0),
     page: Math.max(1, page),
     pageSize: limit,
+    ...getWithdrawPolicy(),
     auto_transfer_enabled: isTransferConfigured(),
     require_admin_approval: isAdminApprovalRequiredForTransfer(),
   }
@@ -859,6 +952,11 @@ async function handleTransferNotify(req) {
 module.exports = {
   adminResult,
   MIN_WITHDRAW_YUAN,
+  MAX_WITHDRAW_YUAN,
+  USER_DAILY_WITHDRAW_LIMIT_YUAN,
+  MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN,
+  getWithdrawPolicy,
+  computeWithdrawCap,
   isAdminApprovalRequiredForTransfer,
   shouldTransferOnUserRequest,
   requestWithdraw,

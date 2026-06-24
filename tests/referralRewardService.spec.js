@@ -4,6 +4,9 @@ import {
   mapWechatStateToWithdrawalStatus,
   shouldTransferOnUserRequest,
   isAdminApprovalRequiredForTransfer,
+  computeWithdrawCap,
+  MAX_WITHDRAW_YUAN,
+  USER_DAILY_WITHDRAW_LIMIT_YUAN,
 } from '../services/withdrawService.js'
 import { FIRST_REFERRAL_BONUS_YUAN } from '../services/referralRewardService.js'
 
@@ -34,6 +37,38 @@ describe('validateWithdrawAmount', () => {
 
   it('rejects amount greater than available', () => {
     expect(validateWithdrawAmount(50, 20).ok).toBe(false)
+  })
+
+  it('rejects amount above default single transfer cap', () => {
+    expect(validateWithdrawAmount(201, 500).ok).toBe(false)
+    expect(validateWithdrawAmount(200, 500).ok).toBe(true)
+  })
+})
+
+describe('computeWithdrawCap', () => {
+  it('caps by single, user daily, and available balance', () => {
+    expect(computeWithdrawCap({
+      availableYuan: 1500,
+      userTodayYuan: 0,
+      merchantTodayYuan: 0,
+    })).toBe(200)
+
+    expect(computeWithdrawCap({
+      availableYuan: 1500,
+      userTodayYuan: 1900,
+      merchantTodayYuan: 0,
+    })).toBe(100)
+
+    expect(computeWithdrawCap({
+      availableYuan: 80,
+      userTodayYuan: 0,
+      merchantTodayYuan: 0,
+    })).toBe(80)
+  })
+
+  it('exposes default wechat-aligned limits', () => {
+    expect(MAX_WITHDRAW_YUAN).toBe(200)
+    expect(USER_DAILY_WITHDRAW_LIMIT_YUAN).toBe(2000)
   })
 })
 
