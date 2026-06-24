@@ -21,6 +21,16 @@ const MIN_WITHDRAW_YUAN = parseFloat(process.env.MIN_WITHDRAW_YUAN || '0')
 const MAX_WITHDRAW_YUAN = parseFloat(process.env.MAX_WITHDRAW_YUAN || '20000')
 const DAILY_WITHDRAW_LIMIT_YUAN = parseFloat(process.env.DAILY_WITHDRAW_LIMIT_YUAN || '50000')
 
+function isAdminApprovalRequiredForTransfer() {
+  return String(process.env.WX_WITHDRAW_REQUIRE_ADMIN_APPROVAL || 'false').toLowerCase() === 'true'
+}
+
+function shouldTransferOnUserRequest() {
+  if (!isTransferConfigured()) return false
+  if (isAdminApprovalRequiredForTransfer()) return false
+  return true
+}
+
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
 }
@@ -229,7 +239,11 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
     await connection.commit()
 
     const withdrawalId = insertResult.insertId
-    const transferResult = await processWithdrawTransfer(withdrawalId)
+    let transferResult = { status: 'pending', manualReview: !isTransferConfigured() }
+
+    if (shouldTransferOnUserRequest()) {
+      transferResult = await processWithdrawTransfer(withdrawalId)
+    }
 
     return adminResult(200, {
       success: true,
@@ -237,7 +251,8 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
       amount_yuan: validation.amount,
       status: transferResult.status || 'pending',
       need_user_confirm: Boolean(transferResult.needUserConfirm),
-      manual_review: transferResult.manualReview || false,
+      manual_review: transferResult.manualReview || !shouldTransferOnUserRequest(),
+      awaiting_admin_approval: !shouldTransferOnUserRequest() && isTransferConfigured(),
     })
   } catch (err) {
     await connection.rollback()
@@ -349,6 +364,7 @@ async function applyWechatBillToWithdrawal(withdrawalId, bill) {
     status: mappedStatus,
     needUserConfirm: mappedStatus === 'await_confirm',
     packageInfo,
+    wxState,
   }
 }
 
@@ -543,26 +559,54 @@ async function failWithdrawal(withdrawalId, reason) {
 async function approveWithdrawalManually(withdrawalId) {
   await ensureReferralRewardsSchema()
 
+  const [rows] = await db.query(
+    `SELECT id, user_id, amount, status FROM withdrawal_requests WHERE id = ? LIMIT 1`,
+    [withdrawalId]
+  )
+  const row = rows[0]
+  if (!row) {
+    return adminResult(404, { error: '提现记录不存在' })
+  }
+  if (row.status === 'success') {
+    return adminResult(200, { success: true, alreadyDone: true, status: 'success' })
+  }
+  if (!['pending', 'failed'].includes(row.status)) {
+    return adminResult(400, {
+      error: '当前状态不可审核，请使用重试转账或等待用户确认收款',
+      status: row.status,
+    })
+  }
+
+  if (isTransferConfigured()) {
+    const transferResult = await processWithdrawTransfer(withdrawalId)
+    return adminResult(200, {
+      success: Boolean(transferResult.ok),
+      status: transferResult.status || 'processing',
+      need_user_confirm: Boolean(transferResult.needUserConfirm),
+      wx_state: transferResult.wxState || null,
+      error: transferResult.error || null,
+      message: transferResult.needUserConfirm
+        ? '已发起微信转账，请通知用户在小程序内确认收款'
+        : (transferResult.ok ? '转账处理中' : (transferResult.error || '发起转账失败')),
+    })
+  }
+
   const connection = await db.getConnection()
   try {
     await connection.beginTransaction()
 
-    const [rows] = await connection.query(
+    const [lockedRows] = await connection.query(
       `SELECT id, user_id, amount, status FROM withdrawal_requests WHERE id = ? FOR UPDATE`,
       [withdrawalId]
     )
-    const row = rows[0]
-    if (!row) {
+    const locked = lockedRows[0]
+    if (!locked || locked.status === 'success') {
       await connection.rollback()
-      return adminResult(404, { error: '提现记录不存在' })
+      return adminResult(200, { success: true, alreadyDone: true, status: 'success' })
     }
-    if (row.status === 'success') {
+    if (!['pending', 'failed'].includes(locked.status)) {
       await connection.rollback()
-      return adminResult(200, { success: true, alreadyDone: true })
-    }
-    if (!['pending', 'processing', 'await_confirm', 'failed'].includes(row.status)) {
-      await connection.rollback()
-      return adminResult(400, { error: '当前状态不可确认打款' })
+      return adminResult(400, { error: '当前状态不可确认打款', status: locked.status })
     }
 
     await connection.query(
@@ -576,11 +620,15 @@ async function approveWithdrawalManually(withdrawalId) {
       `UPDATE user_wallets
        SET total_withdrawn = total_withdrawn + ?, updated_at = NOW()
        WHERE user_id = ?`,
-      [row.amount, row.user_id]
+      [locked.amount, locked.user_id]
     )
 
     await connection.commit()
-    return adminResult(200, { success: true })
+    return adminResult(200, {
+      success: true,
+      status: 'success',
+      message: '已标记为线下打款完成',
+    })
   } catch (err) {
     await connection.rollback()
     throw err
@@ -615,6 +663,7 @@ async function listUserWithdrawals(userId, { page = 1, pageSize = 20 } = {}) {
     pageSize: limit,
     min_withdraw_yuan: MIN_WITHDRAW_YUAN,
     auto_transfer_enabled: isTransferConfigured(),
+    require_admin_approval: isAdminApprovalRequiredForTransfer(),
   }
 }
 
@@ -661,6 +710,8 @@ async function listAdminWithdrawals({
     total: Number(countRows[0]?.total || 0),
     page: Math.max(1, page),
     pageSize: limit,
+    auto_transfer_enabled: isTransferConfigured(),
+    require_admin_approval: isAdminApprovalRequiredForTransfer(),
   }
 }
 
@@ -808,6 +859,8 @@ async function handleTransferNotify(req) {
 module.exports = {
   adminResult,
   MIN_WITHDRAW_YUAN,
+  isAdminApprovalRequiredForTransfer,
+  shouldTransferOnUserRequest,
   requestWithdraw,
   processWithdrawTransfer,
   syncWithdrawalFromWechat,

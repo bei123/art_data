@@ -51,7 +51,7 @@
                     size="sm"
                     @click="handleApprove(row)"
                   >
-                    确认打款
+                    {{ approveButtonLabel }}
                   </Button>
                   <Button
                     v-if="row.status === 'pending' || row.status === 'processing' || row.status === 'await_confirm'"
@@ -75,7 +75,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { Loader2 } from 'lucide-vue-next'
 import axios from '@/utils/axios'
 import { showPageSuccess } from '@/utils/appMessage'
@@ -85,6 +85,11 @@ import { Card, CardContent } from '@/components/ui/card'
 const loading = ref(false)
 const items = ref([])
 const filterStatus = ref('')
+const autoTransferEnabled = ref(false)
+
+const approveButtonLabel = computed(() =>
+  autoTransferEnabled.value ? '审核并发起转账' : '确认线下打款'
+)
 
 function formatMoney(value) {
   const n = parseFloat(value)
@@ -115,6 +120,9 @@ async function loadWithdrawals() {
     if (filterStatus.value) params.status = filterStatus.value
     const response = await axios.get('/admin/referral/withdrawals', { params })
     items.value = response.items || []
+    if (response.auto_transfer_enabled != null) {
+      autoTransferEnabled.value = Boolean(response.auto_transfer_enabled)
+    }
   } catch (error) {
     items.value = []
   } finally {
@@ -123,8 +131,8 @@ async function loadWithdrawals() {
 }
 
 async function handleApprove(row) {
-  await axios.post(`/admin/referral/withdrawals/${row.id}/approve`)
-  showPageSuccess('已确认打款')
+  const response = await axios.post(`/admin/referral/withdrawals/${row.id}/approve`)
+  showPageSuccess(response.message || (autoTransferEnabled.value ? '已发起转账' : '已确认打款'))
   await loadWithdrawals()
 }
 

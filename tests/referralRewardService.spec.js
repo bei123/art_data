@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest'
-import { validateWithdrawAmount, mapWechatStateToWithdrawalStatus } from '../services/withdrawService.js'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import {
+  validateWithdrawAmount,
+  mapWechatStateToWithdrawalStatus,
+  shouldTransferOnUserRequest,
+  isAdminApprovalRequiredForTransfer,
+} from '../services/withdrawService.js'
 import { FIRST_REFERRAL_BONUS_YUAN } from '../services/referralRewardService.js'
 
 describe('mapWechatStateToWithdrawalStatus', () => {
@@ -35,5 +40,27 @@ describe('validateWithdrawAmount', () => {
 describe('FIRST_REFERRAL_BONUS_YUAN', () => {
   it('defaults to 30 yuan', () => {
     expect(FIRST_REFERRAL_BONUS_YUAN).toBe(30)
+  })
+})
+
+describe('withdraw transfer policy', () => {
+  const prevAuto = process.env.WX_WITHDRAW_AUTO_TRANSFER
+  const prevAdmin = process.env.WX_WITHDRAW_REQUIRE_ADMIN_APPROVAL
+
+  afterEach(() => {
+    process.env.WX_WITHDRAW_AUTO_TRANSFER = prevAuto
+    process.env.WX_WITHDRAW_REQUIRE_ADMIN_APPROVAL = prevAdmin
+  })
+
+  it('does not transfer on user request when auto transfer is off', () => {
+    process.env.WX_WITHDRAW_AUTO_TRANSFER = 'false'
+    process.env.WX_WITHDRAW_REQUIRE_ADMIN_APPROVAL = 'false'
+    expect(shouldTransferOnUserRequest()).toBe(false)
+  })
+
+  it('waits for admin when admin approval is required', () => {
+    process.env.WX_WITHDRAW_REQUIRE_ADMIN_APPROVAL = 'true'
+    expect(isAdminApprovalRequiredForTransfer()).toBe(true)
+    expect(shouldTransferOnUserRequest()).toBe(false)
   })
 })
