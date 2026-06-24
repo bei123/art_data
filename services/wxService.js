@@ -180,6 +180,11 @@ const { code } = req.body;
 
         const tokenPair = await issueWxTokenPair({ userId: user.id, openid });
 
+        const { tryBindReferralOnLogin } = require('./referralService');
+        const { getUserTierProfile } = require('./userTierService');
+        const referralBind = await tryBindReferralOnLogin(user.id, req.body);
+        const tier = await getUserTierProfile(user.id);
+
         // 4. 返回用户信息和 token, 过滤掉敏感字段
         return adminResult(200, {
             token: tokenPair.token,
@@ -196,7 +201,9 @@ const { code } = req.body;
                 phone: maskPhone(user.phone),
                 created_at: user.created_at,
                 updated_at: user.updated_at
-            }
+            },
+            tier,
+            referral_bind: referralBind,
         });
 } catch (err) {
         logger.error('登录失败', { err });
@@ -507,6 +514,9 @@ async function realNameRegistration(req) {
                 mobile, channel, type, userChainCallbackUrl, passCard, password, 1
             ]
         );
+
+        const { tryUpgradeToRecommender } = require('./userTierService');
+        await tryUpgradeToRecommender(userId, 'real_name');
 
         // 2. 调用外部API进行实名注册，带上token
         const response = await axios.post(

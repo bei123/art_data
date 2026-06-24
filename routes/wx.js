@@ -10,6 +10,7 @@ const mapGeocodeSvc = require('../services/mapGeocodeService');
 const logisticsSvc = require('../services/logisticsService');
 const subscribeMessageSvc = require('../services/subscribeMessageService');
 const subscribeNotifySvc = require('../services/subscribeMessageNotify');
+const referralRouter = require('./referral');
 
 const geocodeLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -607,5 +608,7 @@ router.post('/subscribe-message/resend', authenticateToken, checkRole(['admin'])
         res.status(500).json({ error: '订阅消息补发失败', detail: error.message });
     }
 });
+
+router.use('/referral', referralRouter);
 
 module.exports = router;

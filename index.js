@@ -49,6 +49,7 @@ const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('./utils/orderShipmentsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { ensureOrdersShippingColumns } = require('./utils/ordersSchema');
+const { ensureReferralSchema } = require('./utils/referralSchema');
 const { ensureRightsShippingColumns } = require('./services/rightsService');
 const { ensureArtworksShippingColumns } = require('./utils/artworkShippingDimensions');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
@@ -418,6 +419,9 @@ ensureDigitalArtworkIdColumns().catch((err) => {
 });
 ensureOrdersShippingColumns().catch((err) => {
   logger.warn('orders shipping columns ensure failed', { err: err.message });
+});
+ensureReferralSchema().catch((err) => {
+  logger.warn('referral schema ensure failed', { err: err.message });
 });
 ensureRightsShippingColumns().catch((err) => {
   logger.warn('rights shipping columns ensure failed', { err: err.message });

@@ -52,6 +52,9 @@ const {
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { resolveUserOutTradeNo } = require('../utils/orderTradeNo');
 const { ensureOrdersOutTradeNoUnique, ensureOrdersShippingColumns } = require('../utils/ordersSchema');
+const { ensureReferralSchema } = require('../utils/referralSchema');
+const { resolveOrderReferrerId } = require('./referralService');
+const { onPaymentSuccess } = require('./userTierService');
 const {
     normalizeCartItemShape,
     normalizeSingleItemFromBody,
@@ -589,6 +592,7 @@ async function unifiedOrder(req) {
         await ensureDigitalArtworkIdColumns();
         await ensureOrdersOutTradeNoUnique();
         await ensureOrdersShippingColumns();
+        await ensureReferralSchema();
 
         const { openid, body, out_trade_no, cart_items, address_id, quote_token } = req.body;
 
@@ -711,6 +715,8 @@ async function unifiedOrder(req) {
                 quoteToken: resolvedQuoteToken,
             } = checkoutAmounts;
 
+            const orderReferrerId = await resolveOrderReferrerId(userId, connection);
+
             let orderId;
 
             const shippingSnapshotJson = shippingSnapshot ? JSON.stringify(shippingSnapshot) : null;
@@ -720,8 +726,8 @@ async function unifiedOrder(req) {
                 // 更新已存在的订单
                 orderId = existingOrders[0].id;
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
                 );
 
                 // 删除旧的订单项
@@ -729,8 +735,8 @@ async function unifiedOrder(req) {
             } else {
                 // 创建新订单
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, referrer_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -841,6 +847,7 @@ async function singleOrder(req) {
         await ensureDigitalArtworkIdColumns();
         await ensureOrdersOutTradeNoUnique();
         await ensureOrdersShippingColumns();
+        await ensureReferralSchema();
 
         const { openid, body, out_trade_no, address_id, quote_token, type, quantity, right_id, digital_artwork_id, artwork_id } = req.body;
 
@@ -947,20 +954,21 @@ async function singleOrder(req) {
             } = checkoutAmounts;
 
             const pricedItem = pricedCartItems[0];
+            const orderReferrerId = await resolveOrderReferrerId(userId, connection);
             let orderId;
             const shippingSnapshotJson = shippingSnapshot ? JSON.stringify(shippingSnapshot) : null;
 
             if (existingOrders.length > 0) {
                 orderId = existingOrders[0].id;
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
                 );
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, referrer_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -1141,7 +1149,7 @@ async function payNotify(req) {
             let shouldFulfillInventory = false;
             try {
                 const [orders] = await connection.query(
-                    'SELECT trade_state, user_id FROM orders WHERE out_trade_no = ? FOR UPDATE',
+                    'SELECT trade_state, user_id, actual_fee FROM orders WHERE out_trade_no = ? FOR UPDATE',
                     [out_trade_no]
                 );
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
@@ -1152,6 +1160,7 @@ async function payNotify(req) {
                 }
 
                 const userId = orders[0]?.user_id;
+                const previousTradeState = orders[0]?.trade_state;
 
                 await connection.query(
                     `UPDATE orders SET 
@@ -1177,6 +1186,10 @@ async function payNotify(req) {
                     });
                     shouldFulfillInventory = true;
                     console.log('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length });
+                }
+
+                if (userId && previousTradeState !== 'SUCCESS') {
+                    await onPaymentSuccess(userId, orders[0].actual_fee, connection);
                 }
 
                 await connection.commit();
