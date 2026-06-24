@@ -626,6 +626,8 @@ module.exports = {
   cancelCommissionsByOrderId,
   settlePendingCommissions,
   getWalletSummary,
+  ensureWallet,
+  adjustWalletBalances,
   listUserCommissions,
   listAdminCommissions,
   listAdminCommissionRules,
