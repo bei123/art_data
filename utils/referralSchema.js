@@ -113,6 +113,8 @@ async function ensureShareEventsTable() {
   logger.info('share_events table created')
 }
 
+const { ensureCommissionSchema } = require('./commissionSchema')
+
 async function ensureOrdersReferrerColumn() {
   try {
     if (await hasColumn('orders', 'referrer_id')) return
@@ -134,6 +136,7 @@ async function ensureReferralSchema() {
   await ensureReferralBindingsTable()
   await ensureShareEventsTable()
   await ensureOrdersReferrerColumn()
+  await ensureCommissionSchema()
 
   schemaReady = true
 }

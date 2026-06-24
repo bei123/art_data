@@ -55,6 +55,8 @@ const { ensureArtworksShippingColumns } = require('./utils/artworkShippingDimens
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
 const { startLogisticsPathNotifyScheduler } = require('./services/logisticsPathNotify');
+const { startCommissionSettlementScheduler } = require('./services/commissionSettlementScheduler');
+const adminReferralRouter = require('./routes/adminReferral');
 const {
   applyCorsHeaders,
   corsPreflightMiddleware,
@@ -329,6 +331,7 @@ app.post('/api/auth/url-access', auth.authenticateToken, async (req, res) => {
 
 // 保护需要管理员权限的路由
 app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
+app.use('/api/admin/referral', adminReferralRouter);
 
 // 获取用户的数字身份购买记录（本人或 admin，防止越权）
 app.get(
@@ -437,6 +440,7 @@ startWmsProductSyncSchedule();
 // 待付款订阅消息：截止前 N 分钟扫描 Redis 排期并发送
 startPaymentPendingReminderScheduler();
 startLogisticsPathNotifyScheduler();
+startCommissionSettlementScheduler();
 
 // 使用仪表盘路由
 app.use('/api/dashboard', dashboardRouter);

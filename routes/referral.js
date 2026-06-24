@@ -73,4 +73,23 @@ router.post('/share-event', authenticateToken, async (req, res) => {
   }
 })
 
+router.get('/commissions', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { listUserCommissions } = require('../services/commissionService')
+    const { page, pageSize, status } = req.query
+    const data = await listUserCommissions(session.userId, {
+      page: parseInt(page, 10) || 1,
+      pageSize: parseInt(pageSize, 10) || 20,
+      status: status || undefined,
+    })
+    return res.json(data)
+  } catch (error) {
+    logger.error('获取佣金明细失败', { err: error })
+    res.status(500).json({ error: '获取佣金明细失败' })
+  }
+})
+
 module.exports = router

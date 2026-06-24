@@ -148,6 +148,26 @@ const routes = [
           requiresAuth: true,
           roles: ['admin']
         }
+      },
+      {
+        path: 'referral/commissions',
+        name: 'ReferralCommissions',
+        component: () => import('@/views/ReferralCommissions.vue'),
+        meta: {
+          title: '推荐佣金明细',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
+        path: 'referral/commission-rules',
+        name: 'CommissionRules',
+        component: () => import('@/views/CommissionRules.vue'),
+        meta: {
+          title: '佣金比例规则',
+          requiresAuth: true,
+          roles: ['admin']
+        }
       }
     ]
   },

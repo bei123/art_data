@@ -6,6 +6,7 @@ const {
   getUserTierProfile,
   isRecommenderOrAbove,
 } = require('./userTierService')
+const { getWalletSummary } = require('./commissionService')
 
 const REFERRAL_BINDING_DAYS = parseInt(process.env.REFERRAL_BINDING_DAYS || '365', 10)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -259,16 +260,20 @@ async function getReferralCenter(userId) {
     [userId]
   )
 
+  const wallet = await getWalletSummary(userId)
+
   return adminResult(200, {
     tier: tierProfile,
     referral_code: codeRow?.status === 'active' ? codeRow.code : null,
     my_binding: formatBinding(binding),
+    binding_days: REFERRAL_BINDING_DAYS,
     stats: {
       referred_order_count: Number(orderStats[0]?.referred_order_count || 0),
       share_count: Number(shareStats[0]?.share_count || 0),
-      pending_commission_yuan: 0,
-      available_commission_yuan: 0,
-      withdrawn_commission_yuan: 0,
+      pending_commission_yuan: wallet.pending_commission_yuan,
+      available_commission_yuan: wallet.available_commission_yuan,
+      withdrawn_commission_yuan: wallet.withdrawn_commission_yuan,
+      total_earned_yuan: wallet.total_earned_yuan,
     },
   })
 }

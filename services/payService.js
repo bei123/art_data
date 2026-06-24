@@ -56,6 +56,10 @@ const { ensureReferralSchema } = require('../utils/referralSchema');
 const { resolveOrderReferrerId } = require('./referralService');
 const { onPaymentSuccess } = require('./userTierService');
 const {
+    createCommissionsForPaidOrder,
+    cancelCommissionsByOrderId,
+} = require('./commissionService');
+const {
     normalizeCartItemShape,
     normalizeSingleItemFromBody,
     resolveCheckoutAmounts,
@@ -1149,7 +1153,7 @@ async function payNotify(req) {
             let shouldFulfillInventory = false;
             try {
                 const [orders] = await connection.query(
-                    'SELECT trade_state, user_id, actual_fee FROM orders WHERE out_trade_no = ? FOR UPDATE',
+                    'SELECT id, trade_state, user_id, actual_fee, referrer_id FROM orders WHERE out_trade_no = ? FOR UPDATE',
                     [out_trade_no]
                 );
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
@@ -1190,6 +1194,12 @@ async function payNotify(req) {
 
                 if (userId && previousTradeState !== 'SUCCESS') {
                     await onPaymentSuccess(userId, orders[0].actual_fee, connection);
+                    if (orders[0].id) {
+                        await createCommissionsForPaidOrder({
+                            orderId: orders[0].id,
+                            connection,
+                        });
+                    }
                 }
 
                 await connection.commit();
@@ -1497,6 +1507,12 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
     const connection = await db.getConnection();
     await connection.beginTransaction();
     try {
+        const [orderRows] = await connection.query(
+            'SELECT id FROM orders WHERE out_trade_no = ? LIMIT 1',
+            [out_trade_no]
+        );
+        const orderId = orderRows[0]?.id;
+
         const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${out_trade_no}`;
         const inventoryDone = await redisClient.get(inventoryKey);
         let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
@@ -1516,6 +1532,10 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
             `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款' WHERE out_trade_no = ?`,
             [out_trade_no]
         );
+
+        if (orderId) {
+            await cancelCommissionsByOrderId(orderId, connection);
+        }
 
         await connection.commit();
 
