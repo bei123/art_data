@@ -18,8 +18,13 @@ function extractBearerToken(authHeader) {
 }
 
 /**
- * 校验 JWT 且在 user_sessions 中仍有效（登出/过期即失效）
+ * 校验 JWT 且在会话表中仍有效（登出/过期即失效）
+ * 微信用户（JWT 含 openid）查 wx_user_sessions；后台用户查 user_sessions
  */
+function resolveSessionTable(decoded) {
+  return decoded?.openid ? 'wx_user_sessions' : 'user_sessions'
+}
+
 async function verifyActiveSessionToken(token) {
   if (!token || typeof token !== 'string') {
     return { ok: false, status: 401, error: '未登录' }
@@ -27,9 +32,10 @@ async function verifyActiveSessionToken(token) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET)
+    const sessionTable = resolveSessionTable(decoded)
 
     const [sessions] = await query(
-      'SELECT user_id FROM user_sessions WHERE token = ? AND expires_at > NOW() LIMIT 1',
+      `SELECT user_id FROM ${sessionTable} WHERE token = ? AND expires_at > NOW() LIMIT 1`,
       [token]
     )
 
@@ -70,6 +76,7 @@ async function resolveAuthFromRequest(req) {
 module.exports = {
   JWT_SECRET,
   extractBearerToken,
+  resolveSessionTable,
   verifyActiveSessionToken,
   resolveAuthFromRequest,
 }

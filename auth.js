@@ -8,7 +8,7 @@ const {
   verifyActiveSessionToken,
   resolveAuthFromRequest,
 } = require('./utils/sessionAuth');
-const { revokeWxRefreshTokensForUser } = require('./utils/wxSessionTokens');
+const { revokeWxRefreshTokensForUser, revokeWxAccessSession } = require('./utils/wxSessionTokens');
 
 // 生成JWT token
 const generateToken = (userId) => {
@@ -402,7 +402,11 @@ const logout = async (req, res) => {
   try {
     const token = req.headers['authorization']?.split(' ')[1];
     if (token) {
-      await query('DELETE FROM user_sessions WHERE token = ?', [token]);
+      if (req.user?.is_wx_user) {
+        await revokeWxAccessSession(token);
+      } else {
+        await query('DELETE FROM user_sessions WHERE token = ?', [token]);
+      }
     }
     if (req.user?.is_wx_user && req.user?.id) {
       await revokeWxRefreshTokensForUser(req.user.id);

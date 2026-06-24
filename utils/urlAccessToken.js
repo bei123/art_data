@@ -31,12 +31,15 @@ function claimsMatch(decoded, expected) {
 }
 
 async function isSessionSidActive(userId, sid) {
-  const [sessions] = await query(
-    'SELECT token FROM user_sessions WHERE user_id = ? AND expires_at > NOW()',
-    [userId]
-  )
-  if (!sessions?.length) return false
-  return sessions.some((row) => sessionTokenSid(row.token) === sid)
+  const sessionTables = ['user_sessions', 'wx_user_sessions']
+  for (const table of sessionTables) {
+    const [sessions] = await query(
+      `SELECT token FROM ${table} WHERE user_id = ? AND expires_at > NOW()`,
+      [userId]
+    )
+    if (sessions?.some((row) => sessionTokenSid(row.token) === sid)) return true
+  }
+  return false
 }
 
 /**

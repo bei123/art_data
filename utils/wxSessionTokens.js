@@ -40,7 +40,7 @@ async function persistWxAccessSession({ userId, accessToken }) {
   const decoded = jwt.decode(accessToken)
   const expiresAt = new Date(decoded.exp * 1000)
   await query(
-    'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
+    'INSERT INTO wx_user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
     [userId, accessToken, expiresAt]
   )
 }
@@ -119,6 +119,11 @@ async function revokeWxRefreshTokensForUser(userId) {
   )
 }
 
+async function revokeWxAccessSession(token) {
+  if (!token) return
+  await query('DELETE FROM wx_user_sessions WHERE token = ?', [token])
+}
+
 module.exports = {
   WX_ACCESS_TOKEN_EXPIRES_IN,
   WX_REFRESH_TOKEN_TTL_DAYS,
@@ -130,4 +135,5 @@ module.exports = {
   issueWxTokenPair,
   refreshWxAccessToken,
   revokeWxRefreshTokensForUser,
+  revokeWxAccessSession,
 }
