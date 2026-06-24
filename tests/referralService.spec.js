@@ -5,6 +5,7 @@ import {
   normalizeBindSource,
   computeBindingExpiresAt,
   isBindingActive,
+  isDuplicateKeyError,
 } from '../services/referralService.js'
 
 describe('normalizeReferrerCode', () => {
@@ -61,5 +62,14 @@ describe('binding expiry', () => {
     expect(isBindingActive({ expires_at: '2026-12-31T00:00:00.000Z' }, now)).toBe(true)
     expect(isBindingActive({ expires_at: '2026-01-01T00:00:00.000Z' }, now)).toBe(false)
     expect(isBindingActive(null, now)).toBe(false)
+  })
+})
+
+describe('isDuplicateKeyError', () => {
+  it('detects mysql duplicate key errors', () => {
+    expect(isDuplicateKeyError({ code: 'ER_DUP_ENTRY' })).toBe(true)
+    expect(isDuplicateKeyError({ errno: 1062 })).toBe(true)
+    expect(isDuplicateKeyError(new Error('other'))).toBe(false)
+    expect(isDuplicateKeyError(null)).toBe(false)
   })
 })

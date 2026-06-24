@@ -60,6 +60,10 @@ function isBindingActive(binding, now = new Date()) {
   return new Date(binding.expires_at) > now
 }
 
+function isDuplicateKeyError(err) {
+  return Boolean(err && (err.code === 'ER_DUP_ENTRY' || err.errno === 1062))
+}
+
 async function ensureReferralCode(userId, connection = db) {
   await ensureReferralSchema()
 
@@ -171,11 +175,39 @@ async function bindReferral({ refereeId, code, referrerId, source = 'link', conn
 
   const expiresAt = computeBindingExpiresAt()
 
-  await connection.query(
-    `INSERT INTO referral_bindings (referrer_id, referee_id, source, expires_at)
-     VALUES (?, ?, ?, ?)`,
-    [resolvedReferrerId, refereeId, normalizedSource, expiresAt]
-  )
+  try {
+    await connection.query(
+      `INSERT INTO referral_bindings (referrer_id, referee_id, source, expires_at)
+       VALUES (?, ?, ?, ?)`,
+      [resolvedReferrerId, refereeId, normalizedSource, expiresAt]
+    )
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err
+
+    const racedBinding = await getBindingByRefereeId(refereeId, connection)
+    if (!racedBinding) throw err
+
+    if (Number(racedBinding.referrer_id) === Number(resolvedReferrerId)) {
+      logger.info('referral binding already exists (idempotent)', {
+        refereeId,
+        referrerId: resolvedReferrerId,
+        source: normalizedSource,
+      })
+      return {
+        ok: true,
+        status: 200,
+        binding: formatBinding(racedBinding),
+        alreadyBound: true,
+      }
+    }
+
+    return {
+      ok: false,
+      status: 409,
+      error: '已绑定推荐关系，不可修改',
+      binding: formatBinding(racedBinding),
+    }
+  }
 
   const binding = await getBindingByRefereeId(refereeId, connection)
 
@@ -325,6 +357,7 @@ async function bindReferralFromRequest(req) {
   return adminResult(200, {
     success: true,
     binding: result.binding,
+    alreadyBound: result.alreadyBound || undefined,
   })
 }
 
@@ -348,6 +381,7 @@ async function tryBindReferralOnLogin(userId, body) {
     status: result.status,
     error: result.error || null,
     binding: result.binding || null,
+    alreadyBound: result.alreadyBound || false,
   }
 }
 
@@ -388,6 +422,7 @@ module.exports = {
   computeBindingExpiresAt,
   isBindingActive,
   ensureReferralCode,
+  isDuplicateKeyError,
   bindReferral,
   resolveOrderReferrerId,
   getReferralCodeInfo,
