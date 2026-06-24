@@ -208,6 +208,16 @@ const routes = [
           requiresAuth: true,
           roles: ['admin']
         }
+      },
+      {
+        path: 'wx-users',
+        name: 'WxUsers',
+        component: () => import('@/views/WxUsers.vue'),
+        meta: {
+          title: '小程序用户',
+          requiresAuth: true,
+          roles: ['admin']
+        }
       }
     ]
   },

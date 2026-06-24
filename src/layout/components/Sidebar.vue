@@ -56,6 +56,7 @@ import {
   MessageSquare,
   Store,
   User,
+  UserX,
   Wallet,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -92,6 +93,7 @@ const navItems = [
   { path: '/referral/coupons', label: '推荐优惠券', icon: HandCoins, role: 'admin' },
   { path: '/referral/advisor-applications', label: '艺术顾问', icon: User, role: 'admin' },
   { path: '/referral/vip-early-access', label: 'VIP优先购', icon: HandCoins, role: 'admin' },
+  { path: '/wx-users', label: '小程序用户', icon: UserX, role: 'admin' },
   { path: '/orders', label: '订单管理', icon: FileText },
   { path: '/subscribe-message/templates', label: '订阅消息', icon: MessageSquare, role: 'admin' },
 ]

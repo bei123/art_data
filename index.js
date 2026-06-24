@@ -57,6 +57,7 @@ const { startPaymentPendingReminderScheduler } = require('./services/subscribeMe
 const { startLogisticsPathNotifyScheduler } = require('./services/logisticsPathNotify');
 const { startCommissionSettlementScheduler } = require('./services/commissionSettlementScheduler');
 const adminReferralRouter = require('./routes/adminReferral');
+const adminWxUsersRouter = require('./routes/adminWxUsers');
 const {
   applyCorsHeaders,
   corsPreflightMiddleware,
@@ -333,6 +334,7 @@ app.post('/api/auth/url-access', auth.authenticateToken, async (req, res) => {
 // 保护需要管理员权限的路由
 app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
 app.use('/api/admin/referral', adminReferralRouter);
+app.use('/api/admin/wx-users', adminWxUsersRouter);
 
 // 获取用户的数字身份购买记录（本人或 admin，防止越权）
 app.get(
