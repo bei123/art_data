@@ -168,7 +168,7 @@ async function expireCouponsIfNeeded(userId) {
   )
 }
 
-async function resolveReferralCouponDiscount(connection, userId, couponId, orderSubtotalYuan) {
+async function resolveReferralCouponDiscount(connection, userId, couponId, orderBaseYuan, itemsSubtotalYuan = null) {
   if (!couponId) return { discountYuan: 0, coupon: null }
 
   await ensureReferralRewardsSchema()
@@ -195,13 +195,14 @@ async function resolveReferralCouponDiscount(connection, userId, couponId, order
     return { error: '优惠券已过期' }
   }
 
-  const subtotal = parseMoney(orderSubtotalYuan)
+  const orderBase = parseMoney(orderBaseYuan)
   const minOrder = parseMoney(coupon.min_order_yuan)
-  if (subtotal < minOrder) {
+  if (orderBase < minOrder) {
     return { error: `订单满 ${minOrder} 元可用` }
   }
 
-  const discountYuan = roundMoney(Math.min(parseMoney(coupon.discount_yuan), subtotal))
+  const discountCapBase = parseMoney(itemsSubtotalYuan != null ? itemsSubtotalYuan : orderBaseYuan)
+  const discountYuan = roundMoney(Math.min(parseMoney(coupon.discount_yuan), discountCapBase))
   if (discountYuan <= 0) {
     return { error: '优惠券金额无效' }
   }

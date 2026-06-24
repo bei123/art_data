@@ -794,10 +794,12 @@ async function buildCheckoutQuote({
 
   if (referralCouponId) {
     const { resolveReferralCouponDiscount } = require('./referralRewardService')
+    const orderBaseYuan = roundYuan(priced.itemsSubtotalYuan + shippingFeeYuan)
     const couponResolved = await resolveReferralCouponDiscount(
       connection,
       userId,
       referralCouponId,
+      orderBaseYuan,
       priced.itemsSubtotalYuan
     )
     if (couponResolved.error) {
