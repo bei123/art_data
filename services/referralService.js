@@ -387,6 +387,7 @@ module.exports = {
   bindReferralFromRequest,
   tryBindReferralOnLogin,
   getTierForRequest,
+  resolveWxUserId,
   getBindingByRefereeId,
   formatBinding,
 }
