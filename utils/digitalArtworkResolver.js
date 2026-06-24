@@ -74,6 +74,8 @@ function mapLegacyRow(row) {
     is_hidden: false,
     lv3_goods_number: null,
     lv3_total_num: null,
+    vip_early_access: row.vip_early_access,
+    vip_early_until: row.vip_early_until,
   }
 }
 
@@ -132,7 +134,7 @@ async function fetchDigitalArtworkById(id, connection = null) {
 
   const [legacyRows] = await queryWithConnection(
     connection,
-    'SELECT id, title, price, batch_quantity, image_url FROM digital_artworks WHERE id = ? LIMIT 1',
+    'SELECT id, title, price, batch_quantity, image_url, vip_early_access, vip_early_until FROM digital_artworks WHERE id = ? LIMIT 1',
     [sid]
   )
   if (legacyRows && legacyRows.length > 0) {
@@ -167,7 +169,7 @@ async function fetchDigitalArtworksByIds(ids, connection = null) {
 
   const [legacyRows] = await queryWithConnection(
     connection,
-    'SELECT id, title, price, batch_quantity, image_url FROM digital_artworks WHERE id IN (?)',
+    'SELECT id, title, price, batch_quantity, image_url, vip_early_access, vip_early_until FROM digital_artworks WHERE id IN (?)',
     [uniqueIds]
   )
   for (const row of legacyRows || []) {

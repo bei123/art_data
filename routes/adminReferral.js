@@ -18,6 +18,15 @@ const {
   grantCouponToUser,
   listAdminUserCoupons,
 } = require('../services/referralRewardService')
+const {
+  listAdminArtAdvisorApplications,
+  approveArtAdvisorApplication,
+  rejectArtAdvisorApplication,
+} = require('../services/artAdvisorService')
+const {
+  setProductVipEarlyAccess,
+  getProductVipEarlyAccess,
+} = require('../services/vipEarlyAccessService')
 
 router.get('/commissions', async (req, res) => {
   try {
@@ -156,6 +165,72 @@ router.get('/coupons', async (req, res) => {
   } catch (error) {
     logger.error('admin list coupons failed', { err: error })
     res.status(500).json({ error: '获取优惠券记录失败' })
+  }
+})
+
+router.get('/advisor-applications', async (req, res) => {
+  try {
+    const data = await listAdminArtAdvisorApplications({
+      page: parseInt(req.query.page, 10) || 1,
+      pageSize: parseInt(req.query.pageSize, 10) || 20,
+      status: req.query.status || undefined,
+    })
+    return res.json(data)
+  } catch (error) {
+    logger.error('admin list advisor applications failed', { err: error })
+    res.status(500).json({ error: '获取艺术顾问申请失败' })
+  }
+})
+
+router.post('/advisor-applications/:id/approve', async (req, res) => {
+  try {
+    const rate = req.body?.commission_rate
+    const r = await approveArtAdvisorApplication(req.params.id, {
+      commissionRate: rate,
+      reviewedBy: req.user?.id,
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin approve advisor failed', { err: error })
+    res.status(500).json({ error: '审批失败' })
+  }
+})
+
+router.post('/advisor-applications/:id/reject', async (req, res) => {
+  try {
+    const r = await rejectArtAdvisorApplication(req.params.id, {
+      reason: req.body?.reason,
+      reviewedBy: req.user?.id,
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin reject advisor failed', { err: error })
+    res.status(500).json({ error: '驳回失败' })
+  }
+})
+
+router.get('/vip-early-access', async (req, res) => {
+  try {
+    const r = await getProductVipEarlyAccess(req.query.product_type, req.query.product_id)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin get vip early access failed', { err: error })
+    res.status(500).json({ error: '查询失败' })
+  }
+})
+
+router.put('/vip-early-access', async (req, res) => {
+  try {
+    const r = await setProductVipEarlyAccess({
+      productType: req.body?.product_type,
+      productId: req.body?.product_id,
+      enabled: req.body?.vip_early_access,
+      until: req.body?.vip_early_until,
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin set vip early access failed', { err: error })
+    res.status(500).json({ error: '设置失败' })
   }
 })
 

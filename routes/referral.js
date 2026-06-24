@@ -179,6 +179,44 @@ router.post('/withdrawals/:id/sync', authenticateToken, async (req, res) => {
   }
 })
 
+router.get('/rules', async (req, res) => {
+  try {
+    const r = await svc.getReferralRules()
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('获取推荐规则失败', { err: error })
+    res.status(500).json({ error: '获取推荐规则失败' })
+  }
+})
+
+router.post('/advisor/apply', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { submitArtAdvisorApplication } = require('../services/artAdvisorService')
+    const r = await submitArtAdvisorApplication(session.userId, req.body)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('艺术顾问申请失败', { err: error })
+    res.status(500).json({ error: '艺术顾问申请失败' })
+  }
+})
+
+router.get('/advisor/status', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { getArtAdvisorApplicationStatus } = require('../services/artAdvisorService')
+    const r = await getArtAdvisorApplicationStatus(session.userId)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('获取艺术顾问状态失败', { err: error })
+    res.status(500).json({ error: '获取艺术顾问状态失败' })
+  }
+})
+
 router.get('/coupons', authenticateToken, async (req, res) => {
   try {
     const session = await svc.resolveWxUserId(req)

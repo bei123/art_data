@@ -196,6 +196,9 @@ async function ensureReferralRewardsSchema() {
   await ensureCommissionLedgerBonusType()
   await ensureOrdersReferralCouponColumn()
 
+  const { ensureVipEarlyAccessSchema } = require('./vipEarlyAccessSchema')
+  await ensureVipEarlyAccessSchema()
+
   schemaReady = true
 }
 

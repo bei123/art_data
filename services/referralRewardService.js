@@ -10,6 +10,10 @@ const {
 } = require('./commissionService')
 
 const FIRST_REFERRAL_BONUS_YUAN = parseFloat(process.env.FIRST_REFERRAL_BONUS_YUAN || '30')
+const NEW_USER_COUPON_YUAN = parseFloat(process.env.NEW_USER_COUPON_YUAN || '50')
+const NEW_USER_COUPON_MIN_ORDER_YUAN = parseFloat(process.env.NEW_USER_COUPON_MIN_ORDER_YUAN || '0')
+const NEW_USER_COUPON_VALID_DAYS = parseInt(process.env.NEW_USER_COUPON_VALID_DAYS || '30', 10)
+const NEW_USER_COUPON_SOURCE = 'new_user_welcome'
 const BONUS_TYPE_FIRST_REFERRAL = 'first_referral_order'
 
 function adminResult(status, body) {
@@ -28,6 +32,65 @@ async function hasGrantedBonus(userId, bonusType, connection = db) {
     [userId, bonusType]
   )
   return rows.length > 0
+}
+
+async function hasWelcomeCoupon(userId, connection = db) {
+  const [rows] = await connection.query(
+    `SELECT id FROM user_referral_coupons
+     WHERE user_id = ? AND source = ?
+     LIMIT 1`,
+    [userId, NEW_USER_COUPON_SOURCE]
+  )
+  return rows.length > 0
+}
+
+async function tryGrantNewUserWelcomeCoupon(userId, connection = db) {
+  await ensureReferralRewardsSchema()
+
+  if (NEW_USER_COUPON_YUAN <= 0) {
+    return { granted: false, reason: 'disabled' }
+  }
+
+  if (await hasWelcomeCoupon(userId, connection)) {
+    return { granted: false, alreadyGranted: true }
+  }
+
+  const discount = roundMoney(NEW_USER_COUPON_YUAN)
+  if (discount <= 0) return { granted: false, reason: 'invalid_amount' }
+
+  const expiresAt = addDays(new Date(), NEW_USER_COUPON_VALID_DAYS)
+  try {
+    const [result] = await connection.query(
+      `INSERT INTO user_referral_coupons
+       (user_id, template_id, title, discount_yuan, min_order_yuan, status, source, expires_at)
+       VALUES (?, NULL, ?, ?, ?, 'available', ?, ?)`,
+      [
+        userId,
+        '新人礼包',
+        discount,
+        Math.max(0, NEW_USER_COUPON_MIN_ORDER_YUAN),
+        NEW_USER_COUPON_SOURCE,
+        expiresAt,
+      ]
+    )
+
+    if (!result || result.affectedRows !== 1) {
+      return { granted: false }
+    }
+
+    logger.info('new user welcome coupon granted', { userId, discount })
+    return {
+      granted: true,
+      coupon_id: result.insertId,
+      discount_yuan: discount,
+      expires_at: expiresAt,
+    }
+  } catch (err) {
+    if (err && (err.code === 'ER_DUP_ENTRY' || err.errno === 1062)) {
+      return { granted: false, alreadyGranted: true }
+    }
+    throw err
+  }
 }
 
 async function tryGrantFirstReferralOrderBonus({ referrerId, orderId, connection = db }) {
@@ -311,7 +374,9 @@ async function cancelBonusGrantsByOrderId(orderId, connection = db) {
 module.exports = {
   adminResult,
   FIRST_REFERRAL_BONUS_YUAN,
+  NEW_USER_COUPON_YUAN,
   BONUS_TYPE_FIRST_REFERRAL,
+  tryGrantNewUserWelcomeCoupon,
   tryGrantFirstReferralOrderBonus,
   listUserCoupons,
   resolveReferralCouponDiscount,

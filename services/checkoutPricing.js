@@ -532,6 +532,8 @@ function buildPreviewItemImageFields(item, goods, rightImagesMap) {
 async function priceCartItems(connection, userId, normalizedCartItems) {
   await ensureRightsShippingColumns(connection)
   await ensureArtworksShippingColumns(connection)
+  const { ensureVipEarlyAccessSchema } = require('../utils/vipEarlyAccessSchema')
+  await ensureVipEarlyAccessSchema()
 
   const rightIds = []
   const artworkIds = []
@@ -549,7 +551,8 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
   if (rightIds.length > 0) {
     const [rights] = await connection.query(
       `SELECT id, title, price, discount_price, remaining_count,
-              length_cm, width_cm, height_cm, weight_kg
+              length_cm, width_cm, height_cm, weight_kg,
+              vip_early_access, vip_early_until
        FROM rights WHERE id IN (?) AND status = "onsale"`,
       [rightIds]
     )
@@ -576,7 +579,8 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
   if (artworkIds.length > 0) {
     const [artworks] = await connection.query(
       `SELECT oa.id, oa.title, oa.image, oa.original_price, oa.discount_price, oa.stock,
-              oa.collection_size, oa.length_cm, oa.width_cm, oa.height_cm, oa.weight_kg
+              oa.collection_size, oa.length_cm, oa.width_cm, oa.height_cm, oa.weight_kg,
+              oa.vip_early_access, oa.vip_early_until
        FROM original_artworks oa
        INNER JOIN artists a ON a.id = oa.artist_id
        WHERE oa.id IN (?) AND oa.is_on_sale = 1
@@ -596,6 +600,12 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
     digitalsMap.forEach((digital, id) => {
       goodsMap.set(`digital_${id}`, digital)
     })
+  }
+
+  const { assertCartVipEarlyAccess } = require('./vipEarlyAccessService')
+  const vipCheck = await assertCartVipEarlyAccess(userId, goodsMap, normalizedCartItems)
+  if (vipCheck.error) {
+    return { error: adminResult(403, { error: vipCheck.error, code: 'VIP_EARLY_ACCESS' }) }
   }
 
   let itemsSubtotalYuan = 0

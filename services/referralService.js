@@ -8,7 +8,7 @@ const {
 } = require('./userTierService')
 const { getWalletSummary } = require('./commissionService')
 const { MIN_WITHDRAW_YUAN } = require('./withdrawService')
-const { FIRST_REFERRAL_BONUS_YUAN } = require('./referralRewardService')
+const { FIRST_REFERRAL_BONUS_YUAN, NEW_USER_COUPON_YUAN } = require('./referralRewardService')
 
 const REFERRAL_BINDING_DAYS = parseInt(process.env.REFERRAL_BINDING_DAYS || '365', 10)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -306,6 +306,7 @@ async function getReferralCenter(userId) {
       requires_real_name: false,
     },
     first_referral_bonus_yuan: FIRST_REFERRAL_BONUS_YUAN,
+    new_user_coupon_yuan: NEW_USER_COUPON_YUAN,
     stats: {
       referred_order_count: Number(orderStats[0]?.referred_order_count || 0),
       share_count: Number(shareStats[0]?.share_count || 0),
@@ -408,6 +409,28 @@ async function resolveWxUserId(req) {
   return { ok: true, userId: auth.userId }
 }
 
+async function getReferralRules() {
+  const { VIP_SPEND_THRESHOLD_YUAN } = require('./userTierService')
+  const newUserCouponValidDays = parseInt(process.env.NEW_USER_COUPON_VALID_DAYS || '30', 10)
+
+  return adminResult(200, {
+    binding_days: REFERRAL_BINDING_DAYS,
+    first_referral_bonus_yuan: FIRST_REFERRAL_BONUS_YUAN,
+    new_user_coupon_yuan: NEW_USER_COUPON_YUAN,
+    new_user_coupon_valid_days: newUserCouponValidDays,
+    vip_spend_threshold_yuan: VIP_SPEND_THRESHOLD_YUAN,
+    min_withdraw_yuan: MIN_WITHDRAW_YUAN,
+    highlights: [
+      '分享有礼：好友通过您的链接购买，您可获得基于真实成交的推荐奖励',
+      `推荐关系绑定后 ${REFERRAL_BINDING_DAYS} 天内有效，首次绑定后不可修改`,
+      `推荐官首次成功推荐成交，额外奖励 ${FIRST_REFERRAL_BONUS_YUAN} 元（计入可提现余额）`,
+      `新用户注册可获得 ${NEW_USER_COUPON_YUAN} 元优惠券（下单抵扣）`,
+      `累计消费满 ${VIP_SPEND_THRESHOLD_YUAN} 元可升级 VIP 收藏家，推荐奖励 +2%`,
+      '艺术顾问经审核通过后可享专属佣金比例',
+    ],
+  })
+}
+
 async function getTierForRequest(req) {
   const session = await resolveWxUserId(req)
   if (!session.ok) return session.result
@@ -434,6 +457,7 @@ module.exports = {
   resolveOrderReferrerId,
   getReferralCodeInfo,
   getReferralCenter,
+  getReferralRules,
   recordShareEvent,
   bindReferralFromRequest,
   tryBindReferralOnLogin,

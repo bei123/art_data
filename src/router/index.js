@@ -188,6 +188,26 @@ const routes = [
           requiresAuth: true,
           roles: ['admin']
         }
+      },
+      {
+        path: 'referral/advisor-applications',
+        name: 'ReferralAdvisorApplications',
+        component: () => import('@/views/ReferralAdvisorApplications.vue'),
+        meta: {
+          title: '艺术顾问申请',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
+        path: 'referral/vip-early-access',
+        name: 'ReferralVipEarlyAccess',
+        component: () => import('@/views/ReferralVipEarlyAccess.vue'),
+        meta: {
+          title: 'VIP优先购',
+          requiresAuth: true,
+          roles: ['admin']
+        }
       }
     ]
   },

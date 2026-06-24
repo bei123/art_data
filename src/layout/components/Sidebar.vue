@@ -90,6 +90,8 @@ const navItems = [
   { path: '/referral/commission-rules', label: '佣金规则', icon: HandCoins, role: 'admin' },
   { path: '/referral/withdrawals', label: '推荐官提现', icon: Wallet, role: 'admin' },
   { path: '/referral/coupons', label: '推荐优惠券', icon: HandCoins, role: 'admin' },
+  { path: '/referral/advisor-applications', label: '艺术顾问', icon: User, role: 'admin' },
+  { path: '/referral/vip-early-access', label: 'VIP优先购', icon: HandCoins, role: 'admin' },
   { path: '/orders', label: '订单管理', icon: FileText },
   { path: '/subscribe-message/templates', label: '订阅消息', icon: MessageSquare, role: 'admin' },
 ]

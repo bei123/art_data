@@ -135,6 +135,7 @@ module.exports = {
   VIP_SPEND_THRESHOLD_YUAN,
   TIER_LABELS,
   getUserTierProfile,
+  setUserTier,
   tryUpgradeToRecommender,
   recalculateVipTier,
   onPaymentSuccess,
