@@ -122,7 +122,7 @@
 
 <script setup>
 import { defineComponent, h, onMounted, reactive, ref } from 'vue'
-import axios from 'axios'
+import api from '@/utils/axios'
 import { AlertCircle, ArrowDown, ArrowUp, ImagePlus, Link2, Loader2, Trash2, Type } from 'lucide-vue-next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -392,10 +392,10 @@ async function uploadBlockImage(field, index, file) {
     const processedFile = await uploadImageToWebpLimit5MB(file)
     const formData = new FormData()
     formData.append('file', processedFile)
-    const { data } = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+    const response = await api.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
-    const imageUrl = extractUploadUrl(data)
+    const imageUrl = extractUploadUrl(response)
     if (!imageUrl) throw new Error('上传成功但未返回图片地址')
     updateBlock(field, index, { url: imageUrl })
     showPageSuccess('图片上传成功')
@@ -410,7 +410,7 @@ async function loadConfig() {
   loading.value = true
   loadError.value = ''
   try {
-    const { data } = await axios.get('/digital-claim-copy/admin')
+    const data = await api.get('/digital-claim-copy/admin')
     applyForm(data)
     forceHidden.value = !!data?.force_hidden
   } catch (error) {
@@ -434,7 +434,7 @@ async function saveConfig() {
       list_blocks: form.list_blocks,
       sheet_blocks: form.sheet_blocks,
     }
-    const { data } = await axios.put('/digital-claim-copy', payload)
+    const data = await api.put('/digital-claim-copy', payload)
     applyForm(data?.data || payload)
     showPageSuccess(data?.message || '保存成功')
   } catch (error) {
