@@ -642,7 +642,7 @@ async function unifiedOrder(req) {
         try {
             // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
-                'SELECT id, trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                'SELECT id, trade_state, user_id, referral_coupon_id FROM orders WHERE out_trade_no = ?',
                 [cleanOutTradeNo]
             );
 
@@ -701,6 +701,7 @@ async function unifiedOrder(req) {
                 normalizedCartItems,
                 addressId: address_id,
                 quoteToken: quote_token,
+                reserveOrderId: existingOrders[0]?.id || null,
             });
             if (checkoutAmounts.error) {
                 await connection.rollback();
@@ -768,6 +769,21 @@ async function unifiedOrder(req) {
                     SET discount_amount = 0 
                     WHERE user_id = ? AND discount_amount > 0
                 `, [userId]);
+            }
+
+            const { syncReferralCouponForOrder } = require('./referralRewardService');
+            const couponSync = await syncReferralCouponForOrder({
+                userId,
+                orderId,
+                referralCouponId,
+                previousReferralCouponId: existingOrders[0]?.referral_coupon_id,
+            }, connection);
+            if (couponSync.error) {
+                await connection.rollback();
+                return adminResult(400, {
+                    error: couponSync.error,
+                    code: 'REFERRAL_COUPON_INVALID',
+                });
             }
 
             // 构建统一下单参数
@@ -886,7 +902,7 @@ async function singleOrder(req) {
 
         try {
             const [existingOrders] = await connection.query(
-                'SELECT id, trade_state, user_id FROM orders WHERE out_trade_no = ?',
+                'SELECT id, trade_state, user_id, referral_coupon_id FROM orders WHERE out_trade_no = ?',
                 [cleanOutTradeNo]
             );
 
@@ -940,6 +956,7 @@ async function singleOrder(req) {
                 normalizedCartItems,
                 addressId: address_id,
                 quoteToken: quote_token,
+                reserveOrderId: existingOrders[0]?.id || null,
             });
             if (checkoutAmounts.error) {
                 await connection.rollback();
@@ -996,6 +1013,21 @@ async function singleOrder(req) {
                     SET discount_amount = 0 
                     WHERE user_id = ? AND discount_amount > 0
                 `, [userId]);
+            }
+
+            const { syncReferralCouponForOrder } = require('./referralRewardService');
+            const couponSync = await syncReferralCouponForOrder({
+                userId,
+                orderId,
+                referralCouponId,
+                previousReferralCouponId: existingOrders[0]?.referral_coupon_id,
+            }, connection);
+            if (couponSync.error) {
+                await connection.rollback();
+                return adminResult(400, {
+                    error: couponSync.error,
+                    code: 'REFERRAL_COUPON_INVALID',
+                });
             }
 
             const params = {
@@ -1312,6 +1344,15 @@ async function closeOrder(req) {
         );
 
         if (response.status === 204) {
+            const { releaseReferralCouponByOrderId } = require('./referralRewardService');
+            if (owned.order?.id) {
+                await db.query(
+                    `UPDATE orders SET trade_state = 'CLOSED', trade_state_desc = '订单已关闭', updated_at = NOW()
+                     WHERE id = ? AND trade_state IN ('NOTPAY', 'PAYERROR')`,
+                    [owned.order.id]
+                );
+                await releaseReferralCouponByOrderId(owned.order.id);
+            }
             cancelPaymentPendingReminder(cleanOutTradeNo).catch((err) => {
                 logger.warn('取消待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
             });
@@ -4286,6 +4327,16 @@ async function syncOrderTradeStateFromWechat(orderRow) {
         if (wxPay.trade_type) orderRow.trade_type = wxPay.trade_type;
         if (successTime) orderRow.success_time = successTime;
         didSync = true;
+
+        if (wxState === 'CLOSED' || wxState === 'REVOKED') {
+            const { releaseReferralCouponByOrderId } = require('./referralRewardService');
+            await releaseReferralCouponByOrderId(orderRow.id).catch((err) => {
+                logger.warn('同步关单时释放优惠券失败', {
+                    orderId: orderRow.id,
+                    err: err?.message || err,
+                });
+            });
+        }
     }
 
     if (wxState === 'SUCCESS' && orderRow?.out_trade_no) {

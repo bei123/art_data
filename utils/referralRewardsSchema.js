@@ -165,6 +165,28 @@ async function ensureWithdrawalUserConfirmColumns() {
   }
 }
 
+async function ensureUserReferralCouponReservedStatus() {
+  try {
+    const [rows] = await db.query(
+      `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'user_referral_coupons'
+         AND COLUMN_NAME = 'status'
+       LIMIT 1`
+    )
+    const columnType = String(rows[0]?.COLUMN_TYPE || '')
+    if (!columnType || columnType.includes("'reserved'")) return
+    await db.query(
+      `ALTER TABLE user_referral_coupons
+       MODIFY status ENUM('available','reserved','used','expired','cancelled')
+       NOT NULL DEFAULT 'available'`
+    )
+    logger.info('user_referral_coupons.status reserved enum added')
+  } catch (err) {
+    logger.warn('ensureUserReferralCouponReservedStatus failed', { err: err.message })
+  }
+}
+
 async function ensureOrdersReferralCouponColumn() {
   try {
     const [rows] = await db.query(
@@ -193,6 +215,7 @@ async function ensureReferralRewardsSchema() {
   await ensureReferralBonusGrantsTable()
   await ensureReferralCouponTemplatesTable()
   await ensureUserReferralCouponsTable()
+  await ensureUserReferralCouponReservedStatus()
   await ensureCommissionLedgerBonusType()
   await ensureOrdersReferralCouponColumn()
 

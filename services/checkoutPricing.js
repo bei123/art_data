@@ -725,6 +725,9 @@ function parseCheckoutPreviewBody(body) {
   const referralCouponId = payload.referral_coupon_id != null
     ? parseInt(payload.referral_coupon_id, 10)
     : null
+  const outTradeNo = payload.out_trade_no != null
+    ? String(payload.out_trade_no).trim()
+    : null
 
   return {
     mode,
@@ -732,6 +735,7 @@ function parseCheckoutPreviewBody(body) {
     addressId: payload.address_id,
     expressTypeId,
     referralCouponId: Number.isNaN(referralCouponId) ? null : referralCouponId,
+    outTradeNo: outTradeNo || null,
   }
 }
 
@@ -743,6 +747,7 @@ async function buildCheckoutQuote({
   addressId,
   expressTypeId,
   referralCouponId,
+  reserveOrderId = null,
 }) {
   const priced = await priceCartItems(connection, userId, normalizedCartItems)
   if (priced.error) return priced
@@ -800,7 +805,8 @@ async function buildCheckoutQuote({
       userId,
       referralCouponId,
       orderBaseYuan,
-      priced.itemsSubtotalYuan
+      priced.itemsSubtotalYuan,
+      reserveOrderId
     )
     if (couponResolved.error) {
       return {
@@ -902,6 +908,7 @@ async function resolveCheckoutAmounts({
   addressId,
   quoteToken,
   expressTypeId,
+  reserveOrderId = null,
 }) {
   if (quoteToken) {
     const loaded = await loadCheckoutQuote(userId, quoteToken)
@@ -930,6 +937,7 @@ async function resolveCheckoutAmounts({
       addressId: quote.address_id,
       expressTypeId: quote.express_type_id || expressTypeId || getDefaultExpressTypeId(),
       referralCouponId: quote.referral_coupon?.id || null,
+      reserveOrderId,
     })
     if (repriced.error) return repriced
 
@@ -1002,6 +1010,18 @@ async function checkoutPreview(req) {
 
     const connection = await db.getConnection()
     try {
+      let reserveOrderId = null
+      if (parsed.outTradeNo) {
+        const [orderRows] = await connection.query(
+          `SELECT id FROM orders
+           WHERE out_trade_no = ? AND user_id = ?
+             AND trade_state IN ('NOTPAY', 'PAYERROR')
+           LIMIT 1`,
+          [parsed.outTradeNo, userId]
+        )
+        reserveOrderId = orderRows[0]?.id || null
+      }
+
       const quote = await buildCheckoutQuote({
         connection,
         userId,
@@ -1010,6 +1030,7 @@ async function checkoutPreview(req) {
         addressId: parsed.addressId,
         expressTypeId: parsed.expressTypeId,
         referralCouponId: parsed.referralCouponId,
+        reserveOrderId,
       })
       if (quote.error) return quote.error
 

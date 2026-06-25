@@ -160,15 +160,68 @@ async function listUserCoupons(userId, { status = 'available' } = {}) {
 async function expireCouponsIfNeeded(userId) {
   await db.query(
     `UPDATE user_referral_coupons
-     SET status = 'expired', updated_at = NOW()
+     SET status = 'expired', used_order_id = NULL, updated_at = NOW()
      WHERE user_id = ?
-       AND status = 'available'
+       AND status IN ('available', 'reserved')
        AND expires_at < NOW()`,
     [userId]
   )
 }
 
-async function resolveReferralCouponDiscount(connection, userId, couponId, orderBaseYuan, itemsSubtotalYuan = null) {
+function evaluateReferralCouponApplicability({
+  itemsSubtotalYuan,
+  orderBaseYuan,
+  couponDiscountYuan,
+  minOrderYuan,
+}) {
+  const itemsSubtotal = parseMoney(itemsSubtotalYuan)
+  const orderBase = parseMoney(orderBaseYuan)
+  const faceValue = parseMoney(couponDiscountYuan)
+  const minOrder = parseMoney(minOrderYuan)
+
+  if (faceValue <= 0) {
+    return { ok: false, error: '优惠券金额无效' }
+  }
+  if (itemsSubtotal < faceValue) {
+    return { ok: false, error: '商品金额低于优惠券面额，不可使用' }
+  }
+  if (orderBase < minOrder) {
+    return { ok: false, error: `订单满 ${minOrder} 元可用` }
+  }
+
+  return { ok: true, discountYuan: roundMoney(faceValue) }
+}
+
+async function isReferralCouponInUseByOtherOrder(connection, userId, couponId, excludeOrderId = null) {
+  const params = [couponId, userId]
+  let excludeSql = ''
+  if (excludeOrderId) {
+    excludeSql = ' AND o.id <> ?'
+    params.push(excludeOrderId)
+  }
+
+  const [rows] = await connection.query(
+    `SELECT o.id
+     FROM orders o
+     WHERE o.referral_coupon_id = ?
+       AND o.user_id = ?
+       AND o.trade_state IN ('NOTPAY', 'SUCCESS', 'PAYERROR')
+       ${excludeSql}
+     LIMIT 1`,
+    params
+  )
+
+  return rows.length > 0
+}
+
+async function resolveReferralCouponDiscount(
+  connection,
+  userId,
+  couponId,
+  orderBaseYuan,
+  itemsSubtotalYuan = null,
+  orderId = null
+) {
   if (!couponId) return { discountYuan: 0, coupon: null }
 
   await ensureReferralRewardsSchema()
@@ -179,8 +232,10 @@ async function resolveReferralCouponDiscount(connection, userId, couponId, order
     return { error: '优惠券无效' }
   }
 
+  const parsedOrderId = orderId ? parseInt(orderId, 10) : null
+
   const [rows] = await connection.query(
-    `SELECT id, title, discount_yuan, min_order_yuan, status, expires_at
+    `SELECT id, title, discount_yuan, min_order_yuan, status, expires_at, used_order_id
      FROM user_referral_coupons
      WHERE id = ? AND user_id = ?
      LIMIT 1`,
@@ -188,37 +243,137 @@ async function resolveReferralCouponDiscount(connection, userId, couponId, order
   )
 
   const coupon = rows[0]
-  if (!coupon || coupon.status !== 'available') {
+  if (!coupon) {
+    return { error: '优惠券不可用' }
+  }
+
+  const isAvailable = coupon.status === 'available'
+  const isReservedForOrder = coupon.status === 'reserved'
+    && parsedOrderId
+    && Number(coupon.used_order_id) === parsedOrderId
+
+  if (!isAvailable && !isReservedForOrder) {
+    if (coupon.status === 'used') return { error: '优惠券已使用' }
     return { error: '优惠券不可用' }
   }
   if (new Date(coupon.expires_at) <= new Date()) {
     return { error: '优惠券已过期' }
   }
 
-  const orderBase = parseMoney(orderBaseYuan)
-  const minOrder = parseMoney(coupon.min_order_yuan)
-  if (orderBase < minOrder) {
-    return { error: `订单满 ${minOrder} 元可用` }
+  if (!isReservedForOrder) {
+    const inUseElsewhere = await isReferralCouponInUseByOtherOrder(
+      connection,
+      userId,
+      id,
+      parsedOrderId
+    )
+    if (inUseElsewhere) {
+      return { error: '优惠券已在其他订单中使用' }
+    }
   }
 
-  const discountCapBase = parseMoney(itemsSubtotalYuan != null ? itemsSubtotalYuan : orderBaseYuan)
-  const discountYuan = roundMoney(Math.min(parseMoney(coupon.discount_yuan), discountCapBase))
-  if (discountYuan <= 0) {
-    return { error: '优惠券金额无效' }
+  const itemsSubtotal = parseMoney(
+    itemsSubtotalYuan != null ? itemsSubtotalYuan : orderBaseYuan
+  )
+  const applicability = evaluateReferralCouponApplicability({
+    itemsSubtotalYuan: itemsSubtotal,
+    orderBaseYuan,
+    couponDiscountYuan: coupon.discount_yuan,
+    minOrderYuan: coupon.min_order_yuan,
+  })
+  if (!applicability.ok) {
+    return { error: applicability.error }
   }
 
-  return { discountYuan, coupon }
+  return { discountYuan: applicability.discountYuan, coupon }
+}
+
+async function reserveReferralCouponForOrder({ userId, couponId, orderId }, connection = db) {
+  if (!couponId || !orderId) return { ok: true }
+
+  const parsedCouponId = parseInt(couponId, 10)
+  const parsedOrderId = parseInt(orderId, 10)
+  if (Number.isNaN(parsedCouponId) || parsedCouponId <= 0) {
+    return { error: '优惠券无效' }
+  }
+  if (Number.isNaN(parsedOrderId) || parsedOrderId <= 0) {
+    return { error: '订单无效' }
+  }
+
+  const [updateResult] = await connection.query(
+    `UPDATE user_referral_coupons
+     SET status = 'reserved', used_order_id = ?, updated_at = NOW()
+     WHERE id = ? AND user_id = ? AND status = 'available'
+       AND (used_order_id IS NULL OR used_order_id = ?)`,
+    [parsedOrderId, parsedCouponId, userId, parsedOrderId]
+  )
+
+  if (updateResult.affectedRows === 1) {
+    return { ok: true }
+  }
+
+  const [rows] = await connection.query(
+    `SELECT status, used_order_id
+     FROM user_referral_coupons
+     WHERE id = ? AND user_id = ?
+     LIMIT 1`,
+    [parsedCouponId, userId]
+  )
+  const row = rows[0]
+  if (row?.status === 'reserved' && Number(row.used_order_id) === parsedOrderId) {
+    return { ok: true }
+  }
+  if (row?.status === 'used') {
+    return { error: '优惠券已使用' }
+  }
+  return { error: '优惠券不可用' }
+}
+
+async function syncReferralCouponForOrder({
+  userId,
+  orderId,
+  referralCouponId,
+  previousReferralCouponId,
+}, connection = db) {
+  const nextCouponId = referralCouponId ? parseInt(referralCouponId, 10) : null
+  const prevCouponId = previousReferralCouponId ? parseInt(previousReferralCouponId, 10) : null
+
+  if (prevCouponId && (!nextCouponId || prevCouponId !== nextCouponId)) {
+    await releaseReferralCouponByOrderId(orderId, connection)
+  }
+
+  if (!nextCouponId) {
+    return { ok: true }
+  }
+
+  const reserved = await reserveReferralCouponForOrder({
+    userId,
+    couponId: nextCouponId,
+    orderId,
+  }, connection)
+  if (reserved.error) {
+    return { error: reserved.error }
+  }
+  return { ok: true }
 }
 
 async function markReferralCouponUsed({ userId, couponId, orderId }, connection = db) {
-  if (!couponId || !orderId) return
+  if (!couponId || !orderId) return { ok: false }
 
-  await connection.query(
+  const [result] = await connection.query(
     `UPDATE user_referral_coupons
      SET status = 'used', used_order_id = ?, used_at = NOW(), updated_at = NOW()
-     WHERE id = ? AND user_id = ? AND status = 'available'`,
-    [orderId, couponId, userId]
+     WHERE id = ? AND user_id = ?
+       AND status IN ('available', 'reserved')
+       AND (used_order_id IS NULL OR used_order_id = ?)`,
+    [orderId, couponId, userId, orderId]
   )
+
+  if (!result || result.affectedRows !== 1) {
+    logger.warn('markReferralCouponUsed skipped or failed', { userId, couponId, orderId })
+    return { ok: false }
+  }
+  return { ok: true }
 }
 
 async function releaseReferralCouponByOrderId(orderId, connection = db) {
@@ -226,7 +381,7 @@ async function releaseReferralCouponByOrderId(orderId, connection = db) {
   await connection.query(
     `UPDATE user_referral_coupons
      SET status = 'available', used_order_id = NULL, used_at = NULL, updated_at = NOW()
-     WHERE used_order_id = ? AND status = 'used'`,
+     WHERE used_order_id = ? AND status IN ('reserved', 'used')`,
     [orderId]
   )
 }
@@ -380,7 +535,10 @@ module.exports = {
   tryGrantNewUserWelcomeCoupon,
   tryGrantFirstReferralOrderBonus,
   listUserCoupons,
+  evaluateReferralCouponApplicability,
   resolveReferralCouponDiscount,
+  reserveReferralCouponForOrder,
+  syncReferralCouponForOrder,
   markReferralCouponUsed,
   releaseReferralCouponByOrderId,
   cancelBonusGrantsByOrderId,
