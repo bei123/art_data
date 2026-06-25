@@ -14,9 +14,8 @@ router.get('/', async (req, res) => {
       list_visible: false,
       sheet_guide_visible: false,
       guide_title: '',
-      guide_intro: '',
-      guide_steps: [],
-      sheet_tip: '',
+      list_blocks: [],
+      sheet_blocks: [],
     })
   }
 })

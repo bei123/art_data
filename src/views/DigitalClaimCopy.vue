@@ -5,7 +5,9 @@
         数字藏品领取说明
       </h2>
       <p class="text-sm text-muted-foreground">
-        文案保存在服务端，小程序按需拉取。审核期间可关闭展示；支持 <code class="rounded bg-muted px-1">{platform}</code> 占位符（替换为作品发行方）。
+        文案保存在服务端，小程序按需拉取。支持文字、图片、链接三种内容块；可使用
+        <code class="rounded bg-muted px-1">{platform}</code>
+        占位符（替换为作品发行方）。
       </p>
       <p v-if="forceHidden" class="text-sm font-medium text-amber-600 dark:text-amber-400">
         当前环境变量 DIGITAL_CLAIM_COPY_FORCE_HIDDEN 已开启，小程序端将强制隐藏所有领取说明。
@@ -51,7 +53,7 @@
         <div class="flex items-center justify-between gap-4 rounded-lg border border-border p-4">
           <div>
             <p class="font-medium text-foreground">领取码弹层使用说明</p>
-            <p class="text-sm text-muted-foreground">点击「查看领取码」后弹层内的步骤说明</p>
+            <p class="text-sm text-muted-foreground">点击「查看领取码」后弹层内的说明内容</p>
           </div>
           <Checkbox
             :model-value="form.sheet_guide_visible"
@@ -64,78 +66,64 @@
 
     <Card class="shadow-none ring-1">
       <CardHeader>
-        <CardTitle class="text-base">文案内容</CardTitle>
+        <CardTitle class="text-base">基础信息</CardTitle>
       </CardHeader>
-      <CardContent class="flex flex-col gap-4">
+      <CardContent>
         <div class="grid gap-2">
           <Label for="guide-title">说明标题</Label>
           <Input id="guide-title" v-model="form.guide_title" maxlength="64" placeholder="数字藏品领取说明" />
         </div>
-
-        <div class="grid gap-2">
-          <Label for="guide-intro">引导说明</Label>
-          <Textarea
-            id="guide-intro"
-            v-model="form.guide_intro"
-            rows="3"
-            maxlength="1000"
-            placeholder="请使用「{platform}」官方 App 扫码领取..."
-          />
-        </div>
-
-        <div class="grid gap-2">
-          <div class="flex items-center justify-between gap-2">
-            <Label>操作步骤</Label>
-            <Button type="button" variant="outline" size="sm" @click="addStep">
-              添加步骤
-            </Button>
-          </div>
-          <div v-if="form.guide_steps.length === 0" class="text-sm text-muted-foreground">
-            暂无步骤，点击「添加步骤」。
-          </div>
-          <div v-for="(step, index) in form.guide_steps" :key="'step-' + index" class="flex items-start gap-2">
-            <span class="mt-2 w-6 shrink-0 text-sm text-muted-foreground">{{ index + 1 }}.</span>
-            <Textarea
-              v-model="form.guide_steps[index]"
-              rows="2"
-              maxlength="200"
-              class="min-h-[60px] flex-1"
-              placeholder="步骤说明，可使用 {platform}"
-            />
-            <Button type="button" variant="ghost" size="icon" aria-label="删除步骤" @click="removeStep(index)">
-              <Trash2 class="size-4" />
-            </Button>
-          </div>
-        </div>
-
-        <div class="grid gap-2">
-          <Label for="sheet-tip">领取码弹层提示</Label>
-          <Textarea
-            id="sheet-tip"
-            v-model="form.sheet_tip"
-            rows="2"
-            maxlength="512"
-            placeholder="点击二维码可放大保存，打开「{platform}」扫码领取"
-          />
-        </div>
       </CardContent>
-      <div class="flex flex-wrap gap-2 border-t border-border px-6 pb-6 pt-6">
-        <Button type="button" variant="outline" @click="resetToDefault">
-          恢复默认文案
-        </Button>
-        <Button type="button" :disabled="saving" @click="saveConfig">
-          <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" aria-hidden="true" />
-          {{ saving ? '保存中…' : '保存配置' }}
-        </Button>
-      </div>
     </Card>
+
+    <ClaimCopyBlockSection
+      title="资产页内容"
+      description="展示在「我的资产」页说明卡片内，可混合文字、图片和链接。"
+      :blocks="form.list_blocks"
+      :uploading-index="uploadingListIndex"
+      @add="(type) => addBlock('list_blocks', type)"
+      @remove="(index) => removeBlock('list_blocks', index)"
+      @move-up="(index) => moveBlock('list_blocks', index, -1)"
+      @move-down="(index) => moveBlock('list_blocks', index, 1)"
+      @upload="(index, file) => uploadBlockImage('list_blocks', index, file)"
+      @update-block="(index, patch) => updateBlock('list_blocks', index, patch)"
+    />
+
+    <ClaimCopyBlockSection
+      title="领取码弹层内容"
+      description="展示在领取二维码弹层内，建议补充操作步骤、App 下载图或官网链接。"
+      :blocks="form.sheet_blocks"
+      :uploading-index="uploadingSheetIndex"
+      @add="(type) => addBlock('sheet_blocks', type)"
+      @remove="(index) => removeBlock('sheet_blocks', index)"
+      @move-up="(index) => moveBlock('sheet_blocks', index, -1)"
+      @move-down="(index) => moveBlock('sheet_blocks', index, 1)"
+      @upload="(index, file) => uploadBlockImage('sheet_blocks', index, file)"
+      @update-block="(index, patch) => updateBlock('sheet_blocks', index, patch)"
+    >
+      <template #actions>
+        <Button type="button" variant="outline" size="sm" @click="copyListBlocksToSheet">
+          从资产页复制
+        </Button>
+      </template>
+    </ClaimCopyBlockSection>
+
+    <div class="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" @click="resetToDefault">
+        恢复默认文案
+      </Button>
+      <Button type="button" :disabled="saving" @click="saveConfig">
+        <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" aria-hidden="true" />
+        {{ saving ? '保存中…' : '保存配置' }}
+      </Button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { defineComponent, h, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
-import { AlertCircle, Loader2, Trash2 } from 'lucide-vue-next'
+import { AlertCircle, ArrowDown, ArrowUp, ImagePlus, Link2, Loader2, Trash2, Type } from 'lucide-vue-next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -144,44 +132,278 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { showPageSuccess, showPageWarning } from '@/utils/appMessage'
+import { API_BASE_URL } from '@/config'
+import { uploadImageToWebpLimit5MB } from '@/utils/image'
 
 const loading = ref(true)
 const saving = ref(false)
 const loadError = ref('')
 const forceHidden = ref(false)
+const uploadingListIndex = ref(-1)
+const uploadingSheetIndex = ref(-1)
 
 const form = reactive({
   list_visible: false,
   sheet_guide_visible: false,
   guide_title: '',
-  guide_intro: '',
-  guide_steps: [],
-  sheet_tip: '',
+  list_blocks: [],
+  sheet_blocks: [],
 })
 
 const DEFAULT_FORM = {
   list_visible: false,
   sheet_guide_visible: false,
   guide_title: '数字藏品领取说明',
-  guide_intro:
-    '请使用「{platform}」官方 App 扫码领取。如尚未安装，可在应用商店搜索「{platform}」下载。',
-  guide_steps: [
-    '在应用商店搜索并安装「{platform}」',
-    '打开「{platform}」并登录账号（建议与购买时使用的手机号一致）',
-    '点击「查看领取码」，保存或截图二维码（也可用另一台手机展示）',
-    '在 App 内找到「扫码领取」「典藏领取」或类似入口，扫描领取二维码',
-    '领取成功后，藏品将出现在您的账号藏品库中',
+  list_blocks: [
+    { type: 'text', content: '请使用「{platform}」官方 App 扫码领取。如尚未安装，可在应用商店搜索「{platform}」下载。' },
+    { type: 'text', content: '在应用商店搜索并安装「{platform}」' },
+    { type: 'text', content: '打开「{platform}」并登录账号（建议与购买时使用的手机号一致）' },
+    { type: 'text', content: '点击「查看领取码」，保存或截图二维码（也可用另一台手机展示）' },
+    { type: 'text', content: '在 App 内找到「扫码领取」「典藏领取」或类似入口，扫描领取二维码' },
+    { type: 'text', content: '领取成功后，藏品将出现在您的账号藏品库中' },
   ],
-  sheet_tip: '点击二维码可放大保存，打开「{platform}」扫码领取',
+  sheet_blocks: [
+    { type: 'text', content: '点击二维码可放大保存，打开「{platform}」扫码领取' },
+    { type: 'text', content: '在应用商店搜索并安装「{platform}」' },
+    { type: 'text', content: '打开「{platform}」并登录账号（建议与购买时使用的手机号一致）' },
+    { type: 'text', content: '在 App 内找到扫码领取入口，扫描上方二维码' },
+  ],
 }
+
+const ClaimCopyBlockSection = defineComponent({
+  name: 'ClaimCopyBlockSection',
+  props: {
+    title: { type: String, required: true },
+    description: { type: String, default: '' },
+    blocks: { type: Array, default: () => [] },
+    uploadingIndex: { type: Number, default: -1 },
+  },
+  emits: ['add', 'remove', 'move-up', 'move-down', 'upload', 'update-block'],
+  setup(props, { emit, slots }) {
+    function getImagePreview(url) {
+      if (!url) return ''
+      return String(url).startsWith('http') ? url : `${API_BASE_URL}${url}`
+    }
+
+    function handleImagePick(index, event) {
+      const file = event?.target?.files?.[0]
+      event.target.value = ''
+      if (!file) return
+      emit('upload', index, file)
+    }
+
+    return () => h(Card, { class: 'shadow-none ring-1' }, {
+      default: () => [
+        h(CardHeader, null, {
+          default: () => [
+            h('div', { class: 'flex flex-wrap items-start justify-between gap-3' }, [
+              h('div', null, [
+                h(CardTitle, { class: 'text-base' }, () => props.title),
+                props.description ? h(CardDescription, null, () => props.description) : null,
+              ]),
+              h('div', { class: 'flex flex-wrap gap-2' }, [
+                slots.actions?.(),
+                h(Button, {
+                  type: 'button',
+                  variant: 'outline',
+                  size: 'sm',
+                  onClick: () => emit('add', 'text'),
+                }, () => [h(Type, { class: 'mr-1 size-4' }), '文字']),
+                h(Button, {
+                  type: 'button',
+                  variant: 'outline',
+                  size: 'sm',
+                  onClick: () => emit('add', 'image'),
+                }, () => [h(ImagePlus, { class: 'mr-1 size-4' }), '图片']),
+                h(Button, {
+                  type: 'button',
+                  variant: 'outline',
+                  size: 'sm',
+                  onClick: () => emit('add', 'link'),
+                }, () => [h(Link2, { class: 'mr-1 size-4' }), '链接']),
+              ]),
+            ]),
+          ],
+        }),
+        h(CardContent, { class: 'flex flex-col gap-4' }, {
+          default: () => {
+            if (!props.blocks.length) {
+              return h('p', { class: 'text-sm text-muted-foreground' }, '暂无内容块，请添加文字、图片或链接。')
+            }
+            return props.blocks.map((block, index) => h('div', {
+              key: `${block.type}-${index}`,
+              class: 'rounded-lg border border-border p-4',
+            }, [
+              h('div', { class: 'mb-3 flex flex-wrap items-center justify-between gap-2' }, [
+                h('span', { class: 'text-sm font-medium text-foreground' }, block.type === 'text' ? '文字' : block.type === 'image' ? '图片' : '链接'),
+                h('div', { class: 'flex items-center gap-1' }, [
+                  h(Button, {
+                    type: 'button',
+                    variant: 'ghost',
+                    size: 'icon',
+                    disabled: index === 0,
+                    'aria-label': '上移',
+                    onClick: () => emit('move-up', index),
+                  }, () => h(ArrowUp, { class: 'size-4' })),
+                  h(Button, {
+                    type: 'button',
+                    variant: 'ghost',
+                    size: 'icon',
+                    disabled: index === props.blocks.length - 1,
+                    'aria-label': '下移',
+                    onClick: () => emit('move-down', index),
+                  }, () => h(ArrowDown, { class: 'size-4' })),
+                  h(Button, {
+                    type: 'button',
+                    variant: 'ghost',
+                    size: 'icon',
+                    'aria-label': '删除',
+                    onClick: () => emit('remove', index),
+                  }, () => h(Trash2, { class: 'size-4' })),
+                ]),
+              ]),
+              block.type === 'text'
+                ? h(Textarea, {
+                    modelValue: block.content,
+                    rows: 3,
+                    maxlength: 1000,
+                    placeholder: '支持 {platform} 占位符',
+                    'onUpdate:modelValue': (value) => emit('update-block', index, { content: value }),
+                  })
+                : null,
+              block.type === 'image'
+                ? h('div', { class: 'flex flex-col gap-3' }, [
+                    block.url
+                      ? h('img', {
+                          src: getImagePreview(block.url),
+                          alt: block.alt || '说明图片',
+                          class: 'max-h-48 w-full rounded-md border border-border object-contain bg-muted/20',
+                        })
+                      : h('div', { class: 'rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground' }, '尚未上传图片'),
+                    h('div', { class: 'grid gap-2' }, [
+                      h(Label, null, () => '图片说明（可选）'),
+                      h(Input, {
+                        modelValue: block.alt || '',
+                        maxlength: 120,
+                        placeholder: '例如：App 下载示意图',
+                        'onUpdate:modelValue': (value) => emit('update-block', index, { alt: value }),
+                      }),
+                    ]),
+                    h('label', { class: 'inline-flex h-8 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground' }, [
+                      h('input', {
+                        type: 'file',
+                        accept: 'image/*',
+                        class: 'hidden',
+                        onChange: (event) => handleImagePick(index, event),
+                      }),
+                      props.uploadingIndex === index ? '上传中…' : (block.url ? '更换图片' : '上传图片'),
+                    ]),
+                  ])
+                : null,
+              block.type === 'link'
+                ? h('div', { class: 'grid gap-3' }, [
+                    h('div', { class: 'grid gap-2' }, [
+                      h(Label, null, () => '链接文字'),
+                      h(Input, {
+                        modelValue: block.label || '',
+                        maxlength: 64,
+                        placeholder: '例如：下载官方 App',
+                        'onUpdate:modelValue': (value) => emit('update-block', index, { label: value }),
+                      }),
+                    ]),
+                    h('div', { class: 'grid gap-2' }, [
+                      h(Label, null, () => '链接地址'),
+                      h(Input, {
+                        modelValue: block.url || '',
+                        maxlength: 512,
+                        placeholder: 'https://',
+                        'onUpdate:modelValue': (value) => emit('update-block', index, { url: value }),
+                      }),
+                    ]),
+                  ])
+                : null,
+            ]))
+          },
+        }),
+      ],
+    })
+  },
+})
 
 function applyForm(data) {
   form.list_visible = !!data?.list_visible
   form.sheet_guide_visible = !!data?.sheet_guide_visible
   form.guide_title = data?.guide_title || ''
-  form.guide_intro = data?.guide_intro || ''
-  form.guide_steps = Array.isArray(data?.guide_steps) ? [...data.guide_steps] : []
-  form.sheet_tip = data?.sheet_tip || ''
+  form.list_blocks = Array.isArray(data?.list_blocks)
+    ? data.list_blocks.map((block) => ({ ...block }))
+    : []
+  form.sheet_blocks = Array.isArray(data?.sheet_blocks)
+    ? data.sheet_blocks.map((block) => ({ ...block }))
+    : []
+}
+
+function createBlock(type) {
+  if (type === 'image') return { type: 'image', url: '', alt: '' }
+  if (type === 'link') return { type: 'link', label: '', url: '' }
+  return { type: 'text', content: '' }
+}
+
+function addBlock(field, type) {
+  const blocks = form[field]
+  if (blocks.length >= 20) {
+    showPageWarning('每个区域最多 20 个内容块')
+    return
+  }
+  blocks.push(createBlock(type))
+}
+
+function removeBlock(field, index) {
+  form[field].splice(index, 1)
+}
+
+function moveBlock(field, index, delta) {
+  const blocks = form[field]
+  const target = index + delta
+  if (target < 0 || target >= blocks.length) return
+  const [item] = blocks.splice(index, 1)
+  blocks.splice(target, 0, item)
+}
+
+function updateBlock(field, index, patch) {
+  Object.assign(form[field][index], patch)
+}
+
+function copyListBlocksToSheet() {
+  form.sheet_blocks = form.list_blocks.map((block) => ({ ...block }))
+}
+
+function extractUploadUrl(response) {
+  if (response?.url) return response.url
+  if (response?.data?.url) return response.data.url
+  if (response?.path) return response.path
+  if (typeof response?.data === 'string') return response.data
+  return ''
+}
+
+async function uploadBlockImage(field, index, file) {
+  const uploadingRef = field === 'list_blocks' ? uploadingListIndex : uploadingSheetIndex
+  uploadingRef.value = index
+  try {
+    const processedFile = await uploadImageToWebpLimit5MB(file)
+    const formData = new FormData()
+    formData.append('file', processedFile)
+    const { data } = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    const imageUrl = extractUploadUrl(data)
+    if (!imageUrl) throw new Error('上传成功但未返回图片地址')
+    updateBlock(field, index, { url: imageUrl })
+    showPageSuccess('图片上传成功')
+  } catch (error) {
+    showPageWarning(error?.response?.data?.error || error?.message || '图片上传失败')
+  } finally {
+    uploadingRef.value = -1
+  }
 }
 
 async function loadConfig() {
@@ -198,18 +420,6 @@ async function loadConfig() {
   }
 }
 
-function addStep() {
-  if (form.guide_steps.length >= 10) {
-    showPageWarning('最多 10 条步骤')
-    return
-  }
-  form.guide_steps.push('')
-}
-
-function removeStep(index) {
-  form.guide_steps.splice(index, 1)
-}
-
 function resetToDefault() {
   applyForm(DEFAULT_FORM)
 }
@@ -221,9 +431,8 @@ async function saveConfig() {
       list_visible: form.list_visible,
       sheet_guide_visible: form.sheet_guide_visible,
       guide_title: form.guide_title.trim(),
-      guide_intro: form.guide_intro.trim(),
-      guide_steps: form.guide_steps.map((step) => String(step || '').trim()).filter(Boolean),
-      sheet_tip: form.sheet_tip.trim(),
+      list_blocks: form.list_blocks,
+      sheet_blocks: form.sheet_blocks,
     }
     const { data } = await axios.put('/digital-claim-copy', payload)
     applyForm(data?.data || payload)

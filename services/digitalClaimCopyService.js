@@ -5,6 +5,14 @@ const {
   DEFAULT_DIGITAL_CLAIM_COPY,
   ensureDigitalClaimCopyTable,
 } = require('../utils/digitalClaimCopySchema')
+const {
+  normalizeBoolean,
+  normalizeBlocks,
+  resolveListBlocks,
+  resolveSheetBlocks,
+  validateBlocksInput,
+  blocksFromLegacyIntroSteps,
+} = require('../utils/digitalClaimCopyBlocks')
 
 const REDIS_DIGITAL_CLAIM_COPY_KEY = 'digital_claim_copy:public'
 const CACHE_TTL_SEC = 300
@@ -16,25 +24,35 @@ function isForceHidden() {
   return normalized === '1' || normalized === 'true' || normalized === 'yes'
 }
 
-function normalizeBoolean(value, fallback = false) {
-  if (value == null) return fallback
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return value === 1
-  const normalized = String(value).trim().toLowerCase()
-  return normalized === '1' || normalized === 'true' || normalized === 'yes'
+function mapAdminRow(row) {
+  if (!row) return { ...DEFAULT_DIGITAL_CLAIM_COPY }
+  const listBlocksRaw = parseJsonMaybe(row.list_blocks)
+  const sheetBlocksRaw = parseJsonMaybe(row.sheet_blocks)
+  return {
+    list_visible: normalizeBoolean(row.list_visible, false),
+    sheet_guide_visible: normalizeBoolean(row.sheet_guide_visible, false),
+    guide_title: String(row.guide_title || '').trim(),
+    list_blocks: listBlocksRaw.length
+      ? normalizeBlocks(listBlocksRaw, { forAdmin: true })
+      : blocksFromLegacyIntroSteps(row.guide_intro, row.guide_steps),
+    sheet_blocks: sheetBlocksRaw.length
+      ? normalizeBlocks(sheetBlocksRaw, { forAdmin: true })
+      : (() => {
+          const legacy = blocksFromLegacyIntroSteps(row.guide_intro, row.guide_steps)
+          const tip = String(row.sheet_tip || '').trim()
+          if (tip) legacy.push({ type: 'text', content: tip })
+          return legacy
+        })(),
+    updated_at: row.updated_at || null,
+  }
 }
 
-function normalizeSteps(raw) {
-  if (Array.isArray(raw)) {
-    return raw
-      .map((step) => String(step || '').trim())
-      .filter(Boolean)
-      .slice(0, 10)
-  }
+function parseJsonMaybe(raw) {
+  if (Array.isArray(raw)) return raw
   if (typeof raw === 'string') {
     try {
       const parsed = JSON.parse(raw)
-      return normalizeSteps(parsed)
+      return Array.isArray(parsed) ? parsed : []
     } catch {
       return []
     }
@@ -48,9 +66,8 @@ function mapRow(row) {
     list_visible: normalizeBoolean(row.list_visible, false),
     sheet_guide_visible: normalizeBoolean(row.sheet_guide_visible, false),
     guide_title: String(row.guide_title || '').trim(),
-    guide_intro: String(row.guide_intro || '').trim(),
-    guide_steps: normalizeSteps(row.guide_steps),
-    sheet_tip: String(row.sheet_tip || '').trim(),
+    list_blocks: resolveListBlocks(row),
+    sheet_blocks: resolveSheetBlocks(row),
     updated_at: row.updated_at || null,
   }
 }
@@ -74,29 +91,19 @@ function validateUpdateInput(body) {
     return { error: '说明标题不能超过 64 个字符' }
   }
 
-  const guideIntro = String(body.guide_intro ?? '').trim()
-  if (guideIntro.length > 1000) {
-    return { error: '引导说明不能超过 1000 个字符' }
-  }
+  const listBlocksResult = validateBlocksInput(body.list_blocks, '资产页内容')
+  if (listBlocksResult.error) return listBlocksResult
 
-  const sheetTip = String(body.sheet_tip ?? '').trim()
-  if (sheetTip.length > 512) {
-    return { error: '弹层提示不能超过 512 个字符' }
-  }
-
-  const guideSteps = normalizeSteps(body.guide_steps)
-  if (guideSteps.some((step) => step.length > 200)) {
-    return { error: '单条步骤不能超过 200 个字符' }
-  }
+  const sheetBlocksResult = validateBlocksInput(body.sheet_blocks, '领取码弹层内容')
+  if (sheetBlocksResult.error) return sheetBlocksResult
 
   return {
     data: {
       list_visible: normalizeBoolean(body.list_visible, false),
       sheet_guide_visible: normalizeBoolean(body.sheet_guide_visible, false),
       guide_title: guideTitle,
-      guide_intro: guideIntro,
-      guide_steps: guideSteps,
-      sheet_tip: sheetTip,
+      list_blocks: listBlocksResult.blocks,
+      sheet_blocks: sheetBlocksResult.blocks,
     },
   }
 }
@@ -104,7 +111,8 @@ function validateUpdateInput(body) {
 async function fetchRow() {
   await ensureDigitalClaimCopyTable()
   const [rows] = await db.query(
-    `SELECT list_visible, sheet_guide_visible, guide_title, guide_intro, guide_steps, sheet_tip, updated_at
+    `SELECT list_visible, sheet_guide_visible, guide_title, guide_intro, guide_steps, sheet_tip,
+            list_blocks, sheet_blocks, updated_at
      FROM digital_claim_copy
      WHERE id = 1
      LIMIT 1`
@@ -138,7 +146,7 @@ async function getPublicDigitalClaimCopy() {
 async function getAdminDigitalClaimCopy() {
   const row = await fetchRow()
   return {
-    ...mapRow(row),
+    ...mapAdminRow(row),
     force_hidden: isForceHidden(),
   }
 }
@@ -156,29 +164,27 @@ async function updateDigitalClaimCopy(body) {
   if (existing.length) {
     await db.query(
       `UPDATE digital_claim_copy
-       SET list_visible = ?, sheet_guide_visible = ?, guide_title = ?, guide_intro = ?, guide_steps = ?, sheet_tip = ?, updated_at = NOW()
+       SET list_visible = ?, sheet_guide_visible = ?, guide_title = ?, list_blocks = ?, sheet_blocks = ?, updated_at = NOW()
        WHERE id = 1`,
       [
         payload.list_visible ? 1 : 0,
         payload.sheet_guide_visible ? 1 : 0,
         payload.guide_title,
-        payload.guide_intro,
-        JSON.stringify(payload.guide_steps),
-        payload.sheet_tip,
+        JSON.stringify(payload.list_blocks),
+        JSON.stringify(payload.sheet_blocks),
       ]
     )
   } else {
     await db.query(
       `INSERT INTO digital_claim_copy
-        (id, list_visible, sheet_guide_visible, guide_title, guide_intro, guide_steps, sheet_tip)
-       VALUES (1, ?, ?, ?, ?, ?, ?)`,
+        (id, list_visible, sheet_guide_visible, guide_title, list_blocks, sheet_blocks)
+       VALUES (1, ?, ?, ?, ?, ?)`,
       [
         payload.list_visible ? 1 : 0,
         payload.sheet_guide_visible ? 1 : 0,
         payload.guide_title,
-        payload.guide_intro,
-        JSON.stringify(payload.guide_steps),
-        payload.sheet_tip,
+        JSON.stringify(payload.list_blocks),
+        JSON.stringify(payload.sheet_blocks),
       ]
     )
   }
@@ -203,7 +209,6 @@ async function updateDigitalClaimCopy(body) {
 module.exports = {
   DEFAULT_DIGITAL_CLAIM_COPY,
   isForceHidden,
-  normalizeSteps,
   mapRow,
   applyForceHidden,
   getPublicDigitalClaimCopy,
