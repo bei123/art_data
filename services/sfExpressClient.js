@@ -187,7 +187,7 @@ function parseApiEnvelope(data) {
   if (biz.success === false) {
     return enrichSfErrorResult({
       ok: false,
-      error: biz.errorMsg || '顺丰业务处理失败',
+      error: biz.errorMessage || biz.errorMsg || '顺丰业务处理失败',
       errorCode: biz.errorCode,
       apiResultCode: API_RESULT_OK,
       apiResponseID: data.apiResponseID,
@@ -199,7 +199,7 @@ function parseApiEnvelope(data) {
   if (bizCode && bizCode !== BIZ_RESULT_OK) {
     return enrichSfErrorResult({
       ok: false,
-      error: biz.errorMsg || `顺丰业务错误（${bizCode}）`,
+      error: biz.errorMessage || biz.errorMsg || `顺丰业务错误（${bizCode}）`,
       errorCode: biz.errorCode,
       apiResultCode: API_RESULT_OK,
       apiResponseID: data.apiResponseID,
