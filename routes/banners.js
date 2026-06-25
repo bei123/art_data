@@ -34,6 +34,16 @@ router.post('/', ...requireAdmin, async (req, res) => {
   }
 });
 
+router.put('/sort', ...requireAdmin, async (req, res) => {
+  try {
+    const r = await svc.reorderBannersAdmin(req.body);
+    return res.status(r.status).json(r.body);
+  } catch (error) {
+    logger.error('更新轮播图排序失败', { err: error });
+    res.status(500).json({ error: '更新轮播图排序失败' });
+  }
+});
+
 router.put('/:id', ...requireAdmin, async (req, res) => {
   try {
     const r = await svc.updateBannerAdmin(req.params.id, req.body);

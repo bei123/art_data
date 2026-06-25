@@ -19,6 +19,10 @@
       </AlertDescription>
     </Alert>
 
+    <p v-if="banners.length > 1" class="text-sm text-muted-foreground">
+      拖拽左侧手柄或使用「上移 / 下移」调整轮播顺序，保存后立即生效。
+    </p>
+
     <Card class="relative overflow-hidden shadow-none ring-1">
       <div
         v-if="listLoading"
@@ -32,20 +36,36 @@
         <table class="w-full min-w-[800px] text-sm">
           <thead>
             <tr class="border-b border-border bg-muted/40">
+              <th class="h-10 w-14 px-3 text-left font-medium" />
+              <th class="h-10 w-20 px-3 text-left font-medium">排序</th>
               <th class="h-10 min-w-[8rem] px-3 text-left font-medium">标题</th>
               <th class="h-10 min-w-[14rem] px-3 text-left font-medium">图片</th>
               <th class="h-10 min-w-[12rem] px-3 text-left font-medium">链接</th>
-              <th class="h-10 w-24 px-3 text-left font-medium tabular-nums">排序</th>
               <th class="h-10 w-24 px-3 text-left font-medium">状态</th>
-              <th class="h-10 w-36 px-3 text-left font-medium">操作</th>
+              <th class="h-10 w-44 px-3 text-left font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="row in banners"
+              v-for="(row, bannerIndex) in banners"
               :key="row.id"
+              draggable="true"
               class="border-b border-border transition-colors hover:bg-muted/30"
+              :class="{
+                'opacity-50 ring-2 ring-primary': bannerDragFromIndex === bannerIndex,
+                'ring-2 ring-primary/60': bannerDragOverIndex === bannerIndex && bannerDragFromIndex !== bannerIndex,
+                'pointer-events-none opacity-60': isSavingBannerOrder,
+              }"
+              @dragstart="handleBannerSortDragStart(bannerIndex, $event)"
+              @dragend="handleBannerSortDragEnd"
+              @dragover="handleBannerSortDragOver(bannerIndex, $event)"
+              @dragleave="handleBannerSortDragLeave(bannerIndex, $event)"
+              @drop="handleBannerSortDrop(bannerIndex, $event)"
             >
+              <td class="px-3 py-2 text-muted-foreground">
+                <GripVertical class="size-4 cursor-grab active:cursor-grabbing" aria-hidden="true" />
+              </td>
+              <td class="px-3 py-2 tabular-nums text-muted-foreground">{{ bannerIndex + 1 }}</td>
               <td class="px-3 py-2.5 font-medium">{{ row.title }}</td>
               <td class="px-3 py-2">
                 <div class="h-[100px] w-[200px] overflow-hidden rounded-md border border-border bg-muted/30">
@@ -61,7 +81,6 @@
               <td class="max-w-xs truncate px-3 py-2.5 text-muted-foreground" :title="row.link_url">
                 {{ row.link_url || '—' }}
               </td>
-              <td class="px-3 py-2.5 tabular-nums text-muted-foreground">{{ row.sort_order }}</td>
               <td class="px-3 py-2.5">
                 <Badge :variant="row.status === 'active' ? 'default' : 'secondary'">
                   {{ row.status === 'active' ? '启用' : '禁用' }}
@@ -69,6 +88,26 @@
               </td>
               <td class="px-3 py-2.5">
                 <div class="flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    :disabled="bannerIndex === 0 || isSavingBannerOrder"
+                    aria-label="上移"
+                    @click="moveBanner(bannerIndex, bannerIndex - 1)"
+                  >
+                    上移
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    :disabled="bannerIndex >= banners.length - 1 || isSavingBannerOrder"
+                    aria-label="下移"
+                    @click="moveBanner(bannerIndex, bannerIndex + 1)"
+                  >
+                    下移
+                  </Button>
                   <Button size="sm" variant="secondary" type="button" @click="handleEdit(row)">
                     编辑
                   </Button>
@@ -79,7 +118,7 @@
               </td>
             </tr>
             <tr v-if="banners.length === 0 && !listLoading">
-              <td colspan="6" class="px-3 py-12 text-center text-muted-foreground">
+              <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">
                 暂无轮播图
               </td>
             </tr>
@@ -184,7 +223,7 @@
               </div>
             </div>
             <p class="text-xs text-muted-foreground">
-              跳转链接与排序在右侧 Tab 中设置。
+              跳转链接在右侧 Tab 中设置；排序请在列表中拖拽或上移/下移。
             </p>
           </div>
 
@@ -206,18 +245,6 @@
                   <div class="flex flex-col gap-2">
                     <Label for="bn-title">标题 <span class="text-destructive">*</span></Label>
                     <Input id="bn-title" v-model="form.title" autocomplete="off" placeholder="轮播图标题" />
-                  </div>
-                  <div class="flex flex-col gap-2">
-                    <Label for="bn-sort">排序</Label>
-                    <Input
-                      id="bn-sort"
-                      v-model.number="form.sort_order"
-                      type="number"
-                      min="0"
-                      step="1"
-                      class="max-w-[160px]"
-                    />
-                    <p class="text-xs text-muted-foreground">数值越小越靠前</p>
                   </div>
                   <div class="flex flex-col gap-2">
                     <Label for="bn-status">状态</Label>
@@ -382,7 +409,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
+import { AlertCircle, GripVertical, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
@@ -430,6 +457,9 @@ const bannerFormTab = ref('basic')
 const banners = ref([])
 const listLoading = ref(false)
 const listError = ref('')
+const isSavingBannerOrder = ref(false)
+const bannerDragFromIndex = ref(null)
+const bannerDragOverIndex = ref(null)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const submitting = ref(false)
@@ -456,7 +486,6 @@ const form = ref({
   title: '',
   image_url: '',
   link_url: '',
-  sort_order: 0,
   status: 'active',
   link_type: '',
   link_id: null,
@@ -529,7 +558,6 @@ const handleAdd = () => {
     title: '',
     image_url: '',
     link_url: '',
-    sort_order: 0,
     status: 'active',
     link_type: '',
     link_id: null,
@@ -538,6 +566,83 @@ const handleAdd = () => {
   resetImageUploadState()
   bannerFormTab.value = 'basic'
   dialogVisible.value = true
+}
+
+async function saveBannersOrder(items) {
+  if (!items?.length) return false
+  isSavingBannerOrder.value = true
+  try {
+    const res = await axios.put('/banners/sort', {
+      banner_ids: items.map((item) => item.id),
+    })
+    const nextItems = Array.isArray(res?.items) ? res.items : null
+    if (nextItems) {
+      banners.value = nextItems.map((banner) => ({
+        ...banner,
+        image_url: getImageUrl(banner.image_url),
+      }))
+    } else {
+      await fetchBanners()
+    }
+    ElMessage.success('轮播图排序已保存')
+    return true
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.error || error?.error || '保存排序失败')
+    return false
+  } finally {
+    isSavingBannerOrder.value = false
+  }
+}
+
+async function moveBanner(fromIndex, toIndex) {
+  if (!banners.value.length) return
+  const items = [...banners.value]
+  if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex >= items.length) return
+
+  const previousItems = banners.value
+  const [item] = items.splice(fromIndex, 1)
+  items.splice(toIndex, 0, item)
+  banners.value = items
+
+  const ok = await saveBannersOrder(items)
+  if (!ok) banners.value = previousItems
+}
+
+function handleBannerSortDragStart(index, event) {
+  if (isSavingBannerOrder.value) {
+    event.preventDefault()
+    return
+  }
+  bannerDragFromIndex.value = index
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(index))
+}
+
+function handleBannerSortDragEnd() {
+  bannerDragFromIndex.value = null
+  bannerDragOverIndex.value = null
+}
+
+function handleBannerSortDragOver(index, event) {
+  if (bannerDragFromIndex.value === null) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  bannerDragOverIndex.value = index
+}
+
+function handleBannerSortDragLeave(index, event) {
+  if (bannerDragOverIndex.value === index && !event.currentTarget.contains(event.relatedTarget)) {
+    bannerDragOverIndex.value = null
+  }
+}
+
+async function handleBannerSortDrop(toIndex, event) {
+  event.preventDefault()
+  const fromIndex = bannerDragFromIndex.value
+  bannerDragFromIndex.value = null
+  bannerDragOverIndex.value = null
+  if (fromIndex === null || fromIndex === toIndex) return
+  await moveBanner(fromIndex, toIndex)
 }
 
 const handleEdit = (row) => {

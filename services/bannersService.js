@@ -22,7 +22,71 @@ async function invalidateBannerCaches() {
   await redisClient.del(REDIS_BANNERS_ALL_KEY);
 }
 
-function validateBannerFields(title, image_url, sort_order) {
+async function getNextBannerSortOrder(connection = db) {
+  const [[row]] = await connection.query(
+    'SELECT COALESCE(MAX(sort_order), 0) AS m FROM banners'
+  );
+  return Number(row?.m || 0) + 1;
+}
+
+function parseBannerIdsList(raw) {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const parsed = raw.map((id) => parsePositiveIntId(id)).filter(Boolean);
+  if (parsed.length !== raw.length) return null;
+  if (parsed.length > 500) return null;
+  return parsed;
+}
+
+async function reorderBannersAdmin(body) {
+  const bannerIds = parseBannerIdsList(body?.banner_ids);
+  if (!bannerIds) {
+    return adminResult(400, { error: 'banner_ids 必须为非空整数数组，且不可超过 500 项' });
+  }
+
+  const placeholders = bannerIds.map(() => '?').join(',');
+  const [rows] = await db.query(
+    `SELECT id FROM banners WHERE id IN (${placeholders})`,
+    bannerIds
+  );
+  if ((rows || []).length !== bannerIds.length) {
+    return adminResult(400, { error: 'banner_ids 包含不存在的轮播图' });
+  }
+
+  const [[{ total }]] = await db.query('SELECT COUNT(*) AS total FROM banners');
+  const totalCount = Number(total) || 0;
+  if (bannerIds.length !== totalCount) {
+    return adminResult(400, {
+      error: 'banner_ids 必须包含全部轮播图（拖拽排序时需提交完整列表）',
+      expected: totalCount,
+      received: bannerIds.length,
+    });
+  }
+
+  const connection = await db.getConnection();
+  await connection.beginTransaction();
+  try {
+    for (let i = 0; i < bannerIds.length; i += 1) {
+      await connection.query(
+        'UPDATE banners SET sort_order = ? WHERE id = ?',
+        [i + 1, bannerIds[i]]
+      );
+    }
+    await connection.commit();
+    connection.release();
+  } catch (error) {
+    await connection.rollback();
+    connection.release();
+    logger.error('reorderBannersAdmin tx failed', { err: error });
+    return adminResult(500, { error: '更新轮播图排序失败' });
+  }
+
+  await invalidateBannerCaches();
+  const listResult = await getAllBannersAdmin();
+  if (!listResult.ok) return listResult;
+  return adminResult(200, { message: '轮播图排序已更新', items: listResult.body });
+}
+
+function validateBannerFields(title, image_url) {
   if (!title || typeof title !== 'string' || title.trim().length === 0) {
     return adminResult(400, { error: '标题不能为空' });
   }
@@ -35,11 +99,7 @@ function validateBannerFields(title, image_url, sort_order) {
   if (!validateImageUrl(image_url)) {
     return adminResult(400, { error: '无效的图片URL' });
   }
-  const cleanSortOrder = parseInt(sort_order, 10) || 0;
-  if (cleanSortOrder < 0 || cleanSortOrder > 9999) {
-    return adminResult(400, { error: '排序值必须在0-9999之间' });
-  }
-  return { ok: true, title: title.trim(), cleanSortOrder };
+  return { ok: true, title: title.trim() };
 }
 
 async function getPublicBannersList() {
@@ -91,14 +151,15 @@ async function getAllBannersAdmin() {
 }
 
 async function createBannerAdmin(body) {
-  const { title, image_url, link_url, sort_order } = body || {};
-  const v = validateBannerFields(title, image_url, sort_order);
+  const { title, image_url, link_url } = body || {};
+  const v = validateBannerFields(title, image_url);
   if (!v.ok) return v;
 
   try {
+    const cleanSortOrder = await getNextBannerSortOrder();
     const [result] = await db.query(
       'INSERT INTO banners (title, image_url, link_url, sort_order) VALUES (?, ?, ?, ?)',
-      [v.title, image_url, link_url || null, v.cleanSortOrder]
+      [v.title, image_url, link_url || null, cleanSortOrder]
     );
     const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [result.insertId]);
     const processedBanner = processObjectImages(banner[0], ['image_url']);
@@ -114,8 +175,8 @@ async function updateBannerAdmin(rawId, body) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的轮播图ID' });
 
-  const { title, image_url, link_url, sort_order, status } = body || {};
-  const v = validateBannerFields(title, image_url, sort_order);
+  const { title, image_url, link_url, status } = body || {};
+  const v = validateBannerFields(title, image_url);
   if (!v.ok) return v;
 
   const validStatuses = ['active', 'inactive'];
@@ -123,8 +184,8 @@ async function updateBannerAdmin(rawId, body) {
 
   try {
     await db.query(
-      'UPDATE banners SET title = ?, image_url = ?, link_url = ?, sort_order = ?, status = ? WHERE id = ?',
-      [v.title, image_url, link_url || null, v.cleanSortOrder, cleanStatus, id]
+      'UPDATE banners SET title = ?, image_url = ?, link_url = ?, status = ? WHERE id = ?',
+      [v.title, image_url, link_url || null, cleanStatus, id]
     );
     const [banner] = await db.query('SELECT * FROM banners WHERE id = ?', [id]);
     const processedBanner = processObjectImages(banner[0], ['image_url']);
@@ -158,4 +219,5 @@ module.exports = {
   createBannerAdmin,
   updateBannerAdmin,
   deleteBannerAdmin,
+  reorderBannersAdmin,
 };
