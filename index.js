@@ -41,6 +41,7 @@ const transactionRouter = require('./routes/transaction');
 const institutionsRouter = require('./routes/institutions');
 const showcaseRouter = require('./routes/showcase');
 const homeTitlesRouter = require('./routes/home-titles');
+const digitalClaimCopyRouter = require('./routes/digital-claim-copy');
 const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
 const dashboardRouter = require('./routes/dashboard');
@@ -486,6 +487,9 @@ app.use('/api/showcase', showcaseRouter);
 
 // 使用首页标题路由
 app.use('/api/home-titles', homeTitlesRouter);
+
+// 数字藏品领取说明（小程序公开读取，后台可配置展示/隐藏）
+app.use('/api/digital-claim-copy', digitalClaimCopyRouter);
 
 // 使用展览路由
 app.use('/api/exhibitions', exhibitionsRouter);

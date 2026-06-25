@@ -54,6 +54,16 @@ const routes = [
         component: () => import('@/views/DigitalArtworks.vue')
       },
       {
+        path: 'digital-claim-copy',
+        name: 'DigitalClaimCopy',
+        component: () => import('@/views/DigitalClaimCopy.vue'),
+        meta: {
+          title: '领取说明配置',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
         path: 'physical-categories',
         name: 'PhysicalCategories',
         component: () => import('@/views/PhysicalCategories.vue')

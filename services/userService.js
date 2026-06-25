@@ -97,6 +97,7 @@ async function getPurchasedProducts(userId) {
           title: item.digital_title,
           description: item.digital_description,
           images: item.digital_image_url ? [item.digital_image_url] : [],
+          issuer: item.digital_issuer || '',
           qr_code_url: qrCodeUrl,
           qr_code_uploaded_at: item.delivery_qr_code_at || null,
         };

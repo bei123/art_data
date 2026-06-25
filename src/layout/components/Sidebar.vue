@@ -83,6 +83,7 @@ const navItems = [
   { path: '/artists', label: '艺术家管理', icon: User },
   { path: '/institutions', label: '机构管理', icon: Building2 },
   { path: '/digital-artworks', label: '数字艺术品', icon: Images },
+  { path: '/digital-claim-copy', label: '领取说明', icon: FileText, role: 'admin' },
   { path: '/physical-categories', label: '实物分类', icon: FolderTree },
   { path: '/rights', label: '权益管理', icon: FileText },
   { path: '/exhibitions', label: '展览管理', icon: FileText, role: 'admin' },

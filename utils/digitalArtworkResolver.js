@@ -287,7 +287,8 @@ const DIGITAL_ITEM_SELECT_SQL = `
   COALESCE(da.price, dae.price / ${WESPACE_PRICE_FEN_PER_YUAN}) AS digital_price,
   COALESCE(da.description, dae.description) AS digital_description,
   COALESCE(da.image_url, dae.image_url) AS digital_image_url,
-  COALESCE(da.batch_quantity, dae.lv3_goods_number, dae.lv3_total_num) AS digital_batch_quantity
+  COALESCE(da.batch_quantity, dae.lv3_goods_number, dae.lv3_total_num) AS digital_batch_quantity,
+  da.issuer AS digital_issuer
 `
 
 module.exports = {
