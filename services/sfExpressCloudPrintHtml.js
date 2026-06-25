@@ -10,12 +10,50 @@ const SERVICE_CODE_CLOUD_PRINT_HTML = 'COM_RECE_CLOUD_PRINT_HTML'
 const CLOUD_PRINT_VERSION = '2.0'
 const MAX_DOCUMENTS_PER_REQUEST = 20
 
-function resolveCloudPrintTemplateCode(partnerId) {
+function resolveCloudPrintTemplateCode(partnerId, rawOverride) {
   const pid = String(partnerId || '').trim()
-  const raw = (process.env.SF_CLOUD_PRINT_TEMPLATE_CODE || 'fm_76130_standard_{partnerId}').trim()
-  return raw
+  let raw = String(
+    rawOverride || process.env.SF_CLOUD_PRINT_TEMPLATE_CODE || 'fm_76130_standard_{partnerId}',
+  ).trim()
+
+  if (pid && (raw.includes('{partnerId}') || raw.includes('{{clientcode}}')) && raw.includes(pid)) {
+    raw = raw
+      .replace(/_?\{partnerId\}/gi, '')
+      .replace(/_?\{\{clientcode\}\}/gi, '')
+  }
+
+  let resolved = raw
     .replace(/\{\{clientcode\}\}/gi, pid)
     .replace(/\{partnerId\}/gi, pid)
+
+  if (pid) {
+    const doubleSuffix = `_${pid}_${pid}`
+    while (resolved.endsWith(doubleSuffix)) {
+      resolved = resolved.slice(0, -(`_${pid}`.length))
+    }
+  }
+
+  return resolved
+}
+
+function resolveOptionalCustomTemplateCode(standardTemplateCode, customOverride) {
+  const custom = String(
+    customOverride || process.env.SF_CLOUD_PRINT_CUSTOM_TEMPLATE_CODE || '',
+  ).trim()
+  if (!custom) return undefined
+
+  const standard = String(standardTemplateCode || '').trim()
+  if (custom === standard) {
+    logger.warn('SF_CLOUD_PRINT_CUSTOM_TEMPLATE_CODE equals templateCode, ignored', { custom })
+    return undefined
+  }
+
+  if (!/_custom_/i.test(custom)) {
+    logger.warn('SF_CLOUD_PRINT_CUSTOM_TEMPLATE_CODE is not a custom template, ignored', { custom })
+    return undefined
+  }
+
+  return custom
 }
 
 function resolveCloudPrintCheckFields(options = {}) {
@@ -86,7 +124,7 @@ function buildCloudPrintPayload({
   partnerId,
   waybillNoInfoList,
   fallbackWaybillNo,
-  templateCode,
+  templateCode: templateCodeOption,
   customTemplateCode,
   fileType,
   extJson,
@@ -102,14 +140,15 @@ function buildCloudPrintPayload({
     return { ok: false, error: '缺少可打印的运单号' }
   }
 
+  const templateCode = templateCodeOption || resolveCloudPrintTemplateCode(pid)
   const payload = {
-    templateCode: templateCode || resolveCloudPrintTemplateCode(pid),
+    templateCode,
     version: CLOUD_PRINT_VERSION,
     fileType: fileType || 'html',
     documents,
   }
 
-  const customCode = String(customTemplateCode || process.env.SF_CLOUD_PRINT_CUSTOM_TEMPLATE_CODE || '').trim()
+  const customCode = resolveOptionalCustomTemplateCode(templateCode, customTemplateCode)
   if (customCode) payload.customTemplateCode = customCode
 
   if (extJson && typeof extJson === 'object') {
@@ -294,6 +333,7 @@ module.exports = {
   CLOUD_PRINT_VERSION,
   MAX_DOCUMENTS_PER_REQUEST,
   resolveCloudPrintTemplateCode,
+  resolveOptionalCustomTemplateCode,
   resolveCloudPrintCheckFields,
   buildCloudPrintDocuments,
   buildCloudPrintPayload,

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   resolveCloudPrintTemplateCode,
+  resolveOptionalCustomTemplateCode,
   buildCloudPrintDocuments,
   buildCloudPrintPayload,
   assessCloudPrintResponse,
@@ -10,6 +11,28 @@ import {
 describe('resolveCloudPrintTemplateCode', () => {
   it('replaces partnerId placeholders', () => {
     expect(resolveCloudPrintTemplateCode('ABC123')).toBe('fm_76130_standard_ABC123')
+  })
+
+  it('uses full template code as-is when no placeholder', () => {
+    expect(resolveCloudPrintTemplateCode('ABC123', 'fm_76130_standard_ABC123')).toBe('fm_76130_standard_ABC123')
+  })
+
+  it('avoids double partnerId suffix', () => {
+    expect(resolveCloudPrintTemplateCode('ABC123', 'fm_76130_standard_ABC123_{partnerId}')).toBe('fm_76130_standard_ABC123')
+  })
+})
+
+describe('resolveOptionalCustomTemplateCode', () => {
+  it('ignores standard template mistaken as custom', () => {
+    expect(resolveOptionalCustomTemplateCode('fm_76130_standard_ABC', 'fm_76130_standard_ABC')).toBeUndefined()
+    expect(resolveOptionalCustomTemplateCode('fm_76130_standard_ABC', 'fm_76130_standard_ABC123')).toBeUndefined()
+  })
+
+  it('accepts published custom template code', () => {
+    expect(resolveOptionalCustomTemplateCode(
+      'fm_76130_standard_ABC',
+      'fm_76130_standard_custom_10000022213_1',
+    )).toBe('fm_76130_standard_custom_10000022213_1')
   })
 })
 
