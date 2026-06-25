@@ -58,6 +58,8 @@ import {
   User,
   UserX,
   Wallet,
+  Share2,
+  ClipboardCheck,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { useUserStore } from '@/stores/user'
@@ -93,6 +95,8 @@ const navItems = [
   { path: '/referral/coupons', label: '推荐优惠券', icon: HandCoins, role: 'admin' },
   { path: '/referral/advisor-applications', label: '艺术顾问', icon: User, role: 'admin' },
   { path: '/referral/vip-early-access', label: 'VIP优先购', icon: HandCoins, role: 'admin' },
+  { path: '/referral/share-events', label: '分享记录', icon: Share2, role: 'admin' },
+  { path: '/referral/reconciliation', label: '推荐对账', icon: ClipboardCheck, role: 'admin' },
   { path: '/wx-users', label: '小程序用户', icon: UserX, role: 'admin' },
   { path: '/orders', label: '订单管理', icon: FileText },
   { path: '/subscribe-message/templates', label: '订阅消息', icon: MessageSquare, role: 'admin' },

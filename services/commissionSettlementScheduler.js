@@ -3,13 +3,24 @@ const { settlePendingCommissions } = require('./commissionService')
 
 const POLL_MS = parseInt(process.env.COMMISSION_SETTLEMENT_POLL_MS || '300000', 10)
 let schedulerTimer = null
+let isSettlementRunning = false
 
 async function runCommissionSettlementTick() {
-  const result = await settlePendingCommissions({ limit: 100 })
-  if (result.settled > 0) {
-    logger.info('commission settlement tick', result)
+  if (isSettlementRunning) {
+    logger.info('commission settlement tick skipped (already running)')
+    return { skipped: true, settled: 0, scanned: 0 }
   }
-  return result
+
+  isSettlementRunning = true
+  try {
+    const result = await settlePendingCommissions({ limit: 100 })
+    if (result.settled > 0) {
+      logger.info('commission settlement tick', result)
+    }
+    return result
+  } finally {
+    isSettlementRunning = false
+  }
 }
 
 function startCommissionSettlementScheduler() {

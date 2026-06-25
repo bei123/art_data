@@ -210,6 +210,26 @@ const routes = [
         }
       },
       {
+        path: 'referral/share-events',
+        name: 'ReferralShareEvents',
+        component: () => import('@/views/ReferralShareEvents.vue'),
+        meta: {
+          title: '分享记录',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
+        path: 'referral/reconciliation',
+        name: 'ReferralReconciliation',
+        component: () => import('@/views/ReferralReconciliation.vue'),
+        meta: {
+          title: '推荐对账',
+          requiresAuth: true,
+          roles: ['admin']
+        }
+      },
+      {
         path: 'wx-users',
         name: 'WxUsers',
         component: () => import('@/views/WxUsers.vue'),

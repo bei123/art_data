@@ -27,6 +27,12 @@ const {
   setProductVipEarlyAccess,
   getProductVipEarlyAccess,
 } = require('../services/vipEarlyAccessService')
+const {
+  listAdminShareEvents,
+  runReferralReconciliation,
+  listReconciliationLogs,
+  getReconciliationLogById,
+} = require('../services/referralDashboardService')
 
 router.get('/commissions', async (req, res) => {
   try {
@@ -231,6 +237,57 @@ router.put('/vip-early-access', async (req, res) => {
   } catch (error) {
     logger.error('admin set vip early access failed', { err: error })
     res.status(500).json({ error: '设置失败' })
+  }
+})
+
+router.get('/share-events', async (req, res) => {
+  try {
+    const data = await listAdminShareEvents({
+      page: parseInt(req.query.page, 10) || 1,
+      pageSize: parseInt(req.query.pageSize, 10) || 20,
+      userId: req.query.user_id ? parseInt(req.query.user_id, 10) : undefined,
+      itemType: req.query.item_type || undefined,
+      channel: req.query.channel || undefined,
+      dateFrom: req.query.date_from || undefined,
+      dateTo: req.query.date_to || undefined,
+    })
+    return res.json(data)
+  } catch (error) {
+    logger.error('admin list share events failed', { err: error })
+    res.status(500).json({ error: '获取分享记录失败' })
+  }
+})
+
+router.post('/reconciliation/run', async (req, res) => {
+  try {
+    const result = await runReferralReconciliation()
+    return res.json({ success: true, ...result })
+  } catch (error) {
+    logger.error('admin run reconciliation failed', { err: error })
+    res.status(500).json({ error: '执行对账失败' })
+  }
+})
+
+router.get('/reconciliation/logs', async (req, res) => {
+  try {
+    const data = await listReconciliationLogs({
+      page: parseInt(req.query.page, 10) || 1,
+      pageSize: parseInt(req.query.pageSize, 10) || 20,
+    })
+    return res.json(data)
+  } catch (error) {
+    logger.error('admin list reconciliation logs failed', { err: error })
+    res.status(500).json({ error: '获取对账记录失败' })
+  }
+})
+
+router.get('/reconciliation/logs/:id', async (req, res) => {
+  try {
+    const r = await getReconciliationLogById(req.params.id)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin get reconciliation log failed', { err: error })
+    res.status(500).json({ error: '获取对账详情失败' })
   }
 })
 

@@ -1,6 +1,7 @@
 const db = require('../db');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
+const { getReferralOverviewStats } = require('./referralDashboardService');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const RECENT_LIMIT = 5;
@@ -45,6 +46,7 @@ async function getDashboardOverview() {
       [[{ physicalCategories }]],
       [recentOriginalRows],
       [recentDigitalRows],
+      referral,
     ] = await Promise.all([
       db.query('SELECT COUNT(*) AS originalArtworks FROM original_artworks'),
       db.query(`SELECT COUNT(*) AS digitalArtworks FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}`),
@@ -74,6 +76,10 @@ async function getDashboardOverview() {
       `,
         [RECENT_LIMIT]
       ),
+      getReferralOverviewStats().catch((err) => {
+        logger.warn('getReferralOverviewStats failed in dashboard', { err: err.message });
+        return null;
+      }),
     ]);
 
     return adminResult(200, {
@@ -84,6 +90,7 @@ async function getDashboardOverview() {
       },
       recentOriginalArtworks: (recentOriginalRows || []).map(mapOriginalRow),
       recentDigitalArtworks: (recentDigitalRows || []).map(mapDigitalRow),
+      referral: referral || undefined,
     });
   } catch (error) {
     logger.error('getDashboardOverview failed', { err: error });

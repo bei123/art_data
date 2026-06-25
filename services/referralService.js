@@ -411,6 +411,7 @@ async function resolveWxUserId(req) {
 
 async function getReferralRules() {
   const { VIP_SPEND_THRESHOLD_YUAN } = require('./userTierService')
+  const { buildReferralRuleHighlights } = require('../utils/referralCopy')
   const newUserCouponValidDays = parseInt(process.env.NEW_USER_COUPON_VALID_DAYS || '30', 10)
   const withdrawPolicy = getWithdrawPolicy()
 
@@ -423,15 +424,14 @@ async function getReferralRules() {
     min_withdraw_yuan: withdrawPolicy.min_yuan,
     max_withdraw_yuan: withdrawPolicy.max_yuan,
     user_daily_withdraw_limit_yuan: withdrawPolicy.user_daily_limit_yuan,
-    highlights: [
-      '分享有礼：好友通过您的链接购买，您可获得基于真实成交的推荐奖励',
-      `推荐关系绑定后 ${REFERRAL_BINDING_DAYS} 天内有效，首次绑定后不可修改`,
-      `推荐官首次成功推荐成交，额外奖励 ${FIRST_REFERRAL_BONUS_YUAN} 元（计入可提现余额）`,
-      `新用户注册可获得 ${NEW_USER_COUPON_YUAN} 元优惠券（下单抵扣）`,
-      `累计消费满 ${VIP_SPEND_THRESHOLD_YUAN} 元可升级 VIP 收藏家，推荐奖励 +2%`,
-      '艺术顾问经审核通过后可享专属佣金比例',
-      `提现到微信零钱：单笔最高 ${withdrawPolicy.max_yuan} 元，单日最高 ${withdrawPolicy.user_daily_limit_yuan} 元，可分多次提现`,
-    ],
+    highlights: buildReferralRuleHighlights({
+      bindingDays: REFERRAL_BINDING_DAYS,
+      firstReferralBonusYuan: FIRST_REFERRAL_BONUS_YUAN,
+      newUserCouponYuan: NEW_USER_COUPON_YUAN,
+      newUserCouponValidDays,
+      vipSpendThresholdYuan: VIP_SPEND_THRESHOLD_YUAN,
+      withdrawPolicy,
+    }),
   })
 }
 

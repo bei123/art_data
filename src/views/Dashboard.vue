@@ -42,6 +42,87 @@
       </Card>
     </div>
 
+    <template v-if="referral">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h3 class="text-lg font-semibold tracking-tight text-foreground">
+          艺术推荐官
+        </h3>
+        <div class="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" size="sm" @click="router.push('/referral/share-events')">
+            分享记录
+          </Button>
+          <Button type="button" variant="secondary" size="sm" @click="router.push('/referral/reconciliation')">
+            对账日志
+          </Button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-5">
+        <Card v-for="stat in referralStatCards" :key="stat.key" class="shadow-none ring-1">
+          <CardHeader class="border-b border-border pb-3">
+            <CardTitle class="text-sm font-medium">{{ stat.title }}</CardTitle>
+          </CardHeader>
+          <CardContent class="flex flex-col items-center gap-1 py-6">
+            <div class="text-3xl font-bold tabular-nums text-primary">
+              {{ stat.value }}
+            </div>
+            <div class="text-xs text-muted-foreground">
+              {{ stat.suffix }}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card class="shadow-none ring-1">
+        <CardHeader class="border-b border-border pb-3">
+          <CardTitle class="text-sm font-medium">最近分享记录</CardTitle>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr class="border-b border-border bg-muted/40 text-left text-muted-foreground">
+                  <th class="px-3 py-2.5 font-medium">用户</th>
+                  <th class="px-3 py-2.5 font-medium">作品类型</th>
+                  <th class="px-3 py-2.5 font-medium">作品 ID</th>
+                  <th class="px-3 py-2.5 font-medium">渠道</th>
+                  <th class="px-3 py-2.5 font-medium">时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in recentShareEvents"
+                  :key="row.id"
+                  class="border-b border-border transition-colors last:border-b-0 hover:bg-muted/30"
+                >
+                  <td class="px-3 py-2.5">
+                    {{ row.user_nickname || `用户 #${row.user_id}` }}
+                  </td>
+                  <td class="px-3 py-2.5 text-muted-foreground">
+                    {{ shareItemTypeLabel(row.item_type) }}
+                  </td>
+                  <td class="max-w-[10rem] truncate px-3 py-2.5" :title="row.item_id">
+                    {{ row.item_id }}
+                  </td>
+                  <td class="px-3 py-2.5 text-muted-foreground">
+                    {{ shareChannelLabel(row.channel) }}
+                  </td>
+                  <td class="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
+                    {{ formatDate(row.created_at) }}
+                  </td>
+                </tr>
+                <tr v-if="recentShareEvents.length === 0 && !statsLoading">
+                  <td colspan="5" class="px-3 py-10 text-center text-muted-foreground">
+                    暂无分享记录
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </template>
+
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
       <Card class="shadow-none ring-1">
         <CardHeader class="border-b border-border pb-3">
@@ -185,8 +266,46 @@ const stats = ref({
 
 const recentOriginalArtworks = ref([])
 const recentDigitalArtworks = ref([])
+const referral = ref(null)
 const statsLoading = ref(false)
 const statsError = ref('')
+
+const recentShareEvents = computed(() => {
+  const rows = referral.value?.recent_share_events
+  return Array.isArray(rows) ? rows : []
+})
+
+const referralStatCards = computed(() => {
+  if (!referral.value) return []
+  const pendingCount = referral.value.commissions_by_status?.pending?.count ?? 0
+  const settlableAmount = referral.value.commissions_by_status?.settlable?.amount_yuan ?? 0
+  return [
+    {
+      key: 'referrers',
+      title: '活跃推荐官',
+      value: referral.value.active_referrers ?? 0,
+      suffix: '人',
+    },
+    {
+      key: 'bindings',
+      title: '有效绑定',
+      value: referral.value.active_bindings ?? 0,
+      suffix: '条关系',
+    },
+    {
+      key: 'shares',
+      title: '累计分享',
+      value: referral.value.total_shares ?? 0,
+      suffix: `今日 ${referral.value.today_shares ?? 0} 次`,
+    },
+    {
+      key: 'commission',
+      title: '待结算佣金',
+      value: pendingCount,
+      suffix: `可提现 ¥${formatMoney(settlableAmount)}`,
+    },
+  ]
+})
 
 const statCards = computed(() => [
   {
@@ -230,6 +349,22 @@ const formatDate = (dateString) => {
   })
 }
 
+const formatMoney = (value) => {
+  const n = parseFloat(value)
+  if (!Number.isFinite(n)) return '0.00'
+  return n.toFixed(2)
+}
+
+function shareItemTypeLabel(type) {
+  const map = { right: '版权实物', artwork: '原作', digital: '数字艺术品' }
+  return map[type] || type || '-'
+}
+
+function shareChannelLabel(channel) {
+  const map = { link: '链接', poster: '海报', miniprogram: '小程序' }
+  return map[channel] || channel || '-'
+}
+
 const retryFetchStats = () => {
   statsError.value = ''
   fetchStats()
@@ -254,6 +389,8 @@ const fetchStats = async () => {
     recentDigitalArtworks.value = Array.isArray(overview?.recentDigitalArtworks)
       ? overview.recentDigitalArtworks
       : []
+
+    referral.value = overview?.referral || null
   } catch {
     stats.value = {
       originalArtworks: 0,
@@ -262,6 +399,7 @@ const fetchStats = async () => {
     }
     recentOriginalArtworks.value = []
     recentDigitalArtworks.value = []
+    referral.value = null
     statsError.value = '概览数据加载失败，请检查网络或稍后重试'
   } finally {
     statsLoading.value = false

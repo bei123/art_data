@@ -56,6 +56,7 @@ const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncServic
 const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
 const { startLogisticsPathNotifyScheduler } = require('./services/logisticsPathNotify');
 const { startCommissionSettlementScheduler } = require('./services/commissionSettlementScheduler');
+const { startReferralReconciliationScheduler } = require('./services/referralReconciliationScheduler');
 const adminReferralRouter = require('./routes/adminReferral');
 const adminWxUsersRouter = require('./routes/adminWxUsers');
 const {
@@ -444,6 +445,7 @@ startWmsProductSyncSchedule();
 startPaymentPendingReminderScheduler();
 startLogisticsPathNotifyScheduler();
 startCommissionSettlementScheduler();
+startReferralReconciliationScheduler();
 
 // 使用仪表盘路由
 app.use('/api/dashboard', dashboardRouter);
