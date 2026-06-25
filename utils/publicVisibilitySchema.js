@@ -3,6 +3,11 @@ const logger = require('./logger')
 
 let schemaEnsured = false
 
+function toIsPublicEff(raw) {
+  if (raw === 0 || raw === false || raw === '0') return 0
+  return 1
+}
+
 async function hasColumn(tableName, columnName) {
   const [rows] = await db.query(
     `SELECT 1
@@ -41,18 +46,6 @@ async function hasTable(tableName) {
   return rows.length > 0
 }
 
-async function hasTrigger(triggerName) {
-  const [rows] = await db.query(
-    `SELECT 1
-     FROM INFORMATION_SCHEMA.TRIGGERS
-     WHERE TRIGGER_SCHEMA = DATABASE()
-       AND TRIGGER_NAME = ?
-     LIMIT 1`,
-    [triggerName]
-  )
-  return rows.length > 0
-}
-
 async function isGeneratedColumn(tableName, columnName) {
   const [rows] = await db.query(
     `SELECT EXTRA
@@ -72,31 +65,7 @@ async function syncPublicEffValues(tableName) {
   if (await isGeneratedColumn(tableName, 'is_public_eff')) return
   if (!(await hasColumn(tableName, 'is_public'))) return
 
-  await db.query(
-    `UPDATE ${tableName} SET is_public_eff = IFNULL(is_public, 1)`
-  )
-}
-
-async function ensurePublicEffTriggers(tableName) {
-  if (!(await hasColumn(tableName, 'is_public')) || !(await hasColumn(tableName, 'is_public_eff'))) return
-  if (await isGeneratedColumn(tableName, 'is_public_eff')) return
-
-  const insertTrigger = `tr_${tableName}_is_public_eff_bi`
-  const updateTrigger = `tr_${tableName}_is_public_eff_bu`
-
-  if (!(await hasTrigger(insertTrigger))) {
-    await db.query(
-      `CREATE TRIGGER ${insertTrigger} BEFORE INSERT ON ${tableName}
-       FOR EACH ROW SET NEW.is_public_eff = IFNULL(NEW.is_public, 1)`
-    )
-  }
-
-  if (!(await hasTrigger(updateTrigger))) {
-    await db.query(
-      `CREATE TRIGGER ${updateTrigger} BEFORE UPDATE ON ${tableName}
-       FOR EACH ROW SET NEW.is_public_eff = IFNULL(NEW.is_public, 1)`
-    )
-  }
+  await db.query(`UPDATE ${tableName} SET is_public_eff = IFNULL(is_public, 1)`)
 }
 
 async function ensurePublicEffColumn(tableName) {
@@ -114,6 +83,7 @@ async function ensurePublicEffColumn(tableName) {
          GENERATED ALWAYS AS (IFNULL(is_public, 1)) STORED`
       )
       logger.info('is_public_eff generated column added', { table: tableName })
+      return
     } catch (generatedErr) {
       logger.warn('generated is_public_eff unsupported; using plain column', {
         table: tableName,
@@ -122,15 +92,11 @@ async function ensurePublicEffColumn(tableName) {
       await db.query(
         `ALTER TABLE ${tableName} ADD COLUMN is_public_eff TINYINT NOT NULL DEFAULT 1`
       )
-      await syncPublicEffValues(tableName)
-      await ensurePublicEffTriggers(tableName)
       logger.info('is_public_eff plain column added', { table: tableName })
-      return
     }
   }
 
   await syncPublicEffValues(tableName)
-  await ensurePublicEffTriggers(tableName)
 }
 
 async function ensurePublicVisibilityIndexes() {
@@ -162,12 +128,18 @@ async function ensurePublicVisibilitySchema() {
   if (schemaEnsured) return
   schemaEnsured = true
 
+  for (const table of ['artists', 'original_artworks']) {
+    try {
+      await ensurePublicEffColumn(table)
+    } catch (err) {
+      logger.warn('ensurePublicEffColumn failed', { table, err: err.message })
+    }
+  }
+
   try {
-    await ensurePublicEffColumn('artists')
-    await ensurePublicEffColumn('original_artworks')
     await ensurePublicVisibilityIndexes()
   } catch (err) {
-    logger.warn('ensurePublicVisibilitySchema failed', { err: err.message })
+    logger.warn('ensurePublicVisibilityIndexes failed', { err: err.message })
   }
 }
 
@@ -178,6 +150,7 @@ const INDEPENDENT_PUBLIC_ARTIST_WHERE = 'a.is_public_eff = 1 AND a.institution_i
 const INSTITUTION_PUBLIC_ARTIST_COUNT_WHERE = 'a.institution_id = i.id AND a.is_public_eff = 1'
 
 module.exports = {
+  toIsPublicEff,
   ensurePublicVisibilitySchema,
   ARTIST_PUBLIC_WHERE,
   ARTIST_PUBLIC_WHERE_UNALIASED,

@@ -9,6 +9,7 @@ const {
   ARTIST_PUBLIC_WHERE,
   ARTIST_PUBLIC_WHERE_UNALIASED,
   ORIGINAL_ARTWORK_PUBLIC_WHERE,
+  toIsPublicEff,
 } = require('../utils/publicVisibilitySchema');
 const {
   parseListPageParams,
@@ -316,8 +317,8 @@ async function createArtistAdmin(body) {
       sort_order = await getNextPublicArtistSortOrder();
     }
     const [result] = await db.query(
-      'INSERT INTO artists (avatar, name, description, institution_id, is_public, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
-      [avatar, cleanName, cleanDescription, institution_id || null, is_public, sort_order]
+      'INSERT INTO artists (avatar, name, description, institution_id, is_public, is_public_eff, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [avatar, cleanName, cleanDescription, institution_id || null, is_public, toIsPublicEff(is_public), sort_order]
     );
     const { invalidateShowcaseCache } = require('./showcaseService');
     await invalidateShowcaseCache();
@@ -412,8 +413,12 @@ async function updateArtistAdmin(rawId, body) {
     updateValues.push(updateData.achievements ? JSON.stringify(updateData.achievements) : null);
   }
   if (updateData.is_public !== undefined) {
+    const normalizedIsPublic =
+      updateData.is_public === 0 || updateData.is_public === false || updateData.is_public === '0' ? 0 : 1;
     updateFields.push('is_public = ?');
-    updateValues.push(updateData.is_public === 0 || updateData.is_public === false || updateData.is_public === '0' ? 0 : 1);
+    updateValues.push(normalizedIsPublic);
+    updateFields.push('is_public_eff = ?');
+    updateValues.push(toIsPublicEff(normalizedIsPublic));
   }
 
   try {

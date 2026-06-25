@@ -12,7 +12,7 @@ const {
   attachAdminWmsImageFields,
   stripWmsFieldsForPublic,
 } = require('./wmsArtworkImageService');
-const { ORIGINAL_ARTWORK_PUBLIC_WHERE } = require('../utils/publicVisibilitySchema');
+const { ORIGINAL_ARTWORK_PUBLIC_WHERE, toIsPublicEff } = require('../utils/publicVisibilitySchema');
 
 const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
@@ -525,8 +525,8 @@ async function createOriginalArtworkAdmin(body) {
       `INSERT INTO original_artworks (
         title, image, artist_id, year, description, long_description,
         background, features, collection_location, 
-        collection_number, collection_size, collection_material, price, original_price, discount_price, is_public
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        collection_number, collection_size, collection_material, price, original_price, discount_price, is_public, is_public_eff
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         image,
@@ -544,6 +544,7 @@ async function createOriginalArtworkAdmin(body) {
         original_price,
         discount_price,
         is_public,
+        toIsPublicEff(is_public),
       ]
     );
     const [artistRows] = await db.query('SELECT id, name FROM artists WHERE id = ?', [finalArtistId]);
@@ -638,7 +639,8 @@ async function updateOriginalArtworkAdmin(rawId, body) {
         stock = ?,
         sales = ?,
         is_on_sale = ?,
-        is_public = ?
+        is_public = ?,
+        is_public_eff = ?
       WHERE id = ?`,
       [
         title,
@@ -659,6 +661,7 @@ async function updateOriginalArtworkAdmin(rawId, body) {
         sales,
         is_on_sale,
         resolvedIsPublic,
+        toIsPublicEff(resolvedIsPublic),
         artworkId,
       ]
     );
@@ -815,7 +818,10 @@ async function patchOriginalArtworkIsPublicAdmin(rawId, body) {
   const v = body && body.is_public;
   const isPublic = v === 0 || v === false || v === '0' ? 0 : 1;
   try {
-    const [result] = await db.query('UPDATE original_artworks SET is_public = ? WHERE id = ?', [isPublic, artworkId]);
+    const [result] = await db.query(
+      'UPDATE original_artworks SET is_public = ?, is_public_eff = ? WHERE id = ?',
+      [isPublic, toIsPublicEff(isPublic), artworkId]
+    );
     if (!result || result.affectedRows === 0) return adminResult(404, { error: '作品不存在' });
     await invalidateArtworksPublicCaches({ artworkDetailId: artworkId });
     return adminResult(200, { id: artworkId, is_public: isPublic });
