@@ -605,7 +605,8 @@ async function getPath(req) {
 }
 
 /**
- * 顺丰：查询订单/面单信息（EXP_RECE_SEARCH_ORDER_RESP）
+ * 顺丰：查询订单/面单信息
+ * 面单 HTML 优先走 COM_RECE_CLOUD_PRINT_HTML 云打印；失败时回退简易预览。
  */
 async function getOrder(req) {
   const auth = assertSfConfig()
@@ -628,18 +629,44 @@ async function getOrder(req) {
     const ctx = await resolveLogisticsOrderContext(b)
     if (ctx.error) return ctx.error
 
+    let storedWaybillData = null
+    if (ctx.internal_order_id != null) {
+      const [rows] = await db.query(
+        `SELECT waybill_id, waybill_data_json FROM order_shipments
+         WHERE order_id = ? AND delivery_id = ? AND status = 'active'
+         ORDER BY id DESC LIMIT 1`,
+        [ctx.internal_order_id, delivery_id],
+      )
+      if (rows && rows.length) {
+        storedWaybillData = rows[0].waybill_data_json
+        if (typeof storedWaybillData === 'string') {
+          try { storedWaybillData = JSON.parse(storedWaybillData) } catch { storedWaybillData = null }
+        }
+      }
+    }
+
+    const waybillNoInfoList = resolveWaybillNoInfoList({
+      waybillNoInfoList: b.waybill_no_info_list,
+      waybillId: waybill_id || (storedWaybillData?.waybillNo ? String(storedWaybillData.waybillNo) : undefined),
+      storedWaybillData,
+    })
+
     const inputCheck = validateSearchOrderInput({ orderId: ctx.order_id })
     if (!inputCheck.ok) {
       return adminResult(400, { error: inputCheck.error })
     }
 
+    let assessment = null
     const sfResult = await searchOrder(buildSearchOrderPayload({
       orderId: inputCheck.orderId,
       searchType: b.search_type ?? SF_SEARCH_TYPE.FORWARD,
       language: b.language,
       mainWaybillNo: waybill_id,
     }))
-    if (!sfResult.ok) {
+
+    if (sfResult.ok) {
+      assessment = assessSearchOrderResponse(sfResult.msgData)
+    } else if (!waybillNoInfoList.length && !waybill_id) {
       return adminResult(502, {
         error: sfResult.error || '获取运单数据失败',
         errorCode: sfResult.errorCode,
@@ -647,43 +674,84 @@ async function getOrder(req) {
       })
     }
 
-    const assessment = assessSearchOrderResponse(sfResult.msgData)
-    if (!assessment.ok) {
+    const resolvedWaybill = waybill_id
+      || waybillNoInfoList.find((item) => String(item.waybillType) === '1')?.waybillNo
+      || waybillNoInfoList[0]?.waybillNo
+      || (assessment?.ok
+        ? (assessment.waybill_data.find((item) => String(item.waybill_type) === '1')?.waybill_no
+          || assessment.waybill_data[0]?.waybill_no
+          || extractPrimaryWaybillNo(assessment.normalized))
+        : null)
+
+    if (!resolvedWaybill && (!assessment || !assessment.ok)) {
       return adminResult(404, {
-        error: assessment.error,
+        error: assessment?.error || '未找到可打印的运单号',
         order_id: ctx.order_id,
         provider: 'sf-express',
       })
     }
 
-    const resolvedWaybill = waybill_id
-      || assessment.waybill_data.find((item) => String(item.waybill_type) === '1')?.waybill_no
-      || assessment.waybill_data[0]?.waybill_no
-      || extractPrimaryWaybillNo(assessment.normalized)
-    const routeLabelInfo = assessment.route_label_info || null
-    const previewHtml = buildWaybillPreviewHtml({
-      orderId: assessment.order_id || ctx.order_id,
-      waybillId: resolvedWaybill,
-      routeLabelInfo,
-      waybillNoInfoList: assessment.normalized?.waybillNoInfoList,
+    const routeLabelInfo = assessment?.route_label_info || null
+    const normalizedWaybillList = assessment?.ok && assessment.normalized?.waybillNoInfoList?.length
+      ? assessment.normalized.waybillNoInfoList
+      : waybillNoInfoList
+
+    const { fetchCloudPrintWaybillHtml } = require('./sfExpressCloudPrintHtml')
+    const cloudPrint = await fetchCloudPrintWaybillHtml({
+      waybillNoInfoList: normalizedWaybillList,
+      fallbackWaybillNo: resolvedWaybill,
+      templateCode: b.template_code,
+      customTemplateCode: b.custom_template_code,
+      waybillNoCheckType: b.waybill_no_check_type,
+      waybillNoCheckValue: b.waybill_no_check_value,
     })
-    const print_html = Buffer.from(previewHtml, 'utf8').toString('base64')
+
+    let printHtml = ''
+    let printSource = 'fallback'
+    let printFiles = []
+    let cloudPrintError = null
+
+    if (cloudPrint.ok) {
+      printHtml = cloudPrint.html
+      printSource = 'cloud_print'
+      printFiles = cloudPrint.print_files || []
+    } else {
+      cloudPrintError = cloudPrint.error || '云打印面单失败'
+      logger.warn('getOrder cloud print fallback', {
+        orderId: ctx.order_id,
+        waybillId: resolvedWaybill,
+        error: cloudPrintError,
+        errorCode: cloudPrint.errorCode,
+      })
+      printHtml = buildWaybillPreviewHtml({
+        orderId: assessment?.order_id || ctx.order_id,
+        waybillId: resolvedWaybill,
+        routeLabelInfo,
+        waybillNoInfoList: normalizedWaybillList,
+      })
+    }
+
+    const print_html = Buffer.from(printHtml, 'utf8').toString('base64')
 
     return adminResult(200, {
       print_html,
-      waybill_data: assessment.waybill_data,
+      print_source: printSource,
+      print_files: printFiles,
+      cloud_print_error: cloudPrintError || undefined,
+      template_code: cloudPrint.template_code,
+      waybill_data: assessment?.waybill_data || extractWaybillNoInfoList(normalizedWaybillList),
       route_label_info: routeLabelInfo,
-      route_label_summary: assessment.route_label_summary,
-      order_id: assessment.order_id || ctx.order_id,
+      route_label_summary: assessment?.route_label_summary,
+      order_id: assessment?.order_id || ctx.order_id,
       delivery_id,
       waybill_id: resolvedWaybill,
-      origin_code: assessment.origin_code,
-      dest_code: assessment.dest_code,
-      filter_result: assessment.filter_result,
-      filter_meta: assessment.filter_meta,
-      filter_warning: assessment.filter_warning,
-      route_label_warning: assessment.route_label_warning,
-      return_extra_info_list: assessment.return_extra_info_list,
+      origin_code: assessment?.origin_code,
+      dest_code: assessment?.dest_code,
+      filter_result: assessment?.filter_result,
+      filter_meta: assessment?.filter_meta,
+      filter_warning: assessment?.filter_warning,
+      route_label_warning: assessment?.route_label_warning,
+      return_extra_info_list: assessment?.return_extra_info_list,
       provider: 'sf-express',
     })
   } catch (err) {

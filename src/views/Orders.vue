@@ -1004,7 +1004,10 @@
             <Input id="wb-waybill" v-model="trackForm.waybill_id" autocomplete="off" />
           </div>
           <p class="text-xs text-muted-foreground">
-            顺丰面单由订单查询接口返回路由标签 HTML 预览；运单号留空时按订单号查询。
+            顺丰云打印面单（COM_RECE_CLOUD_PRINT_HTML）；运单号留空时按订单号查询。
+          </p>
+          <p v-if="waybillPrintSource" class="text-xs text-muted-foreground">
+            面单来源：{{ waybillPrintSource === 'cloud_print' ? '云打印 HTML' : '简易预览（云打印失败时回退）' }}
           </p>
           <Button type="button" class="w-fit" :disabled="waybillLoading" @click="fetchWaybill">
             <Loader2 v-if="waybillLoading" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
@@ -1342,6 +1345,7 @@ const trackForm = reactive({
 const waybillDialogVisible = ref(false)
 const waybillLoading = ref(false)
 const waybillPreviewUrl = ref('')
+const waybillPrintSource = ref('')
 const pathEmptyHint = ref('')
 
 const cancelWaybillDialogOpen = ref(false)
@@ -2077,6 +2081,7 @@ function revokeWaybillPreview() {
     URL.revokeObjectURL(waybillPreviewUrl.value)
     waybillPreviewUrl.value = ''
   }
+  waybillPrintSource.value = ''
 }
 
 async function submitShip() {
@@ -2258,6 +2263,10 @@ async function fetchWaybill() {
     if (!html) {
       ElMessage.warning('未返回可解码的面单 HTML')
       return
+    }
+    waybillPrintSource.value = res?.print_source || ''
+    if (res?.cloud_print_error && res?.print_source !== 'cloud_print') {
+      ElMessage.warning(`云打印失败，已回退简易预览：${res.cloud_print_error}`)
     }
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
     waybillPreviewUrl.value = URL.createObjectURL(blob)
