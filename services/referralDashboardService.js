@@ -1,7 +1,8 @@
 const db = require('../db')
 const logger = require('../utils/logger')
 const { ensureReferralSchema } = require('../utils/referralSchema')
-const { ensureCommissionSchema, roundMoney, parseMoney } = require('./commissionService')
+const { ensureCommissionSchema } = require('../utils/commissionSchema')
+const { roundMoney, parseMoney } = require('./commissionService')
 const { ensureReferralRewardsSchema } = require('../utils/referralRewardsSchema')
 const { ensureReferralReconciliationSchema } = require('../utils/referralReconciliationSchema')
 
