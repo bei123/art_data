@@ -119,7 +119,7 @@
           />
         </div>
       </CardContent>
-      <CardFooter class="flex flex-wrap gap-2 border-t border-border pt-6">
+      <div class="flex flex-wrap gap-2 border-t border-border px-6 pb-6 pt-6">
         <Button type="button" variant="outline" @click="resetToDefault">
           恢复默认文案
         </Button>
@@ -127,7 +127,7 @@
           <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" aria-hidden="true" />
           {{ saving ? '保存中…' : '保存配置' }}
         </Button>
-      </CardFooter>
+      </div>
     </Card>
   </div>
 </template>
@@ -138,12 +138,12 @@ import axios from 'axios'
 import { AlertCircle, Loader2, Trash2 } from 'lucide-vue-next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { showPageError, showPageSuccess } from '@/utils/appMessage'
+import { showPageSuccess, showPageWarning } from '@/utils/appMessage'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -200,7 +200,7 @@ async function loadConfig() {
 
 function addStep() {
   if (form.guide_steps.length >= 10) {
-    showPageError('最多 10 条步骤')
+    showPageWarning('最多 10 条步骤')
     return
   }
   form.guide_steps.push('')
@@ -229,7 +229,7 @@ async function saveConfig() {
     applyForm(data?.data || payload)
     showPageSuccess(data?.message || '保存成功')
   } catch (error) {
-    showPageError(error?.response?.data?.error || error?.message || '保存失败')
+    showPageWarning(error?.response?.data?.error || error?.message || '保存失败')
   } finally {
     saving.value = false
   }
