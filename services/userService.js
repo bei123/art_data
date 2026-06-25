@@ -41,8 +41,6 @@ async function getPurchasedProducts(userId) {
         r.price as right_price,
         r.original_price as right_original_price,
         r.description as right_description,
-        r.status as right_status,
-        r.remaining_count as right_remaining_count,
         ri.image_url as right_image_url,
         ${DIGITAL_ITEM_SELECT_SQL},
         COALESCE(da.artist_id, dae.artist_id) as digital_artist_id,
@@ -82,8 +80,6 @@ async function getPurchasedProducts(userId) {
           title: item.right_title,
           original_price: item.right_original_price,
           description: item.right_description,
-          status: item.right_status,
-          remaining_count: item.right_remaining_count,
           images: item.right_image_url ? [item.right_image_url] : [],
         };
       } else if (item.type === 'digital') {
