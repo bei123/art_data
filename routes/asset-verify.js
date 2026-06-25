@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
+const { requireAdmin } = require('../auth');
+
+router.use(...requireAdmin);
 
 /**
  * 外部API配置

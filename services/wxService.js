@@ -13,9 +13,14 @@ const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { resolveAuthFromRequest } = require('../auth');
 const { issueWxTokenPair, refreshWxAccessToken } = require('../utils/wxSessionTokens');
+const { appendClientErrorDetail } = require('../utils/clientErrorDetail');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
+}
+
+function fail500(message, err, extra = {}) {
+  return adminResult(500, appendClientErrorDetail({ error: message, ...extra }, err));
 }
 
 function maskPhone(phone) {
@@ -153,8 +158,8 @@ const { code } = req.body;
         const { openid, session_key } = wxRes.data;
 
         if (!openid) {
-            return adminResult(400, { error: '微信登录失败', detail: wxRes.data });
-}
+            return adminResult(400, appendClientErrorDetail({ error: '微信登录失败' }, wxRes.data?.errmsg ? new Error(String(wxRes.data.errmsg)) : null));
+        }
 
         // 2. 在你自己的数据库查找或注册用户（表名改为 wx_users）
         let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?', [openid]);
@@ -216,7 +221,7 @@ const { code } = req.body;
         });
 } catch (err) {
         logger.error('登录失败', { err });
-        return adminResult(500, { error: '获取用户信息服务暂时不可用', detail: err.message });
+        return fail500('获取用户信息服务暂时不可用', err);
 }
 }
 
@@ -239,7 +244,7 @@ async function refreshToken(req) {
         });
     } catch (err) {
         logger.error('刷新 token 失败', { err });
-        return adminResult(500, { error: '刷新登录状态失败', detail: err.message });
+        return fail500('刷新登录状态失败', err);
     }
 }
 
@@ -442,7 +447,7 @@ async function updateProfile(req) {
         });
 } catch (err) {
         logger.error('更新用户信息失败', { err });
-        return adminResult(500, { error: '更新用户信息服务暂时不可用', detail: err.message });
+        return fail500('更新用户信息服务暂时不可用', err);
 }
 }
 
@@ -473,10 +478,7 @@ const { appInfo } = req.body;
         return adminResult(200, response.data);
 } catch (err) {
         logger.error('获取token失败', { err });
-        return adminResult(500, {
-            error: '获取外部token服务暂时不可用',
-            detail: err.message
-        });
+        return fail500('获取外部token服务暂时不可用', err);
 }
 }
 
@@ -543,12 +545,7 @@ async function realNameRegistration(req) {
         return adminResult(200, response.data);
 } catch (err) {
         logger.error('实名注册失败', { err });
-        return adminResult(500, {
-            code: 500,
-            status: false,
-            message: '实名注册服务暂时不可用',
-            detail: err.message
-        });
+        return adminResult(500, appendClientErrorDetail({ code: 500, status: false, message: '实名注册服务暂时不可用' }, err));
 }
 }
 
@@ -556,26 +553,29 @@ async function userPhone(req) {
     const session = await resolveWxSession(req)
     if (!session.ok) return session.result
     const payload = session.payload
+    const purpose = String(req.query?.purpose || req.body?.purpose || '').trim()
 
     try {
-        // 查询用户手机号
         const [rows] = await db.query(
             `SELECT phone FROM wx_users WHERE id = ?`,
             [payload.userId]
-        );
+        )
 
         if (rows.length === 0) {
-            return adminResult(404, { error: '用户不存在' });
-}
+            return adminResult(404, { error: '用户不存在' })
+        }
+
+        const phone = rows[0].phone
+        const exposeFullPhone = purpose === 'real_name'
 
         return adminResult(200, {
-            phone: rows[0].phone,
-            message: '获取手机号成功'
-        });
-} catch (err) {
-        logger.error('获取手机号失败', { err });
-        return adminResult(500, { error: '获取手机号服务暂时不可用', detail: err.message });
-}
+            phone: exposeFullPhone ? phone : maskPhone(phone),
+            message: exposeFullPhone ? '获取手机号成功' : '获取脱敏手机号成功',
+        })
+    } catch (err) {
+        logger.error('获取手机号失败', { err })
+        return fail500('获取手机号服务暂时不可用', err)
+    }
 }
 
 async function userVerificationStatus(req) {
@@ -618,30 +618,22 @@ async function userVerificationStatus(req) {
 }
     } catch (err) {
         logger.error('查询实名状态失败', { err });
-        return adminResult(500, { error: '查询实名状态服务暂时不可用', detail: err.message });
+        return fail500('查询实名状态服务暂时不可用', err);
 }
 }
 
 async function uploadIdcard(req) {
-const { userId } = req.body;
+    const session = await resolveWxSession(req, { extendedError: true });
+    if (!session.ok) return session.result;
 
-    // 输入验证
-    if (!userId) {
-        return adminResult(400, {
-            code: 400,
+    const cleanUserId = session.userId;
+    if (!cleanUserId || cleanUserId <= 0) {
+        return adminResult(401, {
+            code: 401,
             status: false,
-            message: '缺少用户ID'
+            message: '请先登录',
         });
-}
-
-    const cleanUserId = parseInt(userId);
-    if (isNaN(cleanUserId) || cleanUserId <= 0) {
-        return adminResult(400, {
-            code: 400,
-            status: false,
-            message: '无效的用户ID'
-        });
-}
+    }
 
     try {
         const files = req.files;
@@ -750,12 +742,11 @@ const { userId } = req.body;
                             err: verifyErr,
                             recommend: verifyErr.data?.Recommend,
                         });
-                        result.idCardVerify = {
+                        result.idCardVerify = appendClientErrorDetail({
                             code: 500,
                             message: '二要素核验失败',
-                            detail: verifyErr.message,
-                            recommend: verifyErr.data?.Recommend
-                        };
+                            recommend: verifyErr.data?.Recommend,
+                        }, verifyErr);
                     }
                 } else {
                     console.log('无法获取姓名或身份证号:', {
@@ -810,12 +801,7 @@ const { userId } = req.body;
         });
 } catch (err) {
         logger.error('上传身份证照片失败', { err });
-        return adminResult(500, {
-            code: 500,
-            status: false,
-            message: '上传身份证照片服务暂时不可用',
-            detail: err.message
-        });
+        return adminResult(500, appendClientErrorDetail({ code: 500, status: false, message: '上传身份证照片服务暂时不可用' }, err));
 }
 }
 
@@ -838,7 +824,10 @@ function getIp(req) {
 }
 
 async function idcardVerify(req) {
-const { certName, certNo } = req.body;
+    const session = await resolveWxSession(req, { extendedError: true });
+    if (!session.ok) return session.result;
+
+    const { certName, certNo } = req.body;
 
     // 输入验证
     if (!certName || typeof certName !== 'string' || certName.trim().length === 0) {
@@ -876,12 +865,7 @@ const { certName, certNo } = req.body;
         return adminResult(200, response.body);
 } catch (err) {
         logger.error('二要素核验失败', { err });
-        return adminResult(500, {
-            code: 500,
-            message: '身份证核验服务暂时不可用',
-            detail: err.message,
-            recommend: err.data?.Recommend
-        });
+        return adminResult(500, appendClientErrorDetail({ code: 500, message: '身份证核验服务暂时不可用', recommend: err.data?.Recommend }, err));
 }
 }
 
@@ -942,7 +926,7 @@ async function setPassword(req) {
         });
 } catch (err) {
         logger.error('设置密码失败', { err });
-        return adminResult(500, { error: '设置密码服务暂时不可用', detail: err.message });
+        return fail500('设置密码服务暂时不可用', err);
 }
 }
 
@@ -1010,7 +994,7 @@ async function changePassword(req) {
         });
 } catch (err) {
         logger.error('修改密码失败', { err });
-        return adminResult(500, { error: '修改密码服务暂时不可用', detail: err.message });
+        return fail500('修改密码服务暂时不可用', err);
 }
 }
 
@@ -1065,7 +1049,7 @@ async function verifyPassword(req) {
         });
 } catch (err) {
         logger.error('验证密码失败', { err });
-        return adminResult(500, { error: '验证密码服务暂时不可用', detail: err.message });
+        return fail500('验证密码服务暂时不可用', err);
 }
 }
 
@@ -1115,7 +1099,7 @@ async function listAddresses(req) {
         });
 } catch (err) {
         logger.error('获取地址列表失败', { err });
-        return adminResult(500, { error: '获取地址列表服务暂时不可用', detail: err.message });
+        return fail500('获取地址列表服务暂时不可用', err);
 }
 }
 
@@ -1159,7 +1143,7 @@ async function getAddressDefault(req) {
         });
 } catch (err) {
         logger.error('获取默认地址失败', { err });
-        return adminResult(500, { error: '获取默认地址服务暂时不可用', detail: err.message });
+        return fail500('获取默认地址服务暂时不可用', err);
 }
 }
 
@@ -1205,7 +1189,7 @@ async function getAddressById(req) {
         });
 } catch (err) {
         logger.error('获取地址详情失败', { err });
-        return adminResult(500, { error: '获取地址详情服务暂时不可用', detail: err.message });
+        return fail500('获取地址详情服务暂时不可用', err);
 }
 }
 
@@ -1310,7 +1294,7 @@ async function createAddress(req) {
         });
 } catch (err) {
         logger.error('添加地址失败', { err });
-        return adminResult(500, { error: '添加地址服务暂时不可用', detail: err.message });
+        return fail500('添加地址服务暂时不可用', err);
 }
 }
 
@@ -1430,7 +1414,7 @@ async function updateAddress(req) {
         });
 } catch (err) {
         logger.error('修改地址失败', { err });
-        return adminResult(500, { error: '修改地址服务暂时不可用', detail: err.message });
+        return fail500('修改地址服务暂时不可用', err);
 }
 }
 
@@ -1479,7 +1463,7 @@ async function deleteAddress(req) {
         });
 } catch (err) {
         logger.error('删除地址失败', { err });
-        return adminResult(500, { error: '删除地址服务暂时不可用', detail: err.message });
+        return fail500('删除地址服务暂时不可用', err);
 }
 }
 
@@ -1509,7 +1493,7 @@ async function setAddressDefault(req) {
         });
 } catch (err) {
         logger.error('设置默认地址失败', { err });
-        return adminResult(500, { error: '设置默认地址服务暂时不可用', detail: err.message });
+        return fail500('设置默认地址服务暂时不可用', err);
 }
 }
 

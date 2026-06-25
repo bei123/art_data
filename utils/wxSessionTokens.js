@@ -2,6 +2,7 @@ const crypto = require('crypto')
 const jwt = require('jsonwebtoken')
 const { query } = require('../db')
 const { JWT_SECRET } = require('./sessionAuth')
+const { hashSessionToken } = require('./sessionTokenHash')
 
 const WX_ACCESS_TOKEN_EXPIRES_IN = process.env.WX_ACCESS_TOKEN_EXPIRES_IN || '2h'
 const WX_REFRESH_TOKEN_TTL_DAYS = parseInt(process.env.WX_REFRESH_TOKEN_TTL_DAYS || '30', 10)
@@ -39,9 +40,10 @@ function getRefreshTokenMeta() {
 async function persistWxAccessSession({ userId, accessToken }) {
   const decoded = jwt.decode(accessToken)
   const expiresAt = new Date(decoded.exp * 1000)
+  const tokenHash = hashSessionToken(accessToken)
   await query(
-    'INSERT INTO wx_user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
-    [userId, accessToken, expiresAt]
+    'INSERT INTO wx_user_sessions (user_id, token, token_hash, expires_at) VALUES (?, ?, ?, ?)',
+    [userId, accessToken, tokenHash, expiresAt]
   )
 }
 
@@ -121,7 +123,11 @@ async function revokeWxRefreshTokensForUser(userId) {
 
 async function revokeWxAccessSession(token) {
   if (!token) return
-  await query('DELETE FROM wx_user_sessions WHERE token = ?', [token])
+  const tokenHash = hashSessionToken(token)
+  await query(
+    'DELETE FROM wx_user_sessions WHERE token = ? OR token_hash = ?',
+    [token, tokenHash]
+  )
 }
 
 module.exports = {

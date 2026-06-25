@@ -18,10 +18,17 @@ function getAllowedCorsOrigins() {
   return [...new Set([...base, ...parseExtraCorsOrigins()])];
 }
 
-/** 允许 2000gallery.art 子域（管理台、H5 等） */
+function isSubdomainWildcardEnabled() {
+  const raw = process.env.CORS_ALLOW_SUBDOMAIN_WILDCARD;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return true;
+  return String(raw).toLowerCase() === 'true' || raw === '1';
+}
+
+/** 允许 2000gallery.art 子域（管理台、H5 等）；可通过 CORS_ALLOW_SUBDOMAIN_WILDCARD=false 关闭 */
 function isOriginAllowed(origin) {
   if (!origin || typeof origin !== 'string') return false;
   if (getAllowedCorsOrigins().includes(origin)) return true;
+  if (!isSubdomainWildcardEnabled()) return false;
   try {
     const { protocol, hostname } = new URL(origin);
     if (protocol !== 'https:' && protocol !== 'http:') return false;

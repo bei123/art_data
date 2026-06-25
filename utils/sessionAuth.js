@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken')
 const { query } = require('../db')
+const { hashSessionToken } = require('./sessionTokenHash')
 
 const isTestRuntime = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test'
 const JWT_SECRET = process.env.JWT_SECRET
@@ -34,9 +35,12 @@ async function verifyActiveSessionToken(token) {
     const decoded = jwt.verify(token, JWT_SECRET)
     const sessionTable = resolveSessionTable(decoded)
 
+    const tokenHash = hashSessionToken(token)
     const [sessions] = await query(
-      `SELECT user_id FROM ${sessionTable} WHERE token = ? AND expires_at > NOW() LIMIT 1`,
-      [token]
+      `SELECT user_id FROM ${sessionTable}
+       WHERE expires_at > NOW() AND (token = ? OR token_hash = ?)
+       LIMIT 1`,
+      [token, tokenHash]
     )
 
     if (!sessions || sessions.length === 0) {

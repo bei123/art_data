@@ -29,6 +29,14 @@ if (!process.env.DB_PASSWORD) {
     }
 }
 
+if (
+    !isTestRuntime &&
+    process.env.NODE_ENV === 'production' &&
+    !process.env.DB_USER
+) {
+    logger.warn('DB_USER not set, using default account name "data"');
+}
+
 if (isDev) {
     console.log('Database configuration:', {
         ...dbConfig,

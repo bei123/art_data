@@ -1,10 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const multer = require('multer');
 const rateLimit = require('express-rate-limit');
-const upload = multer();
+const { merchantImageUpload } = require('../config/multerUpload');
+const wxImageUpload = merchantImageUpload;
 const { authenticateToken, checkRole } = require('../auth');
+const { wxAuthenticated } = require('../utils/wxRouteAuth');
+const { appendClientErrorDetail } = require('../utils/clientErrorDetail');
+const { wxLoginLimiter, wxRefreshLimiter, wxPublicAuxLimiter } = require('../utils/wxAuthRateLimit');
 const svc = require('../services/wxService');
 const mapGeocodeSvc = require('../services/mapGeocodeService');
 const logisticsSvc = require('../services/logisticsService');
@@ -28,115 +31,145 @@ const geocodeLimiter = rateLimit({
     },
 });
 
-router.post('/getPhoneNumber', async (req, res) => {
+const wxPhoneNumberLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: parseInt(process.env.WX_GET_PHONE_NUMBER_RATE_LIMIT || '10', 10),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        const userId = req.user?.id
+        if (userId != null) return `wx-phone:user:${userId}`
+        return `wx-phone:ip:${req.ip}`
+    },
+    handler: (req, res) => {
+        res.status(429).json({ error: '获取手机号过于频繁，请稍后再试' });
+    },
+});
+
+const idcardVerifyLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: parseInt(process.env.WX_IDCARD_VERIFY_RATE_LIMIT_PER_HOUR || '20', 10),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        const userId = req.user?.id
+        if (userId != null) return `idcard-verify:user:${userId}`
+        return `idcard-verify:ip:${req.ip}`
+    },
+    handler: (req, res) => {
+        res.status(429).json({
+            code: 429,
+            message: '核验次数过多，请稍后再试',
+        });
+    },
+});
+
+router.post('/getPhoneNumber', authenticateToken, wxPhoneNumberLimiter, async (req, res) => {
     try {
         const r = await svc.getPhoneNumber(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取手机号失败', { err: error });
-        res.status(500).json({ error: '获取手机号服务暂时不可用' });
+        res.status(500).json(appendClientErrorDetail({ error: '获取手机号服务暂时不可用' }, error));
     }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', wxLoginLimiter, async (req, res) => {
     try {
         const r = await svc.login(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('登录失败', { err: error });
-        res.status(500).json({ error: '获取用户信息服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取用户信息服务暂时不可用' }, error));
     }
 });
 
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', wxRefreshLimiter, async (req, res) => {
     try {
         const r = await svc.refreshToken(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('刷新 token 失败', { err: error });
-        res.status(500).json({ error: '刷新登录状态失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '刷新登录状态失败' }, error));
     }
 });
 
-router.post('/bindUserInfo', async (req, res) => {
+router.post('/bindUserInfo', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.bindUserInfo(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('绑定用户信息失败', { err: error });
-        res.status(500).json({ error: '更新用户信息服务暂时不可用' });
+        res.status(500).json(appendClientErrorDetail({ error: '更新用户信息服务暂时不可用' }, error));
     }
 });
 
-router.get('/userInfo', async (req, res) => {
+router.get('/userInfo', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.userInfo(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取用户信息失败', { err: error });
-        res.status(500).json({ error: '获取用户信息服务暂时不可用' });
+        res.status(500).json(appendClientErrorDetail({ error: '获取用户信息服务暂时不可用' }, error));
     }
 });
 
-router.post('/updateProfile', upload.single('avatar'), async (req, res) => {
+router.post('/updateProfile', authenticateToken, wxImageUpload.single('avatar'), async (req, res) => {
     try {
         const r = await svc.updateProfile(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('更新用户信息失败', { err: error });
-        res.status(500).json({ error: '更新用户信息服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '更新用户信息服务暂时不可用' }, error));
     }
 });
 
-router.post('/userApi/user/getToken', express.urlencoded({ extended: false }), async (req, res) => {
+router.post('/userApi/user/getToken', authenticateToken, express.urlencoded({ extended: false }), async (req, res) => {
     try {
         const r = await svc.userApiGetToken(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取token失败', { err: error });
-        res.status(500).json({
-            error: '获取外部token服务暂时不可用',
-            detail: error.message
-        });
+        res.status(500).json(appendClientErrorDetail({ error: '获取外部token服务暂时不可用'
+        }, error));
     }
 });
 
-router.post('/userApi/external/user/real_name_registration/simplify/v3', async (req, res) => {
+router.post('/userApi/external/user/real_name_registration/simplify/v3', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.realNameRegistration(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('实名注册失败', { err: error });
-        res.status(500).json({
+        res.status(500).json(appendClientErrorDetail({
             code: 500,
             status: false,
             message: '实名注册服务暂时不可用',
-            detail: error.message
-        });
+        }, error));
     }
 });
 
-router.get('/userPhone', async (req, res) => {
+router.get('/userPhone', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.userPhone(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取手机号失败', { err: error });
-        res.status(500).json({ error: '获取手机号服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取手机号服务暂时不可用' }, error));
     }
 });
 
-router.get('/userVerificationStatus', async (req, res) => {
+router.get('/userVerificationStatus', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.userVerificationStatus(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('查询实名状态失败', { err: error });
-        res.status(500).json({ error: '查询实名状态服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '查询实名状态服务暂时不可用' }, error));
     }
 });
 
-router.post('/userApi/external/user/upload/idcard', upload.fields([
+router.post('/userApi/external/user/upload/idcard', authenticateToken, wxImageUpload.fields([
     { name: 'idCardFront', maxCount: 1 },
     { name: 'idCardBack', maxCount: 1 },
     { name: 'businessLicense', maxCount: 1 }
@@ -146,77 +179,75 @@ router.post('/userApi/external/user/upload/idcard', upload.fields([
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('上传身份证照片失败', { err: error });
-        res.status(500).json({
+        res.status(500).json(appendClientErrorDetail({
             code: 500,
             status: false,
             message: '上传身份证照片服务暂时不可用',
-            detail: error.message
-        });
+        }, error));
     }
 });
 
-router.get('/getIp', async (req, res) => {
+router.get('/getIp', wxPublicAuxLimiter, async (req, res) => {
     try {
         const r = await svc.getIp(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取IP失败', { err: error });
-        res.status(500).json({ error: '服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '服务暂时不可用' }, error));
     }
 });
 
-router.post('/userApi/external/user/idcard-verify', async (req, res) => {
+router.post('/userApi/external/user/idcard-verify', authenticateToken, idcardVerifyLimiter, async (req, res) => {
     try {
         const r = await svc.idcardVerify(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('二要素核验失败', { err: error });
-        res.status(500).json({
+        res.status(500).json(appendClientErrorDetail({
             code: 500,
             message: '身份证核验服务暂时不可用',
-            detail: error.message,
-            recommend: error.data?.Recommend
-        });
+            recommend: error.data?.Recommend,
+        }, error));
     }
 });
 
-router.get('/font-url', async (req, res) => {
+router.get('/font-url', wxPublicAuxLimiter, async (req, res) => {
     try {
         const r = await svc.getFontUrl(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取字体链接失败', { err: error });
-        res.status(500).json({ error: '服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '服务暂时不可用' }, error));
     }
 });
 
-router.post('/setPassword', async (req, res) => {
+router.post('/setPassword', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.setPassword(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('设置密码失败', { err: error });
-        res.status(500).json({ error: '设置密码服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '设置密码服务暂时不可用' }, error));
     }
 });
 
-router.post('/changePassword', async (req, res) => {
+router.post('/changePassword', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.changePassword(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('修改密码失败', { err: error });
-        res.status(500).json({ error: '修改密码服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '修改密码服务暂时不可用' }, error));
     }
 });
 
-router.post('/verifyPassword', async (req, res) => {
+router.post('/verifyPassword', ...wxAuthenticated, async (req, res) => {
     try {
         const r = await svc.verifyPassword(req);
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('验证密码失败', { err: error });
-        res.status(500).json({ error: '验证密码服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '验证密码服务暂时不可用' }, error));
     }
 });
 
@@ -226,7 +257,7 @@ router.get('/addresses', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取地址列表失败', { err: error });
-        res.status(500).json({ error: '获取地址列表服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取地址列表服务暂时不可用' }, error));
     }
 });
 
@@ -236,7 +267,7 @@ router.get('/addresses/default', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取默认地址失败', { err: error });
-        res.status(500).json({ error: '获取默认地址服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取默认地址服务暂时不可用' }, error));
     }
 });
 
@@ -246,7 +277,7 @@ router.get('/addresses/:id', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取地址详情失败', { err: error });
-        res.status(500).json({ error: '获取地址详情服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取地址详情服务暂时不可用' }, error));
     }
 });
 
@@ -256,7 +287,7 @@ router.post('/addresses', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('添加地址失败', { err: error });
-        res.status(500).json({ error: '添加地址服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '添加地址服务暂时不可用' }, error));
     }
 });
 
@@ -266,7 +297,7 @@ router.put('/addresses/:id', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('修改地址失败', { err: error });
-        res.status(500).json({ error: '修改地址服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '修改地址服务暂时不可用' }, error));
     }
 });
 
@@ -276,7 +307,7 @@ router.delete('/addresses/:id', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('删除地址失败', { err: error });
-        res.status(500).json({ error: '删除地址服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '删除地址服务暂时不可用' }, error));
     }
 });
 
@@ -286,7 +317,7 @@ router.put('/addresses/:id/default', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('设置默认地址失败', { err: error });
-        res.status(500).json({ error: '设置默认地址服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '设置默认地址服务暂时不可用' }, error));
     }
 });
 
@@ -297,7 +328,7 @@ router.get('/map/geocode', geocodeLimiter, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('地理编码失败', { err: error });
-        return res.status(500).json({ error: '地址解析失败' });
+        return res.status(500).json(appendClientErrorDetail({ error: '地址解析失败' }, error));
     }
 });
 
@@ -308,7 +339,7 @@ router.post('/logistics/me/path', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('买家查询运单轨迹失败', { err: error });
-        res.status(500).json({ error: '查询运单轨迹失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '查询运单轨迹失败' }, error));
     }
 });
 
@@ -319,7 +350,7 @@ router.post('/logistics/me/order', authenticateToken, async (req, res) => {
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('买家获取运单数据失败', { err: error });
-        res.status(500).json({ error: '获取运单数据失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取运单数据失败' }, error));
     }
 });
 
@@ -330,7 +361,7 @@ router.get('/logistics/deliveries', authenticateToken, checkRole(['admin']), asy
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取快递公司列表失败', { err: error });
-        res.status(500).json({ error: '获取快递公司列表服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取快递公司列表服务暂时不可用' }, error));
     }
 });
 
@@ -341,7 +372,7 @@ router.post('/logistics/orders', authenticateToken, checkRole(['admin']), async 
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('生成运单失败', { err: error });
-        res.status(500).json({ error: '生成运单服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '生成运单服务暂时不可用' }, error));
     }
 });
 
@@ -352,7 +383,7 @@ router.post('/logistics/path', authenticateToken, checkRole(['admin']), async (r
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('查询运单轨迹失败', { err: error });
-        res.status(500).json({ error: '查询运单轨迹服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '查询运单轨迹服务暂时不可用' }, error));
     }
 });
 
@@ -363,7 +394,7 @@ router.post('/logistics/order/get', authenticateToken, checkRole(['admin']), asy
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取运单数据失败', { err: error });
-        res.status(500).json({ error: '获取运单数据服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取运单数据服务暂时不可用' }, error));
     }
 });
 
@@ -374,7 +405,7 @@ router.post('/logistics/order/confirm', authenticateToken, checkRole(['admin']),
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('订单确认失败', { err: error });
-        res.status(500).json({ error: '订单确认服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '订单确认服务暂时不可用' }, error));
     }
 });
 
@@ -385,7 +416,7 @@ router.post('/logistics/query-deliver-tm', authenticateToken, checkRole(['admin'
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('时效价格查询失败', { err: error });
-        res.status(500).json({ error: '时效价格查询服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '时效价格查询服务暂时不可用' }, error));
     }
 });
 
@@ -396,7 +427,7 @@ router.post('/logistics/order/cancel', authenticateToken, checkRole(['admin']), 
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('取消运单失败', { err: error });
-        res.status(500).json({ error: '取消运单服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '取消运单服务暂时不可用' }, error));
     }
 });
 
@@ -407,7 +438,7 @@ router.post('/logistics/upload-shipping-info', authenticateToken, checkRole(['ad
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信发货信息录入失败', { err: error });
-        res.status(500).json({ error: '微信发货信息录入服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信发货信息录入服务暂时不可用' }, error));
     }
 });
 
@@ -418,7 +449,7 @@ router.post('/logistics/upload-combined-shipping-info', authenticateToken, check
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信合单发货信息录入失败', { err: error });
-        res.status(500).json({ error: '微信合单发货信息录入服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信合单发货信息录入服务暂时不可用' }, error));
     }
 });
 
@@ -429,7 +460,7 @@ router.post('/logistics/wechat-order/get', authenticateToken, checkRole(['admin'
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信订单发货状态查询失败', { err: error });
-        res.status(500).json({ error: '微信订单发货状态查询服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信订单发货状态查询服务暂时不可用' }, error));
     }
 });
 
@@ -440,7 +471,7 @@ router.post('/logistics/wechat-order/list', authenticateToken, checkRole(['admin
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信订单列表查询失败', { err: error });
-        res.status(500).json({ error: '微信订单列表查询服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信订单列表查询服务暂时不可用' }, error));
     }
 });
 
@@ -451,7 +482,7 @@ router.post('/logistics/wechat-order/notify-confirm-receive', authenticateToken,
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信确认收货提醒失败', { err: error });
-        res.status(500).json({ error: '微信确认收货提醒服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信确认收货提醒服务暂时不可用' }, error));
     }
 });
 
@@ -462,7 +493,7 @@ router.post('/logistics/wechat-order/set-msg-jump-path', authenticateToken, chec
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信消息跳转路径设置失败', { err: error });
-        res.status(500).json({ error: '微信消息跳转路径设置服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信消息跳转路径设置服务暂时不可用' }, error));
     }
 });
 
@@ -473,7 +504,7 @@ router.post('/logistics/wechat-order/is-trade-management-completed', authenticat
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('微信交易结算管理确认查询失败', { err: error });
-        res.status(500).json({ error: '微信交易结算管理确认查询服务暂时不可用', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '微信交易结算管理确认查询服务暂时不可用' }, error));
     }
 });
 
@@ -484,7 +515,7 @@ router.get('/subscribe-message/categories', authenticateToken, checkRole(['admin
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取订阅消息类目失败', { err: error });
-        res.status(500).json({ error: '获取订阅消息类目失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取订阅消息类目失败' }, error));
     }
 });
 
@@ -495,7 +526,7 @@ router.get('/subscribe-message/templates/public', authenticateToken, checkRole([
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取公共订阅模板失败', { err: error });
-        res.status(500).json({ error: '获取公共订阅模板失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取公共订阅模板失败' }, error));
     }
 });
 
@@ -506,7 +537,7 @@ router.get('/subscribe-message/templates/public/:tid/keywords', authenticateToke
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取订阅模板关键词失败', { err: error });
-        res.status(500).json({ error: '获取订阅模板关键词失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取订阅模板关键词失败' }, error));
     }
 });
 
@@ -517,7 +548,7 @@ router.get('/subscribe-message/templates', authenticateToken, checkRole(['admin'
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取私有订阅模板失败', { err: error });
-        res.status(500).json({ error: '获取私有订阅模板失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取私有订阅模板失败' }, error));
     }
 });
 
@@ -528,7 +559,7 @@ router.post('/subscribe-message/templates', authenticateToken, checkRole(['admin
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('选用订阅模板失败', { err: error });
-        res.status(500).json({ error: '选用订阅模板失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '选用订阅模板失败' }, error));
     }
 });
 
@@ -539,7 +570,7 @@ router.delete('/subscribe-message/templates/:priTmplId', authenticateToken, chec
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('删除订阅模板失败', { err: error });
-        res.status(500).json({ error: '删除订阅模板失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '删除订阅模板失败' }, error));
     }
 });
 
@@ -550,7 +581,7 @@ router.post('/subscribe-message/send', authenticateToken, checkRole(['admin']), 
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('发送订阅消息失败', { err: error });
-        res.status(500).json({ error: '发送订阅消息失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '发送订阅消息失败' }, error));
     }
 });
 
@@ -561,7 +592,7 @@ router.post('/subscribe-message/user-notify', authenticateToken, checkRole(['adm
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('激活/更新服务卡片失败', { err: error });
-        res.status(500).json({ error: '激活/更新服务卡片失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '激活/更新服务卡片失败' }, error));
     }
 });
 
@@ -572,7 +603,7 @@ router.post('/subscribe-message/user-notify/ext', authenticateToken, checkRole([
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('更新服务卡片扩展信息失败', { err: error });
-        res.status(500).json({ error: '更新服务卡片扩展信息失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '更新服务卡片扩展信息失败' }, error));
     }
 });
 
@@ -583,7 +614,7 @@ router.post('/subscribe-message/user-notify/query', authenticateToken, checkRole
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('查询服务卡片状态失败', { err: error });
-        res.status(500).json({ error: '查询服务卡片状态失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '查询服务卡片状态失败' }, error));
     }
 });
 
@@ -594,7 +625,7 @@ router.get('/subscribe-message/resend/scenes', authenticateToken, checkRole(['ad
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('获取订阅消息补发场景失败', { err: error });
-        res.status(500).json({ error: '获取补发场景失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '获取补发场景失败' }, error));
     }
 });
 
@@ -605,7 +636,7 @@ router.post('/subscribe-message/resend', authenticateToken, checkRole(['admin'])
         return res.status(r.status).json(r.body);
     } catch (error) {
         logger.error('订阅消息补发失败', { err: error });
-        res.status(500).json({ error: '订阅消息补发失败', detail: error.message });
+        res.status(500).json(appendClientErrorDetail({ error: '订阅消息补发失败' }, error));
     }
 });
 

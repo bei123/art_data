@@ -1075,7 +1075,7 @@ async function payNotify(req) {
         // 获取原始body字符串
         const body = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
         // 日志：收到回调
-        console.log('收到微信支付回调，原始body:', body);
+        logger.info('收到微信支付回调', { body_length: String(body).length });
         // 解析JSON
         let parsed;
         try {
@@ -1108,7 +1108,7 @@ async function payNotify(req) {
                 resource.nonce,
                 resource.ciphertext
             );
-            console.log('解密后回调数据:', decryptedData);
+            logger.info('支付回调解密成功', { payload_length: decryptedData?.length });
         } catch (e) {
             logger.error('解密回调数据失败', { err: e });
             return adminResult(400, { code: 'FAIL', message: '解密失败' });
@@ -1139,7 +1139,10 @@ async function payNotify(req) {
                 return adminResult(200, { code: 'SUCCESS', message: '重复回调，已忽略' });
             }
 
-            console.log('支付成功回调数据:', callbackData);
+            logger.info('支付成功回调', {
+                out_trade_no: callbackData.out_trade_no,
+                trade_state: callbackData.trade_state,
+            });
             const {
                 out_trade_no,
                 transaction_id,
@@ -1159,7 +1162,7 @@ async function payNotify(req) {
                     [out_trade_no]
                 );
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
-                    console.log('订单已退款，不再覆盖为SUCCESS:', out_trade_no);
+                    logger.info('支付回调：订单已退款，忽略 SUCCESS', { out_trade_no });
                     await connection.commit();
                     await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                     return adminResult(200, { code: 'SUCCESS', message: '订单已退款，不再覆盖' });
@@ -1191,7 +1194,7 @@ async function payNotify(req) {
                         connection,
                     });
                     shouldFulfillInventory = true;
-                    console.log('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length });
+                    logger.info('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length });
                 }
 
                 if (userId && previousTradeState !== 'SUCCESS') {
@@ -1226,7 +1229,7 @@ async function payNotify(req) {
                     await clearInventoryRelatedCaches(affected);
                 }
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
-                console.log('支付回调处理完成');
+                logger.info('支付回调处理完成', { out_trade_no });
 
                 await cancelPaymentPendingReminder(out_trade_no).catch((err) => {
                     logger.warn('取消待付款提醒排期失败', { outTradeNo: out_trade_no, err: err?.message || err });
@@ -2053,15 +2056,12 @@ async function getRefundRequestById(req) {
 
 async function refundNotify(req) {
     try {
-        console.log('【退款回调】收到微信退款回调请求');
-        // 获取原始body字符串
         const body = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
-        console.log('【退款回调】原始body:', body);
+        logger.info('收到微信退款回调', { body_length: String(body).length });
         // 解析JSON
         let parsed;
         try {
             parsed = JSON.parse(body);
-            console.log('【退款回调】解析后的JSON:', parsed);
         } catch (e) {
             logger.error('【退款回调】回调body解析失败', { body_preview: String(body).slice(0, 500) });
             return adminResult(400, { code: 'FAIL', message: '回调数据解析失败' });
@@ -2077,7 +2077,6 @@ async function refundNotify(req) {
         const signature = req.headers['wechatpay-signature'];
         const serial = req.headers['wechatpay-serial'];
         const verifyResult = verifyWechatpaySignature({ serial, signature, timestamp, nonce, body });
-        console.log('【退款回调】验签结果:', verifyResult);
         if (!verifyResult) {
             logger.error('【退款回调】签名验证失败', { serial, signature_len: signature ? String(signature).length : 0 });
             return adminResult(401, { code: 'FAIL', message: '签名验证失败' });
@@ -2090,7 +2089,7 @@ async function refundNotify(req) {
                 resource.nonce,
                 resource.ciphertext
             );
-            console.log('【退款回调】解密后回调数据:', decryptedData);
+            logger.info('退款回调解密成功', { payload_length: decryptedData?.length });
         } catch (e) {
             logger.error('【退款回调】解密回调数据失败', { err: e });
             return adminResult(400, { code: 'FAIL', message: '解密失败' });
@@ -2098,14 +2097,16 @@ async function refundNotify(req) {
         let callbackData;
         try {
             callbackData = JSON.parse(decryptedData);
-            console.log('【退款回调】最终业务数据:', callbackData);
         } catch (e) {
             logger.error('【退款回调】解析解密数据失败', { decrypted_preview: typeof decryptedData === 'string' ? decryptedData.slice(0, 300) : 'non-string' });
             return adminResult(400, { code: 'FAIL', message: '回调数据解析失败' });
         }
         // 处理退款结果
         if (callbackData.refund_status === 'SUCCESS') {
-            console.log('【退款回调】退款成功回调数据:', callbackData);
+            logger.info('退款成功回调', {
+                out_refund_no: callbackData.out_refund_no,
+                out_trade_no: callbackData.out_trade_no,
+            });
             await completeRefundSuccess({
                 out_refund_no: callbackData.out_refund_no,
                 out_trade_no: callbackData.out_trade_no,

@@ -47,8 +47,14 @@ async function isAuthorizedLocalUpload(req, relativePath) {
   if (!verified.ok) return false
 
   const { query } = require('../db')
-  const [users] = await query('SELECT role FROM users WHERE id = ?', [verified.userId])
-  if (users.length > 0 && users[0].role === 'admin') return true
+  const [users] = await query(
+    `SELECT r.name AS role_name
+     FROM users u
+     JOIN roles r ON u.role_id = r.id
+     WHERE u.id = ?`,
+    [verified.userId]
+  )
+  if (users.length > 0 && users[0].role_name === 'admin') return true
 
   return false
 }

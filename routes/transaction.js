@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
+const { requireAdmin } = require('../auth');
+const { notImplementedBody } = require('../utils/publicApiSanitizer');
+
+router.use(...requireAdmin);
 
 /**
  * 外部API配置
@@ -119,52 +123,7 @@ router.post('/records', async (req, res) => {
  * GET /api/transaction/detail/:id
  */
 router.get('/detail/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // 参数验证
-    if (!id || typeof id !== 'string' || id.trim().length === 0) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'ID参数不能为空',
-        data: null
-      });
-    }
-
-    // 这里可以添加查询交易记录详情的逻辑
-    // 比如从数据库查询具体的交易记录
-
-    // 示例响应
-    res.json({
-      code: 200,
-      status: true,
-      message: '查询成功',
-      data: {
-        id: id,
-        qrCodeId: 'WSAbBZmQpgt',
-        transactionType: 'transfer',
-        fromUsn: 'SELLER001',
-        toUsn: 'BUYER002',
-        price: 10000,
-        currency: 'CNY',
-        status: 'success',
-        createTime: new Date().toISOString(),
-        completeTime: new Date().toISOString(),
-        remark: '资产过户交易'
-      }
-    });
-
-  } catch (error) {
-    logger.error('获取交易记录详情失败:', { err: error })
-
-    res.status(500).json({
-      code: 500,
-      status: false,
-      message: '查询失败',
-      data: null
-    });
-  }
+  return res.status(501).json(notImplementedBody('交易记录详情'));
 });
 
 /**
@@ -172,50 +131,7 @@ router.get('/detail/:id', async (req, res) => {
  * GET /api/transaction/statistics
  */
 router.get('/statistics', async (req, res) => {
-  try {
-    const { qrCodeId, startDate, endDate } = req.query;
-
-    // 参数验证
-    if (!qrCodeId || typeof qrCodeId !== 'string' || qrCodeId.trim().length === 0) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'qrCodeId参数不能为空',
-        data: null
-      });
-    }
-
-    // 这里可以添加查询交易统计信息的逻辑
-    // 比如统计交易次数、总金额、成功率等
-
-    // 示例响应
-    res.json({
-      code: 200,
-      status: true,
-      message: '查询成功',
-      data: {
-        qrCodeId: qrCodeId,
-        totalTransactions: 10,
-        totalAmount: 100000,
-        successCount: 9,
-        failedCount: 1,
-        successRate: 90,
-        averagePrice: 10000,
-        firstTransactionTime: '2024-01-01 00:00:00',
-        lastTransactionTime: '2024-06-19 14:38:40'
-      }
-    });
-
-  } catch (error) {
-    logger.error('获取交易统计信息失败:', { err: error })
-
-    res.status(500).json({
-      code: 500,
-      status: false,
-      message: '查询失败',
-      data: null
-    });
-  }
+  return res.status(501).json(notImplementedBody('交易统计'));
 });
 
 /**
@@ -223,56 +139,7 @@ router.get('/statistics', async (req, res) => {
  * POST /api/transaction/export
  */
 router.post('/export', async (req, res) => {
-  try {
-    const { qrCodeId, startDate, endDate, format } = req.body;
-
-    // 参数验证
-    if (!qrCodeId || typeof qrCodeId !== 'string' || qrCodeId.trim().length === 0) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'qrCodeId参数不能为空',
-        data: null
-      });
-    }
-
-    // 验证导出格式
-    const validFormats = ['excel', 'csv', 'pdf'];
-    if (format && !validFormats.includes(format)) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'format参数必须是excel、csv或pdf',
-        data: null
-      });
-    }
-
-    // 这里可以添加导出交易记录的逻辑
-    // 比如生成Excel文件、CSV文件或PDF文件
-
-    // 示例响应
-    res.json({
-      code: 200,
-      status: true,
-      message: '导出成功',
-      data: {
-        downloadUrl: `https://your-domain.com/downloads/transaction_${qrCodeId}_${Date.now()}.${format || 'excel'}`,
-        fileName: `transaction_${qrCodeId}_${new Date().toISOString().split('T')[0]}.${format || 'excel'}`,
-        fileSize: '1.2MB',
-        expireTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24小时后过期
-      }
-    });
-
-  } catch (error) {
-    logger.error('导出交易记录失败:', { err: error })
-
-    res.status(500).json({
-      code: 500,
-      status: false,
-      message: '导出失败',
-      data: null
-    });
-  }
+  return res.status(501).json(notImplementedBody('交易记录导出'));
 });
 
 /**

@@ -11,6 +11,9 @@ const {
   externalAuthNotConfiguredBody,
 } = require('../utils/externalApiAuth');
 const { assertSafePathSegment, joinUrlPath } = require('../utils/safeOutboundUrl');
+const { requireAdmin } = require('../auth');
+
+router.use(...requireAdmin);
 
 // Redis缓存键前缀
 const REDIS_EXTERNAL_USER_KEY_PREFIX = 'external_user:';

@@ -1,11 +1,14 @@
 const express = require('express')
 const router = express.Router()
 const logger = require('../utils/logger')
+const { requireAdmin } = require('../auth')
 const {
   listWxUsersForAdmin,
   getWxUserAdminDetail,
   purgeWxUser,
 } = require('../services/wxUserAdminService')
+
+router.use(...requireAdmin)
 
 router.get('/', async (req, res) => {
   try {

@@ -3,6 +3,7 @@ const redisClient = require('../utils/redisClient');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
+const { stripPublicFields } = require('../utils/publicApiSanitizer');
 
 const REDIS_ARTISTS_LIST_KEY = 'artists:list';
 const REDIS_ARTIST_DETAIL_KEY_PREFIX = 'artists:detail:';
@@ -23,10 +24,10 @@ function parsePositiveIntId(raw) {
   return id;
 }
 
-function mapArtistRows(rows) {
+function mapArtistRows(rows, { publicMode = false } = {}) {
   return (rows || []).map((artist) => {
     const processedArtist = processObjectImages(artist, ['avatar', 'banner']);
-    return {
+    const mapped = {
       ...processedArtist,
       achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
       institution: artist.institution_id
@@ -38,6 +39,7 @@ function mapArtistRows(rows) {
           }
         : null,
     };
+    return publicMode ? stripPublicFields(mapped) : mapped;
   });
 }
 
@@ -163,7 +165,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
       [...whereParams, offset, sizeNum]
     );
     const body = {
-      data: mapArtistRows(rows),
+      data: mapArtistRows(rows, { publicMode: !includeHidden }),
       pagination: { page: pageNum, pageSize: sizeNum, total },
     };
     if (institutionMeta) body.institution = institutionMeta;
@@ -199,7 +201,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
         id: institutionRows[0].id,
         name: institutionRows[0].name,
       },
-      artists: mapArtistRows(rows),
+      artists: mapArtistRows(rows, { publicMode: !includeHidden }),
       total: rows.length,
     });
   }
@@ -229,7 +231,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
     ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
   `);
 
-  const artistsWithProcessedImages = mapArtistRows(rows);
+  const artistsWithProcessedImages = mapArtistRows(rows, { publicMode: !includeHidden });
 
   try {
     if (!includeHidden) {
@@ -250,7 +252,7 @@ async function getPublicArtistDetail(rawId, includeHidden = false) {
       if (cache) {
         const parsed = JSON.parse(cache);
         if (Number(parsed.is_public) === 0) return adminResult(404, { error: '艺术家不存在' });
-        return adminResult(200, parsed);
+        return adminResult(200, stripPublicFields(parsed));
       }
     } catch (e) {
       logger.error('Redis 读取艺术家详情失败', { err: e });
@@ -277,7 +279,7 @@ async function getPublicArtistDetail(rawId, includeHidden = false) {
   }
 
   const artist = processObjectImages(rows[0], ['avatar', 'banner']);
-  const artistWithInstitution = {
+  let artistWithInstitution = {
     ...artist,
     achievements: artist.achievements ? JSON.parse(artist.achievements) : [],
     institution: artist.institution_id
@@ -289,6 +291,10 @@ async function getPublicArtistDetail(rawId, includeHidden = false) {
         }
       : null,
   };
+
+  if (!includeHidden) {
+    artistWithInstitution = stripPublicFields(artistWithInstitution);
+  }
 
   try {
     if (!includeHidden) {

@@ -9,6 +9,8 @@ const {
   resolveAuthFromRequest,
 } = require('./utils/sessionAuth');
 const { revokeWxRefreshTokensForUser, revokeWxAccessSession } = require('./utils/wxSessionTokens');
+const { hashSessionToken } = require('./utils/sessionTokenHash');
+const { appendClientErrorDetail } = require('./utils/clientErrorDetail');
 
 // 生成JWT token
 const generateToken = (userId) => {
@@ -238,10 +240,12 @@ const register = async (req, res) => {
     // 生成token
     const token = generateToken(result.insertId);
 
+    const tokenHash = hashSessionToken(token);
+
     // 创建用户会话
     await connection.query(
-      'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
-      [result.insertId, token]
+      'INSERT INTO user_sessions (user_id, token, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
+      [result.insertId, token, tokenHash]
     );
 
     // 提交事务
@@ -266,10 +270,10 @@ const register = async (req, res) => {
       await connection.rollback();
     }
     console.error('注册失败:', error);
-    res.status(500).json({ 
+    res.status(500).json(appendClientErrorDetail({
       success: false,
-      error: '注册失败: ' + error.message 
-    });
+      error: '注册失败',
+    }, error));
   } finally {
     // 释放连接
     if (connection) {
@@ -327,10 +331,12 @@ const login = async (req, res) => {
       [user.id]
     );
 
+    const tokenHash = hashSessionToken(token);
+
     // 创建会话记录
     await connection.query(
-      'INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
-      [user.id, token]
+      'INSERT INTO user_sessions (user_id, token, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
+      [user.id, token, tokenHash]
     );
 
     await connection.commit();
@@ -353,10 +359,10 @@ const login = async (req, res) => {
       await connection.rollback();
     }
     console.error('登录失败:', error);
-    res.status(500).json({ 
+    res.status(500).json(appendClientErrorDetail({
       success: false,
-      error: '登录失败: ' + error.message 
-    });
+      error: '登录失败',
+    }, error));
   } finally {
     if (connection) {
       connection.release();
@@ -393,7 +399,7 @@ const getCurrentUser = async (req, res) => {
     res.json(user);
   } catch (error) {
     console.error('获取用户信息失败:', error);
-    res.status(500).json({ error: '获取用户信息失败: ' + error.message });
+    res.status(500).json(appendClientErrorDetail({ error: '获取用户信息失败' }, error));
   }
 };
 
@@ -405,7 +411,11 @@ const logout = async (req, res) => {
       if (req.user?.is_wx_user) {
         await revokeWxAccessSession(token);
       } else {
-        await query('DELETE FROM user_sessions WHERE token = ?', [token]);
+        const tokenHash = hashSessionToken(token);
+        await query(
+          'DELETE FROM user_sessions WHERE token = ? OR token_hash = ?',
+          [token, tokenHash]
+        );
       }
     }
     if (req.user?.is_wx_user && req.user?.id) {
@@ -414,7 +424,7 @@ const logout = async (req, res) => {
     res.json({ message: '退出成功' });
   } catch (error) {
     console.error('退出失败:', error);
-    res.status(500).json({ error: '退出失败: ' + error.message });
+    res.status(500).json(appendClientErrorDetail({ error: '退出失败' }, error));
   }
 };
 

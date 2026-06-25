@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
+const { requireAdmin } = require('../auth');
+const { verifyIntegrationWebhook } = require('../utils/integrationWebhookAuth');
 
 /**
  * 外部API配置
@@ -15,6 +17,49 @@ const EXTERNAL_API_CONFIG = {
     TRANSFER_DETAILS_V1: '/assetsApi/foreign/asset/v2/transfer/details/v1'
   }
 };
+
+/** 外部回调：共享密钥，须在 admin 守卫之前注册 */
+router.post('/callback', verifyIntegrationWebhook({ envName: 'ASSET_TRANSFER_WEBHOOK_SECRET' }), async (req, res) => {
+  try {
+    const { id, status, msg, time } = req.body;
+
+    logger.info('asset_transfer_callback', { id, status, time });
+
+    if (!id || !status || !time) {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: '回调参数不完整',
+        data: null,
+      });
+    }
+
+    if (status === '1') {
+      logger.info('asset_transfer_success', { id, time });
+    } else if (status === '2') {
+      logger.info('asset_transfer_failed', { id, msg, time });
+    } else {
+      logger.warn('asset_transfer_unknown_status', { id, status });
+    }
+
+    return res.json({
+      code: 200,
+      status: true,
+      message: '回调处理成功',
+      data: null,
+    });
+  } catch (error) {
+    logger.error('处理资产过户回调失败:', { err: error });
+    return res.status(500).json({
+      code: 500,
+      status: false,
+      message: '回调处理失败',
+      data: null,
+    });
+  }
+});
+
+router.use(...requireAdmin);
 
 /**
  * 资产过户
@@ -168,71 +213,6 @@ router.post('/transfer', async (req, res) => {
         data: null
       });
     }
-  }
-});
-
-/**
- * 资产过户回调处理
- * POST /api/asset-transfer/callback
- * 处理外部API的回调通知
- */
-router.post('/callback', async (req, res) => {
-  try {
-    const { id, status, msg, time } = req.body;
-
-    console.log('收到资产过户回调:', {
-      id,
-      status,
-      msg,
-      time
-    });
-
-    // 验证回调参数
-    if (!id || !status || !time) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: '回调参数不完整',
-        data: null
-      });
-    }
-
-    // 处理过户结果
-    if (status === '1') {
-      // 过户成功
-      console.log(`资产过户成功 - ID: ${id}, 时间: ${time}`);
-
-      // 这里可以添加你的业务逻辑
-      // 比如更新数据库状态、发送通知等
-
-    } else if (status === '2') {
-      // 过户失败
-      console.log(`资产过户失败 - ID: ${id}, 原因: ${msg}, 时间: ${time}`);
-
-      // 这里可以添加失败处理逻辑
-      // 比如记录失败日志、发送失败通知等
-
-    } else {
-      console.log(`未知的过户状态 - ID: ${id}, 状态: ${status}`);
-    }
-
-    // 返回成功响应给外部API
-    res.json({
-      code: 200,
-      status: true,
-      message: '回调处理成功',
-      data: null
-    });
-
-  } catch (error) {
-    logger.error('处理资产过户回调失败:', { err: error })
-
-    res.status(500).json({
-      code: 500,
-      status: false,
-      message: '回调处理失败',
-      data: null
-    });
   }
 });
 

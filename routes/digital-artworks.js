@@ -3,7 +3,7 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
 const db = require('../db');
-const { requireAdmin } = require('../auth');
+const { authenticateToken, checkRole, requireAdmin } = require('../auth');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const redisClient = require('../utils/redisClient');
@@ -12,14 +12,12 @@ const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields'
 const { ensureShowPurchaseLinkColumnReady } = require('../utils/digitalArtworksSync');
 const { normalizeWespacePriceToYuan } = require('../utils/digitalArtworkResolver');
 const { buildListEnvelope, buildPaginationMeta } = require('../utils/apiListEnvelope');
+const { stripPublicFields } = require('../utils/publicApiSanitizer');
+const { assertUsnOwnedByWxUser } = require('../utils/wespaceUserBinding');
 const { invalidateExhibitionCachesForArtworks } = require('../services/exhibitionsService');
 const {
-  runHealthChecks,
-  buildPublicReadinessResponse,
-  logDegradedHealth,
-} = require('../utils/healthCheck');
-const {
   resolveExternalBearerAuthorization,
+  resolveWespaceBasicAuthorization,
   externalAuthNotConfiguredBody,
 } = require('../utils/externalApiAuth');
 
@@ -129,19 +127,9 @@ function normalizeShowPurchaseLink(v) {
   return !(v === 0 || v === false || v === '0');
 }
 
-// 数据库健康检查端点
-router.get('/health', async (req, res) => {
-  try {
-    const result = await runHealthChecks();
-    logDegradedHealth(result);
-    res
-      .status(result.ok ? 200 : 503)
-      .json(buildPublicReadinessResponse(result));
-  } catch (error) {
-    logger.error('健康检查失败', { err: error });
-    res.status(503).json({ status: 'degraded' });
-  }
-});
+function isArtworkHiddenFlag(value) {
+  return value === 1 || value === true || value === '1';
+}
 
 /**
  * 从外部数据中解析 issueInfo
@@ -338,9 +326,12 @@ router.get('/:id', async (req, res) => {
       if (cache) {
         const cached = JSON.parse(cache);
         const [flagRows] = await db.query(
-          `SELECT show_purchase_link FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ? LIMIT 1`,
+          `SELECT show_purchase_link, is_hidden FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ? LIMIT 1`,
           [rawId]
         );
+        if (flagRows.length && isArtworkHiddenFlag(flagRows[0].is_hidden)) {
+          return res.status(404).json({ error: '作品不存在' });
+        }
         let showLink = true;
         if (flagRows.length) {
           const v = flagRows[0].show_purchase_link;
@@ -358,7 +349,7 @@ router.get('/:id', async (req, res) => {
         if (priceRows.length) {
           cached.price = normalizeWespacePriceToYuan(priceRows[0].price);
         }
-        return res.json(cached);
+        return res.json(stripPublicFields(cached));
       }
     }
 
@@ -381,6 +372,9 @@ router.get('/:id', async (req, res) => {
 
     if (extRows && extRows.length > 0) {
       const rawExt = extRows[0];
+      if (isArtworkHiddenFlag(rawExt.is_hidden)) {
+        return res.status(404).json({ error: '作品不存在' });
+      }
       const artwork = processObjectImages(rawExt, ['image_url', 'artist_avatar']);
       const wespaceDetails = assembleWespaceDetailsFromRow(rawExt);
       const wespaceListV3 = assembleListV3FromRow(rawExt);
@@ -417,8 +411,6 @@ router.get('/:id', async (req, res) => {
         batch_quantity: null,
         updated_at: rawExt.updated_at || null,
         goods_id: artwork.id,
-        is_hidden: rawExt.is_hidden === 1 || rawExt.is_hidden === true,
-        fetched_at: rawExt.fetched_at || null,
         show_purchase_link: normalizeShowPurchaseLink(rawExt.show_purchase_link),
         artist: {
           id: artwork.artist_id,
@@ -463,6 +455,10 @@ router.get('/:id', async (req, res) => {
         return res.status(404).json({ error: '作品不存在' });
       }
 
+      if (isArtworkHiddenFlag(rows[0].is_hidden)) {
+        return res.status(404).json({ error: '作品不存在' });
+      }
+
       const artwork = processObjectImages(rows[0], ['image_url', 'artist_avatar']);
 
       const artist = {
@@ -486,6 +482,12 @@ router.get('/:id', async (req, res) => {
 
     // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id（外部表已有 goods_id 时跳过）
     if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0 && !obtainedGoodsId) {
+      if (req.user?.id) {
+        const usnCheck = await assertUsnOwnedByWxUser(req.user.id, usn);
+        if (!usnCheck.ok) {
+          return res.status(usnCheck.status).json(usnCheck.body);
+        }
+      }
       try {
         const authorization = resolveExternalBearerAuthorization();
         if (!authorization) {
@@ -632,11 +634,12 @@ router.get('/:id', async (req, res) => {
       ? buildWespacePurchaseUrl(result.goods_id)
       : null;
 
-    res.json(result);
+    const publicResult = stripPublicFields(result);
+    res.json(publicResult);
     
     // 写入redis缓存（如果融合了外部数据，缓存时间缩短为1小时）
     const cacheTTL = shouldFuse && (targetGoodsVerId || obtainedGoodsId) ? 3600 : 604800;
-    await redisClient.setEx(detailCacheKey, cacheTTL, JSON.stringify(result));
+    await redisClient.setEx(detailCacheKey, cacheTTL, JSON.stringify(publicResult));
   } catch (error) {
     logger.error('获取数字艺术品详情失败', { err: error });
 
@@ -829,17 +832,13 @@ router.delete('/:id', ...requireAdmin, async (req, res) => {
  * GET /api/digital-artworks/order/product-list
  * 转发到外部接口：GET https://node.wespace.cn/orderApi/wespace/index/list/V2
  */
-router.get('/order/product-list', async (req, res) => {
+router.get('/order/product-list', authenticateToken, async (req, res) => {
   try {
     const { newsPageSize, publicityPageSize, activityPageSize, usn } = req.query;
-    
-    // 参数验证
-    if (!usn || typeof usn !== 'string' || usn.trim().length === 0) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'usn参数不能为空'
-      });
+
+    const usnCheck = await assertUsnOwnedByWxUser(req.user?.id, usn);
+    if (!usnCheck.ok) {
+      return res.status(usnCheck.status).json(usnCheck.body);
     }
 
     const authorization = resolveExternalBearerAuthorization();
@@ -848,7 +847,7 @@ router.get('/order/product-list', async (req, res) => {
     }
 
     const params = {
-      usn: usn.trim()
+      usn: usnCheck.usn,
     };
 
     // 添加可选参数，设置默认值
@@ -948,7 +947,7 @@ router.get('/order/product-list', async (req, res) => {
  * POST /api/digital-artworks/goods/ver/list/v3
  * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/list/v3
  */
-router.post('/goods/ver/list/v3', async (req, res) => {
+router.post('/goods/ver/list/v3', authenticateToken, async (req, res) => {
   try {
     // POST 请求可以从查询参数或请求体中获取 goods 参数
     const goods = req.query?.goods || req.body?.goods;
@@ -1032,28 +1031,25 @@ router.post('/goods/ver/list/v3', async (req, res) => {
  * 统一购买流程接口
  * POST /api/digital-artworks/order/purchase
  * 整合三个外部API：价格查询 -> 统一下单 -> 支付价格查询
- * 前端需要提供：usn, authorization (Bearer token)
+ * 前端需提供：usn；Wespace 凭据通过 X-External-Authorization（JWT 仍走 Authorization）
  */
-router.post('/order/purchase', async (req, res) => {
+router.post('/order/purchase', authenticateToken, async (req, res) => {
   try {
-    // 从请求头获取前端提供的 authorization 和 usn
-    const authorization = req.headers.authorization || req.headers.Authorization;
+    const wespaceAuthorization =
+      resolveWespaceBasicAuthorization(req)
+      || (req.body?.wespace_authorization ? String(req.body.wespace_authorization).trim() : null);
     const { usn, goodsVerId, goodsId, goodsNumber = 1, orderType = '4', addressId = '', payType = '1', ...otherOrderParams } = req.body;
 
-    // 参数验证
-    if (!authorization) {
-      return res.status(400).json({
-        code: 400,
-        status: false,
-        message: 'authorization参数不能为空，请提供Bearer token'
-      });
+    const usnCheck = await assertUsnOwnedByWxUser(req.user?.id, usn);
+    if (!usnCheck.ok) {
+      return res.status(usnCheck.status).json(usnCheck.body);
     }
 
-    if (!usn) {
+    if (!wespaceAuthorization) {
       return res.status(400).json({
         code: 400,
         status: false,
-        message: 'usn参数不能为空'
+        message: 'Wespace 凭据不能为空，请通过 X-External-Authorization 或 body.wespace_authorization 提供',
       });
     }
 
@@ -1067,7 +1063,7 @@ router.post('/order/purchase', async (req, res) => {
 
     const baseUrl = EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL;
     const commonHeaders = {
-      'authorization': authorization,
+      'authorization': wespaceAuthorization,
       'tenantid': 'wespace',
       'apptype': '16',
       'origin': 'https://m.wespace.cn',
@@ -1163,7 +1159,7 @@ router.post('/order/purchase', async (req, res) => {
     const orderData = {
       orderType: orderType,
       addressId: addressId,
-      buyerUsn: usn,
+      buyerUsn: usnCheck.usn,
       payType: payType,
       payPrice: String(payPrice),
       discountSumPrice: String(discountSumPrice),
@@ -1289,7 +1285,7 @@ router.post('/order/purchase', async (req, res) => {
  * POST /api/digital-artworks/goods/ver/details
  * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/details
  */
-router.post('/goods/ver/details', async (req, res) => {
+router.post('/goods/ver/details', authenticateToken, async (req, res) => {
   try {
     // POST 请求可以从查询参数或请求体中获取 goods 参数
     const goods = req.query?.goods || req.body?.goods;

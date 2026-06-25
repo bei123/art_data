@@ -16,6 +16,8 @@ const https = require('https');
 const fs = require('fs');
 const { body } = require('express-validator');
 const auth = require('./auth');
+const { requirePublicAdminRegisterEnabled } = require('./utils/publicRegistrationGuard');
+const { ensureAllSessionTokenHashColumns } = require('./utils/sessionTokenHash');
 const { PUBLIC_API_BASE_URL } = require('./config/publicEnv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -129,7 +131,9 @@ const limiter = rateLimit({
   skip: (req) =>
     req.method === 'OPTIONS' ||
     (req.method === 'GET' &&
-      (req.path === '/api/health' || req.path === '/api/health/live')),
+      (req.path === '/api/health' ||
+        req.path === '/api/health/live' ||
+        req.path === '/api/digital-artworks/health')),
   handler: (req, res) => {
     applyCorsHeaders(req, res);
     res.status(429).json({
@@ -206,6 +210,12 @@ async function apiDetailedHealthHandler(req, res) {
 
 app.get('/api/health/live', apiLiveHandler);
 app.get('/api/health', apiReadinessHandler);
+/** @deprecated 请使用 GET /api/health */
+app.get('/api/digital-artworks/health', (req, res) => {
+  res.set('Deprecation', 'true');
+  res.set('Link', '</api/health>; rel="successor-version"');
+  return res.redirect(308, '/api/health');
+});
 app.get('/api/admin/health', ...auth.requireAdmin, apiDetailedHealthHandler);
 
 // 本地上传目录（非公开静态；经签名 URL 或登录后访问）
@@ -225,14 +235,36 @@ const sslOptions = {
   cert: fs.readFileSync(path.join(__dirname, 'ssl', 'api.wx.2000gallery.art.pem'))
 };
 
-// 认证相关路由
-app.post('/api/auth/register',
+app.use('/api/auth/login', loginLimiter);
 
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: parseInt(process.env.AUTH_REGISTER_RATE_LIMIT_PER_HOUR || '3', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  handler: (req, res) => {
+    applyCorsHeaders(req, res);
+    res.status(429).json({
+      error: '注册尝试过于频繁，请稍后再试',
+      code: 'REGISTER_RATE_LIMIT',
+      request_id: req.requestId || null,
+    });
+  },
+});
+
+// 认证相关路由
+app.post(
+  '/api/auth/register',
+  registerLimiter,
+  requirePublicAdminRegisterEnabled,
   [
     body('username').isLength({ min: 3 }).withMessage('用户名至少3个字符'),
     body('email').isEmail().withMessage('请输入有效的邮箱地址'),
-    body('password').isLength({ min: 6 }).withMessage('密码至少6个字符')
-  ], auth.register);
+    body('password').isLength({ min: 6 }).withMessage('密码至少6个字符'),
+  ],
+  auth.register
+);
 
 app.post('/api/auth/login', [
   body('username').notEmpty().withMessage('请输入用户名'),
@@ -333,8 +365,8 @@ app.post('/api/auth/url-access', auth.authenticateToken, async (req, res) => {
 // app.use('/api/digital-artworks', auth.authenticateToken);
 // app.use('/api/rights',);
 
-// 保护需要管理员权限的路由
-app.use('/api/admin/*', auth.authenticateToken, auth.checkRole(['admin']));
+// 保护需要管理员权限的路由（Express 5 不支持 /api/admin/* 通配符，须用前缀挂载）
+app.use('/api/admin', auth.authenticateToken, auth.checkRole(['admin']));
 app.use('/api/admin/referral', adminReferralRouter);
 app.use('/api/admin/wx-users', adminWxUsersRouter);
 
@@ -519,6 +551,9 @@ app.use('*', (req, res) => {
 
 // 启动HTTPS服务器
 const PORT = process.env.PORT || 2000;
+ensureAllSessionTokenHashColumns().catch((err) => {
+  logger.warn('session token_hash column ensure failed', { err: err?.message || err });
+});
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS服务器运行在端口 ${PORT}，PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL}`);
 });
