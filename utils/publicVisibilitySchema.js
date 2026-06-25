@@ -76,24 +76,10 @@ async function ensurePublicEffColumn(tableName) {
   }
 
   if (!(await hasColumn(tableName, 'is_public_eff'))) {
-    try {
-      await db.query(
-        `ALTER TABLE ${tableName}
-         ADD COLUMN is_public_eff TINYINT NOT NULL
-         GENERATED ALWAYS AS (IFNULL(is_public, 1)) STORED`
-      )
-      logger.info('is_public_eff generated column added', { table: tableName })
-      return
-    } catch (generatedErr) {
-      logger.warn('generated is_public_eff unsupported; using plain column', {
-        table: tableName,
-        err: generatedErr.message,
-      })
-      await db.query(
-        `ALTER TABLE ${tableName} ADD COLUMN is_public_eff TINYINT NOT NULL DEFAULT 1`
-      )
-      logger.info('is_public_eff plain column added', { table: tableName })
-    }
+    await db.query(
+      `ALTER TABLE ${tableName} ADD COLUMN is_public_eff TINYINT NOT NULL DEFAULT 1`
+    )
+    logger.info('is_public_eff column added', { table: tableName })
   }
 
   await syncPublicEffValues(tableName)
