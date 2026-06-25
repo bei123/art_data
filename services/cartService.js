@@ -11,6 +11,7 @@ const {
   normalizeWespacePriceToYuan,
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
+const { buildListEnvelope } = require('../utils/apiListEnvelope');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -32,7 +33,7 @@ async function getCartList(userId) {
     );
 
     if (!cartItems || cartItems.length === 0) {
-      return adminResult(200, []);
+      return adminResult(200, buildListEnvelope([]));
     }
 
     const rightIds = [];
@@ -194,7 +195,7 @@ async function getCartList(userId) {
       };
     });
 
-    return adminResult(200, result);
+    return adminResult(200, buildListEnvelope(result));
   } catch (error) {
     logger.error('getCartList failed', { err: error });
     return adminResult(500, { error: '获取购物车服务暂时不可用' });

@@ -11,6 +11,7 @@ const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetai
 const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
 const { ensureShowPurchaseLinkColumnReady } = require('../utils/digitalArtworksSync');
 const { normalizeWespacePriceToYuan } = require('../utils/digitalArtworkResolver');
+const { buildListEnvelope, buildPaginationMeta } = require('../utils/apiListEnvelope');
 const { invalidateExhibitionCachesForArtworks } = require('../services/exhibitionsService');
 const {
   runHealthChecks,
@@ -28,6 +29,74 @@ const EXTERNAL_API_CONFIG = {
 };
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY = 'digital_artworks:list';
+
+function mapPublicDigitalArtworkRow(artwork, { withImageAlias = false } = {}) {
+  const processedArtwork = processObjectImages(artwork, ['image_url', 'artist_avatar']);
+  const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processedArtwork;
+  const mapped = {
+    ...rest,
+    price: normalizeWespacePriceToYuan(processedArtwork.price),
+    artist: {
+      id: processedArtwork.artist_id,
+      name: artist_display_name,
+      avatar: artistAvatarCol || '',
+    },
+  };
+  if (withImageAlias) {
+    mapped.image = processedArtwork.image_url || '';
+  }
+  return mapped;
+}
+
+async function fetchPublicDigitalArtworksList(query, options = {}) {
+  const { withImageAlias = false } = options;
+  const { artist_id, page = 1, pageSize = 20 } = query || {};
+  const pageNum = parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
+  const sizeNum = parseInt(pageSize, 10) > 0 ? parseInt(pageSize, 10) : 20;
+  const offset = (pageNum - 1) * sizeNum;
+
+  let whereSql = 'WHERE dae.is_hidden = 0';
+  const filterParams = [];
+  if (artist_id != null && artist_id !== '') {
+    const artistId = parseInt(artist_id, 10);
+    if (Number.isNaN(artistId) || artistId <= 0) {
+      return { ok: false, status: 400, body: { error: '无效的艺术家ID' } };
+    }
+    whereSql += ' AND dae.artist_id = ?';
+    filterParams.push(artistId);
+  }
+
+  const [[countRow]] = await db.query(
+    `SELECT COUNT(*) AS total FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae ${whereSql}`,
+    filterParams
+  );
+  const total = Number(countRow?.total) || 0;
+
+  const [rows] = await db.query(
+    `
+      SELECT
+        dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
+        dae.artist_id,
+        COALESCE(a.name, dae.artist_name) AS artist_display_name,
+        a.avatar AS artist_avatar
+      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae
+      LEFT JOIN artists a ON a.id = dae.artist_id
+      ${whereSql}
+      ORDER BY dae.created_at DESC
+      LIMIT ? OFFSET ?
+    `,
+    [...filterParams, sizeNum, offset]
+  );
+
+  const data = (rows || []).map((row) => mapPublicDigitalArtworkRow(row, { withImageAlias }));
+  return {
+    ok: true,
+    body: buildListEnvelope(
+      data,
+      buildPaginationMeta({ page: pageNum, pageSize: sizeNum, total })
+    ),
+  };
+}
 const REDIS_DIGITAL_ARTWORKS_LIST_KEY_PREFIX = 'digital_artworks:list:artist:';
 const REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX = 'digital_artworks:detail:';
 
@@ -226,49 +295,11 @@ router.get('/admin/:id/wespace-details', ...requireAdmin, async (req, res) => {
 // 获取数字艺术品列表（公开接口：从缓存表读取）
 router.get('/', async (req, res) => {
   try {
-    const { artist_id, page = 1, pageSize = 20 } = req.query;
-    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
-    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
-    const offset = (pageNum - 1) * sizeNum;
-
-    let query = `
-      SELECT 
-        dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
-        dae.artist_id,
-        COALESCE(a.name, dae.artist_name) AS artist_display_name,
-        a.avatar AS artist_avatar
-      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae
-      LEFT JOIN artists a ON a.id = dae.artist_id
-      WHERE dae.is_hidden = 0
-    `;
-    const queryParams = [];
-
-    if (artist_id) {
-      query += ` AND dae.artist_id = ?`;
-      queryParams.push(parseInt(artist_id));
+    const result = await fetchPublicDigitalArtworksList(req.query);
+    if (!result.ok) {
+      return res.status(result.status).json(result.body);
     }
-
-    query += ` ORDER BY dae.created_at DESC LIMIT ? OFFSET ?`;
-    queryParams.push(sizeNum, offset);
-
-    const [rows] = await db.query(query, queryParams);
-    if (!rows || !Array.isArray(rows)) return res.json([]);
-
-    const artworksWithProcessedImages = rows.map(artwork => {
-      const processedArtwork = processObjectImages(artwork, ['image_url', 'artist_avatar']);
-      const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processedArtwork;
-      return {
-        ...rest,
-        price: normalizeWespacePriceToYuan(processedArtwork.price),
-        artist: {
-          id: processedArtwork.artist_id,
-          name: artist_display_name,
-          avatar: artistAvatarCol || ''
-        }
-      };
-    });
-
-    res.json(artworksWithProcessedImages);
+    return res.json(result.body);
   } catch (error) {
     logger.error('获取数字艺术品列表失败', { err: error });
     res.status(500).json({ error: '获取数字艺术品列表失败' });
@@ -278,55 +309,11 @@ router.get('/', async (req, res) => {
 // 公共数字艺术品列表（须放在 /:id 之前，否则会被当成 id=public）
 router.get('/public', async (req, res) => {
   try {
-    const { artist_id, page = 1, pageSize = 20 } = req.query;
-    const pageNum = parseInt(page) > 0 ? parseInt(page) : 1;
-    const sizeNum = parseInt(pageSize) > 0 ? parseInt(pageSize) : 20;
-    const offset = (pageNum - 1) * sizeNum;
-
-    if (artist_id) {
-      const artistId = parseInt(artist_id);
-      if (isNaN(artistId) || artistId <= 0) {
-        return res.status(400).json({ error: '无效的艺术家ID' });
-      }
+    const result = await fetchPublicDigitalArtworksList(req.query, { withImageAlias: true });
+    if (!result.ok) {
+      return res.status(result.status).json(result.body);
     }
-
-    let query = `
-      SELECT 
-        dae.id, dae.title, dae.image_url, dae.description, dae.price, dae.created_at,
-        dae.artist_id,
-        COALESCE(a.name, dae.artist_name) AS artist_display_name,
-        a.avatar AS artist_avatar
-      FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} dae
-      LEFT JOIN artists a ON a.id = dae.artist_id
-      WHERE dae.is_hidden = 0
-    `;
-    const queryParams = [];
-
-    if (artist_id) {
-      query += ' AND dae.artist_id = ?';
-      queryParams.push(parseInt(artist_id));
-    }
-
-    query += ' ORDER BY dae.created_at DESC LIMIT ? OFFSET ?';
-    queryParams.push(sizeNum, offset);
-
-    const [rows] = await db.query(query, queryParams);
-    const artworksWithFullUrls = (rows || []).map((artwork) => {
-      const processed = processObjectImages(artwork, ['image_url', 'artist_avatar']);
-      const { artist_display_name, artist_avatar: artistAvatarCol, ...rest } = processed;
-      return {
-        ...rest,
-        image: processed.image_url || '',
-        price: normalizeWespacePriceToYuan(processed.price) || 0,
-        artist: {
-          id: processed.artist_id,
-          name: artist_display_name,
-          avatar: artistAvatarCol || ''
-        }
-      };
-    });
-
-    res.json(artworksWithFullUrls);
+    return res.json(result.body);
   } catch (error) {
     logger.error('Error fetching digital artworks (public)', { err: error });
     res.status(500).json({ error: '获取数字艺术品数据服务暂时不可用' });

@@ -7,6 +7,7 @@ const {
   DIGITAL_ITEM_SELECT_SQL,
   ensureDigitalArtworkIdColumns,
 } = require('../utils/digitalArtworkResolver');
+const { buildListEnvelope } = require('../utils/apiListEnvelope');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -22,7 +23,7 @@ async function getPurchasedProducts(userId) {
       [userId, 'SUCCESS']
     );
     if (!orders || orders.length === 0) {
-      return adminResult(200, []);
+      return adminResult(200, buildListEnvelope([]));
     }
     const orderIds = orders.map((o) => o.id);
     const [items] = await db.query(
@@ -86,7 +87,8 @@ async function getPurchasedProducts(userId) {
         const qrCodeUrl = item.delivery_qr_code_url || null;
         product = {
           ...product,
-          digital_id: item.digital_artwork_id,
+          digital_artwork_id:
+            item.digital_artwork_id != null ? String(item.digital_artwork_id) : null,
           artist_id: item.digital_artist_id,
           artist_name: item.digital_artist_name || '',
           artist_avatar: item.digital_artist_avatar
@@ -121,7 +123,7 @@ async function getPurchasedProducts(userId) {
       }
       return product;
     });
-    return adminResult(200, result);
+    return adminResult(200, buildListEnvelope(result));
   } catch (error) {
     logger.error('getPurchasedProducts failed', { err: error });
     return adminResult(500, { error: '获取已购产品失败' });
