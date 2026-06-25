@@ -180,14 +180,17 @@ async function listAdminShareEvents({
 
 async function detectWalletPendingMismatches() {
   const [rows] = await db.query(
-    `SELECT uw.user_id,
-            uw.pending_balance AS wallet_pending,
-            COALESCE(SUM(CASE WHEN cl.status = 'pending' THEN cl.commission_amount ELSE 0 END), 0) AS ledger_pending
-     FROM user_wallets uw
-     LEFT JOIN commission_ledger cl ON cl.user_id = uw.user_id
-     GROUP BY uw.user_id, uw.pending_balance
-     HAVING ABS(uw.pending_balance - ledger_pending) > ?
-     ORDER BY ABS(uw.pending_balance - ledger_pending) DESC
+    `SELECT t.user_id, t.wallet_pending, t.ledger_pending
+     FROM (
+       SELECT uw.user_id,
+              uw.pending_balance AS wallet_pending,
+              COALESCE(SUM(CASE WHEN cl.status = 'pending' THEN cl.commission_amount ELSE 0 END), 0) AS ledger_pending
+       FROM user_wallets uw
+       LEFT JOIN commission_ledger cl ON cl.user_id = uw.user_id
+       GROUP BY uw.user_id, uw.pending_balance
+     ) t
+     WHERE ABS(t.wallet_pending - t.ledger_pending) > ?
+     ORDER BY ABS(t.wallet_pending - t.ledger_pending) DESC
      LIMIT 50`,
     [MONEY_TOLERANCE]
   )
@@ -225,14 +228,17 @@ async function detectOrdersMissingCommission() {
 
 async function detectWithdrawnTotalMismatches() {
   const [rows] = await db.query(
-    `SELECT uw.user_id,
-            uw.total_withdrawn AS wallet_withdrawn,
-            COALESCE(SUM(CASE WHEN wr.status = 'success' THEN wr.amount ELSE 0 END), 0) AS ledger_withdrawn
-     FROM user_wallets uw
-     LEFT JOIN withdrawal_requests wr ON wr.user_id = uw.user_id
-     GROUP BY uw.user_id, uw.total_withdrawn
-     HAVING ABS(uw.total_withdrawn - ledger_withdrawn) > ?
-     ORDER BY ABS(uw.total_withdrawn - ledger_withdrawn) DESC
+    `SELECT t.user_id, t.wallet_withdrawn, t.ledger_withdrawn
+     FROM (
+       SELECT uw.user_id,
+              uw.total_withdrawn AS wallet_withdrawn,
+              COALESCE(SUM(CASE WHEN wr.status = 'success' THEN wr.amount ELSE 0 END), 0) AS ledger_withdrawn
+       FROM user_wallets uw
+       LEFT JOIN withdrawal_requests wr ON wr.user_id = uw.user_id
+       GROUP BY uw.user_id, uw.total_withdrawn
+     ) t
+     WHERE ABS(t.wallet_withdrawn - t.ledger_withdrawn) > ?
+     ORDER BY ABS(t.wallet_withdrawn - t.ledger_withdrawn) DESC
      LIMIT 50`,
     [MONEY_TOLERANCE]
   )
