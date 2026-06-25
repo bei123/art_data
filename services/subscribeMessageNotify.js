@@ -216,10 +216,16 @@ function isNotifyCodeNotReady(result) {
 }
 
 async function markSubscribeSentOnce(redisKey) {
-  const exists = await redisClient.get(redisKey)
-  if (exists) return false
-  await redisClient.setEx(redisKey, SUBSCRIBE_SENT_TTL_SEC, '1')
-  return true
+  try {
+    await redisClient.assertRedisOperational()
+    return await redisClient.setNxEx(redisKey, SUBSCRIBE_SENT_TTL_SEC, '1')
+  } catch (err) {
+    logger.warn('订阅消息去重 Redis 不可用，跳过去重', {
+      redisKey,
+      err: err?.message || err,
+    })
+    return true
+  }
 }
 
 function buildPaymentSuccessNotifySentKey(outTradeNo) {
@@ -229,7 +235,8 @@ function buildPaymentSuccessNotifySentKey(outTradeNo) {
 async function hasPaymentSuccessNotifySent(outTradeNo) {
   const clean = String(outTradeNo || '').trim()
   if (!clean) return false
-  return Boolean(await redisClient.get(buildPaymentSuccessNotifySentKey(clean)))
+  const state = await redisClient.safeGet(buildPaymentSuccessNotifySentKey(clean))
+  return Boolean(state)
 }
 
 async function loadOrderNotifyContext({ orderId, outTradeNo }) {
@@ -554,8 +561,22 @@ async function cancelPaymentPendingReminder(outTradeNo) {
   return { ok: true, removed }
 }
 
+async function pruneExpiredPendingScheduleEntries() {
+  try {
+    const staleBefore = Date.now() - Math.max(PAYMENT_DEADLINE_MINUTES + 60, 120) * 60 * 1000
+    const removed = await redisClient.zRemRangeByScore(PENDING_SCHEDULE_KEY, 0, staleBefore)
+    if (removed > 0) {
+      logger.info('待付款提醒排期清理过期条目', { removed, staleBefore })
+    }
+  } catch (err) {
+    logger.warn('待付款提醒排期清理失败', { err: err?.message || err })
+  }
+}
+
 async function processDuePaymentPendingReminders() {
   if (!isPaymentPendingNotifyEnabled()) return { processed: 0 }
+
+  await pruneExpiredPendingScheduleEntries()
 
   const now = Date.now()
   const dueItems = await redisClient.zRangeByScore(PENDING_SCHEDULE_KEY, 0, now, {

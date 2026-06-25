@@ -1,5 +1,6 @@
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
+const { REDIS_LIST_CACHE_TTL_SEC } = require('../utils/redisCacheTtl');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { ensureArtistSchemaReady, invalidateArtistsListCache } = require('./artistsService');
@@ -256,7 +257,7 @@ async function getPublicShowcaseList() {
   };
 
   try {
-    await redisClient.set(REDIS_SHOWCASE_LIST_KEY, JSON.stringify(body));
+    await redisClient.setEx(REDIS_SHOWCASE_LIST_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(body));
   } catch (e) {
     logger.error('Redis 写入 showcase 列表失败', { err: e });
   }

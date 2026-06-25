@@ -83,7 +83,46 @@ const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 const REDIS_PAY_INVENTORY_FULFILLED_PREFIX = 'pay:inventory:fulfilled:';
 const REDIS_REFUND_INVENTORY_RESTORED_PREFIX = 'refund:inventory:restored:';
 const INVENTORY_FLAG_EXPIRE_SEC = 60 * 60 * 24 * 90;
+const CALLBACK_PROCESSING_EXPIRE = 120;
 const PAID_NOTIFY_RETRY_MS = parseInt(process.env.WX_SUBSCRIBE_PAID_NOTIFY_RETRY_MS || '8000', 10);
+
+async function acquirePayOrderLock(lockKey) {
+    try {
+        await redisClient.assertRedisOperational();
+    } catch (err) {
+        logger.error('Redis 不可用，无法获取支付锁', { lockKey, err: err?.message || err });
+        return { error: adminResult(503, { error: '系统繁忙，请稍后重试', code: 'REDIS_UNAVAILABLE' }) };
+    }
+
+    try {
+        const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
+        if (!lock) {
+            return { error: adminResult(429, { error: '订单正在处理中，请勿重复提交' }) };
+        }
+        return { ok: true };
+    } catch (err) {
+        logger.error('支付锁获取失败', { lockKey, err: err?.message || err });
+        return { error: adminResult(503, { error: '系统繁忙，请稍后重试', code: 'REDIS_UNAVAILABLE' }) };
+    }
+}
+
+async function releasePayOrderLock(lockKey) {
+    if (!lockKey) return;
+    try {
+        await redisClient.del(lockKey);
+    } catch (err) {
+        logger.warn('释放支付锁失败', { lockKey, err: err?.message || err });
+    }
+}
+
+async function releasePayCallbackProcessingSlot(callbackKey) {
+    if (!callbackKey) return;
+    try {
+        await redisClient.del(callbackKey);
+    } catch (err) {
+        logger.warn('释放支付回调 processing 槽位失败', { callbackKey, err: err?.message || err });
+    }
+}
 
 async function loadOrderItemsForInventory(outTradeNo, connection = null) {
     const runner = connection || db;
@@ -340,7 +379,7 @@ async function restoreRefundedOrderInventory(outTradeNo, options = {}) {
 // 清理实物分类相关缓存
 async function clearPhysicalCategoriesCache() {
     try {
-        const n = await redisClient.scanDelByPattern(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`);
+        const n = await redisClient.scanDelByPattern(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`, { swallowError: true });
         if (n > 0) logger.info(`Cleared ${n} physical categories cache keys (SCAN)`);
     } catch (error) {
         logger.error('Error clearing physical categories cache', { err: error });
@@ -639,6 +678,7 @@ async function unifiedOrder(req) {
         const connection = await db.getConnection();
         await connection.beginTransaction();
 
+        let payOrderLockKey = null;
         try {
             // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
@@ -668,19 +708,18 @@ async function unifiedOrder(req) {
                 }
 
                 // 如果是同一用户的未完成订单，允许重复支付，但需要幂等性锁防止并发
-                const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
-                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
-                if (!lock) {
+                payOrderLockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
+                const lockResult = await acquirePayOrderLock(payOrderLockKey);
+                if (lockResult.error) {
                     await connection.rollback();
-                    return adminResult(429, { error: '订单正在处理中，请勿重复提交' });
+                    return lockResult.error;
                 }
             } else {
-                // 新订单，使用原有的幂等性锁
-                const lockKey = `pay:order:lock:${cleanOutTradeNo}`;
-                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
-                if (!lock) {
+                payOrderLockKey = `pay:order:lock:${cleanOutTradeNo}`;
+                const lockResult = await acquirePayOrderLock(payOrderLockKey);
+                if (lockResult.error) {
                     await connection.rollback();
-                    return adminResult(429, { error: '订单正在处理中，请勿重复提交' });
+                    return lockResult.error;
                 }
             }
 
@@ -854,6 +893,7 @@ async function unifiedOrder(req) {
             throw error;
         } finally {
             connection.release();
+            await releasePayOrderLock(payOrderLockKey);
         }
     } catch (error) {
         logger.error('统一下单失败', { err: error });
@@ -900,6 +940,7 @@ async function singleOrder(req) {
         const connection = await db.getConnection();
         await connection.beginTransaction();
 
+        let payOrderLockKey = null;
         try {
             const [existingOrders] = await connection.query(
                 'SELECT id, trade_state, user_id, referral_coupon_id FROM orders WHERE out_trade_no = ?',
@@ -924,18 +965,18 @@ async function singleOrder(req) {
                     return adminResult(403, { error: '只能支付自己的订单' });
                 }
 
-                const lockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
-                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
-                if (!lock) {
+                payOrderLockKey = `pay:order:lock:${cleanOutTradeNo}:${userId}`;
+                const lockResult = await acquirePayOrderLock(payOrderLockKey);
+                if (lockResult.error) {
                     await connection.rollback();
-                    return adminResult(429, { error: '订单正在处理中，请勿重复提交' });
+                    return lockResult.error;
                 }
             } else {
-                const lockKey = `pay:order:lock:${cleanOutTradeNo}`;
-                const lock = await redisClient.set(lockKey, '1', { NX: true, EX: LOCK_EXPIRE });
-                if (!lock) {
+                payOrderLockKey = `pay:order:lock:${cleanOutTradeNo}`;
+                const lockResult = await acquirePayOrderLock(payOrderLockKey);
+                if (lockResult.error) {
                     await connection.rollback();
-                    return adminResult(429, { error: '订单正在处理中，请勿重复提交' });
+                    return lockResult.error;
                 }
             }
 
@@ -1093,6 +1134,7 @@ async function singleOrder(req) {
             throw error;
         } finally {
             connection.release();
+            await releasePayOrderLock(payOrderLockKey);
         }
     } catch (error) {
         logger.error('单商品下单失败', { err: error });
@@ -1156,8 +1198,20 @@ async function payNotify(req) {
         if (callbackData.trade_state === 'SUCCESS') {
             const out_trade_no_early = callbackData.out_trade_no;
             const callbackKey = `pay:callback:${out_trade_no_early}`;
-            const callbackProcessed = await redisClient.get(callbackKey);
-            if (callbackProcessed) {
+
+            try {
+                await redisClient.assertRedisOperational();
+            } catch (err) {
+                logger.error('支付回调 Redis 不可用', { out_trade_no: out_trade_no_early, err: err?.message || err });
+                return adminResult(503, { code: 'FAIL', message: '系统繁忙，请稍后重试' });
+            }
+
+            const callbackAcquired = await redisClient.setNxEx(
+                callbackKey,
+                CALLBACK_PROCESSING_EXPIRE,
+                'processing'
+            );
+            if (!callbackAcquired) {
                 await cancelPaymentPendingReminder(out_trade_no_early).catch((err) => {
                     logger.warn('重复回调取消待付款提醒失败', { outTradeNo: out_trade_no_early, err: err?.message || err });
                 });
@@ -1278,6 +1332,7 @@ async function payNotify(req) {
                 });
             } catch (error) {
                 await connection.rollback();
+                await releasePayCallbackProcessingSlot(callbackKey);
                 logger.error('支付回调处理事务失败', { err: error });
                 throw error;
             } finally {
@@ -1562,7 +1617,16 @@ async function markRefundPendingRetry(refundRow, reason) {
 
 async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id }) {
     const callbackKey = `refund:callback:${out_refund_no}`;
-    if (await redisClient.get(callbackKey)) {
+
+    try {
+        await redisClient.assertRedisOperational();
+    } catch (err) {
+        logger.error('退款回调 Redis 不可用', { out_refund_no, err: err?.message || err });
+        throw err;
+    }
+
+    const callbackAcquired = await redisClient.setNxEx(callbackKey, CALLBACK_PROCESSING_EXPIRE, 'processing');
+    if (!callbackAcquired) {
         return { alreadyDone: true };
     }
 
@@ -1616,6 +1680,7 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
         return { alreadyDone: false };
     } catch (err) {
         await connection.rollback();
+        await releasePayCallbackProcessingSlot(callbackKey);
         throw err;
     } finally {
         connection.release();

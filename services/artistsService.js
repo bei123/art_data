@@ -1,5 +1,6 @@
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
+const { REDIS_LIST_CACHE_TTL_SEC, REDIS_DETAIL_CACHE_TTL_SEC } = require('../utils/redisCacheTtl');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
@@ -235,7 +236,7 @@ async function getPublicArtistsList(query, includeHidden = false) {
 
   try {
     if (!includeHidden) {
-      await redisClient.set(REDIS_ARTISTS_LIST_KEY, JSON.stringify(artistsWithProcessedImages));
+      await redisClient.setEx(REDIS_ARTISTS_LIST_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(artistsWithProcessedImages));
     }
   } catch (e) {
     logger.error('Redis 写入艺术家列表失败', { err: e });
@@ -298,7 +299,7 @@ async function getPublicArtistDetail(rawId, includeHidden = false) {
 
   try {
     if (!includeHidden) {
-      await redisClient.set(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, JSON.stringify(artistWithInstitution));
+      await redisClient.setEx(REDIS_ARTIST_DETAIL_KEY_PREFIX + id, REDIS_DETAIL_CACHE_TTL_SEC, JSON.stringify(artistWithInstitution));
     }
   } catch (e) {
     logger.error('Redis 写入艺术家详情失败', { err: e });

@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
+const { buildExternalUserRedisCachePayload } = require('../utils/externalUserRedisCache');
 const {
   resolveWespaceBasicAuthorization,
   externalAuthNotConfiguredBody,
@@ -510,7 +511,7 @@ router.post('/user/login', async (req, res) => {
                   
                   // 更新Redis缓存
                   try {
-                    const cacheData = {
+                    const cacheData = buildExternalUserRedisCachePayload({
                       id: externalUserId,
                       wx_user_id: wxUserId,
                       usn: externalUser.usn,
@@ -520,17 +521,11 @@ router.post('/user/login', async (req, res) => {
                       nickname: externalUser.nickname,
                       mobile: externalUser.mobile,
                       avatar: externalUser.avatar,
-                      access_token: userData.accessToken,
-                      refresh_token: userData.refreshToken,
-                      token: externalUser.token,
                       expire: userData.expire,
                       app_type: userData.appType,
                       app_type_name: userData.appTypeName,
                       set_password: userData.setPassword,
-                      ws_token: userData.wsToken,
-                      ws_stoken: externalUser.wsStoken,
                       node_org: userData.nodeOrg,
-                      im_token: externalUser.imToken,
                       identity_authentication: externalUser.identityAuthentication,
                       postcode: externalUser.postcode,
                       nation: externalUser.nation,
@@ -540,8 +535,8 @@ router.post('/user/login', async (req, res) => {
                       privileges: externalUser.privileges,
                       chain_status: externalUser.chainStatus,
                       status: externalUser.status,
-                      id_card_no: externalUser.idCardNo
-                    };
+                      id_card_no: externalUser.idCardNo,
+                    });
                     
                     // 使用usn和wx_user_id作为缓存键
                     await redisClient.setEx(
@@ -613,7 +608,7 @@ router.post('/user/login', async (req, res) => {
               
               // 写入Redis缓存
               try {
-                const cacheData = {
+                const cacheData = buildExternalUserRedisCachePayload({
                   id: result.insertId,
                   wx_user_id: wxUserId,
                   usn: externalUser.usn,
@@ -623,17 +618,11 @@ router.post('/user/login', async (req, res) => {
                   nickname: externalUser.nickname,
                   mobile: externalUser.mobile,
                   avatar: externalUser.avatar,
-                  access_token: userData.accessToken,
-                  refresh_token: userData.refreshToken,
-                  token: externalUser.token,
                   expire: userData.expire,
                   app_type: userData.appType,
                   app_type_name: userData.appTypeName,
                   set_password: userData.setPassword,
-                  ws_token: userData.wsToken,
-                  ws_stoken: externalUser.wsStoken,
                   node_org: userData.nodeOrg,
-                  im_token: externalUser.imToken,
                   identity_authentication: externalUser.identityAuthentication,
                   postcode: externalUser.postcode,
                   nation: externalUser.nation,
@@ -643,8 +632,8 @@ router.post('/user/login', async (req, res) => {
                   privileges: externalUser.privileges,
                   chain_status: externalUser.chainStatus,
                   status: externalUser.status,
-                  id_card_no: externalUser.idCardNo
-                };
+                  id_card_no: externalUser.idCardNo,
+                });
                 
                 // 使用usn和wx_user_id作为缓存键
                 await redisClient.setEx(

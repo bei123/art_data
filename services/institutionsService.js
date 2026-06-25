@@ -1,5 +1,6 @@
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
+const { REDIS_LIST_CACHE_TTL_SEC, REDIS_DETAIL_CACHE_TTL_SEC } = require('../utils/redisCacheTtl');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
@@ -109,7 +110,7 @@ async function getPublicInstitutionsList(query = {}) {
     );
     const institutionsWithProcessedImages = (rows || []).map(mapInstitutionRow);
 
-    await redisClient.set(REDIS_INSTITUTIONS_LIST_KEY, JSON.stringify(institutionsWithProcessedImages));
+    await redisClient.setEx(REDIS_INSTITUTIONS_LIST_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(institutionsWithProcessedImages));
     return adminResult(200, institutionsWithProcessedImages);
   } catch (error) {
     logger.error('getPublicInstitutionsList failed', { err: error });
@@ -141,7 +142,7 @@ async function getPublicInstitutionDetail(rawId) {
     }
 
     const institution = mapInstitutionRow(rows[0]);
-    await redisClient.set(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id, JSON.stringify(institution));
+    await redisClient.setEx(REDIS_INSTITUTION_DETAIL_KEY_PREFIX + id, REDIS_DETAIL_CACHE_TTL_SEC, JSON.stringify(institution));
     return adminResult(200, institution);
   } catch (error) {
     logger.error('getPublicInstitutionDetail failed', { err: error });

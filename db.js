@@ -191,18 +191,28 @@ setInterval(() => {
 */
 
 // 优雅关闭处理
-const gracefulShutdown = () => {
-    console.log('正在关闭数据库连接池...');
+async function gracefulShutdown(signal) {
+    logger.info('正在优雅关闭服务', { signal: signal || null });
+    try {
+        const redisClient = require('./redisClient');
+        if (typeof redisClient.shutdownRedis === 'function') {
+            await redisClient.shutdownRedis();
+            logger.info('Redis 连接已关闭');
+        }
+    } catch (err) {
+        logger.error('关闭 Redis 时出错', { err });
+    }
+
     pool.end((err) => {
         if (err) {
-            console.error('关闭连接池时出错:', err);
+            logger.error('关闭连接池时出错', { err });
             process.exit(1);
         } else {
-            console.log('数据库连接池已安全关闭');
+            logger.info('数据库连接池已安全关闭');
             process.exit(0);
         }
     });
-};
+}
 
 // 监听进程退出信号
 process.on('SIGTERM', gracefulShutdown);

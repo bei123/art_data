@@ -268,7 +268,7 @@ async function createMerchantAdmin(body) {
       [merchantId]
     );
 
-    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`, { swallowError: true });
     return adminResult(200, {
       success: true,
       data: newMerchant[0],
@@ -325,7 +325,7 @@ async function updateMerchantAdmin(rawId, body) {
       [id]
     );
 
-    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`, { swallowError: true });
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + id);
     await invalidateGeocodeCaches([previousAddress, address]);
 
@@ -364,7 +364,7 @@ async function deleteMerchantAdmin(rawId) {
       connection.release();
     }
 
-    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`, { swallowError: true });
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + id);
     await invalidateGeocodeCaches([previousAddress]);
 
@@ -395,7 +395,7 @@ async function patchMerchantStatusAdmin(rawId, body) {
 
   try {
     await db.query('UPDATE merchants SET status = ? WHERE id = ?', [status, id]);
-    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`, { swallowError: true });
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + id);
     return adminResult(200, {
       success: true,
@@ -424,7 +424,7 @@ async function patchMerchantSortAdmin(rawId, body) {
 
   try {
     await db.query('UPDATE merchants SET sort_order = ? WHERE id = ?', [sort_order, id]);
-    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`);
+    await redisClient.scanDelByPattern(`${REDIS_MERCHANTS_LIST_KEY_PREFIX}*`, { swallowError: true });
     await redisClient.del(REDIS_MERCHANT_DETAIL_KEY_PREFIX + id);
     return adminResult(200, {
       success: true,

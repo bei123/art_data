@@ -1,5 +1,6 @@
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
+const { REDIS_LIST_CACHE_TTL_SEC } = require('../utils/redisCacheTtl');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
@@ -115,7 +116,7 @@ async function getPublicBannersList() {
       processObjectImages(banner, ['image_url'])
     );
     try {
-      await redisClient.set(REDIS_BANNERS_LIST_KEY, JSON.stringify(bannersWithProcessedImages));
+      await redisClient.setEx(REDIS_BANNERS_LIST_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(bannersWithProcessedImages));
     } catch (e) {
       logger.error('Redis 写入轮播公开列表失败', { err: e });
     }
@@ -139,7 +140,7 @@ async function getAllBannersAdmin() {
       processObjectImages(banner, ['image_url'])
     );
     try {
-      await redisClient.set(REDIS_BANNERS_ALL_KEY, JSON.stringify(bannersWithProcessedImages));
+      await redisClient.setEx(REDIS_BANNERS_ALL_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(bannersWithProcessedImages));
     } catch (e) {
       logger.error('Redis 写入轮播全量列表失败', { err: e });
     }

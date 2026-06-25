@@ -65,7 +65,7 @@ function buildExhibitionListCacheKey(statusKey, pageNum, sizeNum) {
 
 async function invalidateExhibitionListCaches() {
   try {
-    const n = await redisClient.scanDelByPattern(`${REDIS_EXHIBITIONS_LIST_KEY_PREFIX}*`);
+    const n = await redisClient.scanDelByPattern(`${REDIS_EXHIBITIONS_LIST_KEY_PREFIX}*`, { swallowError: true });
     if (n > 0) console.log(`Redis 已清除展览列表缓存键 ${n} 个`);
   } catch (e) {
     logger.error('Redis 清除展览列表缓存失败:', { err: e })
@@ -84,7 +84,7 @@ async function invalidateExhibitionDetailCache(exhibitionId) {
 /** 清除全部展览详情 Redis（原作/数字艺术品批量变更且无法枚举 id 时使用） */
 async function invalidateAllExhibitionDetailCaches() {
   try {
-    const n = await redisClient.scanDelByPattern(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}*`);
+    const n = await redisClient.scanDelByPattern(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}*`, { swallowError: true });
     if (n > 0) logger.info('invalidateAllExhibitionDetailCaches', { cleared: n });
     return n;
   } catch (e) {

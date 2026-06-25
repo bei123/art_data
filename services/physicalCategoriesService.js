@@ -2,6 +2,7 @@ const db = require('../db');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
+const { REDIS_LIST_CACHE_TTL_SEC } = require('../utils/redisCacheTtl');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 
@@ -17,7 +18,7 @@ function parsePositiveIntId(raw) {
 
 async function clearPhysicalCategoriesCache() {
   try {
-    const n = await redisClient.scanDelByPattern(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`);
+    const n = await redisClient.scanDelByPattern(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`, { swallowError: true });
     if (n > 0) {
       logger.info('physical categories cache cleared', { keys: n });
     }
@@ -92,9 +93,7 @@ async function getPublicPhysicalCategoriesList(query) {
       },
     };
 
-    if (cleanPage === 1 && sort === 'created_at' && order === 'desc') {
-      await redisClient.setEx(REDIS_PHYSICAL_CATEGORIES_LIST_KEY, 604800, JSON.stringify(result));
-    }
+    await redisClient.setEx(cacheKey, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(result));
 
     return adminResult(200, result);
   } catch (error) {

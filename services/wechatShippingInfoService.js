@@ -1100,11 +1100,26 @@ async function notifyConfirmReceive(req) {
   })
 }
 
+async function tryMarkNotifyConfirmReceiveSent(orderId) {
+  const id = parseInt(String(orderId ?? ''), 10)
+  if (!id || Number.isNaN(id) || id <= 0) return false
+  const ttl = Number.isFinite(NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC) && NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC > 0
+    ? NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC
+    : 60 * 60 * 24 * 365
+  try {
+    await redisClient.assertRedisOperational()
+    return await redisClient.setNxEx(buildNotifyConfirmReceiveSentKey(id), ttl, '1')
+  } catch (err) {
+    logger.warn('确认收货提醒去重 Redis 不可用，跳过去重', { orderId: id, err: err?.message || err })
+    return true
+  }
+}
+
 async function hasNotifyConfirmReceiveSent(orderId) {
   const id = parseInt(String(orderId ?? ''), 10)
   if (!id || Number.isNaN(id) || id <= 0) return false
   try {
-    return Boolean(await redisClient.get(buildNotifyConfirmReceiveSentKey(id)))
+    return Boolean(await redisClient.safeGet(buildNotifyConfirmReceiveSentKey(id)))
   } catch (err) {
     logger.warn('读取确认收货提醒 Redis 标记失败', { orderId: id, err: err?.message || err })
     return false
@@ -1112,16 +1127,7 @@ async function hasNotifyConfirmReceiveSent(orderId) {
 }
 
 async function markNotifyConfirmReceiveSent(orderId) {
-  const id = parseInt(String(orderId ?? ''), 10)
-  if (!id || Number.isNaN(id) || id <= 0) return
-  try {
-    const ttl = Number.isFinite(NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC) && NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC > 0
-      ? NOTIFY_CONFIRM_RECEIVE_SENT_TTL_SEC
-      : 60 * 60 * 24 * 365
-    await redisClient.setEx(buildNotifyConfirmReceiveSentKey(id), ttl, '1')
-  } catch (err) {
-    logger.warn('写入确认收货提醒 Redis 标记失败', { orderId: id, err: err?.message || err })
-  }
+  await tryMarkNotifyConfirmReceiveSent(orderId)
 }
 
 async function maybeNotifyConfirmReceiveOnSignOff({
@@ -1142,14 +1148,21 @@ async function maybeNotifyConfirmReceiveOnSignOff({
     return { skipped: true, reason: 'missing_order_id' }
   }
 
-  if (!force && await hasNotifyConfirmReceiveSent(id)) {
-    return { skipped: true, reason: 'already_sent' }
+  if (!force) {
+    const acquired = await tryMarkNotifyConfirmReceiveSent(id)
+    if (!acquired) return { skipped: true, reason: 'already_sent' }
   }
 
   const actionAtSec = Number(actionTime) || 0
   const receivedTime = actionAtSec > 0 ? Math.floor(actionAtSec) : Math.floor(Date.now() / 1000)
   const result = await notifyConfirmReceiveForInternalOrder(id, receivedTime)
-  if (result.ok) await markNotifyConfirmReceiveSent(id)
+  if (!result.ok && !force) {
+    try {
+      await redisClient.del(buildNotifyConfirmReceiveSentKey(id))
+    } catch (err) {
+      logger.warn('确认收货提醒失败后释放 Redis 标记失败', { orderId: id, err: err?.message || err })
+    }
+  }
   return result
 }
 

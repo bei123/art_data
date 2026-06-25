@@ -863,13 +863,24 @@ function buildQuoteRedisKey(token) {
 }
 
 async function saveCheckoutQuote(userId, quoteData) {
+  try {
+    await redisClient.assertRedisOperational()
+  } catch (err) {
+    return { error: adminResult(503, { error: '系统繁忙，请稍后重试', code: 'REDIS_UNAVAILABLE' }) }
+  }
+
   const token = `qt_${crypto.randomBytes(16).toString('hex')}`
   const payload = {
     user_id: userId,
     created_at: Date.now(),
     ...quoteData,
   }
-  await redisClient.setEx(buildQuoteRedisKey(token), QUOTE_TTL_SEC, JSON.stringify(payload))
+  try {
+    await redisClient.setEx(buildQuoteRedisKey(token), QUOTE_TTL_SEC, JSON.stringify(payload))
+  } catch (err) {
+    logger.error('结算报价写入 Redis 失败', { err: err?.message || err })
+    return { error: adminResult(503, { error: '系统繁忙，请稍后重试', code: 'REDIS_UNAVAILABLE' }) }
+  }
   return { token, expiresIn: QUOTE_TTL_SEC }
 }
 
@@ -877,7 +888,19 @@ async function loadCheckoutQuote(userId, quoteToken) {
   const cleanToken = typeof quoteToken === 'string' ? quoteToken.trim() : ''
   if (!cleanToken) return { error: adminResult(400, { error: '缺少有效的 quote_token' }) }
 
-  const raw = await redisClient.get(buildQuoteRedisKey(cleanToken))
+  try {
+    await redisClient.assertRedisOperational()
+  } catch (err) {
+    return { error: adminResult(503, { error: '系统繁忙，请稍后重试', code: 'REDIS_UNAVAILABLE' }) }
+  }
+
+  let raw
+  try {
+    raw = await redisClient.get(buildQuoteRedisKey(cleanToken))
+  } catch (err) {
+    logger.error('结算报价读取 Redis 失败', { err: err?.message || err })
+    return { error: adminResult(503, { error: '系统繁忙，请稍后重试', code: 'REDIS_UNAVAILABLE' }) }
+  }
   if (!raw) {
     return { error: adminResult(409, { error: '结算报价已过期，请重新选择地址并预览' }) }
   }
@@ -1035,6 +1058,7 @@ async function checkoutPreview(req) {
       if (quote.error) return quote.error
 
       const saved = await saveCheckoutQuote(userId, quote.data)
+      if (saved.error) return saved.error
       const { normalized_cart_items, priced_cart_items, cart_fingerprint, shipping_snapshot, ...publicData } = quote.data
 
       return adminResult(200, {

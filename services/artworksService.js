@@ -35,7 +35,7 @@ async function invalidateArtworksPublicCaches(options = {}) {
   const opts = options || {}
   if (opts.listOnly === true) {
     try {
-      await redisClient.scanDelByPattern('artworks:list*')
+      await redisClient.scanDelByPattern('artworks:list*', { swallowError: true })
     } catch (e) {
       logger.error('invalidateArtworksPublicCaches_list_only_failed', { err: e })
     }
@@ -51,7 +51,7 @@ async function invalidateArtworksPublicCaches(options = {}) {
       ? parsePositiveIntId(opts.artworkDetailId)
       : null
   try {
-    await redisClient.scanDelByPattern('artworks:list*')
+    await redisClient.scanDelByPattern('artworks:list*', { swallowError: true })
     if (batchIds && batchIds.length > 0) {
       for (const id of batchIds) {
         await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id)
@@ -61,7 +61,7 @@ async function invalidateArtworksPublicCaches(options = {}) {
       await redisClient.del(REDIS_ARTWORK_DETAIL_KEY_PREFIX + singleId)
       await invalidateExhibitionCachesForArtworks({ originalArtworkIds: [singleId] })
     } else {
-      await redisClient.scanDelByPattern('artworks:detail*')
+      await redisClient.scanDelByPattern('artworks:detail*', { swallowError: true })
       await invalidateAllExhibitionDetailCaches()
     }
   } catch (e) {
@@ -783,10 +783,10 @@ async function clearArtworksPerformanceCacheAdmin(body) {
   try {
     let clearedKeys = 0;
     if (type === 'all' || type === 'list') {
-      clearedKeys += await redisClient.scanDelByPattern('artworks:list*');
+      clearedKeys += await redisClient.scanDelByPattern('artworks:list*', { swallowError: true });
     }
     if (type === 'all' || type === 'detail') {
-      clearedKeys += await redisClient.scanDelByPattern('artworks:detail*');
+      clearedKeys += await redisClient.scanDelByPattern('artworks:detail*', { swallowError: true });
     }
     return adminResult(200, { message: '缓存清理成功', clearedKeys, type });
   } catch (error) {

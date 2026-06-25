@@ -20,7 +20,7 @@ function parsePositiveIntId(raw) {
 
 async function clearRightsCache() {
   try {
-    const n = await redisClient.scanDelByPattern(`${REDIS_RIGHTS_LIST_KEY}*`);
+    const n = await redisClient.scanDelByPattern(`${REDIS_RIGHTS_LIST_KEY}*`, { swallowError: true });
     if (n > 0) {
       logger.info('rights cache cleared', { keys: n });
     }
@@ -31,7 +31,7 @@ async function clearRightsCache() {
 
 async function clearPhysicalCategoriesCache() {
   try {
-    const n = await redisClient.scanDelByPattern(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`);
+    const n = await redisClient.scanDelByPattern(`${REDIS_PHYSICAL_CATEGORIES_LIST_KEY}*`, { swallowError: true });
     if (n > 0) {
       logger.info('physical categories cache cleared', { keys: n });
     }
