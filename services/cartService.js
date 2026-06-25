@@ -12,6 +12,7 @@ const {
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { buildListEnvelope } = require('../utils/apiListEnvelope');
+const { ORIGINAL_ARTWORK_PUBLIC_WHERE } = require('../utils/publicVisibilitySchema');
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
@@ -127,7 +128,7 @@ async function getCartList(userId) {
         `SELECT oa.id, oa.title, oa.image, oa.year, oa.description, oa.original_price, oa.discount_price, oa.artist_id
          FROM original_artworks oa
          INNER JOIN artists a ON a.id = oa.artist_id
-         WHERE oa.id IN (?) AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
+         WHERE oa.id IN (?) AND ${ORIGINAL_ARTWORK_PUBLIC_WHERE}`,
         [artworkIds]
       );
       artworks.forEach((a) => {
@@ -296,7 +297,7 @@ async function addCartItem(userId, body) {
         `SELECT oa.original_price, oa.discount_price, oa.stock, oa.is_on_sale
          FROM original_artworks oa
          INNER JOIN artists a ON a.id = oa.artist_id
-         WHERE oa.id = ? AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
+         WHERE oa.id = ? AND ${ORIGINAL_ARTWORK_PUBLIC_WHERE}`,
         [artwork_id]
       );
       if (!artwork || artwork.length === 0) {
@@ -377,7 +378,7 @@ async function updateCartItemQuantity(userId, rawCartItemId, body) {
          FROM original_artworks oa
          INNER JOIN artists a ON a.id = oa.artist_id
          WHERE oa.id = ? AND oa.is_on_sale = 1
-           AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
+           AND ${ORIGINAL_ARTWORK_PUBLIC_WHERE}`,
         [cartItem.artwork_id]
       );
       if (!artworkRows || artworkRows.length === 0) {

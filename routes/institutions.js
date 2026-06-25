@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
 
 router.get('/:id/artists', async (req, res) => {
   try {
-    const r = await svc.getInstitutionArtists(req.params.id);
+    const r = await svc.getInstitutionArtists(req.params.id, req.query);
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取机构艺术家列表失败', { err: error });

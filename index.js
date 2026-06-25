@@ -55,6 +55,12 @@ const { ensureOrdersShippingColumns } = require('./utils/ordersSchema');
 const { ensureReferralSchema } = require('./utils/referralSchema');
 const { ensureRightsShippingColumns } = require('./services/rightsService');
 const { ensureArtworksShippingColumns } = require('./utils/artworkShippingDimensions');
+const { ensurePublicVisibilitySchema } = require('./utils/publicVisibilitySchema');
+const { ensureRightImagesLookupIndex } = require('./utils/rightImagesSchema');
+const { ensureCoreTableIndexes } = require('./utils/coreTableIndexesSchema');
+const { ensureSearchFulltextIndexes } = require('./utils/searchIndexSchema');
+const { DIGITAL_PURCHASE_JOIN_SQL } = require('./utils/digitalArtworkResolver');
+const { parseListPageParams, buildSimplePagination } = require('./utils/listQuery');
 const { startWmsProductSyncSchedule } = require('./services/wmsProductSyncService');
 const { startPaymentPendingReminderScheduler } = require('./services/subscribeMessageNotify');
 const { startLogisticsPathNotifyScheduler } = require('./services/logisticsPathNotify');
@@ -383,6 +389,15 @@ app.get(
       await ensureOrderItemsQrCodeColumns()
       await ensureDigitalArtworkIdColumns()
 
+      const accessUserId = access.userId
+      const { page, pageSize, offset, explicit } = parseListPageParams(req.query, { defaultPageSize: 100 })
+
+      const [[{ total }]] = await db.query(
+        'SELECT COUNT(*) AS total FROM digital_identity_purchases WHERE user_id = ?',
+        [accessUserId]
+      )
+      const totalCount = Number(total) || 0
+
       const [purchases] = await db.query(`
       SELECT 
         dip.*,
@@ -392,15 +407,15 @@ app.get(
         oi.delivery_qr_code_url,
         oi.delivery_qr_code_at
       FROM digital_identity_purchases dip
-      LEFT JOIN digital_artworks da ON CAST(dip.digital_artwork_id AS CHAR) = CAST(da.id AS CHAR)
-      LEFT JOIN digital_artworks_external dae ON CAST(dip.digital_artwork_id AS CHAR) = dae.id
+      ${DIGITAL_PURCHASE_JOIN_SQL}
       LEFT JOIN orders o ON dip.order_id = o.id
       LEFT JOIN order_items oi ON oi.order_id = dip.order_id
         AND oi.type = 'digital'
         AND oi.digital_artwork_id = dip.digital_artwork_id
       WHERE dip.user_id = ?
       ORDER BY dip.purchase_date DESC
-    `, [access.userId])
+      LIMIT ? OFFSET ?
+    `, [accessUserId, pageSize, offset])
 
       const result = (purchases || []).map((row) => {
         const isPaid = row.order_trade_state === 'SUCCESS'
@@ -412,9 +427,16 @@ app.get(
         }
       })
 
-      res.json(result)
+      if (!explicit && totalCount <= pageSize) {
+        return res.json(result)
+      }
+
+      return res.json({
+        data: result,
+        pagination: buildSimplePagination({ page, pageSize, total: totalCount }),
+      })
     } catch (error) {
-      console.error('获取数字身份购买记录失败:', error)
+      logger.error('获取数字身份购买记录失败', { err: error })
       res.status(500).json({ error: '获取数字身份购买记录失败' })
     }
   }
@@ -468,6 +490,18 @@ ensureRightsShippingColumns().catch((err) => {
 });
 ensureArtworksShippingColumns().catch((err) => {
   logger.warn('original_artworks shipping columns ensure failed', { err: err.message });
+});
+ensurePublicVisibilitySchema().catch((err) => {
+  logger.warn('public visibility schema ensure failed', { err: err.message });
+});
+ensureRightImagesLookupIndex().catch((err) => {
+  logger.warn('right_images index ensure failed', { err: err.message });
+});
+ensureCoreTableIndexes().catch((err) => {
+  logger.warn('core table indexes ensure failed', { err: err.message });
+});
+ensureSearchFulltextIndexes().catch((err) => {
+  logger.warn('search fulltext indexes ensure failed', { err: err.message });
 });
 
 // 定时同步外部数字艺术品到缓存表（用于列表/影藏展示）

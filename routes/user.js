@@ -7,7 +7,7 @@ const svc = require('../services/userService');
 router.get('/purchased', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const r = await svc.getPurchasedProducts(userId);
+    const r = await svc.getPurchasedProducts(userId, req.query);
     return res.status(r.status).json(r.body);
   } catch (error) {
     logger.error('获取已购产品失败', { err: error });

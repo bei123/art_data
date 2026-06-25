@@ -48,6 +48,7 @@ const {
     isDigitalArtworkPurchasable,
     adjustDigitalArtworkStock,
     ensureDigitalArtworkIdColumns,
+  DIGITAL_PURCHASE_JOIN_SQL,
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { resolveUserOutTradeNo } = require('../utils/orderTradeNo');
@@ -67,6 +68,16 @@ const {
     hasPhysicalItems,
 } = require('./checkoutPricing');
 const { clearRightsInventoryCaches } = require('./rightsService');
+const {
+    FIRST_RIGHT_IMAGE_SUBQUERY_SQL,
+    fetchRightImagesByRightIds,
+    attachRightImagesToOrderItems,
+} = require('../utils/rightImagesQuery');
+const {
+    parseListPageParams,
+    buildSimplePagination,
+} = require('../utils/listQuery');
+const { ADMIN_ORDER_LIST_SELECT } = require('../utils/sqlSelectFragments');
 const {
     fireSubscribeNotify,
     notifyOrderPaid,
@@ -2333,19 +2344,11 @@ async function queryOrder(req) {
                 [orderAfterSync.id]
             );
 
-            const orderItemsWithImages = await Promise.all(orderItems.map(async (item) => {
-                if (!item.right_id) {
-                    return { ...item, images: [] };
-                }
-                const [images] = await db.query(
-                    'SELECT image_url FROM right_images WHERE right_id = ?',
-                    [item.right_id]
-                );
-                return {
-                    ...item,
-                    images: images.map(img => img.image_url || '')
-                };
-            }));
+            const rightIds = orderItems
+                .filter((item) => item.right_id)
+                .map((item) => item.right_id);
+            const imagesByRightId = await fetchRightImagesByRightIds(rightIds);
+            const orderItemsWithImages = attachRightImagesToOrderItems(orderItems, imagesByRightId);
 
             return adminResult(200, {
                 success: true,
@@ -2490,13 +2493,12 @@ async function fetchListOrderItemsByOrderIds(orderIds) {
             oi.quantity,
             oi.price,
             r.title as right_title,
-            ri.image_url as right_image_url,
+            ${FIRST_RIGHT_IMAGE_SUBQUERY_SQL},
             ${DIGITAL_ITEM_SELECT_SQL},
             oa.title as artwork_title,
             oa.image as artwork_image
         FROM order_items oi
         LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-        LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
         ${DIGITAL_ITEM_JOIN_SQL}
         LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
         WHERE oi.order_id IN (${placeholders})
@@ -2954,6 +2956,13 @@ async function digitalIdentityPurchases(req) {
         }
 
         const cleanUserId = parseInt(userId);
+        const { page, pageSize, offset, explicit } = parseListPageParams(req.query, { defaultPageSize: 100 });
+
+        const [[{ total }]] = await db.query(
+            'SELECT COUNT(*) AS total FROM digital_identity_purchases WHERE user_id = ?',
+            [cleanUserId]
+        );
+        const totalCount = Number(total) || 0;
 
         const [purchases] = await db.query(`
              SELECT 
@@ -2971,15 +2980,15 @@ async function digitalIdentityPurchases(req) {
                  oi.delivery_qr_code_url,
                  oi.delivery_qr_code_at
              FROM digital_identity_purchases dip
-             LEFT JOIN digital_artworks da ON CAST(dip.digital_artwork_id AS CHAR) = CAST(da.id AS CHAR)
-             LEFT JOIN digital_artworks_external dae ON CAST(dip.digital_artwork_id AS CHAR) = dae.id
+             ${DIGITAL_PURCHASE_JOIN_SQL}
              LEFT JOIN orders o ON dip.order_id = o.id
              LEFT JOIN order_items oi ON oi.order_id = dip.order_id
                AND oi.type = 'digital'
                AND oi.digital_artwork_id = dip.digital_artwork_id
              WHERE dip.user_id = ?
              ORDER BY dip.purchase_date DESC
-         `, [cleanUserId]);
+             LIMIT ? OFFSET ?
+         `, [cleanUserId, pageSize, offset]);
 
         const result = (purchases || []).map((row) => {
             const fulfillment = buildDigitalItemFulfillment({
@@ -3005,7 +3014,14 @@ async function digitalIdentityPurchases(req) {
             };
         });
 
-        return adminResult(200, result);
+        if (!explicit && totalCount <= pageSize) {
+            return adminResult(200, result);
+        }
+
+        return adminResult(200, {
+            data: result,
+            pagination: buildSimplePagination({ page, pageSize, total: totalCount }),
+        });
     } catch (error) {
         logger.error('获取数字身份购买记录失败', { err: error });
         return adminResult(500, { error: '获取数字身份购买记录失败' });
@@ -3091,7 +3107,7 @@ async function adminOrders(req) {
         const whereSql = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
 
         let query = `
-            SELECT o.*, u.nickname as user_nickname, u.avatar as user_avatar
+            SELECT ${ADMIN_ORDER_LIST_SELECT}, u.nickname as user_nickname, u.avatar as user_avatar
             ${fromSql}
             ${whereSql}
         `;
@@ -3301,7 +3317,7 @@ async function checkRepayable(req) {
                  r.description as right_description,
                  r.status as right_status,
                  r.remaining_count as right_remaining_count,
-                 ri.image_url as right_image_url,
+                 ${FIRST_RIGHT_IMAGE_SUBQUERY_SQL},
                  ${DIGITAL_ITEM_SELECT_SQL},
                 oa.title as artwork_title,
                 oa.original_price as artwork_original_price,
@@ -3318,7 +3334,6 @@ async function checkRepayable(req) {
                 wa.is_default
             FROM order_items oi
             LEFT JOIN rights r ON oi.type = 'right' AND oi.right_id = r.id
-            LEFT JOIN right_images ri ON oi.type = 'right' AND oi.right_id = ri.right_id
             ${DIGITAL_ITEM_JOIN_SQL}
             LEFT JOIN original_artworks oa ON oi.type = 'artwork' AND oi.artwork_id = oa.id
             LEFT JOIN wx_user_addresses wa ON oi.address_id = wa.id

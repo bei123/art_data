@@ -14,8 +14,8 @@ const dbConfig = {
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME || 'data',
     waitForConnections: true,
-    connectionLimit: 20,
-    queueLimit: 10,
+    connectionLimit: parseInt(process.env.DB_POOL_CONNECTION_LIMIT || '20', 10) || 20,
+    queueLimit: parseInt(process.env.DB_POOL_QUEUE_LIMIT || '20', 10) || 20,
     charset: 'utf8mb4'
 };
 
@@ -66,7 +66,10 @@ pool.on('release', () => {
 });
 
 pool.on('enqueue', () => {
-    if (isDev) console.log('等待可用的连接...');
+    logger.warn('db_pool_waiting_for_connection', {
+        connectionLimit: dbConfig.connectionLimit,
+        queueLimit: dbConfig.queueLimit,
+    });
 });
 
 // 启动时探测连接池（生产仅一条结构化就绪日志；测试环境跳过，避免无 MySQL 时刷屏）

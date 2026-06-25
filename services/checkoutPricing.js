@@ -12,6 +12,7 @@ const {
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing')
 const { processImageUrl } = require('../utils/image')
 const { ensureRightsShippingColumns } = require('./rightsService')
+const { ORIGINAL_ARTWORK_PUBLIC_WHERE } = require('../utils/publicVisibilitySchema')
 const {
   resolveArtworkShippingGoods,
   resolveArtworkHeightCmForVolume,
@@ -584,7 +585,7 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
        FROM original_artworks oa
        INNER JOIN artists a ON a.id = oa.artist_id
        WHERE oa.id IN (?) AND oa.is_on_sale = 1
-         AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1`,
+         AND ${ORIGINAL_ARTWORK_PUBLIC_WHERE}`,
       [artworkIds]
     )
     artworks.forEach((artwork) => {

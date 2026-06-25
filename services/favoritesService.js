@@ -1,5 +1,6 @@
 const db = require('../db');
 const logger = require('../utils/logger');
+const { fetchRightImagesByRightIds } = require('../utils/rightImagesQuery');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 
@@ -323,11 +324,16 @@ async function getFavoritesList(userId, query) {
     const rightsMap = {};
     if (rightIds.length > 0) {
       const [rights] = await db.query(
-        'SELECT r.id, r.title, ri.image_url FROM rights r LEFT JOIN right_images ri ON r.id = ri.right_id WHERE r.id IN (?)',
+        'SELECT id, title FROM rights WHERE id IN (?)',
         [rightIds]
       );
+      const imagesByRightId = await fetchRightImagesByRightIds(rightIds);
       rights.forEach((right) => {
-        rightsMap[right.id] = right;
+        const images = imagesByRightId.get(right.id) || [];
+        rightsMap[right.id] = {
+          ...right,
+          image_url: images[0] || '',
+        };
       });
     }
 

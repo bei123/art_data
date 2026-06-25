@@ -278,8 +278,13 @@ async function ensureDigitalArtworkIdColumns() {
 }
 
 const DIGITAL_ITEM_JOIN_SQL = `
-  LEFT JOIN digital_artworks da ON oi.type = 'digital' AND CAST(oi.digital_artwork_id AS CHAR) = CAST(da.id AS CHAR)
-  LEFT JOIN digital_artworks_external dae ON oi.type = 'digital' AND CAST(oi.digital_artwork_id AS CHAR) = dae.id
+  LEFT JOIN digital_artworks da ON oi.type = 'digital' AND da.id = oi.digital_artwork_id
+  LEFT JOIN digital_artworks_external dae ON oi.type = 'digital' AND dae.id = oi.digital_artwork_id
+`
+
+const DIGITAL_PURCHASE_JOIN_SQL = `
+  LEFT JOIN digital_artworks da ON da.id = dip.digital_artwork_id
+  LEFT JOIN digital_artworks_external dae ON dae.id = dip.digital_artwork_id
 `
 
 const DIGITAL_ITEM_SELECT_SQL = `
@@ -294,6 +299,7 @@ const DIGITAL_ITEM_SELECT_SQL = `
 module.exports = {
   DIGITAL_ARTWORKS_EXTERNAL_TABLE,
   DIGITAL_ITEM_JOIN_SQL,
+  DIGITAL_PURCHASE_JOIN_SQL,
   DIGITAL_ITEM_SELECT_SQL,
   parseDigitalArtworkId,
   resolveDigitalStock,

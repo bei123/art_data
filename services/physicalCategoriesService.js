@@ -50,6 +50,7 @@ async function getPublicPhysicalCategoriesList(query) {
 
     const [[{ total }]] = await db.query('SELECT COUNT(*) as total FROM physical_categories');
 
+    const orderByColumn = cleanSort === 'count' ? 'count' : `pc.${cleanSort}`;
     const [rows] = await db.query(
       `
       SELECT 
@@ -59,11 +60,14 @@ async function getPublicPhysicalCategoriesList(query) {
         pc.description,
         pc.created_at,
         pc.updated_at,
-        COALESCE(COUNT(r.id), 0) as count
+        COALESCE(rc.rights_count, 0) AS count
       FROM physical_categories pc
-      LEFT JOIN rights r ON pc.id = r.category_id
-      GROUP BY pc.id, pc.title, pc.image, pc.description, pc.created_at, pc.updated_at
-      ORDER BY ${cleanSort} ${cleanOrder.toUpperCase()}
+      LEFT JOIN (
+        SELECT category_id, COUNT(*) AS rights_count
+        FROM rights
+        GROUP BY category_id
+      ) rc ON rc.category_id = pc.id
+      ORDER BY ${orderByColumn} ${cleanOrder.toUpperCase()}
       LIMIT ? OFFSET ?
     `,
       [cleanLimit, offset]

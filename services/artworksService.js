@@ -12,6 +12,7 @@ const {
   attachAdminWmsImageFields,
   stripWmsFieldsForPublic,
 } = require('./wmsArtworkImageService');
+const { ORIGINAL_ARTWORK_PUBLIC_WHERE } = require('../utils/publicVisibilitySchema');
 
 const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
@@ -268,7 +269,7 @@ async function getPublicArtworksList(query, includeHidden = false) {
     const params = [];
 
     if (!includeHidden) {
-      whereClauses.push('COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1');
+      whereClauses.push(ORIGINAL_ARTWORK_PUBLIC_WHERE);
     }
 
     if (artist_id) {
@@ -324,7 +325,7 @@ async function getPublicArtworksList(query, includeHidden = false) {
         const countWhere = [];
         const countParams = [];
         if (!includeHidden) {
-          countWhere.push('COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1');
+          countWhere.push(ORIGINAL_ARTWORK_PUBLIC_WHERE);
         }
         if (artist_id) {
           countWhere.push('oa.artist_id = ?');
@@ -431,7 +432,7 @@ async function getPublicArtworkDetail(rawId, includeHidden = false) {
     `;
     const params = [id];
     if (!includeHidden) {
-      sql += ' AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1';
+      sql += ` AND ${ORIGINAL_ARTWORK_PUBLIC_WHERE}`;
     }
 
     const [rows] = await db.query(sql, params);

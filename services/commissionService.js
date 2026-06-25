@@ -179,39 +179,78 @@ async function getWalletSummary(userId, connection = db) {
 }
 
 async function loadOrderSettlementContext(orderId, connection = db) {
+  const map = await loadOrderSettlementContextsByOrderIds([orderId], connection)
+  return map.get(Number(orderId)) || null
+}
+
+async function loadOrderSettlementContextsByOrderIds(orderIds, connection = db) {
+  const uniqueIds = [...new Set((orderIds || []).map((id) => Number(id)).filter((id) => id > 0))]
+  const contextByOrderId = new Map()
+  if (!uniqueIds.length) return contextByOrderId
+
   const [orders] = await connection.query(
     `SELECT id, user_id, referrer_id, trade_state, success_time, out_trade_no
-     FROM orders WHERE id = ? LIMIT 1`,
-    [orderId]
+     FROM orders WHERE id IN (?)`,
+    [uniqueIds]
   )
-  if (!orders.length) return null
 
   const [items] = await connection.query(
-    `SELECT id, type, quantity, price, delivery_qr_code_url, delivery_qr_code_at
-     FROM order_items WHERE order_id = ?`,
-    [orderId]
+    `SELECT id, order_id, type, quantity, price, delivery_qr_code_url, delivery_qr_code_at
+     FROM order_items WHERE order_id IN (?)`,
+    [uniqueIds]
   )
 
   const [shipments] = await connection.query(
-    `SELECT waybill_id, status, latest_path_action_type, latest_path_action_at, created_at
-     FROM order_shipments WHERE order_id = ? AND status != 'cancelled'
-     ORDER BY id DESC LIMIT 1`,
-    [orderId]
+    `SELECT order_id, id, waybill_id, status, latest_path_action_type, latest_path_action_at, created_at
+     FROM order_shipments
+     WHERE order_id IN (?) AND status != 'cancelled'
+     ORDER BY order_id ASC, id DESC`,
+    [uniqueIds]
   )
 
-  const [refunds] = await connection.query(
-    `SELECT status FROM refund_requests
-     WHERE out_trade_no = ? AND status IN (?)
-     ORDER BY id DESC LIMIT 1`,
-    [orders[0].out_trade_no, ACTIVE_REFUND_STATUSES]
-  )
-
-  return {
-    order: orders[0],
-    items: items || [],
-    shipment: shipments[0] || null,
-    refundStatus: refunds[0] || null,
+  const outTradeNos = [...new Set((orders || []).map((order) => order.out_trade_no).filter(Boolean))]
+  let refunds = []
+  if (outTradeNos.length) {
+    ;[refunds] = await connection.query(
+      `SELECT out_trade_no, status, id
+       FROM refund_requests
+       WHERE out_trade_no IN (?) AND status IN (?)
+       ORDER BY id DESC`,
+      [outTradeNos, ACTIVE_REFUND_STATUSES]
+    )
   }
+
+  const itemsByOrderId = new Map()
+  for (const item of items || []) {
+    const bucket = itemsByOrderId.get(item.order_id) || []
+    bucket.push(item)
+    itemsByOrderId.set(item.order_id, bucket)
+  }
+
+  const shipmentByOrderId = new Map()
+  for (const shipment of shipments || []) {
+    if (!shipmentByOrderId.has(shipment.order_id)) {
+      shipmentByOrderId.set(shipment.order_id, shipment)
+    }
+  }
+
+  const refundByOutTradeNo = new Map()
+  for (const refund of refunds || []) {
+    if (!refundByOutTradeNo.has(refund.out_trade_no)) {
+      refundByOutTradeNo.set(refund.out_trade_no, refund)
+    }
+  }
+
+  for (const order of orders || []) {
+    contextByOrderId.set(Number(order.id), {
+      order,
+      items: itemsByOrderId.get(order.id) || [],
+      shipment: shipmentByOrderId.get(order.id) || null,
+      refundStatus: refundByOutTradeNo.get(order.out_trade_no) || null,
+    })
+  }
+
+  return contextByOrderId
 }
 
 function resolveItemFulfillmentCode(item, ctx) {
@@ -264,11 +303,12 @@ function isSettlementPeriodMet(anchorAt, settlementDays) {
   return Date.now() >= due
 }
 
-async function isCommissionSettleEligible(ledgerRow, connection = db) {
+async function isCommissionSettleEligible(ledgerRow, connection = db, contextByOrderId = null) {
   if (!ledgerRow || ledgerRow.status !== 'pending') return false
-  if (ledgerRow.order?.trade_state === 'REFUND') return false
+  if (ledgerRow.trade_state === 'REFUND' || ledgerRow.order?.trade_state === 'REFUND') return false
 
-  const ctx = await loadOrderSettlementContext(ledgerRow.order_id, connection)
+  const ctx = contextByOrderId?.get(Number(ledgerRow.order_id))
+    ?? await loadOrderSettlementContext(ledgerRow.order_id, connection)
   if (!ctx || ctx.order.trade_state !== 'SUCCESS') return false
   if (ctx.refundStatus) return false
 
@@ -418,8 +458,12 @@ async function settlePendingCommissions({ limit = 50 } = {}) {
   )
 
   let settled = 0
+  const contextByOrderId = await loadOrderSettlementContextsByOrderIds(
+    (rows || []).map((row) => row.order_id)
+  )
+
   for (const row of rows || []) {
-    const eligible = await isCommissionSettleEligible(row)
+    const eligible = await isCommissionSettleEligible(row, db, contextByOrderId)
     if (!eligible) continue
 
     const connection = await db.getConnection()

@@ -5,13 +5,23 @@ const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const { stripPublicFields } = require('../utils/publicApiSanitizer');
-
+const {
+  ARTIST_PUBLIC_WHERE,
+  ARTIST_PUBLIC_WHERE_UNALIASED,
+  ORIGINAL_ARTWORK_PUBLIC_WHERE,
+} = require('../utils/publicVisibilitySchema');
+const {
+  parseListPageParams,
+  buildSimplePagination,
+  DEFAULT_LIST_PAGE_SIZE,
+} = require('../utils/listQuery');
+const { ARTIST_LIST_SELECT } = require('../utils/sqlSelectFragments');
 const REDIS_ARTISTS_LIST_KEY = 'artists:list';
 const REDIS_ARTIST_DETAIL_KEY_PREFIX = 'artists:detail:';
 const ARTISTS_TABLE = 'artists';
 const PUBLIC_ARTIST_ORDER_SQL = 'ORDER BY a.sort_order ASC, a.id ASC';
 const ADMIN_ARTIST_ORDER_SQL =
-  'ORDER BY (CASE WHEN COALESCE(a.is_public, 1) = 1 THEN 0 ELSE 1 END) ASC, a.sort_order ASC, a.id ASC';
+  'ORDER BY (CASE WHEN a.is_public_eff = 1 THEN 0 ELSE 1 END) ASC, a.sort_order ASC, a.id ASC';
 
 let artistSchemaReadyPromise = null;
 
@@ -44,9 +54,106 @@ function mapArtistRows(rows, { publicMode = false } = {}) {
   });
 }
 
-function wantsArtistsPagination(query) {
-  if (!query) return false;
-  return query.page != null || query.pageSize != null;
+async function countArtists(whereSql, whereParams) {
+  const [countRows] = await db.query(
+    `SELECT COUNT(*) AS total FROM artists a ${whereSql}`,
+    whereParams
+  );
+  return Number(countRows[0]?.total) || 0;
+}
+
+async function queryArtistRows({ whereSql, whereParams, includeHidden, limit, offset }) {
+  const [rows] = await db.query(
+    `
+      SELECT
+        ${ARTIST_LIST_SELECT},
+        i.name AS institution_name,
+        i.logo AS institution_logo,
+        i.description AS institution_description
+      FROM artists a
+      LEFT JOIN institutions i ON a.institution_id = i.id
+      ${whereSql}
+      ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
+      LIMIT ? OFFSET ?
+    `,
+    [...whereParams, limit, offset]
+  );
+  return mapArtistRows(rows, { publicMode: !includeHidden });
+}
+
+/**
+ * 公开列表：支持 ?institution_id= 或全量（带 Redis 列表缓存）
+ * @returns {{ ok: true, status: number, body: object|Array } | { ok: false, status: number, body: { error: string } }}
+ */
+async function getPublicArtistsList(query, includeHidden = false) {
+  const { institution_id } = query || {};
+  const { page: pageNum, pageSize: sizeNum, offset, explicit: usePagination } = parseListPageParams(query, {
+    defaultPageSize: DEFAULT_LIST_PAGE_SIZE,
+  });
+
+  const whereParts = [];
+  const whereParams = [];
+  if (!includeHidden) whereParts.push(ARTIST_PUBLIC_WHERE);
+
+  let institutionMeta = null;
+  if (institution_id) {
+    const institutionId = parseInt(institution_id, 10);
+    if (Number.isNaN(institutionId) || institutionId <= 0) {
+      return adminResult(400, { error: '无效的机构ID' });
+    }
+    const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [institutionId]);
+    if (!institutionRows.length) {
+      return adminResult(404, { error: '机构不存在' });
+    }
+    institutionMeta = { id: institutionRows[0].id, name: institutionRows[0].name };
+    whereParts.push('a.institution_id = ?');
+    whereParams.push(institutionId);
+  }
+
+  const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+  if (!includeHidden && !institution_id && !usePagination && pageNum === 1) {
+    try {
+      const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
+      if (cache) return adminResult(200, JSON.parse(cache));
+    } catch (e) {
+      logger.error('Redis 读取艺术家列表失败', { err: e });
+    }
+  }
+
+  const total = await countArtists(whereSql, whereParams);
+  const data = await queryArtistRows({
+    whereSql,
+    whereParams,
+    includeHidden,
+    limit: sizeNum,
+    offset,
+  });
+  const pagination = buildSimplePagination({ page: pageNum, pageSize: sizeNum, total });
+
+  if (usePagination || total > sizeNum) {
+    const body = { data, pagination };
+    if (institutionMeta) body.institution = institutionMeta;
+    return adminResult(200, body);
+  }
+
+  if (institutionMeta) {
+    return adminResult(200, {
+      institution: institutionMeta,
+      artists: data,
+      total: data.length,
+    });
+  }
+
+  try {
+    if (!includeHidden) {
+      await redisClient.setEx(REDIS_ARTISTS_LIST_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(data));
+    }
+  } catch (e) {
+    logger.error('Redis 写入艺术家列表失败', { err: e });
+  }
+
+  return adminResult(200, data);
 }
 
 async function ensureArtistSchema() {
@@ -67,7 +174,7 @@ async function ensureArtistSchema() {
       );
       const [rows] = await connection.query(
         `SELECT id FROM ${ARTISTS_TABLE}
-         WHERE COALESCE(is_public, 1) = 1
+         WHERE ${ARTIST_PUBLIC_WHERE_UNALIASED}
          ORDER BY created_at DESC, id DESC`
       );
       for (let i = 0; i < (rows || []).length; i += 1) {
@@ -98,7 +205,7 @@ async function ensureArtistSchemaReady() {
 async function getNextPublicArtistSortOrder(connection) {
   const runner = connection || db;
   const [[row]] = await runner.query(
-    `SELECT COALESCE(MAX(sort_order), 0) AS m FROM ${ARTISTS_TABLE} WHERE COALESCE(is_public, 1) = 1`
+    `SELECT COALESCE(MAX(sort_order), 0) AS m FROM ${ARTISTS_TABLE} WHERE ${ARTIST_PUBLIC_WHERE_UNALIASED}`
   );
   return (Number(row?.m) || 0) + 1;
 }
@@ -110,138 +217,6 @@ async function invalidateArtistsListCache() {
   } catch (e) {
     logger.error('invalidate_artists_list_cache_failed', { err: e });
   }
-}
-
-/**
- * 公开列表：支持 ?institution_id= 或全量（带 Redis 列表缓存）
- * @returns {{ ok: true, status: number, body: object|Array } | { ok: false, status: number, body: { error: string } }}
- */
-async function getPublicArtistsList(query, includeHidden = false) {
-  const { institution_id, page, pageSize } = query || {};
-
-  const usePagination = wantsArtistsPagination(query);
-  const pageNum = parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
-  const sizeNum = Math.min(100, parseInt(pageSize, 10) > 0 ? parseInt(pageSize, 10) : 20);
-  const offset = (pageNum - 1) * sizeNum;
-
-  if (usePagination) {
-    const whereParts = [];
-    const whereParams = [];
-    if (!includeHidden) {
-      whereParts.push('COALESCE(a.is_public, 1) = 1');
-    }
-    let institutionMeta = null;
-    if (institution_id) {
-      const institutionId = parseInt(institution_id, 10);
-      if (Number.isNaN(institutionId) || institutionId <= 0) {
-        return adminResult(400, { error: '无效的机构ID' });
-      }
-      const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [institutionId]);
-      if (!institutionRows.length) {
-        return adminResult(404, { error: '机构不存在' });
-      }
-      institutionMeta = { id: institutionRows[0].id, name: institutionRows[0].name };
-      whereParts.push('a.institution_id = ?');
-      whereParams.push(institutionId);
-    }
-    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
-    const [countRows] = await db.query(
-      `SELECT COUNT(*) as total FROM artists a ${whereSql}`,
-      whereParams
-    );
-    const total = countRows[0]?.total ?? 0;
-    const [rows] = await db.query(
-      `
-        SELECT 
-          a.*,
-          i.name as institution_name,
-          i.logo as institution_logo,
-          i.description as institution_description
-        FROM artists a
-        LEFT JOIN institutions i ON a.institution_id = i.id
-        ${whereSql}
-        ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
-        LIMIT ?, ?
-      `,
-      [...whereParams, offset, sizeNum]
-    );
-    const body = {
-      data: mapArtistRows(rows, { publicMode: !includeHidden }),
-      pagination: { page: pageNum, pageSize: sizeNum, total },
-    };
-    if (institutionMeta) body.institution = institutionMeta;
-    return adminResult(200, body);
-  }
-
-  if (institution_id) {
-    const institutionId = parseInt(institution_id, 10);
-    if (Number.isNaN(institutionId) || institutionId <= 0) {
-      return adminResult(400, { error: '无效的机构ID' });
-    }
-    const [institutionRows] = await db.query('SELECT id, name FROM institutions WHERE id = ?', [institutionId]);
-    if (!institutionRows.length) {
-      return adminResult(404, { error: '机构不存在' });
-    }
-    const [rows] = await db.query(
-      `
-        SELECT 
-          a.*,
-          i.name as institution_name,
-          i.logo as institution_logo,
-          i.description as institution_description
-        FROM artists a
-        LEFT JOIN institutions i ON a.institution_id = i.id
-        WHERE a.institution_id = ?
-        ${!includeHidden ? 'AND COALESCE(a.is_public, 1) = 1' : ''}
-        ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
-      `,
-      [institutionId]
-    );
-    return adminResult(200, {
-      institution: {
-        id: institutionRows[0].id,
-        name: institutionRows[0].name,
-      },
-      artists: mapArtistRows(rows, { publicMode: !includeHidden }),
-      total: rows.length,
-    });
-  }
-
-  if (!includeHidden) {
-    try {
-      const cache = await redisClient.get(REDIS_ARTISTS_LIST_KEY);
-      if (cache) {
-        return adminResult(200, JSON.parse(cache));
-      }
-    } catch (e) {
-      logger.error('Redis 读取艺术家列表失败', { err: e });
-    }
-  }
-
-  const publicWhere = !includeHidden ? 'WHERE COALESCE(a.is_public, 1) = 1' : '';
-
-  const [rows] = await db.query(`
-    SELECT 
-      a.*,
-      i.name as institution_name,
-      i.logo as institution_logo,
-      i.description as institution_description
-    FROM artists a
-    LEFT JOIN institutions i ON a.institution_id = i.id
-    ${publicWhere}
-    ${includeHidden ? ADMIN_ARTIST_ORDER_SQL : PUBLIC_ARTIST_ORDER_SQL}
-  `);
-
-  const artistsWithProcessedImages = mapArtistRows(rows, { publicMode: !includeHidden });
-
-  try {
-    if (!includeHidden) {
-      await redisClient.setEx(REDIS_ARTISTS_LIST_KEY, REDIS_LIST_CACHE_TTL_SEC, JSON.stringify(artistsWithProcessedImages));
-    }
-  } catch (e) {
-    logger.error('Redis 写入艺术家列表失败', { err: e });
-  }
-  return adminResult(200, artistsWithProcessedImages);
 }
 
 async function getPublicArtistDetail(rawId, includeHidden = false) {
@@ -270,7 +245,7 @@ async function getPublicArtistDetail(rawId, includeHidden = false) {
       FROM artists a
       LEFT JOIN institutions i ON a.institution_id = i.id
       WHERE a.id = ?
-      ${!includeHidden ? 'AND COALESCE(a.is_public, 1) = 1' : ''}
+      ${!includeHidden ? `AND ${ARTIST_PUBLIC_WHERE}` : ''}
     `,
     [id]
   );
@@ -665,7 +640,7 @@ async function getPublicFeaturedArtworks(rawId, includeHidden = false) {
   try {
     if (!includeHidden) {
       const [artistOk] = await db.query(
-        'SELECT id FROM artists WHERE id = ? AND COALESCE(is_public, 1) = 1',
+        `SELECT id FROM artists WHERE id = ? AND ${ARTIST_PUBLIC_WHERE_UNALIASED}`,
         [artistId]
       );
       if (!artistOk.length) return adminResult(404, { error: '艺术家不存在' });
@@ -679,7 +654,7 @@ async function getPublicFeaturedArtworks(rawId, includeHidden = false) {
       INNER JOIN original_artworks oa ON oa.id = afa.artwork_id
       INNER JOIN artists a ON a.id = oa.artist_id
       WHERE afa.artist_id = ?
-      ${!includeHidden ? 'AND COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1' : ''}
+      ${!includeHidden ? `AND ${ORIGINAL_ARTWORK_PUBLIC_WHERE}` : ''}
       ORDER BY afa.sort_order ASC
     `,
       [artistId]

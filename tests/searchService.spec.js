@@ -1,11 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 
 const { buildOriginalArtworkSearchClause } = require('../services/searchService.js')
+const { resetFulltextReadyForTests } = require('../utils/searchIndexSchema.js')
 
 describe('buildOriginalArtworkSearchClause', () => {
+  afterEach(() => {
+    resetFulltextReadyForTests()
+  })
+
   it('filters public artworks for anonymous search', () => {
     const { whereSql, params } = buildOriginalArtworkSearchClause(false, '张大千')
-    expect(whereSql).toContain('oa.is_public')
+    expect(whereSql).toContain('oa.is_public_eff')
     expect(whereSql).toContain('oa.title LIKE ?')
     expect(whereSql).not.toContain('wms_record_id')
     expect(params[0]).toBe('%张大千%')

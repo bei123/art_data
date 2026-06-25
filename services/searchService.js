@@ -3,10 +3,16 @@ const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { PUBLIC_API_BASE_URL: BASE_URL } = require('../config/publicEnv');
 const { attachAdminWmsImageFields } = require('./wmsArtworkImageService');
+const {
+  ARTIST_PUBLIC_WHERE,
+  ORIGINAL_ARTWORK_PUBLIC_WHERE,
+} = require('../utils/publicVisibilitySchema');
+const { isFulltextSearchReady, ensureSearchFulltextIndexes } = require('../utils/searchIndexSchema');
+const { ARTIST_LIST_SELECT } = require('../utils/sqlSelectFragments');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const DIGITAL_PUBLIC_WHERE = `(dae.is_hidden = 0 OR dae.is_hidden IS NULL)`;
-const ARTIST_PUBLIC_WHERE = 'COALESCE(a.is_public, 1) = 1';
+
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body };
 }
@@ -72,11 +78,23 @@ function buildArtistSearchClause(includeHidden, institutionId, keyword) {
     whereParts.push('a.institution_id = ?');
     params.push(institutionId);
   }
-  const searchTerm = `%${keyword}%`;
-  whereParts.push(
-    `(a.name LIKE ? OR a.description LIKE ? OR a.era LIKE ? OR a.journey LIKE ? OR a.biography LIKE ? OR i.name LIKE ?)`
-  );
-  params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+
+  if (isFulltextSearchReady('artists')) {
+    whereParts.push(
+      `(MATCH(a.name, a.description, a.era, a.biography) AGAINST (? IN NATURAL LANGUAGE MODE)
+        OR a.journey LIKE ?
+        OR i.name LIKE ?)`
+    );
+    const searchTerm = `%${keyword}%`;
+    params.push(keyword, searchTerm, searchTerm);
+  } else {
+    const searchTerm = `%${keyword}%`;
+    whereParts.push(
+      `(a.name LIKE ? OR a.description LIKE ? OR a.era LIKE ? OR a.journey LIKE ? OR a.biography LIKE ? OR i.name LIKE ?)`
+    );
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+  }
+
   return {
     whereSql: `WHERE ${whereParts.join(' AND ')}`,
     params,
@@ -88,24 +106,41 @@ function buildOriginalArtworkSearchClause(includeHidden, keyword) {
   const whereParts = [];
   const params = [];
   if (!includeHidden) {
-    whereParts.push('COALESCE(oa.is_public, 1) = 1 AND COALESCE(a.is_public, 1) = 1');
+    whereParts.push(ORIGINAL_ARTWORK_PUBLIC_WHERE);
   }
+
   const searchTerm = `%${keyword}%`;
-  const matchSql = [
-    'oa.title LIKE ?',
-    'oa.description LIKE ?',
-    'oa.long_description LIKE ?',
-    'oa.collection_number LIKE ?',
-    'CAST(oa.year AS CHAR) LIKE ?',
-    'a.name LIKE ?',
-  ];
-  const matchParams = [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm];
-  if (includeHidden) {
-    matchSql.push('CAST(oa.wms_record_id AS CHAR) LIKE ?');
-    matchParams.push(searchTerm);
+  if (isFulltextSearchReady('original_artworks')) {
+    const matchSql = [
+      'MATCH(oa.title, oa.description, oa.long_description, oa.collection_number) AGAINST (? IN NATURAL LANGUAGE MODE)',
+      'a.name LIKE ?',
+      'CAST(oa.year AS CHAR) LIKE ?',
+    ];
+    const matchParams = [keyword, searchTerm, searchTerm];
+    if (includeHidden) {
+      matchSql.push('CAST(oa.wms_record_id AS CHAR) LIKE ?');
+      matchParams.push(searchTerm);
+    }
+    whereParts.push(`(${matchSql.join(' OR ')})`);
+    params.push(...matchParams);
+  } else {
+    const matchSql = [
+      'oa.title LIKE ?',
+      'oa.description LIKE ?',
+      'oa.long_description LIKE ?',
+      'oa.collection_number LIKE ?',
+      'CAST(oa.year AS CHAR) LIKE ?',
+      'a.name LIKE ?',
+    ];
+    const matchParams = [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm];
+    if (includeHidden) {
+      matchSql.push('CAST(oa.wms_record_id AS CHAR) LIKE ?');
+      matchParams.push(searchTerm);
+    }
+    whereParts.push(`(${matchSql.join(' OR ')})`);
+    params.push(...matchParams);
   }
-  whereParts.push(`(${matchSql.join(' OR ')})`);
-  params.push(...matchParams);
+
   return {
     whereSql: `WHERE ${whereParts.join(' AND ')}`,
     params,
@@ -143,6 +178,7 @@ function mapOriginalArtworkSearchRows(rows, includeHidden) {
  * 艺术家搜索（管理端 / 公开端共用；管理员 token 下 includeHidden 可搜仅后台艺术家）
  */
 async function searchArtists(query, includeHidden = false) {
+  await ensureSearchFulltextIndexes();
   const parsed = parseSearchQuery(query);
   if (!parsed.ok) return adminResult(400, { error: parsed.error });
 
@@ -175,7 +211,7 @@ async function searchArtists(query, includeHidden = false) {
   const [rows] = await db.query(
     `
       SELECT
-        a.*,
+        ${ARTIST_LIST_SELECT},
         i.id as institution_id,
         i.name as institution_name,
         i.logo as institution_logo,
@@ -204,6 +240,7 @@ async function searchArtists(query, includeHidden = false) {
 }
 
 async function getSearchResults(query, includeHidden = false) {
+  await ensureSearchFulltextIndexes();
   const { type } = query || {};
   const parsed = parseSearchQuery(query);
   if (!parsed.ok) return adminResult(400, { error: parsed.error });
@@ -368,5 +405,6 @@ async function getSearchResults(query, includeHidden = false) {
 module.exports = {
   getSearchResults,
   searchArtists,
+  buildArtistSearchClause,
   buildOriginalArtworkSearchClause,
 };

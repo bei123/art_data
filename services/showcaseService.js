@@ -5,11 +5,19 @@ const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { ensureArtistSchemaReady, invalidateArtistsListCache } = require('./artistsService');
 const { invalidateInstitutionListCache } = require('./institutionsService');
+const {
+  INDEPENDENT_PUBLIC_ARTIST_WHERE,
+  ARTIST_PUBLIC_WHERE_UNALIASED,
+} = require('../utils/publicVisibilitySchema');
+const {
+  INSTITUTION_ARTIST_COUNT_AGG_SUBQUERY,
+  INSTITUTION_ARTIST_COUNT_SELECT,
+} = require('../utils/institutionArtistCountSql');
 
 const REDIS_SHOWCASE_LIST_KEY = 'showcase:list:v1';
 const INSTITUTIONS_TABLE = 'institutions';
 const ARTISTS_TABLE = 'artists';
-const INDEPENDENT_PUBLIC_ARTIST_SQL = 'COALESCE(a.is_public, 1) = 1 AND a.institution_id IS NULL';
+const INDEPENDENT_PUBLIC_ARTIST_SQL = INDEPENDENT_PUBLIC_ARTIST_WHERE;
 
 let showcaseSchemaReadyPromise = null;
 
@@ -76,7 +84,7 @@ async function backfillUnifiedShowcaseOrder(connection) {
   );
   const [artistRows] = await connection.query(
     `SELECT id, created_at FROM ${ARTISTS_TABLE}
-     WHERE COALESCE(is_public, 1) = 1 AND institution_id IS NULL
+     WHERE ${ARTIST_PUBLIC_WHERE_UNALIASED} AND institution_id IS NULL
      ORDER BY created_at DESC, id DESC`
   );
   const merged = [
@@ -164,12 +172,9 @@ async function fetchShowcaseEntriesFromDb() {
         i.logo,
         i.description,
         i.sort_order,
-        (
-          SELECT COUNT(*)
-          FROM ${ARTISTS_TABLE} a
-          WHERE a.institution_id = i.id AND COALESCE(a.is_public, 1) = 1
-        ) AS artist_count
+        ${INSTITUTION_ARTIST_COUNT_SELECT}
       FROM ${INSTITUTIONS_TABLE} i
+      ${INSTITUTION_ARTIST_COUNT_AGG_SUBQUERY}
       ORDER BY i.sort_order ASC, i.id ASC
     `
   );
@@ -288,7 +293,7 @@ async function applyShowcaseSortOrder(items) {
         ]);
       } else {
         await connection.query(
-          `UPDATE ${ARTISTS_TABLE} SET sort_order = ? WHERE id = ? AND institution_id IS NULL AND COALESCE(is_public, 1) = 1`,
+          `UPDATE ${ARTISTS_TABLE} SET sort_order = ? WHERE id = ? AND institution_id IS NULL AND ${ARTIST_PUBLIC_WHERE_UNALIASED}`,
           [sortOrder, item.id]
         );
       }
