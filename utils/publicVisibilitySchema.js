@@ -41,19 +41,101 @@ async function hasTable(tableName) {
   return rows.length > 0
 }
 
-async function ensureGeneratedPublicEffColumn(tableName) {
-  if (!(await hasTable(tableName))) return
-  if (await hasColumn(tableName, 'is_public_eff')) return
+async function hasTrigger(triggerName) {
+  const [rows] = await db.query(
+    `SELECT 1
+     FROM INFORMATION_SCHEMA.TRIGGERS
+     WHERE TRIGGER_SCHEMA = DATABASE()
+       AND TRIGGER_NAME = ?
+     LIMIT 1`,
+    [triggerName]
+  )
+  return rows.length > 0
+}
+
+async function isGeneratedColumn(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT EXTRA
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
+  )
+  const extra = String(rows[0]?.EXTRA || '').toLowerCase()
+  return extra.includes('generated')
+}
+
+async function syncPublicEffValues(tableName) {
+  if (!(await hasColumn(tableName, 'is_public_eff'))) return
+  if (await isGeneratedColumn(tableName, 'is_public_eff')) return
+  if (!(await hasColumn(tableName, 'is_public'))) return
 
   await db.query(
-    `ALTER TABLE ${tableName}
-     ADD COLUMN is_public_eff TINYINT NOT NULL
-     GENERATED ALWAYS AS (IFNULL(is_public, 1)) STORED`
+    `UPDATE ${tableName} SET is_public_eff = IFNULL(is_public, 1)`
   )
-  logger.info('is_public_eff column added', { table: tableName })
+}
+
+async function ensurePublicEffTriggers(tableName) {
+  if (!(await hasColumn(tableName, 'is_public')) || !(await hasColumn(tableName, 'is_public_eff'))) return
+  if (await isGeneratedColumn(tableName, 'is_public_eff')) return
+
+  const insertTrigger = `tr_${tableName}_is_public_eff_bi`
+  const updateTrigger = `tr_${tableName}_is_public_eff_bu`
+
+  if (!(await hasTrigger(insertTrigger))) {
+    await db.query(
+      `CREATE TRIGGER ${insertTrigger} BEFORE INSERT ON ${tableName}
+       FOR EACH ROW SET NEW.is_public_eff = IFNULL(NEW.is_public, 1)`
+    )
+  }
+
+  if (!(await hasTrigger(updateTrigger))) {
+    await db.query(
+      `CREATE TRIGGER ${updateTrigger} BEFORE UPDATE ON ${tableName}
+       FOR EACH ROW SET NEW.is_public_eff = IFNULL(NEW.is_public, 1)`
+    )
+  }
+}
+
+async function ensurePublicEffColumn(tableName) {
+  if (!(await hasTable(tableName))) return
+  if (!(await hasColumn(tableName, 'is_public'))) {
+    logger.warn('ensurePublicEffColumn skipped missing is_public', { table: tableName })
+    return
+  }
+
+  if (!(await hasColumn(tableName, 'is_public_eff'))) {
+    try {
+      await db.query(
+        `ALTER TABLE ${tableName}
+         ADD COLUMN is_public_eff TINYINT NOT NULL
+         GENERATED ALWAYS AS (IFNULL(is_public, 1)) STORED`
+      )
+      logger.info('is_public_eff generated column added', { table: tableName })
+    } catch (generatedErr) {
+      logger.warn('generated is_public_eff unsupported; using plain column', {
+        table: tableName,
+        err: generatedErr.message,
+      })
+      await db.query(
+        `ALTER TABLE ${tableName} ADD COLUMN is_public_eff TINYINT NOT NULL DEFAULT 1`
+      )
+      await syncPublicEffValues(tableName)
+      await ensurePublicEffTriggers(tableName)
+      logger.info('is_public_eff plain column added', { table: tableName })
+      return
+    }
+  }
+
+  await syncPublicEffValues(tableName)
+  await ensurePublicEffTriggers(tableName)
 }
 
 async function ensurePublicVisibilityIndexes() {
+  if (!(await hasColumn('original_artworks', 'is_public_eff'))) return
+
   if ((await hasTable('original_artworks')) && !(await hasIndex('original_artworks', 'idx_oa_public_created'))) {
     await db.query(
       'CREATE INDEX idx_oa_public_created ON original_artworks (is_public_eff, created_at)'
@@ -81,8 +163,8 @@ async function ensurePublicVisibilitySchema() {
   schemaEnsured = true
 
   try {
-    await ensureGeneratedPublicEffColumn('artists')
-    await ensureGeneratedPublicEffColumn('original_artworks')
+    await ensurePublicEffColumn('artists')
+    await ensurePublicEffColumn('original_artworks')
     await ensurePublicVisibilityIndexes()
   } catch (err) {
     logger.warn('ensurePublicVisibilitySchema failed', { err: err.message })
