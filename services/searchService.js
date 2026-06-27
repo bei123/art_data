@@ -7,7 +7,12 @@ const {
   ARTIST_PUBLIC_WHERE,
   ORIGINAL_ARTWORK_PUBLIC_WHERE,
 } = require('../utils/publicVisibilitySchema');
-const { isFulltextSearchReady, ensureSearchFulltextIndexes } = require('../utils/searchIndexSchema');
+const {
+  isFulltextSearchReady,
+  ensureSearchFulltextIndexes,
+  invalidateFulltextSearchReady,
+  isFulltextIndexMismatchError,
+} = require('../utils/searchIndexSchema');
 const { ARTIST_LIST_SELECT } = require('../utils/sqlSelectFragments');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
@@ -177,7 +182,7 @@ function mapOriginalArtworkSearchRows(rows, includeHidden) {
 /**
  * 艺术家搜索（管理端 / 公开端共用；管理员 token 下 includeHidden 可搜仅后台艺术家）
  */
-async function searchArtists(query, includeHidden = false) {
+async function searchArtists(query, includeHidden = false, options = {}) {
   await ensureSearchFulltextIndexes();
   const parsed = parseSearchQuery(query);
   if (!parsed.ok) return adminResult(400, { error: parsed.error });
@@ -199,6 +204,7 @@ async function searchArtists(query, includeHidden = false) {
 
   const { whereSql, params } = buildArtistSearchClause(includeHidden, institutionId, keyword);
 
+  try {
   const [countRows] = await db.query(
     `SELECT COUNT(*) as total
        FROM artists a
@@ -237,9 +243,18 @@ async function searchArtists(query, includeHidden = false) {
       has_prev: pageNum > 1,
     },
   });
+  } catch (error) {
+    if (!options.likeFallback && isFulltextIndexMismatchError(error)) {
+      logger.warn('artist fulltext search mismatch; falling back to LIKE', { err: error.message });
+      invalidateFulltextSearchReady('artists');
+      return searchArtists(query, includeHidden, { likeFallback: true });
+    }
+    logger.error('searchArtists failed', { err: error });
+    return adminResult(500, { error: '搜索服务暂时不可用，请稍后再试' });
+  }
 }
 
-async function getSearchResults(query, includeHidden = false) {
+async function getSearchResults(query, includeHidden = false, options = {}) {
   await ensureSearchFulltextIndexes();
   const { type } = query || {};
   const parsed = parseSearchQuery(query);
@@ -397,6 +412,13 @@ async function getSearchResults(query, includeHidden = false) {
       },
     });
   } catch (error) {
+    if (isFulltextIndexMismatchError(error)) {
+      if (!options.likeFallback) {
+        logger.warn('fulltext search mismatch; falling back to LIKE', { err: error.message })
+        invalidateFulltextSearchReady()
+        return getSearchResults(query, includeHidden, { likeFallback: true })
+      }
+    }
     logger.error('getSearchResults failed', { err: error });
     return adminResult(500, { error: '搜索服务暂时不可用，请稍后再试' });
   }
