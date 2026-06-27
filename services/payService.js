@@ -945,6 +945,12 @@ async function unifiedOrder(req) {
                 }
             };
 
+            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo);
+            if (wxRepayPrep.error) {
+                await connection.rollback();
+                return wxRepayPrep.error;
+            }
+
             // 生成签名所需的参数
             const timestamp = Math.floor(Date.now() / 1000).toString();
             const nonceStr = generateNonceStr();
@@ -991,13 +997,25 @@ async function unifiedOrder(req) {
             }
         } catch (error) {
             await connection.rollback();
+            if (error.response?.data) {
+                return adminResult(400, {
+                    success: false,
+                    error: error.response.data.message || '统一下单失败',
+                    code: error.response.data.code || 'WECHAT_JSAPI_FAILED',
+                    detail: error.response.data,
+                });
+            }
             throw error;
         } finally {
             connection.release();
             await releasePayOrderLock(payOrderLockKey);
         }
     } catch (error) {
-        logger.error('统一下单失败', { err: error });
+        logger.error('统一下单失败', {
+            err: error,
+            wx_detail: error.response?.data,
+            out_trade_no: req.body?.out_trade_no,
+        });
         return adminResult(500, {
             error: '统一下单失败'
         });
@@ -1211,6 +1229,12 @@ async function singleOrder(req) {
                 }
             };
 
+            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo);
+            if (wxRepayPrep.error) {
+                await connection.rollback();
+                return wxRepayPrep.error;
+            }
+
             const timestamp = Math.floor(Date.now() / 1000).toString();
             const nonceStr = generateNonceStr();
             const method = 'POST';
@@ -1253,13 +1277,25 @@ async function singleOrder(req) {
             });
         } catch (error) {
             await connection.rollback();
+            if (error.response?.data) {
+                return adminResult(400, {
+                    success: false,
+                    error: error.response.data.message || '单商品下单失败',
+                    code: error.response.data.code || 'WECHAT_JSAPI_FAILED',
+                    detail: error.response.data,
+                });
+            }
             throw error;
         } finally {
             connection.release();
             await releasePayOrderLock(payOrderLockKey);
         }
     } catch (error) {
-        logger.error('单商品下单失败', { err: error });
+        logger.error('单商品下单失败', {
+            err: error,
+            wx_detail: error.response?.data,
+            out_trade_no: req.body?.out_trade_no,
+        });
         return adminResult(500, {
             error: '单商品下单失败'
         });
@@ -4476,6 +4512,111 @@ async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
         logger.warn('查询微信支付单失败', { err: err.message, out_trade_no: cleanOutTradeNo });
     }
     return null;
+}
+
+function isWechatCloseIgnorableError(wxCode) {
+    const code = wxCode != null ? String(wxCode).trim().toUpperCase() : '';
+    return code === 'ORDER_CLOSED'
+        || code === 'ORDERNOTEXIST'
+        || code === 'ORDER_NOT_EXIST'
+        || code === 'RESOURCE_NOT_EXISTS';
+}
+
+async function requestWechatCloseTransactionForRepay(outTradeNo) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) {
+        return { ok: false, message: '缺少有效的商户订单号' };
+    }
+
+    try {
+        const params = { mchid: WX_PAY_CONFIG.mchId };
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const nonceStr = generateNonceStr();
+        const method = 'POST';
+        const url = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}/close`;
+        const bodyStr = JSON.stringify(params);
+        const signature = generateSignV3(method, url, timestamp, nonceStr, bodyStr);
+
+        const response = await axios.post(
+            wechatPayOutTradeNoCloseUrl(cleanOutTradeNo),
+            params,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    Authorization: `WECHATPAY2-SHA256-RSA2048 mchid="${WX_PAY_CONFIG.mchId}",nonce_str="${nonceStr}",signature="${signature}",timestamp="${timestamp}",serial_no="${WX_PAY_CONFIG.serialNo}"`,
+                    'Wechatpay-Serial': WX_PAY_CONFIG.publicKeyId,
+                    'User-Agent': 'axios/1.9.0',
+                },
+                timeout: 15000,
+            }
+        );
+
+        if (response.status === 204) {
+            logger.info('wechat pay transaction closed for repay', { out_trade_no: cleanOutTradeNo });
+            return { ok: true };
+        }
+
+        return {
+            ok: false,
+            message: '关闭微信支付单失败',
+            detail: response.data,
+        };
+    } catch (err) {
+        const wxCode = err.response?.data?.code;
+        const wxMessage = err.response?.data?.message;
+        if (isWechatCloseIgnorableError(wxCode)) {
+            return { ok: true, alreadyClosed: true };
+        }
+        logger.warn('关闭微信支付单失败', {
+            out_trade_no: cleanOutTradeNo,
+            wxCode,
+            wxMessage,
+            err: err.message,
+        });
+        return {
+            ok: false,
+            message: wxMessage || err.message || '关闭微信支付单失败',
+            detail: err.response?.data,
+        };
+    }
+}
+
+async function prepareWechatJsapiRepay(outTradeNo) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) {
+        return { ok: true };
+    }
+
+    const wxPay = await fetchWxPayOrderByOutTradeNo(cleanOutTradeNo);
+    if (!wxPay?.trade_state) {
+        return { ok: true };
+    }
+
+    const wxState = String(wxPay.trade_state).trim().toUpperCase();
+    if (wxState === 'SUCCESS') {
+        return {
+            error: adminResult(400, {
+                error: '订单已支付成功，不能重复支付',
+                code: 'ORDER_ALREADY_PAID',
+            }),
+        };
+    }
+
+    if (wxState === 'NOTPAY') {
+        const closed = await requestWechatCloseTransactionForRepay(cleanOutTradeNo);
+        if (!closed.ok) {
+            return {
+                error: adminResult(400, {
+                    error: closed.message || '微信支付单关闭失败，请稍后重试',
+                    code: 'WECHAT_CLOSE_FAILED',
+                    detail: closed.detail,
+                }),
+            };
+        }
+    }
+
+    return { ok: true };
 }
 
 async function syncOrderTradeStateFromWechat(orderRow) {
