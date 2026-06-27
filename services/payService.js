@@ -51,7 +51,7 @@ const {
   DIGITAL_PURCHASE_JOIN_SQL,
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
-const { resolveUserOutTradeNo } = require('../utils/orderTradeNo');
+const { resolveUserOutTradeNo, generateOutTradeNo } = require('../utils/orderTradeNo');
 const { ensureOrdersOutTradeNoUnique, ensureOrdersShippingColumns, ensureOrderInventoryReservedColumn } = require('../utils/ordersSchema');
 const { ensureReferralSchema } = require('../utils/referralSchema');
 const { resolveOrderReferrerId } = require('./referralService');
@@ -927,14 +927,28 @@ async function unifiedOrder(req) {
             }
 
             // 构建统一下单参数
+            const jsapiAmountTotalCents = Math.round(actualTotalFee * 100);
+            const wxTradeNoResolved = await resolveOutTradeNoForWechatJsapi({
+                connection,
+                userId,
+                orderId,
+                cleanOutTradeNo,
+                jsapiAmountTotalCents,
+            });
+            if (wxTradeNoResolved.error) {
+                await connection.rollback();
+                return wxTradeNoResolved.error;
+            }
+            const effectiveOutTradeNo = wxTradeNoResolved.outTradeNo;
+
             const params = {
                 appid: WX_PAY_CONFIG.appId,
                 mchid: WX_PAY_CONFIG.mchId,
                 description: cleanBody,
-                out_trade_no: cleanOutTradeNo,
+                out_trade_no: effectiveOutTradeNo,
                 notify_url: WX_PAY_CONFIG.notifyUrl,
                 amount: {
-                    total: Math.round(actualTotalFee * 100), // 元转分
+                    total: jsapiAmountTotalCents,
                     currency: 'CNY'
                 },
                 scene_info: {
@@ -944,15 +958,6 @@ async function unifiedOrder(req) {
                     openid: cleanOpenid
                 }
             };
-
-            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo, {
-                hasExistingLocalOrder: existingOrders.length > 0,
-                jsapiAmountTotalCents: Math.round(actualTotalFee * 100),
-            });
-            if (wxRepayPrep.error) {
-                await connection.rollback();
-                return wxRepayPrep.error;
-            }
 
             // 生成签名所需的参数
             const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -980,14 +985,15 @@ async function unifiedOrder(req) {
                 if (resolvedQuoteToken) {
                     await deleteCheckoutQuote(resolvedQuoteToken);
                 }
-                schedulePaymentPendingReminder({ outTradeNo: cleanOutTradeNo, orderId }).catch((err) => {
-                    logger.warn('待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+                schedulePaymentPendingReminder({ outTradeNo: effectiveOutTradeNo, orderId }).catch((err) => {
+                    logger.warn('待付款提醒排期失败', { outTradeNo: effectiveOutTradeNo, err: err?.message || err });
                 });
                 return adminResult(200, {
                     success: true,
                     data: {
                         ...response.data,
-                        out_trade_no: cleanOutTradeNo,
+                        out_trade_no: effectiveOutTradeNo,
+                        previous_out_trade_no: wxTradeNoResolved.rotated ? cleanOutTradeNo : undefined,
                     },
                 });
             } else {
@@ -1214,14 +1220,28 @@ async function singleOrder(req) {
                 });
             }
 
+            const jsapiAmountTotalCents = Math.round(actualTotalFee * 100);
+            const wxTradeNoResolved = await resolveOutTradeNoForWechatJsapi({
+                connection,
+                userId,
+                orderId,
+                cleanOutTradeNo,
+                jsapiAmountTotalCents,
+            });
+            if (wxTradeNoResolved.error) {
+                await connection.rollback();
+                return wxTradeNoResolved.error;
+            }
+            const effectiveOutTradeNo = wxTradeNoResolved.outTradeNo;
+
             const params = {
                 appid: WX_PAY_CONFIG.appId,
                 mchid: WX_PAY_CONFIG.mchId,
                 description: cleanBody,
-                out_trade_no: cleanOutTradeNo,
+                out_trade_no: effectiveOutTradeNo,
                 notify_url: WX_PAY_CONFIG.notifyUrl,
                 amount: {
-                    total: Math.round(actualTotalFee * 100),
+                    total: jsapiAmountTotalCents,
                     currency: 'CNY'
                 },
                 scene_info: {
@@ -1231,15 +1251,6 @@ async function singleOrder(req) {
                     openid: cleanOpenid
                 }
             };
-
-            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo, {
-                hasExistingLocalOrder: existingOrders.length > 0,
-                jsapiAmountTotalCents: Math.round(actualTotalFee * 100),
-            });
-            if (wxRepayPrep.error) {
-                await connection.rollback();
-                return wxRepayPrep.error;
-            }
 
             const timestamp = Math.floor(Date.now() / 1000).toString();
             const nonceStr = generateNonceStr();
@@ -1263,14 +1274,15 @@ async function singleOrder(req) {
                 if (resolvedQuoteToken) {
                     await deleteCheckoutQuote(resolvedQuoteToken);
                 }
-                schedulePaymentPendingReminder({ outTradeNo: cleanOutTradeNo, orderId }).catch((err) => {
-                    logger.warn('待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
+                schedulePaymentPendingReminder({ outTradeNo: effectiveOutTradeNo, orderId }).catch((err) => {
+                    logger.warn('待付款提醒排期失败', { outTradeNo: effectiveOutTradeNo, err: err?.message || err });
                 });
                 return adminResult(200, {
                     success: true,
                     data: {
                         ...response.data,
-                        out_trade_no: cleanOutTradeNo,
+                        out_trade_no: effectiveOutTradeNo,
+                        previous_out_trade_no: wxTradeNoResolved.rotated ? cleanOutTradeNo : undefined,
                     },
                 });
             }
@@ -4524,6 +4536,7 @@ async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
 function isWechatCloseIgnorableError(wxCode) {
     const code = wxCode != null ? String(wxCode).trim().toUpperCase() : '';
     return code === 'ORDER_CLOSED'
+        || code === 'ORDERCLOSED'
         || code === 'ORDERNOTEXIST'
         || code === 'ORDER_NOT_EXIST'
         || code === 'RESOURCE_NOT_EXISTS';
@@ -4589,17 +4602,39 @@ async function requestWechatCloseTransactionForRepay(outTradeNo) {
     }
 }
 
-async function prepareWechatJsapiRepay(outTradeNo, options = {}) {
-    const cleanOutTradeNo = String(outTradeNo || '').trim();
-    if (!cleanOutTradeNo) {
-        return { ok: true };
+async function rotateOrderOutTradeNoForWechat({ connection, userId, orderId, previousOutTradeNo }) {
+    const newOutTradeNo = generateOutTradeNo(userId);
+    if (!newOutTradeNo) {
+        return { error: adminResult(500, { error: '无法生成新订单号' }) };
     }
 
-    const hasExistingLocalOrder = options.hasExistingLocalOrder === true;
-    const jsapiAmountTotalCents = options.jsapiAmountTotalCents != null
-        ? Number(options.jsapiAmountTotalCents)
-        : null;
+    const [result] = await connection.query(
+        'UPDATE orders SET out_trade_no = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
+        [newOutTradeNo, orderId, userId]
+    );
+    if (!result?.affectedRows) {
+        return { error: adminResult(500, { error: '更新订单号失败' }) };
+    }
 
+    logger.info('order out_trade_no rotated for wechat repay', {
+        orderId,
+        previousOutTradeNo,
+        newOutTradeNo,
+    });
+    return { outTradeNo: newOutTradeNo, rotated: true, previousOutTradeNo };
+}
+
+/**
+ * 微信侧关单后不可复用同一商户订单号 jsapi。
+ * NOTPAY 且金额一致：复用原单号；已关单或金额变更：轮换新单号后再下单。
+ */
+async function resolveOutTradeNoForWechatJsapi({
+    connection,
+    userId,
+    orderId,
+    cleanOutTradeNo,
+    jsapiAmountTotalCents,
+}) {
     const wxPay = await fetchWxPayOrderByOutTradeNo(cleanOutTradeNo);
     const wxState = wxPay?.trade_state ? String(wxPay.trade_state).trim().toUpperCase() : null;
 
@@ -4617,35 +4652,43 @@ async function prepareWechatJsapiRepay(outTradeNo, options = {}) {
         && jsapiAmountTotalCents != null
         && wxAmount !== jsapiAmountTotalCents;
 
-    const shouldClose = hasExistingLocalOrder
-        || amountMismatch
-        || wxState === 'NOTPAY'
-        || (wxState && !['CLOSED', 'REVOKED', 'PAYERROR'].includes(wxState));
-
-    if (!shouldClose) {
-        return { ok: true };
+    if (!wxPay || !wxState) {
+        return { outTradeNo: cleanOutTradeNo, rotated: false };
     }
 
-    const closed = await requestWechatCloseTransactionForRepay(cleanOutTradeNo);
-    if (!closed.ok) {
-        return {
-            error: adminResult(400, {
-                error: closed.message || '微信支付单关闭失败，请稍后重试',
-                code: 'WECHAT_CLOSE_FAILED',
-                detail: closed.detail,
-            }),
-        };
+    if (wxState === 'NOTPAY' && !amountMismatch) {
+        return { outTradeNo: cleanOutTradeNo, rotated: false };
     }
 
-    if (amountMismatch) {
-        logger.info('wechat pay closed due to amount mismatch before repay jsapi', {
-            out_trade_no: cleanOutTradeNo,
-            wx_amount_total: wxAmount,
-            jsapi_amount_total: jsapiAmountTotalCents,
+    if (wxState === 'NOTPAY' && amountMismatch) {
+        const closed = await requestWechatCloseTransactionForRepay(cleanOutTradeNo);
+        if (!closed.ok) {
+            return {
+                error: adminResult(400, {
+                    error: closed.message || '微信支付单关闭失败，请稍后重试',
+                    code: 'WECHAT_CLOSE_FAILED',
+                    detail: closed.detail,
+                }),
+            };
+        }
+        return rotateOrderOutTradeNoForWechat({
+            connection,
+            userId,
+            orderId,
+            previousOutTradeNo: cleanOutTradeNo,
         });
     }
 
-    return { ok: true };
+    if (wxState === 'CLOSED' || wxState === 'REVOKED' || wxState === 'PAYERROR') {
+        return rotateOrderOutTradeNoForWechat({
+            connection,
+            userId,
+            orderId,
+            previousOutTradeNo: cleanOutTradeNo,
+        });
+    }
+
+    return { outTradeNo: cleanOutTradeNo, rotated: false };
 }
 
 async function syncOrderTradeStateFromWechat(orderRow) {
