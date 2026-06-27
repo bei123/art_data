@@ -157,7 +157,8 @@ async function bindReferral({ refereeId, code, referrerId, source = 'link', conn
   }
 
   if (resolvedReferrerId === refereeId) {
-    return { ok: false, status: 400, error: '不能绑定自己为推荐人' }
+    logger.info('referral binding skipped self-referral', { refereeId })
+    return { ok: true, status: 200, skipped: true, reason: 'self_referral' }
   }
 
   const [refereeRows] = await connection.query('SELECT id FROM wx_users WHERE id = ? LIMIT 1', [refereeId])
@@ -362,6 +363,14 @@ async function bindReferralFromRequest(req) {
     })
   }
 
+  if (result.skipped) {
+    return adminResult(200, {
+      success: false,
+      skipped: true,
+      reason: result.reason || 'self_referral',
+    })
+  }
+
   return adminResult(200, {
     success: true,
     binding: result.binding,
@@ -385,11 +394,13 @@ async function tryBindReferralOnLogin(userId, body) {
 
   return {
     attempted: true,
-    success: result.ok,
+    success: result.ok && !result.skipped,
     status: result.status,
     error: result.error || null,
     binding: result.binding || null,
     alreadyBound: result.alreadyBound || false,
+    skipped: result.skipped || false,
+    reason: result.reason || null,
   }
 }
 
