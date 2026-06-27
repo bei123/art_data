@@ -16,7 +16,17 @@ function generateRefreshToken() {
 }
 
 function signWxAccessToken({ userId, openid }) {
-  return jwt.sign({ userId, openid }, JWT_SECRET, { expiresIn: WX_ACCESS_TOKEN_EXPIRES_IN })
+  return jwt.sign(
+    { userId, openid, jti: crypto.randomUUID() },
+    JWT_SECRET,
+    { expiresIn: WX_ACCESS_TOKEN_EXPIRES_IN }
+  )
+}
+
+function isDuplicateSessionError(err) {
+  if (!err || err.code !== 'ER_DUP_ENTRY') return false
+  const message = String(err.message || '')
+  return message.includes('uk_token') || message.includes('token_hash')
 }
 
 function getAccessTokenMeta(token) {
@@ -64,10 +74,19 @@ async function createRefreshTokenRecord({ userId }) {
   }
 }
 
-async function issueWxTokenPair({ userId, openid }) {
+async function issueWxTokenPair({ userId, openid }, attempt = 0) {
   const token = signWxAccessToken({ userId, openid })
   const { expiresAt, expiresIn } = getAccessTokenMeta(token)
-  await persistWxAccessSession({ userId, accessToken: token })
+
+  try {
+    await persistWxAccessSession({ userId, accessToken: token })
+  } catch (err) {
+    if (isDuplicateSessionError(err) && attempt < 2) {
+      return issueWxTokenPair({ userId, openid }, attempt + 1)
+    }
+    throw err
+  }
+
   const refresh = await createRefreshTokenRecord({ userId })
 
   return {

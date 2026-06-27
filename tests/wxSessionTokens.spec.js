@@ -22,13 +22,17 @@ describe('wxSessionTokens', () => {
     expect(a.length).toBeGreaterThan(20)
   })
 
-  it('signWxAccessToken includes userId and openid', () => {
+  it('signWxAccessToken includes userId, openid, and unique jti', () => {
     process.env.JWT_SECRET = process.env.JWT_SECRET || 'vitest-jwt-secret-at-least-32-characters'
     const token = signWxAccessToken({ userId: 42, openid: 'o-test' })
     const decoded = jwt.decode(token)
     expect(decoded.userId).toBe(42)
     expect(decoded.openid).toBe('o-test')
+    expect(decoded.jti).toBeTruthy()
     expect(decoded.exp).toBeTruthy()
+
+    const token2 = signWxAccessToken({ userId: 42, openid: 'o-test' })
+    expect(jwt.decode(token2).jti).not.toBe(decoded.jti)
   })
 
   it('getAccessTokenMeta derives expiry fields', () => {

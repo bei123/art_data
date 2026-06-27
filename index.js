@@ -18,6 +18,7 @@ const { body } = require('express-validator');
 const auth = require('./auth');
 const { requirePublicAdminRegisterEnabled } = require('./utils/publicRegistrationGuard');
 const { ensureAllSessionTokenHashColumns } = require('./utils/sessionTokenHash');
+const { ensureAllSessionStorageSchemas } = require('./utils/sessionStorageSchema');
 const { PUBLIC_API_BASE_URL } = require('./config/publicEnv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -587,6 +588,9 @@ app.use('*', (req, res) => {
 const PORT = process.env.PORT || 2000;
 ensureAllSessionTokenHashColumns().catch((err) => {
   logger.warn('session token_hash column ensure failed', { err: err?.message || err });
+});
+ensureAllSessionStorageSchemas().catch((err) => {
+  logger.warn('session storage schema ensure failed', { err: err?.message || err });
 });
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS服务器运行在端口 ${PORT}，PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL}`);
