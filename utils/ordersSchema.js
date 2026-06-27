@@ -3,6 +3,7 @@ const logger = require('./logger')
 
 let uniqueIndexEnsured = false
 let shippingColumnsEnsured = false
+let inventoryReservedColumnEnsured = false
 
 const SHIPPING_COLUMNS = [
   {
@@ -80,7 +81,26 @@ async function ensureOrdersShippingColumns() {
   shippingColumnsEnsured = true
 }
 
+/** 未支付订单是否已预扣库存（锁单） */
+async function ensureOrderInventoryReservedColumn() {
+  if (inventoryReservedColumnEnsured) return
+
+  try {
+    if (!(await hasColumn('orders', 'inventory_reserved'))) {
+      await db.query(
+        'ALTER TABLE orders ADD COLUMN inventory_reserved TINYINT NOT NULL DEFAULT 0 COMMENT \'未支付订单已预扣库存\''
+      )
+      logger.info('orders.inventory_reserved column added')
+    }
+  } catch (err) {
+    logger.warn('ensureOrderInventoryReservedColumn failed', { err: err.message })
+  }
+
+  inventoryReservedColumnEnsured = true
+}
+
 module.exports = {
   ensureOrdersOutTradeNoUnique,
   ensureOrdersShippingColumns,
+  ensureOrderInventoryReservedColumn,
 }

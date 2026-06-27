@@ -245,7 +245,7 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
         if (ownsConnection) await connection.beginTransaction();
 
         const [orders] = await connection.query(
-            'SELECT id, user_id, trade_state FROM orders WHERE out_trade_no = ? LIMIT 1',
+            'SELECT id, user_id, trade_state, inventory_reserved FROM orders WHERE out_trade_no = ? LIMIT 1',
             [cleanOutTradeNo]
         );
         if (!orders.length || orders[0].trade_state !== 'SUCCESS') {
@@ -254,7 +254,20 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
         }
 
         const orderItems = await loadOrderItemsForInventory(cleanOutTradeNo, connection);
-        const affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+        let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
+        if (Number(orders[0].inventory_reserved) === 1) {
+            await connection.query(
+                'UPDATE orders SET inventory_reserved = 0 WHERE id = ?',
+                [orders[0].id]
+            );
+            for (const item of orderItems) {
+                if (item.type === 'right' && item.right_id) affected.rightIds.push(item.right_id);
+                if (item.type === 'artwork' && item.artwork_id) affected.artworkIds.push(item.artwork_id);
+                if (item.type === 'digital' && item.digital_artwork_id) affected.digitalIds.push(item.digital_artwork_id);
+            }
+        } else {
+            affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+        }
         await recordDigitalIdentityPurchases({
             outTradeNo: cleanOutTradeNo,
             userId: orders[0].user_id,
@@ -537,6 +550,42 @@ async function assertWxBuyerForPay(req, openid, connection = null) {
     return { buyerId, cleanOpenid };
 }
 
+async function applyPendingOrderInventoryLock({ connection, orderId, pricedCartItems }) {
+    const {
+        InventoryReserveError,
+        reserveInventoryForPendingOrder,
+    } = require('../utils/orderInventoryReserve');
+
+    try {
+        const affected = await reserveInventoryForPendingOrder({
+            orderId,
+            pricedCartItems,
+            connection,
+        });
+        await clearInventoryRelatedCaches(affected);
+        return { ok: true };
+    } catch (err) {
+        if (err instanceof InventoryReserveError || err?.code === 'INVENTORY_RESERVE_FAILED') {
+            return {
+                error: adminResult(400, {
+                    error: err.message || '商品库存不足',
+                    code: 'INSUFFICIENT_STOCK',
+                }),
+            };
+        }
+        throw err;
+    }
+}
+
+async function releaseClosedOrderInventory(orderId, connection = null) {
+    const { releaseOrderInventoryIfReserved } = require('../utils/orderInventoryReserve');
+    const released = await releaseOrderInventoryIfReserved(orderId, connection);
+    if (released.released) {
+        await clearInventoryRelatedCaches(released.affected);
+    }
+    return released;
+}
+
 async function loadOrderForBuyer(req, outTradeNo, connection = null) {
     const buyerId = buyerUserIdFromReq(req);
     if (!buyerId) return { error: adminResult(401, { success: false, error: '请先登录' }) };
@@ -552,7 +601,7 @@ async function loadOrderForBuyer(req, outTradeNo, connection = null) {
     const [rows] = await runner.query(
         `SELECT id, out_trade_no, transaction_id, trade_state, trade_state_desc,
                 actual_fee, total_fee, shipping_fee, discount_amount, user_id, body,
-                created_at, updated_at, success_time
+                created_at, updated_at, success_time, inventory_reserved
          FROM orders WHERE out_trade_no = ? LIMIT 1`,
         [cleanOutTradeNo]
     );
@@ -693,7 +742,7 @@ async function unifiedOrder(req) {
         try {
             // 检查订单状态，允许未完成订单重复支付
             const [existingOrders] = await connection.query(
-                'SELECT id, trade_state, user_id, referral_coupon_id FROM orders WHERE out_trade_no = ?',
+                'SELECT id, trade_state, user_id, referral_coupon_id, inventory_reserved FROM orders WHERE out_trade_no = ?',
                 [cleanOutTradeNo]
             );
 
@@ -781,6 +830,9 @@ async function unifiedOrder(req) {
             if (existingOrders.length > 0) {
                 // 更新已存在的订单
                 orderId = existingOrders[0].id;
+                if (existingOrders[0].inventory_reserved) {
+                    await releaseClosedOrderInventory(orderId, connection);
+                }
                 await connection.query(
                     'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = ?, updated_at = NOW() WHERE id = ?',
                     [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, referralCouponId || null, orderId]
@@ -811,6 +863,16 @@ async function unifiedOrder(req) {
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES ?',
                 [orderItems]
             );
+
+            const inventoryLock = await applyPendingOrderInventoryLock({
+                connection,
+                orderId,
+                pricedCartItems,
+            });
+            if (inventoryLock.error) {
+                await connection.rollback();
+                return inventoryLock.error;
+            }
 
             // 如果使用了抵扣，更新抵扣记录
             if (availableDiscount > 0) {
@@ -954,7 +1016,7 @@ async function singleOrder(req) {
         let payOrderLockKey = null;
         try {
             const [existingOrders] = await connection.query(
-                'SELECT id, trade_state, user_id, referral_coupon_id FROM orders WHERE out_trade_no = ?',
+                'SELECT id, trade_state, user_id, referral_coupon_id, inventory_reserved FROM orders WHERE out_trade_no = ?',
                 [cleanOutTradeNo]
             );
 
@@ -1035,6 +1097,9 @@ async function singleOrder(req) {
 
             if (existingOrders.length > 0) {
                 orderId = existingOrders[0].id;
+                if (existingOrders[0].inventory_reserved) {
+                    await releaseClosedOrderInventory(orderId, connection);
+                }
                 await connection.query(
                     'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = ?, updated_at = NOW() WHERE id = ?',
                     [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, referralCouponId || null, orderId]
@@ -1058,6 +1123,16 @@ async function singleOrder(req) {
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 orderItem
             );
+
+            const inventoryLock = await applyPendingOrderInventoryLock({
+                connection,
+                orderId,
+                pricedCartItems: [pricedItem],
+            });
+            if (inventoryLock.error) {
+                await connection.rollback();
+                return inventoryLock.error;
+            }
 
             if (availableDiscount > 0) {
                 await connection.query(`
@@ -1255,7 +1330,7 @@ async function payNotify(req) {
             let shouldFulfillInventory = false;
             try {
                 const [orders] = await connection.query(
-                    'SELECT id, trade_state, user_id, actual_fee, referrer_id, referral_coupon_id FROM orders WHERE out_trade_no = ? FOR UPDATE',
+                    'SELECT id, trade_state, user_id, actual_fee, referrer_id, referral_coupon_id, inventory_reserved FROM orders WHERE out_trade_no = ? FOR UPDATE',
                     [out_trade_no]
                 );
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
@@ -1283,7 +1358,19 @@ async function payNotify(req) {
                 const inventoryDone = await redisClient.get(inventoryKey);
                 if (!inventoryDone) {
                     const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
-                    affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+                    if (Number(orders[0]?.inventory_reserved) === 1) {
+                        await connection.query(
+                            'UPDATE orders SET inventory_reserved = 0 WHERE id = ?',
+                            [orders[0].id]
+                        );
+                        for (const item of orderItems) {
+                            if (item.type === 'right' && item.right_id) affected.rightIds.push(item.right_id);
+                            if (item.type === 'artwork' && item.artwork_id) affected.artworkIds.push(item.artwork_id);
+                            if (item.type === 'digital' && item.digital_artwork_id) affected.digitalIds.push(item.digital_artwork_id);
+                        }
+                    } else {
+                        affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+                    }
                     await recordDigitalIdentityPurchases({
                         outTradeNo: out_trade_no,
                         userId,
@@ -1291,7 +1378,7 @@ async function payNotify(req) {
                         connection,
                     });
                     shouldFulfillInventory = true;
-                    logger.info('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length });
+                    logger.info('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length, reserved: Number(orders[0]?.inventory_reserved) === 1 });
                 }
 
                 if (userId && previousTradeState !== 'SUCCESS') {
@@ -1412,6 +1499,7 @@ async function closeOrder(req) {
         if (response.status === 204) {
             const { releaseReferralCouponByOrderId } = require('./referralRewardService');
             if (owned.order?.id) {
+                await releaseClosedOrderInventory(owned.order.id);
                 await db.query(
                     `UPDATE orders SET trade_state = 'CLOSED', trade_state_desc = '订单已关闭', updated_at = NOW()
                      WHERE id = ? AND trade_state IN ('NOTPAY', 'PAYERROR')`,
@@ -3285,6 +3373,7 @@ async function checkRepayable(req) {
         const order = owned.order;
         const address = await fetchOrderShippingAddress(order.id);
         const orderInfoBase = buildCheckRepayableOrderInfo(order);
+        const hasReservedInventory = Number(order.inventory_reserved) === 1;
 
         if (order.trade_state === 'SUCCESS') {
             return adminResult(200, {
@@ -3346,7 +3435,7 @@ async function checkRepayable(req) {
                     type: 'right',
                     id: item.right_id,
                     title: item.right_title,
-                    available: item.right_status === 'onsale' && item.right_remaining_count >= item.quantity,
+                    available: hasReservedInventory || (item.right_status === 'onsale' && item.right_remaining_count >= item.quantity),
                     stock: item.right_remaining_count,
                     required: item.quantity,
                     status: item.right_status
@@ -3356,7 +3445,7 @@ async function checkRepayable(req) {
                     type: 'artwork',
                     id: item.artwork_id,
                     title: item.artwork_title,
-                    available: item.artwork_stock >= item.quantity,
+                    available: hasReservedInventory || item.artwork_stock >= item.quantity,
                     stock: item.artwork_stock,
                     required: item.quantity
                 };
@@ -3365,7 +3454,7 @@ async function checkRepayable(req) {
                     type: 'digital',
                     id: item.digital_artwork_id,
                     title: item.digital_title,
-                    available: item.digital_batch_quantity >= item.quantity,
+                    available: hasReservedInventory || item.digital_batch_quantity >= item.quantity,
                     stock: item.digital_batch_quantity,
                     required: item.quantity
                 };
@@ -4416,6 +4505,14 @@ async function syncOrderTradeStateFromWechat(orderRow) {
                     err: err?.message || err,
                 });
             });
+            if (Number(orderRow.inventory_reserved) === 1) {
+                await releaseClosedOrderInventory(orderRow.id).catch((err) => {
+                    logger.warn('同步关单时释放库存预扣失败', {
+                        orderId: orderRow.id,
+                        err: err?.message || err,
+                    });
+                });
+            }
         }
     }
 

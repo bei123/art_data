@@ -7,6 +7,7 @@ const {
   fetchDigitalArtworksByIds,
   hasEnoughDigitalStock,
   isDigitalArtworkPurchasable,
+  resolveDigitalStock,
   ensureDigitalArtworkIdColumns,
 } = require('../utils/digitalArtworkResolver')
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing')
@@ -530,11 +531,13 @@ function buildPreviewItemImageFields(item, goods, rightImagesMap) {
   return { image: '', images: [] }
 }
 
-async function priceCartItems(connection, userId, normalizedCartItems) {
+async function priceCartItems(connection, userId, normalizedCartItems, reserveOrderId = null) {
   await ensureRightsShippingColumns(connection)
   await ensureArtworksShippingColumns(connection)
   const { ensureVipEarlyAccessSchema } = require('../utils/vipEarlyAccessSchema')
   await ensureVipEarlyAccessSchema()
+  const { loadOrderInventoryReserveBoost } = require('../utils/orderInventoryReserve')
+  const reserveBoost = await loadOrderInventoryReserveBoost(connection, reserveOrderId)
 
   const rightIds = []
   const artworkIds = []
@@ -634,14 +637,18 @@ async function priceCartItems(connection, userId, normalizedCartItems) {
       return { error: adminResult(404, { error: `数字艺术品ID ${item.digital_artwork_id} 不存在或已下架` }) }
     }
 
-    if (item.type === 'right' && goods.remaining_count < item.quantity) {
+    if (item.type === 'right' && goods.remaining_count + (reserveBoost.rights[item.right_id] || 0) < item.quantity) {
       return { error: adminResult(400, { error: `商品ID ${item.right_id} 库存不足` }) }
     }
-    if (item.type === 'artwork' && goods.stock < item.quantity) {
+    if (item.type === 'artwork' && goods.stock + (reserveBoost.artworks[item.artwork_id] || 0) < item.quantity) {
       return { error: adminResult(400, { error: `艺术品ID ${item.artwork_id} 库存不足` }) }
     }
-    if (item.type === 'digital' && !hasEnoughDigitalStock(goods, item.quantity)) {
-      return { error: adminResult(400, { error: `数字艺术品ID ${item.digital_artwork_id} 库存不足` }) }
+    if (item.type === 'digital') {
+      const boost = reserveBoost.digitals[String(item.digital_artwork_id)] || 0
+      const stock = resolveDigitalStock(goods)
+      if (stock !== null && stock + boost < item.quantity) {
+        return { error: adminResult(400, { error: `数字艺术品ID ${item.digital_artwork_id} 库存不足` }) }
+      }
     }
 
     let unitPriceYuan
@@ -750,7 +757,7 @@ async function buildCheckoutQuote({
   referralCouponId,
   reserveOrderId = null,
 }) {
-  const priced = await priceCartItems(connection, userId, normalizedCartItems)
+  const priced = await priceCartItems(connection, userId, normalizedCartItems, reserveOrderId)
   if (priced.error) return priced
 
   const physical = hasPhysicalItems(normalizedCartItems)
@@ -987,7 +994,7 @@ async function resolveCheckoutAmounts({
     }
   }
 
-  const priced = await priceCartItems(connection, userId, normalizedCartItems)
+  const priced = await priceCartItems(connection, userId, normalizedCartItems, reserveOrderId)
   if (priced.error) return priced
 
   const physical = hasPhysicalItems(normalizedCartItems)
