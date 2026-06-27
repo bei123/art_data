@@ -52,7 +52,7 @@ const {
 } = require('../utils/digitalArtworkResolver');
 const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { resolveUserOutTradeNo } = require('../utils/orderTradeNo');
-const { ensureOrdersOutTradeNoUnique, ensureOrdersShippingColumns } = require('../utils/ordersSchema');
+const { ensureOrdersOutTradeNoUnique, ensureOrdersShippingColumns, ensureOrderInventoryReservedColumn } = require('../utils/ordersSchema');
 const { ensureReferralSchema } = require('../utils/referralSchema');
 const { resolveOrderReferrerId } = require('./referralService');
 const { onPaymentSuccess } = require('./userTierService');
@@ -695,6 +695,7 @@ async function unifiedOrder(req) {
         await ensureDigitalArtworkIdColumns();
         await ensureOrdersOutTradeNoUnique();
         await ensureOrdersShippingColumns();
+        await ensureOrderInventoryReservedColumn();
         await ensureReferralSchema();
 
         const { openid, body, out_trade_no, cart_items, address_id, quote_token } = req.body;
@@ -981,6 +982,7 @@ async function singleOrder(req) {
         await ensureDigitalArtworkIdColumns();
         await ensureOrdersOutTradeNoUnique();
         await ensureOrdersShippingColumns();
+        await ensureOrderInventoryReservedColumn();
         await ensureReferralSchema();
 
         const { openid, body, out_trade_no, address_id, quote_token, type, quantity, right_id, digital_artwork_id, artwork_id } = req.body;

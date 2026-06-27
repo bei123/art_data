@@ -52,6 +52,8 @@ async function loadOrderInventoryReserveBoost(connection, orderId) {
   const empty = buildReserveBoostFromItems([])
   if (!orderId) return empty
 
+  await ensureOrderInventoryReservedColumn()
+
   const [[order]] = await queryWithConnection(
     connection,
     'SELECT inventory_reserved FROM orders WHERE id = ? LIMIT 1',

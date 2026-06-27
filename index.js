@@ -52,7 +52,7 @@ const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('./utils/orderShipmentsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
-const { ensureOrdersShippingColumns } = require('./utils/ordersSchema');
+const { ensureOrdersShippingColumns, ensureOrderInventoryReservedColumn } = require('./utils/ordersSchema');
 const { ensureReferralSchema } = require('./utils/referralSchema');
 const { ensureRightsShippingColumns } = require('./services/rightsService');
 const { ensureArtworksShippingColumns } = require('./utils/artworkShippingDimensions');
@@ -482,6 +482,9 @@ ensureDigitalArtworkIdColumns().catch((err) => {
 });
 ensureOrdersShippingColumns().catch((err) => {
   logger.warn('orders shipping columns ensure failed', { err: err.message });
+});
+ensureOrderInventoryReservedColumn().catch((err) => {
+  logger.warn('orders inventory_reserved column ensure failed', { err: err.message });
 });
 ensureReferralSchema().catch((err) => {
   logger.warn('referral schema ensure failed', { err: err.message });
