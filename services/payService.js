@@ -620,7 +620,7 @@ async function loadOrderForBuyer(req, outTradeNo, connection = null) {
     const runner = connection || db;
     const [rows] = await runner.query(
         `SELECT id, out_trade_no, transaction_id, trade_state, trade_state_desc,
-                actual_fee, total_fee, shipping_fee, discount_amount, user_id, body,
+                actual_fee, total_fee, shipping_fee, discount_amount, referral_coupon_id, user_id, body,
                 created_at, updated_at, success_time, inventory_reserved
          FROM orders WHERE out_trade_no = ? LIMIT 1`,
         [cleanOutTradeNo]
@@ -945,7 +945,10 @@ async function unifiedOrder(req) {
                 }
             };
 
-            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo);
+            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo, {
+                hasExistingLocalOrder: existingOrders.length > 0,
+                jsapiAmountTotalCents: Math.round(actualTotalFee * 100),
+            });
             if (wxRepayPrep.error) {
                 await connection.rollback();
                 return wxRepayPrep.error;
@@ -1229,7 +1232,10 @@ async function singleOrder(req) {
                 }
             };
 
-            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo);
+            const wxRepayPrep = await prepareWechatJsapiRepay(cleanOutTradeNo, {
+                hasExistingLocalOrder: existingOrders.length > 0,
+                jsapiAmountTotalCents: Math.round(actualTotalFee * 100),
+            });
             if (wxRepayPrep.error) {
                 await connection.rollback();
                 return wxRepayPrep.error;
@@ -3398,6 +3404,7 @@ function buildCheckRepayableOrderInfo(order, extra = {}) {
         actual_fee: order.actual_fee,
         shipping_fee: order.shipping_fee != null ? order.shipping_fee : 0,
         discount_amount: order.discount_amount != null ? order.discount_amount : 0,
+        referral_coupon_id: order.referral_coupon_id != null ? order.referral_coupon_id : null,
         trade_state: order.trade_state,
         ...extra,
     };
@@ -4582,18 +4589,20 @@ async function requestWechatCloseTransactionForRepay(outTradeNo) {
     }
 }
 
-async function prepareWechatJsapiRepay(outTradeNo) {
+async function prepareWechatJsapiRepay(outTradeNo, options = {}) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) {
         return { ok: true };
     }
 
-    const wxPay = await fetchWxPayOrderByOutTradeNo(cleanOutTradeNo);
-    if (!wxPay?.trade_state) {
-        return { ok: true };
-    }
+    const hasExistingLocalOrder = options.hasExistingLocalOrder === true;
+    const jsapiAmountTotalCents = options.jsapiAmountTotalCents != null
+        ? Number(options.jsapiAmountTotalCents)
+        : null;
 
-    const wxState = String(wxPay.trade_state).trim().toUpperCase();
+    const wxPay = await fetchWxPayOrderByOutTradeNo(cleanOutTradeNo);
+    const wxState = wxPay?.trade_state ? String(wxPay.trade_state).trim().toUpperCase() : null;
+
     if (wxState === 'SUCCESS') {
         return {
             error: adminResult(400, {
@@ -4603,17 +4612,37 @@ async function prepareWechatJsapiRepay(outTradeNo) {
         };
     }
 
-    if (wxState === 'NOTPAY') {
-        const closed = await requestWechatCloseTransactionForRepay(cleanOutTradeNo);
-        if (!closed.ok) {
-            return {
-                error: adminResult(400, {
-                    error: closed.message || '微信支付单关闭失败，请稍后重试',
-                    code: 'WECHAT_CLOSE_FAILED',
-                    detail: closed.detail,
-                }),
-            };
-        }
+    const wxAmount = wxPay?.amount?.total != null ? Number(wxPay.amount.total) : null;
+    const amountMismatch = wxAmount != null
+        && jsapiAmountTotalCents != null
+        && wxAmount !== jsapiAmountTotalCents;
+
+    const shouldClose = hasExistingLocalOrder
+        || amountMismatch
+        || wxState === 'NOTPAY'
+        || (wxState && !['CLOSED', 'REVOKED', 'PAYERROR'].includes(wxState));
+
+    if (!shouldClose) {
+        return { ok: true };
+    }
+
+    const closed = await requestWechatCloseTransactionForRepay(cleanOutTradeNo);
+    if (!closed.ok) {
+        return {
+            error: adminResult(400, {
+                error: closed.message || '微信支付单关闭失败，请稍后重试',
+                code: 'WECHAT_CLOSE_FAILED',
+                detail: closed.detail,
+            }),
+        };
+    }
+
+    if (amountMismatch) {
+        logger.info('wechat pay closed due to amount mismatch before repay jsapi', {
+            out_trade_no: cleanOutTradeNo,
+            wx_amount_total: wxAmount,
+            jsapi_amount_total: jsapiAmountTotalCents,
+        });
     }
 
     return { ok: true };
