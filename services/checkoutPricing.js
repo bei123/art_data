@@ -536,8 +536,8 @@ async function priceCartItems(connection, userId, normalizedCartItems, reserveOr
   await ensureArtworksShippingColumns(connection)
   const { ensureVipEarlyAccessSchema } = require('../utils/vipEarlyAccessSchema')
   await ensureVipEarlyAccessSchema()
-  const { loadOrderInventoryReserveBoost } = require('../utils/orderInventoryReserve')
-  const reserveBoost = await loadOrderInventoryReserveBoost(connection, reserveOrderId)
+  const { loadCheckoutReserveBoost } = require('../utils/orderInventoryReserve')
+  const reserveBoost = await loadCheckoutReserveBoost(connection, userId, normalizedCartItems, reserveOrderId)
 
   const rightIds = []
   const artworkIds = []

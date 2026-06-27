@@ -37,6 +37,97 @@ function buildReserveBoostFromItems(items) {
   return boost
 }
 
+function cartItemReserveKey(item) {
+  if (!item || !item.type) return null
+  if (item.type === 'right' && item.right_id) return `right:${item.right_id}`
+  if (item.type === 'artwork' && item.artwork_id) return `artwork:${item.artwork_id}`
+  if (item.type === 'digital' && item.digital_artwork_id != null) {
+    return `digital:${String(item.digital_artwork_id)}`
+  }
+  return null
+}
+
+function cartItemsOverlap(orderItems, cartItems) {
+  const cartKeys = new Set((cartItems || []).map(cartItemReserveKey).filter(Boolean))
+  if (!cartKeys.size) return false
+  return (orderItems || []).some((item) => cartKeys.has(cartItemReserveKey(item)))
+}
+
+async function loadUserPendingReserveBoostForCart(connection, userId, normalizedCartItems) {
+  const empty = buildReserveBoostFromItems([])
+  if (!userId || !Array.isArray(normalizedCartItems) || !normalizedCartItems.length) return empty
+
+  await ensureOrderInventoryReservedColumn()
+
+  const [rows] = await queryWithConnection(
+    connection,
+    `SELECT oi.type, oi.quantity, oi.right_id, oi.artwork_id, oi.digital_artwork_id
+     FROM order_items oi
+     INNER JOIN orders o ON o.id = oi.order_id
+     WHERE o.user_id = ?
+       AND o.trade_state IN ('NOTPAY', 'PAYERROR')
+       AND o.inventory_reserved = 1`,
+    [userId]
+  )
+  if (!rows?.length) return empty
+
+  const cartKeys = new Set(normalizedCartItems.map(cartItemReserveKey).filter(Boolean))
+  const overlapping = rows.filter((item) => cartKeys.has(cartItemReserveKey(item)))
+  return buildReserveBoostFromItems(overlapping)
+}
+
+async function loadCheckoutReserveBoost(connection, userId, normalizedCartItems, reserveOrderId = null) {
+  const orderBoost = await loadOrderInventoryReserveBoost(connection, reserveOrderId)
+  if (reserveOrderId) return orderBoost
+  return loadUserPendingReserveBoostForCart(connection, userId, normalizedCartItems)
+}
+
+async function releaseOverlappingUserPendingInventory({
+  connection,
+  userId,
+  cartItems,
+  excludeOrderId = null,
+}) {
+  await ensureOrderInventoryReservedColumn()
+
+  const affected = { rightIds: [], artworkIds: [], digitalIds: [] }
+  if (!userId || !Array.isArray(cartItems) || !cartItems.length) {
+    return affected
+  }
+
+  const sql = excludeOrderId
+    ? `SELECT id FROM orders
+       WHERE user_id = ?
+         AND trade_state IN ('NOTPAY', 'PAYERROR')
+         AND inventory_reserved = 1
+         AND id != ?`
+    : `SELECT id FROM orders
+       WHERE user_id = ?
+         AND trade_state IN ('NOTPAY', 'PAYERROR')
+         AND inventory_reserved = 1`
+  const params = excludeOrderId ? [userId, excludeOrderId] : [userId]
+  const [orders] = await queryWithConnection(connection, sql, params)
+
+  for (const order of orders || []) {
+    const items = await loadOrderItemsByOrderId(order.id, connection)
+    if (!cartItemsOverlap(items, cartItems)) continue
+
+    const released = await releaseOrderInventoryIfReserved(order.id, connection)
+    if (!released.released) continue
+
+    affected.rightIds.push(...(released.affected.rightIds || []))
+    affected.artworkIds.push(...(released.affected.artworkIds || []))
+    affected.digitalIds.push(...(released.affected.digitalIds || []))
+    logger.info('released overlapping pending order inventory', {
+      userId,
+      orderId: order.id,
+      excludeOrderId,
+    })
+  }
+
+  return affected
+}
+
 async function loadOrderItemsByOrderId(orderId, connection = null) {
   if (!orderId) return []
   const [rows] = await queryWithConnection(
@@ -59,7 +150,7 @@ async function loadOrderInventoryReserveBoost(connection, orderId) {
     'SELECT inventory_reserved FROM orders WHERE id = ? LIMIT 1',
     [orderId]
   )
-  if (!order?.inventory_reserved) return empty
+  if (Number(order?.inventory_reserved) !== 1) return empty
 
   const items = await loadOrderItemsByOrderId(orderId, connection)
   return buildReserveBoostFromItems(items)
@@ -181,7 +272,7 @@ async function releaseOrderInventoryIfReserved(orderId, connection = null) {
     'SELECT id, inventory_reserved FROM orders WHERE id = ? LIMIT 1',
     [orderId]
   )
-  if (!order?.inventory_reserved) {
+  if (Number(order?.inventory_reserved) !== 1) {
     return { released: false, affected: { rightIds: [], artworkIds: [], digitalIds: [] } }
   }
 
@@ -226,10 +317,15 @@ async function reserveInventoryForPendingOrder({ orderId, pricedCartItems, conne
 module.exports = {
   InventoryReserveError,
   buildReserveBoostFromItems,
+  cartItemReserveKey,
+  cartItemsOverlap,
   loadOrderItemsByOrderId,
   loadOrderInventoryReserveBoost,
+  loadUserPendingReserveBoostForCart,
+  loadCheckoutReserveBoost,
   releaseOrderItemsInventory,
   reserveOrderItemsInventory,
   releaseOrderInventoryIfReserved,
+  releaseOverlappingUserPendingInventory,
   reserveInventoryForPendingOrder,
 }

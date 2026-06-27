@@ -586,6 +586,26 @@ async function releaseClosedOrderInventory(orderId, connection = null) {
     return released;
 }
 
+async function releaseOverlappingPendingInventoryBeforeReserve({
+    connection,
+    userId,
+    orderId,
+    pricedCartItems,
+}) {
+    const { releaseOverlappingUserPendingInventory } = require('../utils/orderInventoryReserve');
+    const affected = await releaseOverlappingUserPendingInventory({
+        connection,
+        userId,
+        cartItems: pricedCartItems,
+        excludeOrderId: orderId,
+    });
+    const hasAffected = (affected.rightIds?.length || affected.artworkIds?.length || affected.digitalIds?.length);
+    if (hasAffected) {
+        await clearInventoryRelatedCaches(affected);
+    }
+    return affected;
+}
+
 async function loadOrderForBuyer(req, outTradeNo, connection = null) {
     const buyerId = buyerUserIdFromReq(req);
     if (!buyerId) return { error: adminResult(401, { success: false, error: '请先登录' }) };
@@ -831,7 +851,7 @@ async function unifiedOrder(req) {
             if (existingOrders.length > 0) {
                 // 更新已存在的订单
                 orderId = existingOrders[0].id;
-                if (existingOrders[0].inventory_reserved) {
+                if (Number(existingOrders[0].inventory_reserved) === 1) {
                     await releaseClosedOrderInventory(orderId, connection);
                 }
                 await connection.query(
@@ -864,6 +884,13 @@ async function unifiedOrder(req) {
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES ?',
                 [orderItems]
             );
+
+            await releaseOverlappingPendingInventoryBeforeReserve({
+                connection,
+                userId,
+                orderId,
+                pricedCartItems,
+            });
 
             const inventoryLock = await applyPendingOrderInventoryLock({
                 connection,
@@ -1099,7 +1126,7 @@ async function singleOrder(req) {
 
             if (existingOrders.length > 0) {
                 orderId = existingOrders[0].id;
-                if (existingOrders[0].inventory_reserved) {
+                if (Number(existingOrders[0].inventory_reserved) === 1) {
                     await releaseClosedOrderInventory(orderId, connection);
                 }
                 await connection.query(
@@ -1125,6 +1152,13 @@ async function singleOrder(req) {
                 'INSERT INTO order_items (order_id, type, right_id, digital_artwork_id, artwork_id, quantity, price, address_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 orderItem
             );
+
+            await releaseOverlappingPendingInventoryBeforeReserve({
+                connection,
+                userId,
+                orderId,
+                pricedCartItems: [pricedItem],
+            });
 
             const inventoryLock = await applyPendingOrderInventoryLock({
                 connection,
@@ -3469,6 +3503,7 @@ async function checkRepayable(req) {
             return adminResult(200, {
                 repayable: false,
                 reason: '部分商品库存不足或已下架',
+                out_trade_no: order.out_trade_no,
                 unavailable_items: unavailableItems,
                 order_status: order.trade_state || 'NOTPAY',
                 address,
@@ -3480,6 +3515,7 @@ async function checkRepayable(req) {
         return adminResult(200, {
             repayable: true,
             reason: '订单可以重复支付',
+            out_trade_no: order.out_trade_no,
             order_status: order.trade_state || 'NOTPAY',
             address,
             order_info: buildCheckRepayableOrderInfo(order, {
