@@ -19,6 +19,14 @@
     </div>
 
     <Card class="relative overflow-hidden shadow-none ring-1">
+      <div
+        v-if="loading"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-[1px]"
+        aria-busy="true"
+        aria-label="加载中"
+      >
+        <Loader2 class="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
+      </div>
       <CardContent class="overflow-x-auto p-0 sm:p-6">
         <table class="w-full min-w-[960px] text-sm">
           <thead>
@@ -52,11 +60,40 @@
                 </Button>
               </td>
             </tr>
-            <tr v-if="!items.length">
+            <tr v-if="!items.length && !loading">
               <td colspan="7" class="px-3 py-12 text-center text-muted-foreground">暂无用户</td>
             </tr>
           </tbody>
         </table>
+      </CardContent>
+    </Card>
+
+    <Card class="shadow-none ring-1">
+      <CardContent class="flex flex-col gap-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <span class="text-sm text-muted-foreground">共 {{ total }} 条</span>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            :disabled="currentPage <= 1 || loading"
+            @click="handlePageChange(currentPage - 1)"
+          >
+            上一页
+          </Button>
+          <span class="min-w-[5rem] text-center text-sm tabular-nums">
+            {{ currentPage }} / {{ totalPages }}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            :disabled="currentPage >= totalPages || loading"
+            @click="handlePageChange(currentPage + 1)"
+          >
+            下一页
+          </Button>
+        </div>
       </CardContent>
     </Card>
 
@@ -136,7 +173,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loader2 } from 'lucide-vue-next'
 import axios from '@/utils/axios'
@@ -166,6 +203,10 @@ const PURGE_PHRASE = '确认注销'
 
 const items = ref([])
 const keyword = ref('')
+const loading = ref(false)
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(20)
 const detailOpen = ref(false)
 const detail = ref(null)
 const purgeOpen = ref(false)
@@ -174,6 +215,8 @@ const confirmUserId = ref('')
 const confirmPhrase = ref('')
 const purging = ref(false)
 const purgePhrase = PURGE_PHRASE
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value) || 1))
 
 const tierMap = {
   normal: '普通用户',
@@ -200,17 +243,36 @@ function formatMoney(value) {
 }
 
 async function loadItems() {
-  const response = await axios.get('/admin/wx-users', {
-    params: {
-      page: 1,
-      pageSize: 50,
-      keyword: keyword.value.trim() || undefined,
-    },
-  })
-  items.value = response.items || []
+  loading.value = true
+  try {
+    const response = await axios.get('/admin/wx-users', {
+      params: {
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        keyword: keyword.value.trim() || undefined,
+      },
+    })
+    items.value = response.items || []
+    total.value = Number(response.total || 0)
+    if (response.page) currentPage.value = Number(response.page) || currentPage.value
+    if (response.pageSize) pageSize.value = Number(response.pageSize) || pageSize.value
+  } catch (error) {
+    console.error('加载小程序用户失败:', error)
+    items.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
 }
 
 function handleSearch() {
+  currentPage.value = 1
+  loadItems()
+}
+
+function handlePageChange(page) {
+  if (page < 1 || page > totalPages.value) return
+  currentPage.value = page
   loadItems()
 }
 
