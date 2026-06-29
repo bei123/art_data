@@ -57,7 +57,7 @@ node scripts/generate-openapi-esa.js
 | WebView | `/api/webview` | H5 代理 |
 | 数字身份 | `/api/digital-identity` | 数字身份购买记录 |
 
-当前共 **183** 个接口操作（`GET`/`POST`/`PUT`/`DELETE`/`PATCH`），合并为 **144** 条 `paths`（同一路径多种方法算一条 path），由代码自动扫描生成。
+当前共 **257** 个接口操作（`GET`/`POST`/`PUT`/`DELETE`/`PATCH`），合并为 **213** 条 `paths`（同一路径多种方法算一条 path），由代码自动扫描生成。
 
 **完整性校验**（代码路由 ⊆ OpenAPI）：
 
@@ -65,7 +65,7 @@ node scripts/generate-openapi-esa.js
 node scripts/audit-openapi-routes.js
 ```
 
-最近一次审计结果：`Code routes: 183`，`OpenAPI operations: 183`，**无遗漏**。
+最近一次审计结果：`Code routes: 257`，`OpenAPI operations: 257`，**无遗漏**。
 
 ### 上传报错「错误码 63 / accidents」
 

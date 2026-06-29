@@ -1,5 +1,10 @@
 # 艺术品数据管理系统
 
+项目接口说明见 [项目接口文档](docs/PROJECT-API.md)，完整机器可读定义见
+[OpenAPI 3.0 文档](docs/openapi-esa.json)。
+
+安全审查结果见 [安全审查报告](docs/SECURITY-REVIEW.md)。
+
 一个基于 Vue 3 + Express + MySQL 的艺术品数据管理系统，用于管理艺术家、原创艺术品、数字艺术品和实物分类等信息。
 
 ## 技术栈

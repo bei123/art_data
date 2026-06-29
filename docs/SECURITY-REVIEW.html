@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Art Data Security Review</title>
+  <style>
+    body{font:16px/1.6 system-ui,sans-serif;max-width:980px;margin:40px auto;padding:0 24px;color:#18202a}
+    h1,h2,h3{line-height:1.25} table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ccd3dc;padding:8px;text-align:left;vertical-align:top}
+    code{background:#f2f4f7;padding:2px 5px;border-radius:4px}.medium{color:#9a5800}.low{color:#49627a}
+    .note{padding:12px 16px;background:#f6f8fa;border-left:4px solid #64748b}
+  </style>
+</head>
+<body>
+  <h1>Art Data Security Review</h1>
+  <p><b>Revision:</b> f337c40 + working tree · <b>Date:</b> 2026-06-29</p>
+  <p class="note">No critical or high-severity vulnerability was confirmed. This was a single-agent review of deployed high-impact runtime families.</p>
+  <h2>Findings</h2>
+  <h3 class="low">SEC-001 · Low · Plaintext passwords can enter registration logs</h3>
+  <p><code>auth.js:181</code> logs the complete registration request body, including <code>password</code>, whenever public registration is enabled. Remove the log or strictly allowlist non-sensitive fields.</p>
+  <h3 class="medium">SEC-002 · Medium · WebView credentials are accepted in URL query parameters</h3>
+  <p><code>routes/webview.js:22</code> reads <code>authorization</code> from the query string and forwards it. Edge/origin logs, browser history and diagnostics may retain the bearer token. Replace it with a short-lived opaque server-side handle.</p>
+  <h2>Correctness defects</h2>
+  <ul>
+    <li>OpenAPI documents favorite creation as <code>item_type/item_id</code>, but the backend requires <code>itemType/itemId</code>.</li>
+    <li>Tests trigger a real OSS probe during module import; the parallel full suite reaches 212/214, while the focused security suite passes 30/30.</li>
+  </ul>
+  <h2>High-impact coverage</h2>
+  <table>
+    <tr><th>Family</th><th>Closure</th></tr>
+    <tr><td>Authentication, sessions, admin authorization, object ownership</td><td>Suppressed by active-session, role and user-ID binding controls</td></tr>
+    <tr><td>Payment/refund/transfer callbacks</td><td>Suppressed by signature/authenticated-decryption/webhook controls</td></tr>
+    <tr><td>SQL injection, SSRF, redirects, local file reads</td><td>Suppressed by placeholders, allowlists, DNS checks, redirect guards and path containment</td></tr>
+    <tr><td>Credential logging</td><td>Reportable: SEC-001</td></tr>
+    <tr><td>Credential transport in URLs</td><td>Reportable: SEC-002</td></tr>
+    <tr><td>Command execution, unsafe deserialization, XXE</td><td>Not applicable to deployed code found</td></tr>
+  </table>
+  <p>See <a href="SECURITY-REVIEW.md">SECURITY-REVIEW.md</a> for evidence, attack paths, counterevidence and verification details.</p>
+</body>
+</html>

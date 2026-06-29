@@ -56,6 +56,17 @@
           }
         }
       },
+      "WxRefreshTokenBody": {
+        "type": "object",
+        "required": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          }
+        }
+      },
       "CartAddItem": {
         "type": "object",
         "required": [
@@ -134,6 +145,48 @@
     }
   },
   "paths": {
+    "/api/digital-artworks/health": {
+      "get": {
+        "operationId": "getDigitalArtworksHealth",
+        "summary": "GET /api/digital-artworks/health",
+        "tags": [
+          "digital-artworks"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/health": {
+      "get": {
+        "operationId": "getAdminHealth",
+        "summary": "GET /api/admin/health",
+        "tags": [
+          "admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/auth/url-access": {
+      "post": {
+        "operationId": "postAuthUrlAccess",
+        "summary": "POST /api/auth/url-access",
+        "tags": [
+          "auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "getHealth",
@@ -143,7 +196,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -157,7 +210,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -171,7 +224,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -185,7 +238,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -209,7 +262,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -233,7 +286,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -247,7 +300,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -261,7 +314,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -270,8 +323,405 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/commissions": {
+      "get": {
+        "operationId": "get_admin_referral_commissions",
+        "summary": "GET /api/admin/referral/commissions",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/commission-rules": {
+      "get": {
+        "operationId": "get_admin_referral_commission_rules",
+        "summary": "GET /api/admin/referral/commission-rules",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/commission-rules/{id}": {
+      "put": {
+        "operationId": "put_admin_referral_commission_rules_id",
+        "summary": "PUT /api/admin/referral/commission-rules/{id}",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/commissions/settle-run": {
+      "post": {
+        "operationId": "post_admin_referral_commissions_settle_run",
+        "summary": "POST /api/admin/referral/commissions/settle-run",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/withdrawals": {
+      "get": {
+        "operationId": "get_admin_referral_withdrawals",
+        "summary": "GET /api/admin/referral/withdrawals",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/withdrawals/{id}/approve": {
+      "post": {
+        "operationId": "post_admin_referral_withdrawals_id_approve",
+        "summary": "POST /api/admin/referral/withdrawals/{id}/approve",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/withdrawals/{id}/retry-transfer": {
+      "post": {
+        "operationId": "post_admin_referral_withdrawals_id_retry_transfer",
+        "summary": "POST /api/admin/referral/withdrawals/{id}/retry-transfer",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/coupon-templates": {
+      "get": {
+        "operationId": "get_admin_referral_coupon_templates",
+        "summary": "GET /api/admin/referral/coupon-templates",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_admin_referral_coupon_templates",
+        "summary": "POST /api/admin/referral/coupon-templates",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/coupons/grant": {
+      "post": {
+        "operationId": "post_admin_referral_coupons_grant",
+        "summary": "POST /api/admin/referral/coupons/grant",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/coupons": {
+      "get": {
+        "operationId": "get_admin_referral_coupons",
+        "summary": "GET /api/admin/referral/coupons",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/advisor-applications": {
+      "get": {
+        "operationId": "get_admin_referral_advisor_applications",
+        "summary": "GET /api/admin/referral/advisor-applications",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/advisor-applications/{id}/approve": {
+      "post": {
+        "operationId": "post_admin_referral_advisor_applications_id_approve",
+        "summary": "POST /api/admin/referral/advisor-applications/{id}/approve",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/advisor-applications/{id}/reject": {
+      "post": {
+        "operationId": "post_admin_referral_advisor_applications_id_reject",
+        "summary": "POST /api/admin/referral/advisor-applications/{id}/reject",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/vip-early-access": {
+      "get": {
+        "operationId": "get_admin_referral_vip_early_access",
+        "summary": "GET /api/admin/referral/vip-early-access",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_admin_referral_vip_early_access",
+        "summary": "PUT /api/admin/referral/vip-early-access",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/share-events": {
+      "get": {
+        "operationId": "get_admin_referral_share_events",
+        "summary": "GET /api/admin/referral/share-events",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/reconciliation/run": {
+      "post": {
+        "operationId": "post_admin_referral_reconciliation_run",
+        "summary": "POST /api/admin/referral/reconciliation/run",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/reconciliation/logs": {
+      "get": {
+        "operationId": "get_admin_referral_reconciliation_logs",
+        "summary": "GET /api/admin/referral/reconciliation/logs",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/reconciliation/logs/{id}": {
+      "get": {
+        "operationId": "get_admin_referral_reconciliation_logs_id",
+        "summary": "GET /api/admin/referral/reconciliation/logs/{id}",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/wx-users": {
+      "get": {
+        "operationId": "get_admin_wx_users",
+        "summary": "GET /api/admin/wx-users",
+        "tags": [
+          "admin-wx-users"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/wx-users/{id}": {
+      "get": {
+        "operationId": "get_admin_wx_users_id",
+        "summary": "GET /api/admin/wx-users/{id}",
+        "tags": [
+          "admin-wx-users"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/wx-users/{id}/purge": {
+      "post": {
+        "operationId": "post_admin_wx_users_id_purge",
+        "summary": "POST /api/admin/wx-users/{id}/purge",
+        "tags": [
+          "admin-wx-users"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
             }
           }
         ]
@@ -286,7 +736,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -298,7 +748,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -312,7 +762,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -321,8 +771,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -335,7 +784,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -344,8 +793,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -360,7 +808,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -369,8 +817,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -383,7 +830,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -392,8 +839,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -406,7 +852,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -415,8 +861,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -431,7 +876,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -445,7 +890,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -457,7 +902,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -471,7 +916,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -485,7 +930,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -499,7 +944,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -513,7 +958,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -527,7 +972,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -536,8 +981,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -552,7 +996,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -561,8 +1005,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -577,7 +1020,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -586,8 +1029,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -602,7 +1044,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -611,8 +1053,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -625,7 +1066,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -634,8 +1075,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -648,7 +1088,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -657,8 +1097,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -673,21 +1112,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
-          }
-        }
-      }
-    },
-    "/api/asset-transfer/transfer": {
-      "post": {
-        "operationId": "post_asset_transfer_transfer",
-        "summary": "POST /api/asset-transfer/transfer",
-        "tags": [
-          "asset-transfer"
-        ],
-        "responses": {
-          "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -701,7 +1126,21 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/asset-transfer/transfer": {
+      "post": {
+        "operationId": "post_asset_transfer_transfer",
+        "summary": "POST /api/asset-transfer/transfer",
+        "tags": [
+          "asset-transfer"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
           }
         }
       }
@@ -715,7 +1154,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -724,8 +1163,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -740,7 +1178,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -754,7 +1192,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -768,7 +1206,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -782,7 +1220,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -796,7 +1234,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -810,7 +1248,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -824,7 +1262,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -836,7 +1274,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -850,7 +1288,21 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/banners/sort": {
+      "put": {
+        "operationId": "put_banners_sort",
+        "summary": "PUT /api/banners/sort",
+        "tags": [
+          "banners"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
           }
         }
       }
@@ -864,7 +1316,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -873,8 +1325,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -887,7 +1338,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -896,8 +1347,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -912,7 +1362,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -924,7 +1374,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -946,7 +1396,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -960,7 +1410,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -969,8 +1419,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ],
@@ -993,7 +1442,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1002,23 +1451,22 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
       }
     },
-    "/api/digital-artworks/health": {
+    "/api/dashboard/overview": {
       "get": {
-        "operationId": "get_digital_artworks_health",
-        "summary": "GET /api/digital-artworks/health",
+        "operationId": "get_dashboard_overview",
+        "summary": "GET /api/dashboard/overview",
         "tags": [
-          "digital-artworks"
+          "dashboard"
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1032,7 +1480,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1046,7 +1494,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1055,8 +1503,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1071,7 +1518,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -1083,7 +1530,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1097,7 +1544,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1111,7 +1558,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1120,8 +1567,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1134,7 +1580,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1143,8 +1589,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1157,7 +1602,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1166,8 +1611,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1182,7 +1626,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1191,8 +1635,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1207,7 +1650,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1216,8 +1659,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1232,7 +1674,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1241,8 +1683,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1257,7 +1698,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1271,7 +1712,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1285,7 +1726,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1299,7 +1740,47 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/digital-claim-copy": {
+      "get": {
+        "operationId": "get_digital_claim_copy",
+        "summary": "GET /api/digital-claim-copy",
+        "tags": [
+          "digital-claim-copy"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_digital_claim_copy",
+        "summary": "PUT /api/digital-claim-copy",
+        "tags": [
+          "digital-claim-copy"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/digital-claim-copy/admin": {
+      "get": {
+        "operationId": "get_digital_claim_copy_admin",
+        "summary": "GET /api/digital-claim-copy/admin",
+        "tags": [
+          "digital-claim-copy"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
           }
         }
       }
@@ -1313,7 +1794,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -1325,7 +1806,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1339,7 +1820,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1348,8 +1829,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1362,7 +1842,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1371,8 +1851,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1387,7 +1866,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1396,8 +1875,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1410,7 +1888,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1419,8 +1897,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1433,7 +1910,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1442,8 +1919,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1458,7 +1934,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1467,8 +1943,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1481,7 +1956,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1490,8 +1965,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1504,7 +1978,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1513,8 +1987,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1529,7 +2002,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1538,8 +2011,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           },
           {
@@ -1547,8 +2019,31 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/exhibitions/{id}/items/sort": {
+      "put": {
+        "operationId": "put_exhibitions_id_items_sort",
+        "summary": "PUT /api/exhibitions/{id}/items/sort",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
             }
           }
         ]
@@ -1563,7 +2058,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1572,8 +2067,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           },
           {
@@ -1581,8 +2075,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1597,7 +2090,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1606,8 +2099,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           },
           {
@@ -1615,8 +2107,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1631,7 +2122,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1645,7 +2136,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1659,7 +2150,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1673,7 +2164,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1687,7 +2178,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1701,7 +2192,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1715,7 +2206,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1729,7 +2220,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1743,7 +2234,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1752,8 +2243,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1766,7 +2256,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1775,53 +2265,10 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
-      }
-    },
-    "/api/external/order/list": {
-      "post": {
-        "operationId": "post_external_order_list",
-        "summary": "POST /api/external/order/list",
-        "tags": [
-          "external"
-        ],
-        "responses": {
-          "200": {
-            "description": "success"
-          }
-        }
-      }
-    },
-    "/api/external/order/detail": {
-      "post": {
-        "operationId": "post_external_order_detail",
-        "summary": "POST /api/external/order/detail",
-        "tags": [
-          "external"
-        ],
-        "responses": {
-          "200": {
-            "description": "success"
-          }
-        }
-      }
-    },
-    "/api/external/order/cancel": {
-      "post": {
-        "operationId": "post_external_order_cancel",
-        "summary": "POST /api/external/order/cancel",
-        "tags": [
-          "external"
-        ],
-        "responses": {
-          "200": {
-            "description": "success"
-          }
-        }
       }
     },
     "/api/favorites": {
@@ -1833,7 +2280,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -1845,7 +2292,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -1861,6 +2308,36 @@
       }
     },
     "/api/favorites/{itemType}/{itemId}": {
+      "get": {
+        "operationId": "get_favorites_itemType_itemId",
+        "summary": "GET /api/favorites/{itemType}/{itemId}",
+        "tags": [
+          "favorites"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "itemType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
       "delete": {
         "operationId": "delete_favorites_itemType_itemId",
         "summary": "DELETE /api/favorites/{itemType}/{itemId}",
@@ -1869,7 +2346,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1901,7 +2378,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -1913,7 +2390,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1927,7 +2404,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -1939,7 +2416,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -1953,7 +2430,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1962,8 +2439,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -1978,7 +2454,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -1987,8 +2463,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2001,7 +2476,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2010,8 +2485,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2024,7 +2498,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2033,8 +2507,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2049,7 +2522,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2063,7 +2536,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2072,8 +2545,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2088,7 +2560,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2097,8 +2569,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2113,7 +2584,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2127,7 +2598,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2141,7 +2612,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2155,7 +2626,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2169,7 +2640,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2178,8 +2649,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2194,7 +2664,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -2206,7 +2676,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2220,7 +2690,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2234,7 +2704,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2248,7 +2718,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2257,8 +2727,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2273,7 +2742,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2282,8 +2751,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2298,7 +2766,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2307,8 +2775,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2321,7 +2788,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2330,8 +2797,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2344,7 +2810,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2353,11 +2819,24 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
+      }
+    },
+    "/api/wx/pay/checkout/preview": {
+      "post": {
+        "operationId": "post_wx_pay_checkout_preview",
+        "summary": "POST /api/wx/pay/checkout/preview",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
       }
     },
     "/api/wx/pay/unifiedorder": {
@@ -2369,7 +2848,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -2393,7 +2872,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -2417,7 +2896,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2431,7 +2910,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2445,7 +2924,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2459,7 +2938,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2473,7 +2952,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2487,7 +2966,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2496,8 +2975,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2512,7 +2990,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2526,7 +3004,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2540,7 +3018,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2554,7 +3032,21 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/pay/orders/confirm-receipt/verify": {
+      "post": {
+        "operationId": "post_wx_pay_orders_confirm_receipt_verify",
+        "summary": "POST /api/wx/pay/orders/confirm-receipt/verify",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
           }
         }
       }
@@ -2568,7 +3060,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2582,7 +3074,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2591,8 +3083,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2607,9 +3098,33 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
+      }
+    },
+    "/api/wx/pay/admin/orders/{id}/refund": {
+      "post": {
+        "operationId": "post_wx_pay_admin_orders_id_refund",
+        "summary": "POST /api/wx/pay/admin/orders/{id}/refund",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/api/wx/pay/admin/orders/{id}": {
@@ -2621,7 +3136,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2630,8 +3145,39 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/pay/admin/orders/{orderId}/items/{itemId}/qr-code": {
+      "patch": {
+        "operationId": "patch_wx_pay_admin_orders_orderId_items_itemId_qr_code",
+        "summary": "PATCH /api/wx/pay/admin/orders/{orderId}/items/{itemId}/qr-code",
+        "tags": [
+          "wechat-pay"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
             }
           }
         ]
@@ -2646,7 +3192,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2660,7 +3206,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -2672,7 +3218,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2686,7 +3232,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2695,8 +3241,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2709,7 +3254,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2718,8 +3263,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2732,7 +3276,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2741,11 +3285,240 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
+      }
+    },
+    "/api/wx/referral/bind": {
+      "post": {
+        "operationId": "post_wx_referral_bind",
+        "summary": "POST /api/wx/referral/bind",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/code": {
+      "get": {
+        "operationId": "get_wx_referral_code",
+        "summary": "GET /api/wx/referral/code",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/center": {
+      "get": {
+        "operationId": "get_wx_referral_center",
+        "summary": "GET /api/wx/referral/center",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/tier": {
+      "get": {
+        "operationId": "get_wx_referral_tier",
+        "summary": "GET /api/wx/referral/tier",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/share-event": {
+      "post": {
+        "operationId": "post_wx_referral_share_event",
+        "summary": "POST /api/wx/referral/share-event",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/commissions": {
+      "get": {
+        "operationId": "get_wx_referral_commissions",
+        "summary": "GET /api/wx/referral/commissions",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/withdraw/notify": {
+      "post": {
+        "operationId": "post_wx_referral_withdraw_notify",
+        "summary": "POST /api/wx/referral/withdraw/notify",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/withdraw": {
+      "post": {
+        "operationId": "post_wx_referral_withdraw",
+        "summary": "POST /api/wx/referral/withdraw",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/withdrawals": {
+      "get": {
+        "operationId": "get_wx_referral_withdrawals",
+        "summary": "GET /api/wx/referral/withdrawals",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/withdrawals/{id}/confirm-info": {
+      "get": {
+        "operationId": "get_wx_referral_withdrawals_id_confirm_info",
+        "summary": "GET /api/wx/referral/withdrawals/{id}/confirm-info",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/referral/withdrawals/{id}/sync": {
+      "post": {
+        "operationId": "post_wx_referral_withdrawals_id_sync",
+        "summary": "POST /api/wx/referral/withdrawals/{id}/sync",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/referral/rules": {
+      "get": {
+        "operationId": "get_wx_referral_rules",
+        "summary": "GET /api/wx/referral/rules",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/advisor/apply": {
+      "post": {
+        "operationId": "post_wx_referral_advisor_apply",
+        "summary": "POST /api/wx/referral/advisor/apply",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/advisor/status": {
+      "get": {
+        "operationId": "get_wx_referral_advisor_status",
+        "summary": "GET /api/wx/referral/advisor/status",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/referral/coupons": {
+      "get": {
+        "operationId": "get_wx_referral_coupons",
+        "summary": "GET /api/wx/referral/coupons",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
       }
     },
     "/api/rights": {
@@ -2757,7 +3530,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -2769,7 +3542,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2783,7 +3556,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2792,8 +3565,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2806,7 +3578,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2815,8 +3587,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2829,7 +3600,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2838,8 +3609,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2854,7 +3624,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2869,6 +3639,48 @@
         ]
       }
     },
+    "/api/showcase": {
+      "get": {
+        "operationId": "get_showcase",
+        "summary": "GET /api/showcase",
+        "tags": [
+          "showcase"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/showcase/admin-order": {
+      "get": {
+        "operationId": "get_showcase_admin_order",
+        "summary": "GET /api/showcase/admin-order",
+        "tags": [
+          "showcase"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/showcase/sort": {
+      "put": {
+        "operationId": "put_showcase_sort",
+        "summary": "PUT /api/showcase/sort",
+        "tags": [
+          "showcase"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/api/transaction/records": {
       "post": {
         "operationId": "post_transaction_records",
@@ -2878,7 +3690,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2892,7 +3704,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -2901,8 +3713,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -2917,7 +3728,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2931,7 +3742,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2945,7 +3756,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2959,7 +3770,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2973,7 +3784,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -2987,7 +3798,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -3011,7 +3822,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "requestBody": {
@@ -3020,6 +3831,30 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/WxCodeBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wx/refresh": {
+      "post": {
+        "operationId": "post_wx_refresh",
+        "summary": "POST /api/wx/refresh",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WxRefreshTokenBody"
               }
             }
           }
@@ -3035,7 +3870,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3049,7 +3884,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3063,7 +3898,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3077,7 +3912,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3091,7 +3926,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3105,7 +3940,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3119,7 +3954,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3133,7 +3968,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3147,7 +3982,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3161,7 +3996,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3175,7 +4010,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3189,7 +4024,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3203,7 +4038,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3217,7 +4052,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3231,7 +4066,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       },
@@ -3243,7 +4078,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3257,7 +4092,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3271,7 +4106,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -3280,8 +4115,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -3294,7 +4128,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -3303,8 +4137,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -3317,7 +4150,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -3326,8 +4159,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
@@ -3342,7 +4174,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         },
         "parameters": [
@@ -3351,11 +4183,24 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
-              "format": "int32"
+              "type": "integer"
             }
           }
         ]
+      }
+    },
+    "/api/wx/map/geocode": {
+      "get": {
+        "operationId": "get_wx_map_geocode",
+        "summary": "GET /api/wx/map/geocode",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
       }
     },
     "/api/wx/logistics/me/path": {
@@ -3367,7 +4212,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3381,7 +4226,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3395,7 +4240,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3409,7 +4254,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3423,7 +4268,7 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
           }
         }
       }
@@ -3437,7 +4282,35 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/order/confirm": {
+      "post": {
+        "operationId": "post_wx_logistics_order_confirm",
+        "summary": "POST /api/wx/logistics/order/confirm",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/query-deliver-tm": {
+      "post": {
+        "operationId": "post_wx_logistics_query_deliver_tm",
+        "summary": "POST /api/wx/logistics/query-deliver-tm",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
           }
         }
       }
@@ -3451,7 +4324,291 @@
         ],
         "responses": {
           "200": {
-            "description": "success"
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/upload-shipping-info": {
+      "post": {
+        "operationId": "post_wx_logistics_upload_shipping_info",
+        "summary": "POST /api/wx/logistics/upload-shipping-info",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/upload-combined-shipping-info": {
+      "post": {
+        "operationId": "post_wx_logistics_upload_combined_shipping_info",
+        "summary": "POST /api/wx/logistics/upload-combined-shipping-info",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/wechat-order/get": {
+      "post": {
+        "operationId": "post_wx_logistics_wechat_order_get",
+        "summary": "POST /api/wx/logistics/wechat-order/get",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/wechat-order/list": {
+      "post": {
+        "operationId": "post_wx_logistics_wechat_order_list",
+        "summary": "POST /api/wx/logistics/wechat-order/list",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/wechat-order/notify-confirm-receive": {
+      "post": {
+        "operationId": "post_wx_logistics_wechat_order_notify_confirm_receive",
+        "summary": "POST /api/wx/logistics/wechat-order/notify-confirm-receive",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/wechat-order/set-msg-jump-path": {
+      "post": {
+        "operationId": "post_wx_logistics_wechat_order_set_msg_jump_path",
+        "summary": "POST /api/wx/logistics/wechat-order/set-msg-jump-path",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/wechat-order/is-trade-management-completed": {
+      "post": {
+        "operationId": "post_wx_logistics_wechat_order_is_trade_management_completed",
+        "summary": "POST /api/wx/logistics/wechat-order/is-trade-management-completed",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/categories": {
+      "get": {
+        "operationId": "get_wx_subscribe_message_categories",
+        "summary": "GET /api/wx/subscribe-message/categories",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/templates/public": {
+      "get": {
+        "operationId": "get_wx_subscribe_message_templates_public",
+        "summary": "GET /api/wx/subscribe-message/templates/public",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/templates/public/{tid}/keywords": {
+      "get": {
+        "operationId": "get_wx_subscribe_message_templates_public_tid_keywords",
+        "summary": "GET /api/wx/subscribe-message/templates/public/{tid}/keywords",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "tid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/subscribe-message/templates": {
+      "get": {
+        "operationId": "get_wx_subscribe_message_templates",
+        "summary": "GET /api/wx/subscribe-message/templates",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_wx_subscribe_message_templates",
+        "summary": "POST /api/wx/subscribe-message/templates",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/templates/{priTmplId}": {
+      "delete": {
+        "operationId": "delete_wx_subscribe_message_templates_priTmplId",
+        "summary": "DELETE /api/wx/subscribe-message/templates/{priTmplId}",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "priTmplId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/wx/subscribe-message/send": {
+      "post": {
+        "operationId": "post_wx_subscribe_message_send",
+        "summary": "POST /api/wx/subscribe-message/send",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/user-notify": {
+      "post": {
+        "operationId": "post_wx_subscribe_message_user_notify",
+        "summary": "POST /api/wx/subscribe-message/user-notify",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/user-notify/ext": {
+      "post": {
+        "operationId": "post_wx_subscribe_message_user_notify_ext",
+        "summary": "POST /api/wx/subscribe-message/user-notify/ext",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/user-notify/query": {
+      "post": {
+        "operationId": "post_wx_subscribe_message_user_notify_query",
+        "summary": "POST /api/wx/subscribe-message/user-notify/query",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/resend/scenes": {
+      "get": {
+        "operationId": "get_wx_subscribe_message_resend_scenes",
+        "summary": "GET /api/wx/subscribe-message/resend/scenes",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/subscribe-message/resend": {
+      "post": {
+        "operationId": "post_wx_subscribe_message_resend",
+        "summary": "POST /api/wx/subscribe-message/resend",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
           }
         }
       }

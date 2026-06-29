@@ -30,9 +30,18 @@ const ROUTE_PREFIX = {
   'home-titles.js': '/api/home-titles',
   'exhibitions.js': '/api/exhibitions',
   'webview.js': '/api/webview',
+  'dashboard.js': '/api/dashboard',
+  'showcase.js': '/api/showcase',
+  'digital-claim-copy.js': '/api/digital-claim-copy',
+  'referral.js': '/api/wx/referral',
+  'adminReferral.js': '/api/admin/referral',
+  'adminWxUsers.js': '/api/admin/wx-users',
 }
 
 const INDEX_ROUTES = [
+  ['get', '/api/digital-artworks/health'],
+  ['get', '/api/admin/health'],
+  ['post', '/api/auth/url-access'],
   ['get', '/api/health'],
   ['get', '/api/health/live'],
   ['post', '/api/upload'],

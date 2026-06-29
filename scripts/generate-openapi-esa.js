@@ -32,9 +32,18 @@ const ROUTE_PREFIX = {
   'home-titles.js': '/api/home-titles',
   'exhibitions.js': '/api/exhibitions',
   'webview.js': '/api/webview',
+  'dashboard.js': '/api/dashboard',
+  'showcase.js': '/api/showcase',
+  'digital-claim-copy.js': '/api/digital-claim-copy',
+  'referral.js': '/api/wx/referral',
+  'adminReferral.js': '/api/admin/referral',
+  'adminWxUsers.js': '/api/admin/wx-users',
 }
 
 const INDEX_ROUTES = [
+  { method: 'get', path: '/api/digital-artworks/health', op: 'getDigitalArtworksHealth', summary: 'Deprecated digital artworks health check' },
+  { method: 'get', path: '/api/admin/health', op: 'getAdminHealth', summary: 'Detailed admin health check', auth: true },
+  { method: 'post', path: '/api/auth/url-access', op: 'postAuthUrlAccess', summary: 'Issue short-lived URL access token', auth: true },
   { method: 'get', path: '/api/health', op: 'getHealth', summary: '健康检查' },
   { method: 'get', path: '/api/health/live', op: 'getHealthLive', summary: '存活探针' },
   { method: 'post', path: '/api/upload', op: 'postUpload', summary: '上传文件到OSS', auth: true },
@@ -73,6 +82,12 @@ const MODULE_TAGS = {
   '/api/exhibitions': 'exhibitions',
   '/api/webview': 'webview',
   '/api/digital-identity': 'digital-identity',
+  '/api/dashboard': 'dashboard',
+  '/api/showcase': 'showcase',
+  '/api/digital-claim-copy': 'digital-claim-copy',
+  '/api/admin/referral': 'admin-referral',
+  '/api/admin/wx-users': 'admin-wx-users',
+  '/api/admin': 'admin',
 }
 
 function getTag(apiPath) {
@@ -181,7 +196,7 @@ function buildSpec() {
       operationId: r.op || safeOperationId(r.method, r.path),
       summary: `${r.method.toUpperCase()} ${oasPath}`,
       tags: [tag],
-      responses: { '200': { description: 'success' } },
+      responses: { '200': { description: 'ok' } },
     }
 
     const pathParamRe = /\{([a-zA-Z_]+)\}/g
@@ -194,7 +209,7 @@ function buildSpec() {
         in: 'path',
         required: true,
         schema: isId
-          ? { type: 'integer', format: 'int32' }
+          ? { type: 'integer' }
           : { type: 'string' },
       })
     }
