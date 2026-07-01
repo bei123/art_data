@@ -256,6 +256,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
+import { fetchAllPhysicalCategories } from '@/utils/artistList'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -324,17 +325,7 @@ const fetchCategories = async () => {
   listLoading.value = true
   listError.value = ''
   try {
-    const response = await axios.get('/physical-categories')
-    let categoriesData = []
-    if (response && response.data && Array.isArray(response.data)) {
-      categoriesData = response.data
-    } else if (response && Array.isArray(response)) {
-      categoriesData = response
-    } else {
-      categories.value = []
-      listError.value = '接口返回格式异常，无法展示列表'
-      return
-    }
+    const categoriesData = await fetchAllPhysicalCategories(axios)
 
     categories.value = categoriesData.map((category) => ({
       ...category,

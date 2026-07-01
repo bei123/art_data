@@ -411,6 +411,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, GripVertical, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
+import { fetchAllArtists, fetchAllRights, fetchAllDigitalArtworksAdmin, fetchAllExhibitions } from '@/utils/artistList'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -916,17 +917,14 @@ async function loadLinkOptions() {
   try {
     let items = []
     if (form.value.link_type === 'digital') {
-      const res = await axios.get('/digital-artworks/admin', { params: { page: 1, pageSize: 50 } })
-      items = Array.isArray(res) ? res : []
+      items = await fetchAllDigitalArtworksAdmin(axios)
       linkOptions.value = items.map((it) => ({ value: it.id, label: it.title }))
     } else if (form.value.link_type === 'rights') {
-      const res = await axios.get('/rights', { params: { page: 1, limit: 50 } })
-      items = (res && Array.isArray(res.data)) ? res.data : (res && Array.isArray(res.data?.data)) ? res.data.data : (Array.isArray(res?.data) ? res.data : [])
-      linkOptions.value = (items || []).map((it) => ({ value: it.id, label: it.title }))
+      items = await fetchAllRights(axios)
+      linkOptions.value = items.map((it) => ({ value: it.id, label: it.title }))
     } else if (form.value.link_type === 'exhibition') {
-      const res = await axios.get('/exhibitions', { params: { status: 'published', page: 1, pageSize: 100 } })
-      items = (res && Array.isArray(res.data)) ? res.data : (Array.isArray(res?.data?.data) ? res.data.data : [])
-      linkOptions.value = (items || []).map((it) => ({ value: it.id, label: it.title }))
+      items = await fetchAllExhibitions(axios, { status: 'published' })
+      linkOptions.value = items.map((it) => ({ value: it.id, label: it.title }))
     } else if (form.value.link_type === 'original') {
       const aggregated = []
       for (let page = 1; page <= ORIGINAL_MAX_PAGES; page++) {
@@ -941,8 +939,7 @@ async function loadLinkOptions() {
       items = aggregated
       linkOptions.value = aggregated.map((it) => ({ value: it.id, label: it.title }))
     } else if (form.value.link_type === 'artist') {
-      const res = await axios.get('/artists')
-      items = Array.isArray(res) ? res : (res && res.data && Array.isArray(res.data) ? res.data : [])
+      items = await fetchAllArtists(axios)
       linkOptions.value = items.map((it) => ({ value: it.id, label: it.name }))
     }
   } catch (err) {
@@ -956,8 +953,7 @@ async function loadLinkOptions() {
 async function loadArtistOptions() {
   artistOptionsLoading.value = true
   try {
-    const res = await axios.get('/artists')
-    const arr = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : [])
+    const arr = await fetchAllArtists(axios)
     artistOptions.value = arr.map((a) => ({ value: a.id, label: a.name }))
   } catch (e) {
     console.error('加载艺术家失败:', e)

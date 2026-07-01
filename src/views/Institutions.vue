@@ -368,6 +368,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
+import { fetchAllInstitutions } from '@/utils/artistList'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -454,13 +455,7 @@ const fetchInstitutions = async () => {
   listLoading.value = true
   listError.value = ''
   try {
-    const data = await axios.get('/institutions')
-    if (Array.isArray(data)) {
-      institutions.value = data
-    } else {
-      institutions.value = []
-      listError.value = '接口返回格式异常，无法展示列表'
-    }
+    institutions.value = await fetchAllInstitutions(axios)
   } catch (error) {
     console.error('获取机构列表失败：', error)
     institutions.value = []

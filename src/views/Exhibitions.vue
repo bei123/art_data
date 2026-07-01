@@ -673,6 +673,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
+import { fetchAllExhibitions } from '@/utils/artistList'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { ElMessage } from 'element-plus'
@@ -1280,9 +1281,7 @@ async function fetchExhibitions() {
   loadingList.value = true
   listError.value = ''
   try {
-    const res = await axios.get('/exhibitions?page=1&pageSize=100')
-    const list = res?.data && Array.isArray(res.data) ? res.data : []
-    exhibitions.value = list
+    exhibitions.value = await fetchAllExhibitions(axios)
   } catch (e) {
     exhibitions.value = []
     listError.value = e?.response?.data?.error || e?.message || '获取展览列表失败，请稍后重试'

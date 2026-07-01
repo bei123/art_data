@@ -472,6 +472,7 @@ import { computed, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Trash2, Upload } from 'lucide-vue-next'
 import axios from '../utils/axios'
+import { fetchAllArtists, fetchAllDigitalArtworksAdmin } from '@/utils/artistList'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -601,19 +602,14 @@ const fetchArtworks = async () => {
   listLoading.value = true
   listError.value = ''
   try {
-    const data = await axios.get('/digital-artworks/admin')
-    if (Array.isArray(data)) {
-      artworks.value = data.map((artwork) => ({
-        ...artwork,
-        image_url: getImageUrl(artwork.image_url),
-        is_hidden: artwork.is_hidden || false,
-        show_purchase_link:
-          artwork.show_purchase_link === 0 || artwork.show_purchase_link === false ? false : true
-      }))
-    } else {
-      artworks.value = []
-      listError.value = '接口返回格式异常，无法展示列表'
-    }
+    const data = await fetchAllDigitalArtworksAdmin(axios)
+    artworks.value = data.map((artwork) => ({
+      ...artwork,
+      image_url: getImageUrl(artwork.image_url),
+      is_hidden: artwork.is_hidden || false,
+      show_purchase_link:
+        artwork.show_purchase_link === 0 || artwork.show_purchase_link === false ? false : true
+    }))
   } catch (error) {
     console.error('获取数字艺术品列表失败：', error)
     artworks.value = []
@@ -625,13 +621,7 @@ const fetchArtworks = async () => {
 
 const fetchArtists = async () => {
   try {
-    const data = await axios.get('/artists')
-    if (Array.isArray(data)) {
-      artistOptions.value = data
-    } else {
-      artistOptions.value = []
-      ElMessage.error('获取艺术家数据格式不正确')
-    }
+    artistOptions.value = await fetchAllArtists(axios)
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     artistOptions.value = []

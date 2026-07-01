@@ -937,6 +937,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, ChevronDown, ChevronUp, GripVertical, Loader2, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
+import { fetchAllInstitutions } from '@/utils/artistList'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -1404,12 +1405,7 @@ const handleArtistListPublicChange = async (row, nextPublic) => {
 
 const fetchInstitutions = async () => {
   try {
-    const data = await axios.get('/institutions')
-    if (Array.isArray(data)) {
-      institutions.value = data
-    } else {
-      institutions.value = []
-    }
+    institutions.value = await fetchAllInstitutions(axios)
   } catch (error) {
     console.error('获取机构列表失败：', error)
     institutions.value = []

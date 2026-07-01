@@ -549,6 +549,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Plus, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
+import { fetchAllArtists, fetchAllPhysicalCategories, fetchAllRights, fetchAllDigitalArtworksAdmin } from '@/utils/artistList'
 import { API_BASE_URL, isOssPublicUrl } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
@@ -780,17 +781,7 @@ const fetchRights = async () => {
   listLoading.value = true
   listError.value = ''
   try {
-    const response = await axios.get('/rights')
-    let arr = []
-    if (Array.isArray(response)) {
-      arr = response
-    } else if (response && Array.isArray(response.data)) {
-      arr = response.data
-    } else if (response != null) {
-      rights.value = []
-      listError.value = '接口返回格式异常，无法展示列表'
-      return
-    }
+    const arr = await fetchAllRights(axios)
     rights.value = arr.map((right) => ({
       ...right,
       images: right.images ? right.images.map((image) => getImageUrl(image)) : []
@@ -806,8 +797,7 @@ const fetchRights = async () => {
 
 const fetchDigitalOptions = async () => {
   try {
-    const arr = await axios.get('/digital-artworks/admin', { params: { page: 1, pageSize: 200 } })
-    digitalOptions.value = Array.isArray(arr) ? arr : []
+    digitalOptions.value = await fetchAllDigitalArtworksAdmin(axios)
   } catch {
     digitalOptions.value = []
   }
@@ -815,14 +805,7 @@ const fetchDigitalOptions = async () => {
 
 const fetchCategories = async () => {
   try {
-    const response = await axios.get('/physical-categories')
-    if (response && response.data && Array.isArray(response.data)) {
-      categories.value = response.data
-    } else if (Array.isArray(response)) {
-      categories.value = response
-    } else {
-      categories.value = []
-    }
+    categories.value = await fetchAllPhysicalCategories(axios)
   } catch (error) {
     console.error('获取分类列表失败：', error)
     categories.value = []
@@ -831,13 +814,7 @@ const fetchCategories = async () => {
 
 const fetchArtists = async () => {
   try {
-    const response = await axios.get('/artists')
-    if (Array.isArray(response)) {
-      artists.value = response
-    } else {
-      artists.value = []
-      ElMessage.error('获取艺术家数据格式不正确')
-    }
+    artists.value = await fetchAllArtists(axios)
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     artists.value = []

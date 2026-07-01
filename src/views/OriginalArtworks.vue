@@ -891,6 +891,7 @@ import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { AlertCircle, Loader2, Plus, RefreshCw, Search, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'  // 使用封装的axios实例
+import { fetchAllArtists } from '@/utils/artistList'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
@@ -1623,16 +1624,7 @@ const editorConfig = {
 
 const fetchArtists = async () => {
   try {
-    const data = await axios.get('/artists')
-    console.log('原作艺术品艺术家API返回的原始数据：', data)
-    if (Array.isArray(data)) {
-      artistOptions.value = data
-      console.log('设置后的艺术家数据：', artistOptions.value)
-    } else {
-      console.error('返回的数据不是数组：', data)
-      artistOptions.value = []
-      ElMessage.error('获取艺术家数据格式不正确')
-    }
+    artistOptions.value = await fetchAllArtists(axios)
   } catch (error) {
     console.error('获取艺术家列表失败：', error)
     artistOptions.value = []
