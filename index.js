@@ -227,9 +227,7 @@ app.get('/api/admin/health', ...auth.requireAdmin, apiDetailedHealthHandler);
 
 // 本地上传目录（非公开静态；经签名 URL 或登录后访问）
 const { serveLocalUpload } = require('./middleware/localUploads');
-const localUploadsRouter = express.Router();
-localUploadsRouter.get('*', serveLocalUpload);
-app.use('/uploads', uploadsLimiter, localUploadsRouter);
+app.use('/uploads', uploadsLimiter, serveLocalUpload);
 
 // 创建上传目录
 if (!fs.existsSync('uploads')) {
@@ -577,8 +575,8 @@ app.use((err, req, res, next) => {
   return sendErrorResponse(res, err, req);
 });
 
-// 404处理
-app.use('*', (req, res) => {
+// 404处理（Express 5 不支持 app.use('*')，无路径 middleware 匹配所有未命中路由）
+app.use((req, res) => {
   applyCorsHeaders(req, res);
   res.status(404).json({
     error: '接口不存在',

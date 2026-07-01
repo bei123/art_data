@@ -8,6 +8,7 @@ const { authenticateToken, checkRole } = require('../auth');
 const { wxAuthenticated } = require('../utils/wxRouteAuth');
 const { appendClientErrorDetail } = require('../utils/clientErrorDetail');
 const { wxLoginLimiter, wxRefreshLimiter, wxPublicAuxLimiter } = require('../utils/wxAuthRateLimit');
+const { rateLimitIpKey, rateLimitUserOrIpKey } = require('../utils/rateLimitKeys');
 const svc = require('../services/wxService');
 const mapGeocodeSvc = require('../services/mapGeocodeService');
 const logisticsSvc = require('../services/logisticsService');
@@ -20,7 +21,7 @@ const geocodeLimiter = rateLimit({
     max: parseInt(process.env.MAP_GEOCODE_RATE_LIMIT_PER_MIN || '30', 10),
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => `geocode:ip:${req.ip}`,
+    keyGenerator: (req) => `geocode:ip:${rateLimitIpKey(req)}`,
     skip: async (req) => {
         const address = String(req.query?.address || '').trim();
         if (!address) return false;
@@ -36,11 +37,7 @@ const wxPhoneNumberLimiter = rateLimit({
     max: parseInt(process.env.WX_GET_PHONE_NUMBER_RATE_LIMIT || '10', 10),
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => {
-        const userId = req.user?.id
-        if (userId != null) return `wx-phone:user:${userId}`
-        return `wx-phone:ip:${req.ip}`
-    },
+    keyGenerator: (req) => rateLimitUserOrIpKey('wx-phone', req),
     handler: (req, res) => {
         res.status(429).json({ error: '获取手机号过于频繁，请稍后再试' });
     },
@@ -51,11 +48,7 @@ const idcardVerifyLimiter = rateLimit({
     max: parseInt(process.env.WX_IDCARD_VERIFY_RATE_LIMIT_PER_HOUR || '20', 10),
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => {
-        const userId = req.user?.id
-        if (userId != null) return `idcard-verify:user:${userId}`
-        return `idcard-verify:ip:${req.ip}`
-    },
+    keyGenerator: (req) => rateLimitUserOrIpKey('idcard-verify', req),
     handler: (req, res) => {
         res.status(429).json({
             code: 429,
