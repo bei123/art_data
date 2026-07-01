@@ -108,6 +108,12 @@ async function clearDigitalArtworkPublicCaches(artworkId, artistIds = []) {
   }
   await redisClient.del(REDIS_DIGITAL_ARTWORK_DETAIL_KEY_PREFIX + sid);
   await invalidateExhibitionCachesForArtworks({ digitalArtworkIds: [sid] });
+  try {
+    const { invalidateSearchCaches } = require('../utils/searchCache');
+    await invalidateSearchCaches();
+  } catch (e) {
+    logger.warn('invalidate_search_caches_from_digital_artwork_failed', { err: e?.message || e });
+  }
 }
 
 /** Wespace H5 二级市场购买页，query 中 id 为 goodsId */

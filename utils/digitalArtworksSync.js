@@ -514,6 +514,8 @@ async function syncDigitalArtworksOnce() {
         await redisClient.del(`digital_artworks:detail:${sid}`);
       }
       await invalidateExhibitionCachesForArtworks({ digitalArtworkIds: syncedIds });
+      const { invalidateSearchCaches } = require('./searchCache');
+      await invalidateSearchCaches();
     } catch (e) {
       console.warn('[digitalArtworksSync] cache invalidation:', e?.message || e);
     }

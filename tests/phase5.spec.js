@@ -16,6 +16,7 @@ describe('REFERRAL_BRAND', () => {
 
 describe('buildReferralRuleHighlights', () => {
   it('builds seven highlight lines with consistent copy', () => {
+    
     const highlights = buildReferralRuleHighlights({
       bindingDays: 365,
       firstReferralBonusYuan: 30,

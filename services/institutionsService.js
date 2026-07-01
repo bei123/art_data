@@ -32,6 +32,12 @@ function parsePositiveIntId(raw) {
 async function invalidateInstitutionListCache() {
   await redisClient.del(REDIS_INSTITUTIONS_LIST_KEY);
   await redisClient.del('institutions:list');
+  try {
+    const { invalidateSearchCaches } = require('../utils/searchCache');
+    await invalidateSearchCaches();
+  } catch (e) {
+    logger.error('invalidate_search_caches_from_institutions_failed', { err: e });
+  }
 }
 
 function sanitizeInstitutionKeyword(raw) {

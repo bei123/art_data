@@ -14,6 +14,11 @@ const {
   isFulltextIndexMismatchError,
 } = require('../utils/searchIndexSchema');
 const { ARTIST_LIST_SELECT } = require('../utils/sqlSelectFragments');
+const {
+  buildSearchCacheKey,
+  getCachedSearchResult,
+  setCachedSearchResult,
+} = require('../utils/searchCache');
 
 const DIGITAL_ARTWORKS_EXTERNAL_TABLE = 'digital_artworks_external';
 const DIGITAL_PUBLIC_WHERE = `(dae.is_hidden = 0 OR dae.is_hidden IS NULL)`;
@@ -204,6 +209,20 @@ async function searchArtists(query, includeHidden = false, options = {}) {
 
   const { whereSql, params } = buildArtistSearchClause(includeHidden, institutionId, keyword);
 
+  const cacheKey = buildSearchCacheKey({
+    keyword,
+    type: 'artist',
+    page: pageNum,
+    limit: limitNum,
+    includeHidden,
+    institutionId,
+  });
+  const cachedBody = await getCachedSearchResult(cacheKey);
+  if (cachedBody) {
+    logger.info('search_cache_hit', { type: 'artist', page: pageNum, limit: limitNum });
+    return adminResult(200, cachedBody);
+  }
+
   try {
   const [countRows] = await db.query(
     `SELECT COUNT(*) as total
@@ -232,7 +251,7 @@ async function searchArtists(query, includeHidden = false, options = {}) {
   );
 
   const totalPages = Math.ceil(totalCount / limitNum) || 0;
-  return adminResult(200, {
+  const body = {
     data: mapArtistSearchRows(rows),
     pagination: {
       current_page: pageNum,
@@ -242,7 +261,9 @@ async function searchArtists(query, includeHidden = false, options = {}) {
       has_next: pageNum < totalPages,
       has_prev: pageNum > 1,
     },
-  });
+  };
+  await setCachedSearchResult(cacheKey, body);
+  return adminResult(200, body);
   } catch (error) {
     if (!options.likeFallback && isFulltextIndexMismatchError(error)) {
       logger.warn('artist fulltext search mismatch; falling back to LIKE', { err: error.message });
@@ -264,8 +285,24 @@ async function getSearchResults(query, includeHidden = false, options = {}) {
   const offset = (pageNum - 1) * limitNum;
   const searchTerm = `%${keyword}%`;
   const digitalLikeParams = [searchTerm, searchTerm, searchTerm, searchTerm];
+  const searchType = type || 'all';
   let results = [];
   let totalCount = 0;
+
+  if (searchType !== 'artist') {
+    const cacheKey = buildSearchCacheKey({
+      keyword,
+      type: searchType,
+      page: pageNum,
+      limit: limitNum,
+      includeHidden,
+    });
+    const cachedBody = await getCachedSearchResult(cacheKey);
+    if (cachedBody) {
+      logger.info('search_cache_hit', { type: searchType, page: pageNum, limit: limitNum });
+      return adminResult(200, cachedBody);
+    }
+  }
 
   try {
     if (type === 'artist') {
@@ -400,7 +437,7 @@ async function getSearchResults(query, includeHidden = false, options = {}) {
     const hasNext = pageNum < totalPages;
     const hasPrev = pageNum > 1;
 
-    return adminResult(200, {
+    const body = {
       data: results,
       pagination: {
         current_page: pageNum,
@@ -410,7 +447,20 @@ async function getSearchResults(query, includeHidden = false, options = {}) {
         has_next: hasNext,
         has_prev: hasPrev,
       },
-    });
+    };
+
+    if (searchType !== 'artist') {
+      const cacheKey = buildSearchCacheKey({
+        keyword,
+        type: searchType,
+        page: pageNum,
+        limit: limitNum,
+        includeHidden,
+      });
+      await setCachedSearchResult(cacheKey, body);
+    }
+
+    return adminResult(200, body);
   } catch (error) {
     if (isFulltextIndexMismatchError(error)) {
       if (!options.likeFallback) {

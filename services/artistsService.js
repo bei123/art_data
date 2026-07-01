@@ -218,6 +218,12 @@ async function invalidateArtistsListCache() {
   } catch (e) {
     logger.error('invalidate_artists_list_cache_failed', { err: e });
   }
+  try {
+    const { invalidateSearchCaches } = require('../utils/searchCache');
+    await invalidateSearchCaches();
+  } catch (e) {
+    logger.error('invalidate_search_caches_from_artists_failed', { err: e });
+  }
 }
 
 async function getPublicArtistDetail(rawId, includeHidden = false) {

@@ -16,7 +16,14 @@ const REDIS_DETAIL_CACHE_TTL_SEC = parsePositiveTtlSec(
   604800,
 )
 
+/** 搜索接口缓存 TTL（默认 5 分钟）；写路径变更时会 scan 清除 */
+const REDIS_SEARCH_CACHE_TTL_SEC = parsePositiveTtlSec(
+  process.env.REDIS_SEARCH_CACHE_TTL_SEC,
+  300,
+)
+
 module.exports = {
   REDIS_LIST_CACHE_TTL_SEC,
   REDIS_DETAIL_CACHE_TTL_SEC,
+  REDIS_SEARCH_CACHE_TTL_SEC,
 }

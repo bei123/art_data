@@ -68,6 +68,12 @@ async function invalidateArtworksPublicCaches(options = {}) {
   } catch (e) {
     logger.error('invalidateArtworksPublicCaches failed', { err: e })
   }
+  try {
+    const { invalidateSearchCaches } = require('../utils/searchCache')
+    await invalidateSearchCaches()
+  } catch (e) {
+    logger.error('invalidate_search_caches_from_artworks_failed', { err: e })
+  }
 }
 
 const performanceMetrics = {
