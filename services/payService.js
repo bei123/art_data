@@ -57,6 +57,10 @@ const { ensureReferralSchema } = require('../utils/referralSchema');
 const { resolveOrderReferrerId } = require('./referralService');
 const { onPaymentSuccess } = require('./userTierService');
 const {
+    buildWechatPayTimeExpire,
+    getUnpaidOrderDeadlineMinutes,
+} = require('../utils/orderPaymentDeadline');
+const {
     createCommissionsForPaidOrder,
     cancelCommissionsByOrderId,
 } = require('./commissionService');
@@ -956,7 +960,8 @@ async function unifiedOrder(req) {
                 },
                 payer: {
                     openid: cleanOpenid
-                }
+                },
+                time_expire: buildWechatPayTimeExpire(),
             };
 
             // 生成签名所需的参数
@@ -1249,7 +1254,8 @@ async function singleOrder(req) {
                 },
                 payer: {
                     openid: cleanOpenid
-                }
+                },
+                time_expire: buildWechatPayTimeExpire(),
             };
 
             const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -1587,23 +1593,13 @@ async function closeOrder(req) {
         );
 
         if (response.status === 204) {
-            const { releaseReferralCouponByOrderId } = require('./referralRewardService');
             if (owned.order?.id) {
-                await releaseClosedOrderInventory(owned.order.id);
-                await db.query(
-                    `UPDATE orders SET trade_state = 'CLOSED', trade_state_desc = '订单已关闭', updated_at = NOW()
-                     WHERE id = ? AND trade_state IN ('NOTPAY', 'PAYERROR')`,
-                    [owned.order.id]
-                );
-                await releaseReferralCouponByOrderId(owned.order.id);
+                await finalizeLocalUnpaidOrderClose({
+                    orderId: owned.order.id,
+                    outTradeNo: cleanOutTradeNo,
+                    stateDesc: '订单已关闭',
+                });
             }
-            cancelPaymentPendingReminder(cleanOutTradeNo).catch((err) => {
-                logger.warn('取消待付款提醒排期失败', { outTradeNo: cleanOutTradeNo, err: err?.message || err });
-            });
-            fireSubscribeNotify(
-                notifyOrderCancelled({ outTradeNo: cleanOutTradeNo, reason: '订单已关闭' }),
-                'orderCancelled',
-            );
             return adminResult(200, {
                 success: true,
                 message: '订单关闭成功'
@@ -4820,6 +4816,93 @@ async function syncOrderTradeStateFromWechat(orderRow) {
     };
 }
 
+async function finalizeLocalUnpaidOrderClose({
+    orderId,
+    outTradeNo,
+    stateDesc = '订单已关闭',
+    notifyReason = stateDesc,
+}) {
+    const { releaseReferralCouponByOrderId } = require('./referralRewardService');
+    if (orderId) {
+        await releaseClosedOrderInventory(orderId);
+        await db.query(
+            `UPDATE orders SET trade_state = 'CLOSED', trade_state_desc = ?, updated_at = NOW()
+             WHERE id = ? AND trade_state IN ('NOTPAY', 'PAYERROR')`,
+            [stateDesc, orderId]
+        );
+        await releaseReferralCouponByOrderId(orderId);
+    }
+    if (outTradeNo) {
+        cancelPaymentPendingReminder(outTradeNo).catch((err) => {
+            logger.warn('取消待付款提醒排期失败', { outTradeNo, err: err?.message || err });
+        });
+        fireSubscribeNotify(
+            notifyOrderCancelled({ outTradeNo, reason: notifyReason }),
+            'orderCancelled',
+        );
+    }
+}
+
+async function autoCloseUnpaidOrderRow(orderRow) {
+    if (!orderRow?.id || !orderRow?.out_trade_no) {
+        return { skipped: true, reason: 'invalid_row' };
+    }
+
+    const synced = await syncOrderTradeStateFromWechat(orderRow);
+    const state = synced.tradeState || orderRow.trade_state;
+    if (state === 'SUCCESS' || state === 'REFUND') {
+        return { skipped: true, reason: 'paid_or_refund' };
+    }
+    if (state !== 'NOTPAY' && state !== 'PAYERROR') {
+        return { skipped: true, reason: 'not_unpaid', tradeState: state };
+    }
+
+    const closed = await requestWechatCloseTransactionForRepay(orderRow.out_trade_no);
+    if (!closed.ok) {
+        return { failed: true, reason: closed.message || 'wechat_close_failed' };
+    }
+
+    await finalizeLocalUnpaidOrderClose({
+        orderId: orderRow.id,
+        outTradeNo: orderRow.out_trade_no,
+        stateDesc: '超时未支付，订单已关闭',
+        notifyReason: '超时未支付，订单已关闭',
+    });
+    return { closed: true };
+}
+
+async function closeExpiredUnpaidOrders(options = {}) {
+    const limit = Math.min(100, Math.max(1, parseInt(options.limit, 10) || 50));
+    const minutes = getUnpaidOrderDeadlineMinutes();
+
+    const [rows] = await db.query(
+        `SELECT id, out_trade_no, user_id, trade_state, inventory_reserved, created_at
+         FROM orders
+         WHERE trade_state IN ('NOTPAY', 'PAYERROR')
+           AND created_at <= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+         ORDER BY created_at ASC
+         LIMIT ?`,
+        [minutes, limit]
+    );
+
+    let closed = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const row of rows || []) {
+        const result = await autoCloseUnpaidOrderRow(row);
+        if (result.closed) closed += 1;
+        else if (result.failed) failed += 1;
+        else skipped += 1;
+    }
+
+    if (closed > 0) {
+        logger.info('order_auto_close_tick', { closed, skipped, failed, minutes, scanned: (rows || []).length });
+    }
+
+    return { closed, skipped, failed, scanned: (rows || []).length, minutes };
+}
+
 async function uploadDigitalItemQrCode(req) {
     try {
         await ensureOrderItemsQrCodeColumns();
@@ -4927,5 +5010,6 @@ module.exports = {
   buyerOrderDetail,
   verifyBuyerConfirmReceipt,
   uploadDigitalItemQrCode,
+  closeExpiredUnpaidOrders,
 };
 

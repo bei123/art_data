@@ -15,7 +15,12 @@ const {
 const { sendSubscribeMessageDirect, setUserNotifyDirect } = require('./subscribeMessageService')
 
 const SUBSCRIBE_SENT_TTL_SEC = 60 * 60 * 24 * 7
-const PAYMENT_DEADLINE_MINUTES = parseInt(process.env.WX_SUBSCRIBE_PAYMENT_DEADLINE_MINUTES || '30', 10)
+const {
+  getUnpaidOrderDeadlineMinutes,
+  getPaymentDeadlineMs,
+} = require('../utils/orderPaymentDeadline')
+
+const PAYMENT_DEADLINE_MINUTES = getUnpaidOrderDeadlineMinutes()
 const PAYMENT_PENDING_REMIND_BEFORE_MINUTES = parseInt(
   process.env.WX_SUBSCRIBE_PAYMENT_PENDING_REMIND_BEFORE_MINUTES || '5',
   10,
@@ -25,11 +30,6 @@ const PENDING_SCHEDULE_POLL_MS = parseInt(process.env.WX_SUBSCRIBE_PAYMENT_PENDI
 const VIRTUAL_DELIVERY_NOTIFY_RETRY_MS = parseInt(process.env.WX_VIRTUAL_DELIVERY_NOTIFY_RETRY_MS || '65000', 10)
 
 let paymentPendingSchedulerTimer = null
-
-function getPaymentDeadlineMs(createdAt) {
-  const created = createdAt ? new Date(createdAt) : new Date()
-  return created.getTime() + Math.max(5, PAYMENT_DEADLINE_MINUTES) * 60 * 1000
-}
 
 function getPaymentPendingSendAtMs(createdAt) {
   const deadlineMs = getPaymentDeadlineMs(createdAt)
