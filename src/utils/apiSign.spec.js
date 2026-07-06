@@ -3,6 +3,7 @@ import { signApiRequest } from '../../utils/apiRequestSign.js'
 import {
   buildCanonicalQuery,
   resolveAxiosSignPath,
+  resolveAxiosSignQuery,
   resolveAxiosSignBody,
   signApiRequestHeaders,
 } from './apiSign.js'
@@ -31,6 +32,42 @@ describe('admin apiSign client', () => {
         url: 'banners',
       })
     ).toBe('/api/banners')
+  })
+
+  it('resolveAxiosSignQuery merges query string from URL and params', () => {
+    expect(
+      resolveAxiosSignQuery({
+        url: '/digital-artworks/123?usn=abc',
+        params: { page: '1' },
+      })
+    ).toEqual({ usn: 'abc', page: '1' })
+
+    expect(
+      resolveAxiosSignQuery({
+        url: '/digital-artworks/123?usn=abc',
+        params: { usn: 'override' },
+      })
+    ).toEqual({ usn: 'override' })
+  })
+
+  it('signApiRequestHeaders matches backend for GET with query', async () => {
+    const payload = {
+      method: 'GET',
+      path: '/api/digital-artworks/1963494180583952430',
+      query: {
+        usn: '41f8d683165712af3aec33e1c840898fe4bdec9f637eaf6642d0774e2e81fb3b',
+      },
+      body: '',
+      apiKey: 'wx-mini',
+      secret: 'test-wx-secret',
+      timestamp: 1720185600,
+      nonce: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+    }
+
+    const serverSigned = signApiRequest(payload)
+    const clientSigned = await signApiRequestHeaders(payload)
+
+    expect(clientSigned).toEqual(serverSigned.headers)
   })
 
   it('signApiRequestHeaders matches backend signApiRequest', async () => {

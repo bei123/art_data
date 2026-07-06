@@ -290,6 +290,35 @@ describe('apiRequestSign', () => {
     expect(getModeAll()).toBe('all')
   })
 
+  it('verifies GET requests with usn query on server', () => {
+    const clients = new Map([['wx-mini', ['test-wx-secret']]])
+    const signed = signApiRequest({
+      method: 'GET',
+      path: '/api/digital-artworks/1963494180583952430',
+      query: {
+        usn: '41f8d683165712af3aec33e1c840898fe4bdec9f637eaf6642d0774e2e81fb3b',
+      },
+      apiKey: 'wx-mini',
+      secret: 'test-wx-secret',
+      timestamp: 1720185600,
+      nonce: 'nonce-usn-test',
+    })
+
+    const verified = verifyApiRequestSignature({
+      method: 'GET',
+      path: '/api/digital-artworks/1963494180583952430',
+      query: {
+        usn: '41f8d683165712af3aec33e1c840898fe4bdec9f637eaf6642d0774e2e81fb3b',
+      },
+      body: '',
+      headers: signed.headers,
+      clients,
+      clockSkewSec: 999999999,
+    })
+
+    expect(verified.ok).toBe(true)
+  })
+
   it('parseApiSignClients preserves secrets with special characters', () => {
     const clients = parseApiSignClients(
       'admin-web:PIUL^u+Rv1j6ho)(5miH,wx-mini:8NsZDr%PbS%(TAs1FV'

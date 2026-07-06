@@ -140,14 +140,11 @@ function parseQueryString(search) {
 }
 
 function resolveAxiosSignQuery(config) {
-  if (config?.params && Object.keys(config.params).length > 0) {
-    return config.params
-  }
-
   const url = String(config?.url || '')
   const qIdx = url.indexOf('?')
-  if (qIdx === -1) return {}
-  return parseQueryString(url.slice(qIdx))
+  const fromUrl = qIdx === -1 ? {} : parseQueryString(url.slice(qIdx))
+  const fromParams = config?.params && typeof config.params === 'object' ? config.params : {}
+  return { ...fromUrl, ...fromParams }
 }
 
 function resolveAxiosSignBody(config) {
