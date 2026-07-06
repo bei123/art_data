@@ -55,14 +55,16 @@ function isApiSignStrictRedis() {
 }
 
 /**
- * 解析 API_SIGN_CLIENTS，格式：clientId:secret,clientId2:secretA|secretB
- * 逗号分隔客户端；同一客户端多密钥用 | 分隔（轮换窗口）
+ * 解析 API_SIGN_CLIENTS
+ * 格式：clientId:secret;clientId2:secretA|secretB（推荐用 ; 分隔客户端，避免密钥含逗号）
+ * 兼容旧格式逗号分隔：clientId:secret,clientId2:secret
  */
 function parseApiSignClients(raw) {
   const map = new Map()
   if (!raw || typeof raw !== 'string') return map
 
-  for (const segment of raw.split(',')) {
+  const delimiter = raw.includes(';') ? ';' : ','
+  for (const segment of raw.split(delimiter)) {
     const trimmed = segment.trim()
     if (!trimmed) continue
 
@@ -83,8 +85,35 @@ function parseApiSignClients(raw) {
   return map
 }
 
+const API_SIGN_CLIENT_ENV_KEYS = [
+  ['admin-web', 'API_SIGN_SECRET_ADMIN_WEB'],
+  ['wx-mini', 'API_SIGN_SECRET_WX_MINI'],
+]
+
+function mergeClientSecrets(map, clientId, secrets) {
+  if (!clientId || !secrets?.length) return
+  const existing = map.get(clientId) || []
+  const merged = [...existing]
+  for (const secret of secrets) {
+    if (!merged.includes(secret)) merged.push(secret)
+  }
+  map.set(clientId, merged)
+}
+
 function loadApiSignClientsFromEnv() {
-  return parseApiSignClients(process.env.API_SIGN_CLIENTS)
+  const map = parseApiSignClients(process.env.API_SIGN_CLIENTS)
+
+  for (const [clientId, envName] of API_SIGN_CLIENT_ENV_KEYS) {
+    const raw = process.env[envName]
+    if (!raw || !String(raw).trim()) continue
+    const secrets = String(raw)
+      .split('|')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    mergeClientSecrets(map, clientId, secrets)
+  }
+
+  return map
 }
 
 function encodeQueryComponent(value) {

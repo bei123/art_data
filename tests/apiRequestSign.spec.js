@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   parseApiSignClients,
   buildCanonicalQuery,
@@ -237,6 +237,23 @@ describe('apiRequestSign', () => {
     expect(shouldSkipApiSign({ method: 'GET', path: '/uploads/demo.jpg' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'POST', path: '/api/upload' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'GET', path: '/api/merchants' })).toBe(false)
+  })
+
+  it('parseApiSignClients supports semicolon-separated clients', () => {
+    const clients = parseApiSignClients('admin-web:abc;wx-mini:def|ghi')
+    expect(clients.get('admin-web')).toEqual(['abc'])
+    expect(clients.get('wx-mini')).toEqual(['def', 'ghi'])
+  })
+
+  it('loadApiSignClientsFromEnv merges API_SIGN_SECRET_* variables', async () => {
+    vi.stubEnv('API_SIGN_CLIENTS', '')
+    vi.stubEnv('API_SIGN_SECRET_ADMIN_WEB', 'admin-secret')
+    vi.stubEnv('API_SIGN_SECRET_WX_MINI', 'wx-secret')
+    vi.resetModules()
+    const { loadApiSignClientsFromEnv } = await import('../utils/apiRequestSign.js')
+    const clients = loadApiSignClientsFromEnv()
+    expect(clients.get('admin-web')).toEqual(['admin-secret'])
+    expect(clients.get('wx-mini')).toEqual(['wx-secret'])
   })
 
   it('parseApiSignClients preserves secrets with special characters', () => {
