@@ -146,6 +146,56 @@ describe('apiRequestSign middleware', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
+  it('allows invalid GET signatures when only writes are enforced', async () => {
+    const middleware = createApiRequestSignMiddleware({
+      enabled: true,
+      enforceWrites: true,
+      clients: TEST_CLIENTS,
+      redis: { setNxEx: vi.fn() },
+    })
+    const req = {
+      method: 'GET',
+      baseUrl: '/api',
+      path: '/merchants',
+      query: {},
+      headers: {},
+      requestId: 'rid',
+    }
+    const res = createMockRes()
+    const next = vi.fn()
+
+    await middleware(req, res, next)
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(res.body).toBe(null)
+  })
+
+  it('blocks invalid POST signatures when only writes are enforced', async () => {
+    const middleware = createApiRequestSignMiddleware({
+      enabled: true,
+      enforceWrites: true,
+      clients: TEST_CLIENTS,
+      redis: { setNxEx: vi.fn() },
+    })
+    const req = {
+      method: 'POST',
+      baseUrl: '/api',
+      path: '/cart',
+      query: {},
+      body: { right_id: 1 },
+      headers: {},
+      requestId: 'rid',
+    }
+    const res = createMockRes()
+    const next = vi.fn()
+
+    await middleware(req, res, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(401)
+    expect(res.body.code).toBe('MISSING_SIGNATURE')
+  })
+
   it('blocks invalid signatures when enforced', async () => {
     const middleware = createApiRequestSignMiddleware({
       enabled: true,
@@ -155,7 +205,8 @@ describe('apiRequestSign middleware', () => {
     })
     const req = {
       method: 'GET',
-      path: '/api/merchants',
+      baseUrl: '/api',
+      path: '/merchants',
       query: {},
       headers: {},
       requestId: 'rid',

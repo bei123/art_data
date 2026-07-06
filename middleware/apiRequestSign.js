@@ -10,7 +10,8 @@ const {
   getApiSignClockSkewSec,
   getApiSignNonceTtlSec,
   isApiSignEnabled,
-  isApiSignEnforced,
+  getApiSignEnforceMode,
+  shouldEnforceApiSignForMethod,
   isApiSignStrictRedis,
 } = require('../utils/apiRequestSign')
 
@@ -29,6 +30,13 @@ function resolveSignPath(req) {
   return combined.startsWith('/') ? combined : `/${combined}`
 }
 
+function resolveEnforceMode(deps = {}) {
+  if (deps.enforceMode) return deps.enforceMode
+  if (deps.enforced === true) return 'all'
+  if (deps.enforceWrites === true) return 'writes'
+  return getApiSignEnforceMode()
+}
+
 async function registerApiSignNonce({ redis, apiKey, nonce, ttlSec }) {
   const key = buildApiSignNonceRedisKey(apiKey, nonce)
   try {
@@ -43,14 +51,14 @@ function createApiRequestSignMiddleware(deps = {}) {
   const redis = deps.redis || redisClient
   const clients = deps.clients || loadApiSignClientsFromEnv()
   const enabled = deps.enabled ?? isApiSignEnabled()
-  const enforced = deps.enforced ?? isApiSignEnforced()
+  const enforceMode = resolveEnforceMode(deps)
   const strictRedis = deps.strictRedis ?? isApiSignStrictRedis()
   const clockSkewSec = deps.clockSkewSec ?? getApiSignClockSkewSec()
   const nonceTtlSec = deps.nonceTtlSec ?? getApiSignNonceTtlSec()
 
   if (enabled && clients.size === 0) {
     logger.warn('api_sign_enabled_without_clients', {
-      enforced,
+      enforce_mode: enforceMode,
       message:
         'API_SIGN_ENABLED=true 但未加载任何客户端密钥。请在服务器 .env 配置 API_SIGN_SECRET_ADMIN_WEB 与 API_SIGN_SECRET_WX_MINI（或 API_SIGN_CLIENTS）后重启',
       has_api_sign_clients: Boolean(process.env.API_SIGN_CLIENTS),
@@ -59,7 +67,7 @@ function createApiRequestSignMiddleware(deps = {}) {
     })
   } else if (enabled) {
     logger.info('api_sign_ready', {
-      enforced,
+      enforce_mode: enforceMode,
       client_ids: [...clients.keys()],
     })
   }
@@ -68,6 +76,7 @@ function createApiRequestSignMiddleware(deps = {}) {
     if (!enabled) return next()
 
     const signPath = resolveSignPath(req)
+    const requestEnforced = shouldEnforceApiSignForMethod(req.method, enforceMode)
 
     if (shouldSkipApiSign({ method: req.method, path: signPath })) {
       return next()
@@ -91,10 +100,11 @@ function createApiRequestSignMiddleware(deps = {}) {
         method: req.method,
         api_key: signHeaders['x-api-key'] || signHeaders['X-Api-Key'] || null,
         request_id: req.requestId || null,
-        enforced,
+        enforce_mode: enforceMode,
+        enforced: requestEnforced,
       })
 
-      if (enforced) {
+      if (requestEnforced) {
         return respondSignError(req, res, 401, {
           error: verifyResult.error,
           code: verifyResult.code,
@@ -117,10 +127,12 @@ function createApiRequestSignMiddleware(deps = {}) {
         method: req.method,
         request_id: req.requestId || null,
         strictRedis,
+        enforce_mode: enforceMode,
+        enforced: requestEnforced,
         err: nonceResult.error?.message || String(nonceResult.error),
       })
 
-      if (strictRedis) {
+      if (strictRedis && requestEnforced) {
         return respondSignError(req, res, 503, {
           error: '签名服务暂时不可用',
           code: 'SIGN_SERVICE_UNAVAILABLE',
@@ -140,10 +152,11 @@ function createApiRequestSignMiddleware(deps = {}) {
         method: req.method,
         api_key: verifyResult.apiKey,
         request_id: req.requestId || null,
-        enforced,
+        enforce_mode: enforceMode,
+        enforced: requestEnforced,
       })
 
-      if (enforced) {
+      if (requestEnforced) {
         return respondSignError(req, res, 401, {
           error: '请求已被使用',
           code: 'REPLAY_DETECTED',
@@ -170,4 +183,5 @@ module.exports = {
   registerApiSignNonce,
   respondSignError,
   resolveSignPath,
+  resolveEnforceMode,
 }

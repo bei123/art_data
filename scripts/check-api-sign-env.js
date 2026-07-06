@@ -5,14 +5,20 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') })
 
-const { loadApiSignClientsFromEnv, isApiSignEnabled, isApiSignEnforced } = require('../utils/apiRequestSign')
+const {
+  loadApiSignClientsFromEnv,
+  isApiSignEnabled,
+  getApiSignEnforceMode,
+} = require('../utils/apiRequestSign')
 
 const clients = loadApiSignClientsFromEnv()
 const enabled = isApiSignEnabled()
-const enforced = isApiSignEnforced()
+const enforceMode = getApiSignEnforceMode()
 
 console.log('API_SIGN_ENABLED:', enabled)
-console.log('API_SIGN_ENFORCE:', enforced)
+console.log('API_SIGN_ENFORCE:', process.env.API_SIGN_ENFORCE ?? '(unset)')
+console.log('API_SIGN_ENFORCE_WRITES:', process.env.API_SIGN_ENFORCE_WRITES ?? '(unset)')
+console.log('enforce_mode:', enforceMode)
 console.log('API_SIGN_CLIENTS:', process.env.API_SIGN_CLIENTS ? '(set)' : '(unset)')
 console.log('API_SIGN_SECRET_ADMIN_WEB:', process.env.API_SIGN_SECRET_ADMIN_WEB ? '(set)' : '(unset)')
 console.log('API_SIGN_SECRET_WX_MINI:', process.env.API_SIGN_SECRET_WX_MINI ? '(set)' : '(unset)')
@@ -40,5 +46,13 @@ if (!clients.has('admin-web')) {
   console.warn('\nWARN: 缺少 admin-web 客户端（管理后台请求会验签失败）')
 }
 
-console.log('\nOK: 签名配置完整')
+if (enforceMode === 'off') {
+  console.warn('\nWARN: 当前为 shadow 模式（验签失败不拦截）')
+} else if (enforceMode === 'writes') {
+  console.log('\nOK: Phase 3 — 写接口强制验签，读接口 shadow')
+} else {
+  console.log('\nOK: Phase 4 — 全量强制验签')
+}
+
+console.log('OK: 签名配置完整')
 process.exit(0)

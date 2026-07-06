@@ -49,6 +49,36 @@ function isApiSignEnforced() {
   return raw === 'true' || raw === '1'
 }
 
+function isTruthyEnvValue(raw) {
+  const value = String(raw ?? '').trim().toLowerCase()
+  return value === 'true' || value === '1'
+}
+
+function isApiSignEnforceWrites() {
+  return isTruthyEnvValue(process.env.API_SIGN_ENFORCE_WRITES)
+}
+
+const API_SIGN_WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/**
+ * @returns {'off' | 'writes' | 'all'}
+ */
+function getApiSignEnforceMode() {
+  if (isApiSignEnforced()) return 'all'
+  if (isApiSignEnforceWrites()) return 'writes'
+  return 'off'
+}
+
+function isApiSignWriteMethod(method) {
+  return API_SIGN_WRITE_METHODS.has(String(method || '').toUpperCase())
+}
+
+function shouldEnforceApiSignForMethod(method, enforceMode = getApiSignEnforceMode()) {
+  if (enforceMode === 'all') return true
+  if (enforceMode === 'writes') return isApiSignWriteMethod(method)
+  return false
+}
+
 function isApiSignStrictRedis() {
   const raw = String(process.env.API_SIGN_STRICT_REDIS ?? 'false').trim().toLowerCase()
   return raw === 'true' || raw === '1'
@@ -380,5 +410,10 @@ module.exports = {
   getApiSignNonceTtlSec,
   isApiSignEnabled,
   isApiSignEnforced,
+  isApiSignEnforceWrites,
+  getApiSignEnforceMode,
+  isApiSignWriteMethod,
+  shouldEnforceApiSignForMethod,
+  API_SIGN_WRITE_METHODS,
   isApiSignStrictRedis,
 }

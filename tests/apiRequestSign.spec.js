@@ -256,6 +256,40 @@ describe('apiRequestSign', () => {
     expect(clients.get('wx-mini')).toEqual(['wx-secret'])
   })
 
+  it('shouldEnforceApiSignForMethod supports off, writes and all modes', async () => {
+    vi.stubEnv('API_SIGN_ENFORCE', 'false')
+    vi.stubEnv('API_SIGN_ENFORCE_WRITES', 'false')
+    vi.resetModules()
+    const {
+      getApiSignEnforceMode,
+      shouldEnforceApiSignForMethod,
+    } = await import('../utils/apiRequestSign.js')
+
+    expect(getApiSignEnforceMode()).toBe('off')
+    expect(shouldEnforceApiSignForMethod('GET', 'off')).toBe(false)
+    expect(shouldEnforceApiSignForMethod('POST', 'off')).toBe(false)
+
+    expect(shouldEnforceApiSignForMethod('GET', 'writes')).toBe(false)
+    expect(shouldEnforceApiSignForMethod('POST', 'writes')).toBe(true)
+    expect(shouldEnforceApiSignForMethod('DELETE', 'writes')).toBe(true)
+
+    expect(shouldEnforceApiSignForMethod('GET', 'all')).toBe(true)
+    expect(shouldEnforceApiSignForMethod('POST', 'all')).toBe(true)
+  })
+
+  it('getApiSignEnforceMode resolves writes and all from env', async () => {
+    vi.stubEnv('API_SIGN_ENFORCE', 'false')
+    vi.stubEnv('API_SIGN_ENFORCE_WRITES', 'true')
+    vi.resetModules()
+    const { getApiSignEnforceMode } = await import('../utils/apiRequestSign.js')
+    expect(getApiSignEnforceMode()).toBe('writes')
+
+    vi.stubEnv('API_SIGN_ENFORCE', 'true')
+    vi.resetModules()
+    const { getApiSignEnforceMode: getModeAll } = await import('../utils/apiRequestSign.js')
+    expect(getModeAll()).toBe('all')
+  })
+
   it('parseApiSignClients preserves secrets with special characters', () => {
     const clients = parseApiSignClients(
       'admin-web:PIUL^u+Rv1j6ho)(5miH,wx-mini:8NsZDr%PbS%(TAs1FV'
