@@ -51,7 +51,11 @@ function createApiRequestSignMiddleware(deps = {}) {
   if (enabled && clients.size === 0) {
     logger.warn('api_sign_enabled_without_clients', {
       enforced,
-      message: 'API_SIGN_ENABLED=true 但未配置 API_SIGN_CLIENTS',
+      message:
+        'API_SIGN_ENABLED=true 但未加载任何客户端密钥。请在服务器 .env 配置 API_SIGN_SECRET_ADMIN_WEB 与 API_SIGN_SECRET_WX_MINI（或 API_SIGN_CLIENTS）后重启',
+      has_api_sign_clients: Boolean(process.env.API_SIGN_CLIENTS),
+      has_admin_secret: Boolean(process.env.API_SIGN_SECRET_ADMIN_WEB),
+      has_wx_secret: Boolean(process.env.API_SIGN_SECRET_WX_MINI),
     })
   } else if (enabled) {
     logger.info('api_sign_ready', {
