@@ -53,18 +53,25 @@ function createApiRequestSignMiddleware(deps = {}) {
       enforced,
       message: 'API_SIGN_ENABLED=true 但未配置 API_SIGN_CLIENTS',
     })
+  } else if (enabled) {
+    logger.info('api_sign_ready', {
+      enforced,
+      client_ids: [...clients.keys()],
+    })
   }
 
   return async function apiRequestSignMiddleware(req, res, next) {
     if (!enabled) return next()
 
-    if (shouldSkipApiSign({ method: req.method, path: req.path })) {
+    const signPath = resolveSignPath(req)
+
+    if (shouldSkipApiSign({ method: req.method, path: signPath })) {
       return next()
     }
 
     const verifyResult = verifyApiRequestSignature({
       method: req.method,
-      path: resolveSignPath(req),
+      path: signPath,
       query: req.query,
       body: resolveRequestBodyForSign(req),
       headers: req.headers,
@@ -73,10 +80,12 @@ function createApiRequestSignMiddleware(deps = {}) {
     })
 
     if (!verifyResult.ok) {
+      const signHeaders = req.headers || {}
       logger.warn('api_sign_verify_failed', {
         code: verifyResult.code,
-        path: req.path,
+        path: signPath,
         method: req.method,
+        api_key: signHeaders['x-api-key'] || signHeaders['X-Api-Key'] || null,
         request_id: req.requestId || null,
         enforced,
       })
@@ -100,7 +109,7 @@ function createApiRequestSignMiddleware(deps = {}) {
 
     if (nonceResult.redisUnavailable) {
       logger.warn('api_sign_nonce_redis_unavailable', {
-        path: req.path,
+        path: signPath,
         method: req.method,
         request_id: req.requestId || null,
         strictRedis,
@@ -123,7 +132,7 @@ function createApiRequestSignMiddleware(deps = {}) {
 
     if (nonceResult.replay) {
       logger.warn('api_sign_replay_detected', {
-        path: req.path,
+        path: signPath,
         method: req.method,
         api_key: verifyResult.apiKey,
         request_id: req.requestId || null,

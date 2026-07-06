@@ -104,6 +104,21 @@ describe('apiRequestSign middleware', () => {
     expect(resolveSignPath({ baseUrl: '/api', path: '/wx/login' })).toBe('/api/wx/login')
   })
 
+  it('passes through skipped paths using mounted sign path', async () => {
+    const middleware = createApiRequestSignMiddleware({
+      enabled: true,
+      enforced: true,
+      clients: TEST_CLIENTS,
+    })
+    const req = { method: 'GET', baseUrl: '/api', path: '/health', headers: {}, requestId: 'rid' }
+    const res = createMockRes()
+    const next = vi.fn()
+
+    await middleware(req, res, next)
+
+    expect(next).toHaveBeenCalledOnce()
+  })
+
   it('passes through when signing is disabled', async () => {
     const middleware = createApiRequestSignMiddleware({ enabled: false })
     const req = createSignedRequest({})

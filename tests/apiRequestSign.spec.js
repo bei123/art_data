@@ -239,6 +239,14 @@ describe('apiRequestSign', () => {
     expect(shouldSkipApiSign({ method: 'GET', path: '/api/merchants' })).toBe(false)
   })
 
+  it('parseApiSignClients preserves secrets with special characters', () => {
+    const clients = parseApiSignClients(
+      'admin-web:PIUL^u+Rv1j6ho)(5miH,wx-mini:8NsZDr%PbS%(TAs1FV'
+    )
+    expect(clients.get('admin-web')).toEqual(['PIUL^u+Rv1j6ho)(5miH'])
+    expect(clients.get('wx-mini')).toEqual(['8NsZDr%PbS%(TAs1FV'])
+  })
+
   it('buildApiSignNonceRedisKey namespaces by api key and nonce', () => {
     expect(buildApiSignNonceRedisKey('wx-mini', 'nonce-1')).toBe('api_sign:nonce:wx-mini:nonce-1')
   })
