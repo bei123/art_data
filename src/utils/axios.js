@@ -2,6 +2,7 @@ import axios from 'axios';
 import { getApiClientBaseUrl, CONFIG } from '../config';
 import { ElMessage } from 'element-plus';
 import { checkAndHandleTokenExpiry, clearUserDataAndRedirect } from './tokenManager';
+import { applyApiSignToAxiosConfig } from './apiSign';
 
 /** 仅开发环境或显式 VITE_DEBUG_HTTP=true 时打印完整请求/响应（避免生产泄露数据与行为） */
 const logHttpDebug =
@@ -22,7 +23,7 @@ const instance = axios.create({
 
 // 请求拦截器
 instance.interceptors.request.use(
-  config => {
+  async config => {
     const url = config?.url || ''
     const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/register')
 
@@ -35,6 +36,8 @@ instance.interceptors.request.use(
       }
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    await applyApiSignToAxiosConfig(config);
 
     if (logHttpDebug) {
       console.log('发送请求:', {

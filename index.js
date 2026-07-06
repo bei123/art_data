@@ -100,7 +100,7 @@ app.use(cors({
   origin: corsPolicyOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With', 'X-Request-Id', 'X-External-Authorization', 'x-external-authorization', 'X-Api-Key', 'X-Api-Timestamp', 'X-Api-Nonce', 'X-Api-Signature'],
   exposedHeaders: ['Authorization', 'X-Request-Id'],
 }));
 
@@ -193,8 +193,22 @@ const uploadsLimiter = rateLimit({
 // 在路由处理中会移除 CSP 头，让页面使用注入的 meta CSP
 
 // 请求体解析（只注册一组，避免重复解析与体积异常）
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    if (buf?.length) req.rawBody = buf
+  },
+}));
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    if (buf?.length) req.rawBody = buf
+  },
+}));
+
+const { apiRequestSignMiddleware } = require('./middleware/apiRequestSign');
+app.use('/api', apiRequestSignMiddleware);
 
 async function apiLiveHandler(req, res) {
   res.status(200).json(buildLiveResponse())

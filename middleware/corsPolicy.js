@@ -61,7 +61,7 @@ function corsPreflightMiddleware(req, res, next) {
   );
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-Request-Id, X-External-Authorization, x-external-authorization'
+    'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-Request-Id, X-External-Authorization, x-external-authorization, X-Api-Key, X-Api-Timestamp, X-Api-Nonce, X-Api-Signature'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
   return res.status(204).end();
