@@ -1,4 +1,4 @@
-const axios = require('axios');
+const { wespaceAxios: axios } = require('./wespaceHttp');
 const db = require('../db');
 const {
   extractDetailsFromRawData,

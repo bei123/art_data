@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const axios = require('axios');
+const { wespaceAxios: axios } = require('../utils/wespaceHttp');
 const db = require('../db');
 const { authenticateToken, checkRole, requireAdmin } = require('../auth');
 const { processObjectImages } = require('../utils/image');
