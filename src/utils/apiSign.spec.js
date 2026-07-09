@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import axios from 'axios'
 import { signApiRequest } from '../../utils/apiRequestSign.js'
 import {
   buildCanonicalQuery,
@@ -6,6 +7,7 @@ import {
   resolveAxiosSignQuery,
   resolveAxiosSignBody,
   signApiRequestHeaders,
+  applyApiSignToAxiosConfig,
 } from './apiSign.js'
 
 describe('admin apiSign client', () => {
@@ -96,5 +98,30 @@ describe('admin apiSign client', () => {
       })
     ).toBe('{"a":1}')
     expect(resolveAxiosSignBody({ method: 'GET', data: { a: 1 } })).toBe('')
+  })
+
+  it('applyApiSignToAxiosConfig sets x-api-key on axios AxiosHeaders', async () => {
+    const instance = axios.create({
+      baseURL: 'http://localhost:2000/api',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const config = await instance.getUri({
+      url: '/merchants',
+      method: 'GET',
+      headers: instance.defaults.headers,
+    })
+    const requestConfig = {
+      baseURL: 'http://localhost:2000/api',
+      url: '/merchants',
+      method: 'GET',
+      headers: axios.AxiosHeaders.from(instance.defaults.headers),
+    }
+
+    await applyApiSignToAxiosConfig(requestConfig)
+
+    expect(requestConfig.headers.get('x-api-key')).toBe('admin-web')
+    expect(requestConfig.headers.get('x-api-signature')).toBeTruthy()
+    expect(requestConfig.headers.get('x-api-nonce')).toBeTruthy()
+    expect(requestConfig.headers.get('x-api-timestamp')).toBeTruthy()
   })
 })

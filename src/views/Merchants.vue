@@ -476,7 +476,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
+import api from '@/utils/axios'
 import { AlertCircle, Loader2, Plus, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
@@ -543,34 +543,6 @@ const getImageUrl = (url) => {
   return `${API_BASE_URL}${url}`
 }
 
-const request = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 15000,
-})
-
-request.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-    return config
-  },
-  (error) => Promise.reject(error),
-)
-
-request.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      ElMessage.error('登录已过期，请重新登录')
-      localStorage.removeItem('token')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  },
-)
-
 const merchants = ref([])
 const loading = ref(false)
 const listError = ref('')
@@ -611,15 +583,15 @@ const fetchMerchants = async () => {
   loading.value = true
   listError.value = ''
   try {
-    const response = await request.get('/api/merchants', {
+    const response = await api.get('/merchants', {
       params: {
         page: currentPage.value,
         limit: pageSize.value,
         search: searchQuery.value,
       },
     })
-    merchants.value = response.data.data
-    total.value = response.data.pagination.total
+    merchants.value = response.data
+    total.value = response.pagination.total
   } catch (error) {
     merchants.value = []
     total.value = 0
@@ -650,7 +622,7 @@ async function handleStatusClick(row) {
   const prev = row.status
   row.status = next
   try {
-    await request.patch(`/api/merchants/${row.id}/status`, {
+    await api.patch(`/merchants/${row.id}/status`, {
       status: next,
     })
     ElMessage.success('状态更新成功')
@@ -666,7 +638,7 @@ async function handleSortBlur(row) {
   v = Math.max(0, Math.min(999, v))
   row.sort_order = v
   try {
-    await request.patch(`/api/merchants/${row.id}/sort`, {
+    await api.patch(`/merchants/${row.id}/sort`, {
       sort_order: v,
     })
     ElMessage.success('排序更新成功')
@@ -685,7 +657,7 @@ async function confirmDeleteMerchant() {
   if (!row?.id) return
   deletingMerchant.value = true
   try {
-    await request.delete(`/api/merchants/${row.id}`)
+    await api.delete(`/merchants/${row.id}`)
     ElMessage.success('删除成功')
     deleteMerchantDialogOpen.value = false
     deleteMerchantTarget.value = null
@@ -729,7 +701,7 @@ const uploadLogoFile = async (file) => {
     const formData = new FormData()
     formData.append('file', processedFile)
 
-    const response = await request.post('/api/upload', formData, {
+    const response = await api.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -838,7 +810,7 @@ const uploadImagesFiles = async (files) => {
       const formData = new FormData()
       formData.append('file', processedFile)
 
-      const response = await request.post('/api/upload', formData, {
+      const response = await api.post('/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -1037,10 +1009,10 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     if (dialogType.value === 'add') {
-      await request.post('/api/merchants', form.value)
+      await api.post('/merchants', form.value)
       ElMessage.success('添加成功')
     } else {
-      await request.put(`/api/merchants/${form.value.id}`, form.value)
+      await api.put(`/merchants/${form.value.id}`, form.value)
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false
@@ -1061,8 +1033,8 @@ async function openEditFromRouteQuery() {
   let row = merchants.value.find((m) => m.id === id)
   if (!row) {
     try {
-      const response = await request.get(`/api/merchants/${id}`)
-      row = response.data?.data ?? response.data
+      const response = await api.get(`/merchants/${id}`)
+      row = response?.data ?? response
     } catch {
       ElMessage.error('未找到该商家')
     }

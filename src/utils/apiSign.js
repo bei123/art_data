@@ -190,9 +190,35 @@ async function signApiRequestHeaders({
   }
 }
 
+function applySignHeadersToConfig(config, signHeaders) {
+  if (!config.headers) {
+    config.headers = { ...signHeaders }
+    return
+  }
+
+  if (typeof config.headers.set === 'function') {
+    for (const [key, value] of Object.entries(signHeaders)) {
+      config.headers.set(key, value)
+    }
+    return
+  }
+
+  config.headers = {
+    ...config.headers,
+    ...signHeaders,
+  }
+}
+
 async function applyApiSignToAxiosConfig(config) {
   const { apiKey, secret, enabled } = resolveApiSignConfig()
-  if (!enabled) return config
+  if (!enabled) {
+    if (import.meta.env.DEV) {
+      console.warn(
+        '[api-sign] VITE_API_SIGN_SECRET 未配置，管理端请求不会带签名头；请在 .env 设置后与 API_SIGN_SECRET_ADMIN_WEB 相同并重启 dev / 重新 build'
+      )
+    }
+    return config
+  }
 
   const path = resolveAxiosSignPath(config)
   if (shouldSkipClientApiSign(path)) return config
@@ -206,10 +232,7 @@ async function applyApiSignToAxiosConfig(config) {
     secret,
   })
 
-  config.headers = {
-    ...(config.headers || {}),
-    ...signHeaders,
-  }
+  applySignHeadersToConfig(config, signHeaders)
 
   return config
 }
@@ -226,6 +249,7 @@ export {
   resolveAxiosSignQuery,
   resolveAxiosSignBody,
   signApiRequestHeaders,
+  applySignHeadersToConfig,
   applyApiSignToAxiosConfig,
   buildCanonicalStringAsync,
 }

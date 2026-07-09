@@ -46,6 +46,13 @@ if (!clients.has('admin-web')) {
   console.warn('\nWARN: 缺少 admin-web 客户端（管理后台请求会验签失败）')
 }
 
+const viteAdminSecret = String(process.env.VITE_API_SIGN_SECRET || '').trim()
+if (!viteAdminSecret) {
+  console.warn('\nWARN: VITE_API_SIGN_SECRET 未配置，管理端 build/dev 不会发送签名头')
+} else if (!clients.get('admin-web')?.includes(viteAdminSecret)) {
+  console.warn('\nWARN: VITE_API_SIGN_SECRET 与 API_SIGN_SECRET_ADMIN_WEB 不一致，管理端验签会失败')
+}
+
 if (enforceMode === 'off') {
   console.warn('\nWARN: 当前为 shadow 模式（验签失败不拦截）')
 } else if (enforceMode === 'writes') {
