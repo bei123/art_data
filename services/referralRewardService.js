@@ -2,12 +2,7 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const { ensureReferralRewardsSchema } = require('../utils/referralRewardsSchema')
 const { ensureCommissionSchema } = require('../utils/commissionSchema')
-const {
-  ensureWallet,
-  adjustWalletBalances,
-  roundMoney,
-  parseMoney,
-} = require('./commissionService')
+const { adjustWalletBalances, roundMoney, parseMoney } = require('./commissionService')
 
 const FIRST_REFERRAL_BONUS_YUAN = parseFloat(process.env.FIRST_REFERRAL_BONUS_YUAN || '30')
 const NEW_USER_COUPON_YUAN = parseFloat(process.env.NEW_USER_COUPON_YUAN || '50')

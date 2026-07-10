@@ -256,7 +256,7 @@ async function wmsUserLoginFromEnvUncached() {
   const fromEnvCookie = String(WMS_HTTP_COOKIE || '').trim()
   const preCookie = fromEnvCookie || (await wmsWarmLoginSessionCookie())
   const vcode = String(WMS_HTTP_VCODE || '').trim()
-  const { response, sessionCookie } = await wmsUserLogin({
+  const { response, sessionCookie: _sessionCookie } = await wmsUserLogin({
     user: WMS_HTTP_USER,
     passwd,
     autoLogin: false,

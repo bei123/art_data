@@ -1,9 +1,4 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import {
-  isWespaceTlsInsecure,
-  getWespaceHttpsAgent,
-  withWespaceTls,
-} from '../utils/wespaceHttp.js'
 
 describe('wespaceHttp', () => {
   const envBackup = { ...process.env }

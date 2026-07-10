@@ -477,7 +477,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/utils/axios'
-import { AlertCircle, Loader2, Plus, Search, Trash2, Upload, X } from 'lucide-vue-next'
+import { AlertCircle, Loader2, Plus, Search, Upload, X } from 'lucide-vue-next'
 import { uploadImageToWebpLimit5MB } from '../utils/image'
 import { API_BASE_URL } from '../config'
 import { getListThumbnailUrl } from '@/utils/listImageUrl'
@@ -925,14 +925,6 @@ const handleImagesDrop = (e) => {
 
   const files = Array.from(e.dataTransfer.files)
   if (files.length > 0) uploadImagesFiles(files)
-}
-
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const showAddDialog = () => {

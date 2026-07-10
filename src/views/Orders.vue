@@ -2035,14 +2035,6 @@ async function fetchDeliveryList() {
   }
 }
 
-function onShipDeliveryChange() {
-  shipServiceValue.value = ''
-  shipForm.service_type = null
-  shipForm.service_name = ''
-  sfExpectMode.value = 'pickup'
-  sfPickupLocalStr.value = formatDatetimeLocalValue(defaultSfPickupDate())
-}
-
 function onShipServiceChange(val) {
   if (!val || typeof val !== 'string') {
     shipForm.service_type = null

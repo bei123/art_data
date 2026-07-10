@@ -889,7 +889,7 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, Loader2, Plus, RefreshCw, Search, Upload, X } from 'lucide-vue-next'
+import { AlertCircle, Loader2, RefreshCw, Search, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'  // 使用封装的axios实例
 import { fetchAllArtists } from '@/utils/artistList'
 import { useRoute, useRouter } from 'vue-router'
@@ -937,7 +937,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -1535,8 +1534,8 @@ const editorConfig = {
       },
       
       // 上传进度回调
-      onProgress(progress) {
-        console.log('图片上传进度:', progress);
+      onProgress(_progress) {
+        console.log('图片上传进度:', _progress);
       },
       
       // 上传成功回调
@@ -1606,16 +1605,16 @@ const editorConfig = {
       allowedFileTypes: ['video/mp4', 'video/webm', 'video/ogg'],
       maxNumberOfFiles: 1,
       // 上传进度、成功、失败、错误回调
-      onProgress(progress) {
+      onProgress(_progress) {
         // 上传进度处理
       },
-      onSuccess(file, res) {
+      onSuccess(_file, _res) {
         // 上传成功处理
       },
-      onFailed(file, res) {
+      onFailed(_file, _res) {
         // 上传失败处理
       },
-      onError(file, err, res) {
+      onError(_file, _err, _res) {
         // 上传错误处理
       }
     }
@@ -1960,7 +1959,7 @@ const submitForm = async () => {
     }
 
     if (dialogType.value === 'add') {
-      const response = await axios.post('/original-artworks', submitData)
+      await axios.post('/original-artworks', submitData)
       ElMessage.success('添加成功')
       // 添加后重置到第一页
       pagination.value.page = 1
@@ -1969,7 +1968,7 @@ const submitForm = async () => {
         ElMessage.error('未获取到作品ID，无法保存')
         return
       }
-      const response = await axios.put(`/original-artworks/${form.value.id}`, submitData)
+      await axios.put(`/original-artworks/${form.value.id}`, submitData)
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false

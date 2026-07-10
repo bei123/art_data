@@ -9,7 +9,6 @@ const Util = require('@alicloud/tea-util');
 const Credential = require('@alicloud/credentials');
 const sharp = require('sharp');
 const { getAccessToken } = require('./wechatMiniProgramToken');
-const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { resolveAuthFromRequest } = require('../auth');
 const { issueWxTokenPair, refreshWxAccessToken } = require('../utils/wxSessionTokens');
@@ -869,7 +868,7 @@ async function idcardVerify(req) {
 }
 }
 
-function getFontUrl(req) {
+function getFontUrl(_req) {
 // 这里可以根据需要返回不同字体，这里写死一个示例
     return adminResult(200, {
         url: `${OSS_PUBLIC_ORIGIN}/font/SF-Pro.ttf`
@@ -1360,11 +1359,6 @@ async function updateAddress(req) {
     try {
         const owned = await assertAddressOwned(payload.userId, addressId);
         if (owned.error) return owned.error;
-
-        const [existingAddresses] = await db.query(`
-            SELECT id, is_default FROM wx_user_addresses 
-            WHERE id = ? AND user_id = ?
-        `, [addressId, payload.userId]);
 
         // 如果设置为默认地址，先取消其他默认地址
         if (is_default) {

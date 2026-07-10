@@ -10,7 +10,7 @@ const {
   WMS_HTTP_USER,
   isWmsLoginConfigured,
 } = require('../config/wmsHttp')
-const { assertWmsLoginEnvConfigured, wmsUserLoginFromEnv } = require('../utils/wmsHttpClient')
+const { wmsUserLoginFromEnv } = require('../utils/wmsHttpClient')
 
 async function main() {
   console.log('WMS_HTTP_BASE_URL:', WMS_HTTP_BASE_URL || '(未设置)')
@@ -25,7 +25,7 @@ async function main() {
 
   console.log('\n尝试 WMS 登录…')
   try {
-    const { response, sessionCookie } = await wmsUserLoginFromEnv()
+    const { response } = await wmsUserLoginFromEnv()
     const body = response && response.data
     if (body && body.error_code === 0) {
       console.log('登录成功，error_code=0')

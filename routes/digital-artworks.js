@@ -3,9 +3,8 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const { wespaceAxios: axios } = require('../utils/wespaceHttp');
 const db = require('../db');
-const { authenticateToken, checkRole, requireAdmin } = require('../auth');
+const { authenticateToken, requireAdmin } = require('../auth');
 const { processObjectImages } = require('../utils/image');
-const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
 const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
 const { assembleListV3FromRow } = require('../utils/digitalArtworksListV3Fields');
@@ -135,49 +134,6 @@ function normalizeShowPurchaseLink(v) {
 
 function isArtworkHiddenFlag(value) {
   return value === 1 || value === true || value === '1';
-}
-
-/**
- * 从外部数据中解析 issueInfo
- */
-function parseIssueInfo(issueInfoStr) {
-  if (!issueInfoStr) return null;
-  try {
-    return typeof issueInfoStr === 'string' ? JSON.parse(issueInfoStr) : issueInfoStr;
-  } catch (e) {
-    logger.error('解析 issueInfo 失败', { err: e });
-    return null;
-  }
-}
-
-function extractUsnFromBearerAuthorization(authorization) {
-  if (!authorization || typeof authorization !== 'string') return null;
-  if (!authorization.startsWith('Bearer ')) return null;
-
-  const token = authorization.slice('Bearer '.length).trim();
-  if (!token) return null;
-
-  // 只解析 JWT payload，不做签名校验
-  const parts = token.split('.');
-  if (parts.length < 2) return null;
-
-  try {
-    const payloadPart = parts[1]
-      .replace(/-/g, '+')
-      .replace(/_/g, '/');
-    const payloadJson = Buffer.from(payloadPart, 'base64').toString('utf8');
-    const payload = JSON.parse(payloadJson);
-    return payload?.usn || payload?.buyerUsn || payload?.user_usn || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-function toIsoDate(value) {
-  if (!value) return new Date().toISOString();
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return new Date().toISOString();
-  return d.toISOString();
 }
 
 // 获取数字艺术品列表（管理员接口，包含隐藏作品）
@@ -474,7 +430,7 @@ router.get('/:id', async (req, res) => {
         description: artwork.artist_description
       };
 
-      const { artist_id, artist_name, artist_avatar, artist_description, ...artworkData } = artwork;
+      const { artist_id: _artist_id, artist_name: _artist_name, artist_avatar: _artist_avatar, artist_description: _artist_description, ...artworkData } = artwork;
 
       result = {
         ...artworkData,

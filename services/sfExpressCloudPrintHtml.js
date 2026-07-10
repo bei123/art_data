@@ -285,7 +285,7 @@ function mergeCloudPrintHtmlPages(htmlParts) {
     '<!DOCTYPE html><html><head><meta charset="utf-8"><title>顺丰面单</title>',
     '<style>@media print{ .sf-waybill-page{ page-break-after:always } .sf-waybill-page:last-child{ page-break-after:auto } }</style>',
     '</head><body>',
-    ...bodies.map((body, index) => `<div class="sf-waybill-page">${body}</div>`),
+    ...bodies.map((body) => `<div class="sf-waybill-page">${body}</div>`),
     '</body></html>',
   ].join('')
 }

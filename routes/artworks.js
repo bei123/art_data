@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken, checkRole, optionalAuthenticate, requireAdmin } = require('../auth');
+const { optionalAuthenticate, requireAdmin } = require('../auth');
 const svc = require('../services/artworksService');
 const wmsSync = require('../services/wmsProductSyncService');
 const wmsArtworkImage = require('../services/wmsArtworkImageService');

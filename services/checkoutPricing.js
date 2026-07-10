@@ -5,7 +5,6 @@ const redisClient = require('../utils/redisClient')
 const {
   parseDigitalArtworkId,
   fetchDigitalArtworksByIds,
-  hasEnoughDigitalStock,
   isDigitalArtworkPurchasable,
   resolveDigitalStock,
   ensureDigitalArtworkIdColumns,
@@ -1067,7 +1066,13 @@ async function checkoutPreview(req) {
 
       const saved = await saveCheckoutQuote(userId, quote.data)
       if (saved.error) return saved.error
-      const { normalized_cart_items, priced_cart_items, cart_fingerprint, shipping_snapshot, ...publicData } = quote.data
+      const {
+        normalized_cart_items: _normalized_cart_items,
+        priced_cart_items: _priced_cart_items,
+        cart_fingerprint: _cart_fingerprint,
+        shipping_snapshot: _shipping_snapshot,
+        ...publicData
+      } = quote.data
 
       return adminResult(200, {
         success: true,

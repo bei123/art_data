@@ -90,7 +90,7 @@ function normalizeTransferBill(data) {
 }
 
 async function signedRequest(method, urlPath, bodyObj) {
-  const { headers, body } = buildAuthHeaders(method, urlPath, bodyObj)
+  const { headers } = buildAuthHeaders(method, urlPath, bodyObj)
   const url = `https://api.mch.weixin.qq.com${urlPath}`
   const config = {
     method,

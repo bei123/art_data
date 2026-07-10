@@ -2,14 +2,12 @@
  * WMS 原作图片：同步路径、管理端代理预览、采用后上传 OSS
  */
 const axios = require('axios')
-const path = require('path')
 const db = require('../db')
 const logger = require('../utils/logger')
 const { uploadToOSS } = require('../config/oss')
 const { bufferToWebpLimit5MB, buildQualityStepsFromStart } = require('../utils/imageWebp')
 const { validatePublicImageUrl } = require('../config/publicEnv')
 const {
-  WMS_HTTP_BASE_URL,
   WMS_HTTP_USER_AGENT,
   WMS_SYNC_PLACEHOLDER_IMAGE,
   WMS_IMAGE_CDN_ORIGIN,
@@ -693,23 +691,6 @@ async function fetchPreviewImageBuffer(cookie, rel, cacheKey) {
   return task
 }
 
-function extFromContentType(contentType, imageRef) {
-  const map = {
-    'image/jpeg': '.jpg',
-    'image/jpg': '.jpg',
-    'image/png': '.png',
-    'image/webp': '.webp',
-    'image/gif': '.gif',
-  }
-  if (contentType && map[contentType.toLowerCase()]) return map[contentType.toLowerCase()]
-  const pathForExt = isAbsoluteImageUrl(imageRef)
-    ? relativePathFromImageUrl(imageRef) || imageRef
-    : imageRef
-  const ext = path.extname(pathForExt || '').toLowerCase()
-  if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) return ext === '.jpeg' ? '.jpg' : ext
-  return '.jpg'
-}
-
 /**
  * 管理端：代理输出 WMS 图片（需 WMS 登录 Cookie）
  */
@@ -888,7 +869,13 @@ function attachAdminWmsImageFields(row) {
 
 function stripWmsFieldsForPublic(row) {
   if (!row || typeof row !== 'object') return row
-  const { wms_image_paths, has_wms_image, image_is_placeholder, image_is_published, ...rest } = row
+  const {
+    wms_image_paths: _wms_image_paths,
+    has_wms_image: _has_wms_image,
+    image_is_placeholder: _image_is_placeholder,
+    image_is_published: _image_is_published,
+    ...rest
+  } = row
   return rest
 }
 

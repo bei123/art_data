@@ -935,7 +935,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { AlertCircle, ChevronDown, ChevronUp, GripVertical, Loader2, Search, Trash2, Upload, X } from 'lucide-vue-next'
+import { AlertCircle, ChevronDown, ChevronUp, GripVertical, Loader2, Search, Upload, X } from 'lucide-vue-next'
 import axios from '../utils/axios'
 import { fetchAllInstitutions } from '@/utils/artistList'
 import { API_BASE_URL } from '../config'
@@ -972,7 +972,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -1478,10 +1477,6 @@ async function confirmDeleteArtist() {
   }
 }
 
-function openRemoveAvatarDialog() {
-  removeAvatarDialogOpen.value = true
-}
-
 function confirmRemoveAvatar() {
   form.value.avatar = ''
   ElMessage.success('头像已删除')
@@ -1704,10 +1699,6 @@ const resetBannerUploadState = () => {
   bannerFileSize.value = 0
 }
 
-function openRemoveBannerDialog() {
-  removeBannerDialogOpen.value = true
-}
-
 function confirmRemoveBanner() {
   form.value.banner = ''
   ElMessage.success('背景图已删除')
@@ -1781,15 +1772,6 @@ const handleBannerDrop = (e) => {
   if (files.length > 0) {
     uploadBannerFile(files[0])
   }
-}
-
-// 格式化文件大小
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const getImageUrl = (url) => {

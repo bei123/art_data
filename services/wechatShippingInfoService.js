@@ -1115,17 +1115,6 @@ async function tryMarkNotifyConfirmReceiveSent(orderId) {
   }
 }
 
-async function hasNotifyConfirmReceiveSent(orderId) {
-  const id = parseInt(String(orderId ?? ''), 10)
-  if (!id || Number.isNaN(id) || id <= 0) return false
-  try {
-    return Boolean(await redisClient.safeGet(buildNotifyConfirmReceiveSentKey(id)))
-  } catch (err) {
-    logger.warn('读取确认收货提醒 Redis 标记失败', { orderId: id, err: err?.message || err })
-    return false
-  }
-}
-
 async function markNotifyConfirmReceiveSent(orderId) {
   await tryMarkNotifyConfirmReceiveSent(orderId)
 }

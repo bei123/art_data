@@ -128,7 +128,7 @@ const uploadToOSS = async (file, prefix = '') => {
         const ossPath = generateUniqueFileName(file.originalname, prefix);
         
         // 上传文件，添加服务器端加密配置
-        const result = await client.put(ossPath, file.buffer, {
+        await client.put(ossPath, file.buffer, {
             headers: {
                 'x-oss-server-side-encryption': 'AES256',
                 'Cache-Control': 'max-age=31536000',

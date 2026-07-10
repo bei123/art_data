@@ -36,21 +36,14 @@ const {
     pickFulfillmentPathNode,
     pickEffectiveRefundRow,
     mapRefundRowToStatus,
-    FULFILLMENT_STATUS,
 } = require('../utils/orderFulfillmentStatus');
 const {
     DIGITAL_ITEM_JOIN_SQL,
     DIGITAL_ITEM_SELECT_SQL,
-    parseDigitalArtworkId,
-    fetchDigitalArtworkById,
-    fetchDigitalArtworksByIds,
-    hasEnoughDigitalStock,
-    isDigitalArtworkPurchasable,
     adjustDigitalArtworkStock,
     ensureDigitalArtworkIdColumns,
   DIGITAL_PURCHASE_JOIN_SQL,
 } = require('../utils/digitalArtworkResolver');
-const { parseMoney, buildRightDiscountPricingByUser } = require('../utils/rightDiscountPricing');
 const { resolveUserOutTradeNo, generateOutTradeNo } = require('../utils/orderTradeNo');
 const { ensureOrdersOutTradeNoUnique, ensureOrdersShippingColumns, ensureOrderInventoryReservedColumn } = require('../utils/ordersSchema');
 const { ensureReferralSchema } = require('../utils/referralSchema');
@@ -205,7 +198,7 @@ async function applyOrderItemsInventoryDelta({ orderItems, mode, connection = nu
     return { rightIds, artworkIds, digitalIds };
 }
 
-async function recordDigitalIdentityPurchases({ outTradeNo, userId, orderItems, connection = null }) {
+async function recordDigitalIdentityPurchases({ userId, orderItems, connection = null }) {
     const runner = connection || db;
     const digitalItems = (orderItems || []).filter((item) => item.type === 'digital');
     if (!digitalItems.length || !userId) return;
@@ -369,39 +362,6 @@ async function tryEmitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionI
         payTime,
         scheduleRetry: false,
     });
-}
-
-async function restoreRefundedOrderInventory(outTradeNo, options = {}) {
-    const cleanOutTradeNo = String(outTradeNo || '').trim();
-    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
-
-    const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${cleanOutTradeNo}`;
-    const alreadyRestored = await redisClient.get(inventoryKey);
-    if (alreadyRestored) return { skipped: true, reason: 'already_restored' };
-
-    const ownsConnection = !options.connection;
-    const connection = options.connection || await db.getConnection();
-
-    try {
-        if (ownsConnection) await connection.beginTransaction();
-
-        const orderItems = await loadOrderItemsForInventory(cleanOutTradeNo, connection);
-        const affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
-
-        const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
-        await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
-
-        if (ownsConnection) await connection.commit();
-        await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
-        await clearInventoryRelatedCaches(affected);
-        return { ok: true, affected };
-    } catch (error) {
-        if (ownsConnection) await connection.rollback();
-        logger.error('restoreRefundedOrderInventory failed', { err: error, out_trade_no: cleanOutTradeNo });
-        throw error;
-    } finally {
-        if (ownsConnection) connection.release();
-    }
 }
 
 // 清理实物分类相关缓存

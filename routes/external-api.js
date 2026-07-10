@@ -3,7 +3,6 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const axios = require('axios');
 const crypto = require('crypto');
-const querystring = require('querystring');
 const db = require('../db');
 const redisClient = require('../utils/redisClient');
 const { buildExternalUserRedisCachePayload } = require('../utils/externalUserRedisCache');

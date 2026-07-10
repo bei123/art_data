@@ -1,5 +1,4 @@
 import router from '../router'
-import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
 
 // 检查token是否过期

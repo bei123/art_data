@@ -105,7 +105,7 @@ describe('admin apiSign client', () => {
       baseURL: 'http://localhost:2000/api',
       headers: { 'Content-Type': 'application/json' },
     })
-    const config = await instance.getUri({
+    await instance.getUri({
       url: '/merchants',
       method: 'GET',
       headers: instance.defaults.headers,

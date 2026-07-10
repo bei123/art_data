@@ -124,10 +124,6 @@ async function getProductVipEarlyAccess(productType, productId) {
   })
 }
 
-function extendGoodsSelectColumns(baseSql) {
-  return `${baseSql}, vip_early_access, vip_early_until`
-}
-
 module.exports = {
   adminResult,
   isVipTier,

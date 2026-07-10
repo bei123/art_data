@@ -484,14 +484,6 @@ async function getLivePhotos(exhibitionId) {
   });
 }
 
-async function countLivePhotos(exhibitionId) {
-  const [[row]] = await db.query(
-    `SELECT COUNT(*) AS c FROM ${EXHIBITION_LIVE_PHOTOS_TABLE} WHERE exhibition_id = ?`,
-    [exhibitionId]
-  );
-  return row && row.c !== undefined ? Number(row.c) : 0;
-}
-
 function parseLivePhotoImageList(body) {
   const raw = body && (body.images !== undefined ? body.images : body.image_urls);
   if (raw === undefined || raw === null) {
@@ -678,7 +670,7 @@ function normalizeItemsRequest(body) {
   return items;
 }
 
-async function validateAndPrepareItems(exhibitionId, rawItems, mode) {
+async function validateAndPrepareItems(exhibitionId, rawItems, _mode) {
   // mode: 'replace'|'append' 仅用于错误信息
   if (!Array.isArray(rawItems)) throw Object.assign(new Error('items 必须为数组'), { statusCode: 400 });
 
