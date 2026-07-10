@@ -4,6 +4,12 @@ const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
 
 const AMAP_GEOCODER_URL = 'https://restapi.amap.com/v3/geocode/geo'
+const AMAP_INFOCODE_HINTS = {
+  '10009': 'AMAP_WEB_SERVICE_KEY 须为高德开放平台「Web 服务」类型 Key，不能使用 Web端(JS API)、微信小程序或移动端 Key',
+  '10001': 'AMAP_WEB_SERVICE_KEY 无效或为空',
+  '10003': 'AMAP_WEB_SERVICE_KEY 无权限访问地理编码服务',
+  '10005': 'AMAP_WEB_SERVICE_KEY 的 IP 白名单未包含当前服务器出口 IP',
+}
 const MAX_ADDRESS_LENGTH = 200
 const REDIS_GEOCODE_KEY_PREFIX = 'geocode:addr:'
 const REDIS_GEOCODE_TTL_SEC = parseInt(process.env.MAP_GEOCODE_CACHE_TTL_SEC || String(60 * 60 * 24 * 30), 10)
@@ -112,10 +118,12 @@ async function fetchGeocodeFromAmap(address, mapKey) {
   })
 
   if (String(data?.status) !== '1' || !Array.isArray(data?.geocodes) || !data.geocodes.length) {
+    const infocode = data?.infocode != null ? String(data.infocode) : ''
     logger.warn('高德地理编码失败', {
       status: data?.status,
       info: data?.info,
-      infocode: data?.infocode,
+      infocode,
+      hint: AMAP_INFOCODE_HINTS[infocode] || undefined,
       address_preview: address.slice(0, 80),
     })
     return null
