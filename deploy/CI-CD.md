@@ -29,7 +29,13 @@
 | `VITE_API_SIGN_SECRET` | Secret | 与服务器 `API_SIGN_SECRET_ADMIN_WEB` 相同 |
 | `BT_PANEL_URL` | Secret | 可选，宝塔面板 URL |
 | `BT_API_KEY` | Secret | 可选，宝塔 API 密钥 |
-| `DEPLOY_NOTIFY_WEBHOOK_URL` | Secret | 可选，企业微信/钉钉机器人 webhook |
+| `WECOM_WEBHOOK_URL` | Secret | 企业微信群机器人 Webhook |
+| `WECHAT_OA_APPID` | Secret | 微信公众号 AppID |
+| `WECHAT_OA_SECRET` | Secret | 微信公众号 AppSecret |
+| `WECHAT_OA_TEMPLATE_ID` | Secret | 公众号模板消息 ID |
+| `WECHAT_OA_TOUSER` | Secret | 接收人 openid，多个用英文逗号分隔 |
+| `WECHAT_OA_TEMPLATE_DATA_JSON` | Secret | 可选，自定义模板字段 JSON |
+| `DEPLOY_NOTIFY_WEBHOOK_URL` | Secret | 已废弃，兼容旧配置，等同 `WECOM_WEBHOOK_URL` |
 | `VITE_PUBLIC_API_BASE_URL` | Variable | 默认 `https://api.wx.2000gallery.art` |
 | `VITE_OSS_PUBLIC_ORIGIN` | Variable | 默认 `https://wx.oss.2000gallery.art` |
 | `VITE_API_SIGN_KEY` | Variable | 默认 `admin-web` |
@@ -46,10 +52,56 @@
 | `WECHAT_APPID` | Secret | `wx96a502c78c9156d0` |
 | `WECHAT_PRIVATE_KEY` | Secret | 上传密钥 PEM（或改用 BASE64） |
 | `WECHAT_PRIVATE_KEY_BASE64` | Secret | 可选，私钥文件 base64 |
-| `DEPLOY_NOTIFY_WEBHOOK_URL` | Secret | 可选，与 art_data 可共用同一机器人 |
+| `WECOM_WEBHOOK_URL` | Secret | 企业微信群机器人 Webhook |
+| `WECHAT_OA_APPID` | Secret | 微信公众号 AppID（可与 art_data 共用） |
+| `WECHAT_OA_SECRET` | Secret | 微信公众号 AppSecret |
+| `WECHAT_OA_TEMPLATE_ID` | Secret | 公众号模板消息 ID |
+| `WECHAT_OA_TOUSER` | Secret | 接收人 openid，多个用英文逗号分隔 |
+| `WECHAT_OA_TEMPLATE_DATA_JSON` | Secret | 可选，自定义模板字段 JSON |
+| `DEPLOY_NOTIFY_WEBHOOK_URL` | Secret | 已废弃，兼容旧配置 |
 | `WECHAT_ROBOT` | Variable | 默认 `1` |
 | `API_BASE_URL` | Variable | 上传前 API 健康检查 |
 | `WX_DEPLOY_RUNNER` | Variable | 默认 `ubuntu-latest`；IP 白名单场景填 `self-hosted` |
+
+---
+
+## 部署通知（企业微信 + 微信公众号）
+
+部署结束（成功/失败）会同时尝试两个渠道，配哪个发哪个。
+
+### 企业微信
+
+1. 企业微信群 → 群机器人 → 添加  
+2. 复制 Webhook 地址，填入两仓库 Secret：`WECOM_WEBHOOK_URL`
+
+### 微信公众号（模板消息）
+
+1. [微信公众平台](https://mp.weixin.qq.com/) → 广告与服务 → 模板消息 → 选用类目模板  
+2. 建议字段（可用默认映射）：
+
+| 模板字段 | 占位内容 |
+|----------|----------|
+| thing1 | 项目名 `{{project}}` |
+| thing2 | 状态 `{{status}}` |
+| thing3 | 版本 `{{version}}` |
+| time4 | 时间 `{{time}}` |
+
+3. 配置 Secrets：
+
+| Secret | 说明 |
+|--------|------|
+| `WECHAT_OA_APPID` | 公众号 AppID |
+| `WECHAT_OA_SECRET` | 公众号 AppSecret |
+| `WECHAT_OA_TEMPLATE_ID` | 模板 ID |
+| `WECHAT_OA_TOUSER` | 管理员 openid（关注公众号后获取） |
+
+4. 若模板字段名不同，设置 `WECHAT_OA_TEMPLATE_DATA_JSON`：
+
+```json
+{"thing1":{"value":"{{project}}"},"character_string2":{"value":"{{status}}"},"thing3":{"value":"{{version}}"},"time4":{"value":"{{time}}"}}
+```
+
+消息详情页链接指向 GitHub Actions 运行日志。
 
 ---
 
@@ -139,6 +191,6 @@ bash deploy/verify-deploy-ready.sh
 | `deploy/smoke-test.sh` | 外网冒烟 |
 | `deploy/restart-baota-node.sh` | 宝塔 Node 重启 |
 | `deploy/rollback.yml` | 手动回滚 workflow |
-| `deploy/notify-deploy.mjs` | 部署结果 webhook |
+| `deploy/notify-deploy.mjs` | 企业微信 + 公众号通知 |
 
 art_wx 侧见 `scripts/check-config.mjs`、`check-version.mjs`、`upload-miniprogram.mjs`。

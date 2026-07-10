@@ -121,7 +121,13 @@ jobs:
           DEPLOY_STATUS: ${{ job.status }}
           DEPLOY_PROJECT: art_data-rollback
           DEPLOY_VERSION: ${{ inputs.ref }}
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           DEPLOY_NOTIFY_WEBHOOK_URL: ${{ secrets.DEPLOY_NOTIFY_WEBHOOK_URL }}
+          WECHAT_OA_APPID: ${{ secrets.WECHAT_OA_APPID }}
+          WECHAT_OA_SECRET: ${{ secrets.WECHAT_OA_SECRET }}
+          WECHAT_OA_TEMPLATE_ID: ${{ secrets.WECHAT_OA_TEMPLATE_ID }}
+          WECHAT_OA_TOUSER: ${{ secrets.WECHAT_OA_TOUSER }}
+          WECHAT_OA_TEMPLATE_DATA_JSON: ${{ secrets.WECHAT_OA_TEMPLATE_DATA_JSON }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
