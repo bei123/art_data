@@ -13,7 +13,7 @@
 2. **再** `art_wx` merge `main` → 自动上传体验版  
 3. 体验版验证 OK → 微信公众平台人工提审发布正式版  
 
-仅后端改动：只发 `art_data`。仅小程序改动（无 API 变更）：只发 `art_wx`。
+仅后端改动：只发 `art_data`。仅小程序改动（无 API 变更）：只发 `art_wx`。小程序发布细则见 [art_wx/docs/WECHAT-RELEASE.md](https://github.com/bei123/art_wx/blob/main/docs/WECHAT-RELEASE.md)。
 
 ---
 
