@@ -67,7 +67,7 @@ jobs:
       - name: Deploy admin static
         uses: burnett01/rsync-deployments@7.0.1
         with:
-          switches: -avzr --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r
+          switches: -avzr --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r --exclude=.user.ini --filter=P .user.ini
           path: dist/
           remote_path: ${{ vars.ADMIN_DEPLOY_PATH || '/www/wwwroot/wx.ht.2000gallery.art/' }}
           remote_host: ${{ secrets.SSH_HOST }}
