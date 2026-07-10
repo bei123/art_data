@@ -129,3 +129,17 @@ jobs:
           BT_API_KEY: ${{ secrets.BT_API_KEY }}
           BT_API_ACTION: ServiceAdmin
           BT_API_PARAMS: '{"name":"nginx","type":"reload"}'
+
+      - name: Notify deploy result
+        if: always()
+        continue-on-error: true
+        run: node deploy/notify-deploy.mjs
+        env:
+          DEPLOY_STATUS: ${{ job.status }}
+          DEPLOY_PROJECT: art_data
+          DEPLOY_NOTIFY_WEBHOOK_URL: ${{ secrets.DEPLOY_NOTIFY_WEBHOOK_URL }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
