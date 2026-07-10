@@ -1,0 +1,93 @@
+name: Rollback Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git tag or commit SHA to rollback to (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: '24'
+
+jobs:
+  rollback:
+    name: Rollback to ${{ inputs.ref }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm run test
+        env:
+          NODE_ENV: test
+          DB_PASSWORD: ci-test-db-password
+          JWT_SECRET: ci-test-jwt-secret-key-at-least-32-characters
+          OSS_ACCESS_KEY_ID: ci-test-oss-access-key-id
+          OSS_ACCESS_KEY_SECRET: ci-test-oss-access-key-secret
+          OSS_BUCKET: ci-test-bucket
+          OSS_REGION: oss-cn-hangzhou
+
+      - name: Build admin frontend
+        run: npm run build
+        env:
+          NODE_ENV: production
+          VITE_PUBLIC_API_BASE_URL: ${{ vars.VITE_PUBLIC_API_BASE_URL || 'https://api.wx.2000gallery.art' }}
+
+      - name: Deploy admin static
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avzr --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r
+          path: dist/
+          remote_path: ${{ vars.ADMIN_DEPLOY_PATH || '/www/wwwroot/wx.ht.2000gallery.art/' }}
+          remote_host: ${{ secrets.SSH_HOST }}
+          remote_user: ${{ secrets.SSH_USER }}
+          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy backend at ref
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ${{ vars.BACKEND_DEPLOY_PATH || '/www/wwwroot/art_data' }}
+            git fetch origin --tags
+            git reset --hard ${{ inputs.ref }}
+            npm ci --omit=dev
+            chmod +x deploy/*.sh
+            BT_NODE_PROJECT_NAME=${{ vars.BT_NODE_PROJECT_NAME || 'art_data' }} bash deploy/restart-baota-node.sh
+
+      - name: Wait for API
+        run: sleep 10
+
+      - name: Smoke test
+        run: bash deploy/smoke-test.sh
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.wx.2000gallery.art' }}
+          ADMIN_BASE_URL: ${{ vars.ADMIN_BASE_URL || 'https://wx.ht.2000gallery.art' }}

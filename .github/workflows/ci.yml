@@ -87,6 +87,7 @@ jobs:
         run: npm run build
         env:
           NODE_ENV: production
+          VITE_PUBLIC_API_BASE_URL: https://api.wx.2000gallery.art
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v7
@@ -137,3 +138,19 @@ jobs:
       - name: npm audit (high severity and above)
         run: npm run audit:deps
         continue-on-error: true
+
+  ci-gate:
+    name: CI Gate
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Require lint, test, and build
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo "Required CI jobs failed"
+            exit 1
+          fi
+          echo "All required CI checks passed"
