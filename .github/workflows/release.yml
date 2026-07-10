@@ -45,6 +45,10 @@ jobs:
         run: npm run build
         env:
           NODE_ENV: production
+          VITE_PUBLIC_API_BASE_URL: ${{ vars.VITE_PUBLIC_API_BASE_URL || 'https://api.wx.2000gallery.art' }}
+          VITE_OSS_PUBLIC_ORIGIN: ${{ vars.VITE_OSS_PUBLIC_ORIGIN || 'https://wx.oss.2000gallery.art' }}
+          VITE_API_SIGN_KEY: ${{ vars.VITE_API_SIGN_KEY || 'admin-web' }}
+          VITE_API_SIGN_SECRET: ${{ secrets.VITE_API_SIGN_SECRET }}
 
       - name: Create release archive
         run: |
