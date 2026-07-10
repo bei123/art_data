@@ -105,7 +105,7 @@ jobs:
             BT_NODE_PROJECT_NAME=${{ vars.BT_NODE_PROJECT_NAME || 'art_data' }} bash deploy/restart-baota-node.sh
 
       - name: Wait for API
-        run: sleep 10
+        run: sleep 5
 
       - name: Smoke test
         run: bash deploy/smoke-test.sh

@@ -197,7 +197,7 @@ setInterval(() => {
 async function gracefulShutdown(signal) {
     logger.info('正在优雅关闭服务', { signal: signal || null });
     try {
-        const redisClient = require('./redisClient');
+        const redisClient = require('./utils/redisClient');
         if (typeof redisClient.shutdownRedis === 'function') {
             await redisClient.shutdownRedis();
             logger.info('Redis 连接已关闭');
@@ -206,15 +206,14 @@ async function gracefulShutdown(signal) {
         logger.error('关闭 Redis 时出错', { err });
     }
 
-    pool.end((err) => {
-        if (err) {
-            logger.error('关闭连接池时出错', { err });
-            process.exit(1);
-        } else {
-            logger.info('数据库连接池已安全关闭');
-            process.exit(0);
-        }
-    });
+    try {
+        await pool.end();
+        logger.info('数据库连接池已安全关闭');
+        process.exit(0);
+    } catch (err) {
+        logger.error('关闭连接池时出错', { err });
+        process.exit(1);
+    }
 }
 
 // 监听进程退出信号
