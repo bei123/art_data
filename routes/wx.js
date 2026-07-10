@@ -314,7 +314,7 @@ router.put('/addresses/:id/default', authenticateToken, async (req, res) => {
     }
 });
 
-/** 腾讯地图地理编码代理（Key 仅存服务端；按 IP 限流，无需登录） */
+/** 高德地图地理编码代理（Key 仅存服务端；按 IP 限流，无需登录） */
 router.get('/map/geocode', geocodeLimiter, async (req, res) => {
     try {
         const r = await mapGeocodeSvc.mapGeocode(req);

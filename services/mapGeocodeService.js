@@ -3,7 +3,7 @@ const axios = require('axios')
 const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
 
-const TENCENT_GEOCODER_URL = 'https://apis.map.qq.com/ws/geocoder/v1/'
+const AMAP_GEOCODER_URL = 'https://restapi.amap.com/v3/geocode/geo'
 const MAX_ADDRESS_LENGTH = 200
 const REDIS_GEOCODE_KEY_PREFIX = 'geocode:addr:'
 const REDIS_GEOCODE_TTL_SEC = parseInt(process.env.MAP_GEOCODE_CACHE_TTL_SEC || String(60 * 60 * 24 * 30), 10)
@@ -101,8 +101,8 @@ async function invalidateGeocodeCaches(addresses) {
   }
 }
 
-async function fetchGeocodeFromTencent(address, mapKey) {
-  const { data } = await axios.get(TENCENT_GEOCODER_URL, {
+async function fetchGeocodeFromAmap(address, mapKey) {
+  const { data } = await axios.get(AMAP_GEOCODER_URL, {
     params: {
       address,
       key: String(mapKey).trim(),
@@ -111,21 +111,25 @@ async function fetchGeocodeFromTencent(address, mapKey) {
     timeout: 10000,
   })
 
-  if (data?.status !== 0 || !data?.result?.location) {
-    logger.warn('腾讯地理编码失败', {
+  if (String(data?.status) !== '1' || !Array.isArray(data?.geocodes) || !data.geocodes.length) {
+    logger.warn('高德地理编码失败', {
       status: data?.status,
-      message: data?.message,
+      info: data?.info,
+      infocode: data?.infocode,
       address_preview: address.slice(0, 80),
     })
     return null
   }
 
-  const { lat, lng } = data.result.location
-  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
-    return null
-  }
+  const location = data.geocodes[0]?.location
+  if (!location || typeof location !== 'string') return null
 
-  return { lat: Number(lat), lng: Number(lng) }
+  const [lngStr, latStr] = location.split(',')
+  const lat = Number(latStr)
+  const lng = Number(lngStr)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+
+  return { lat, lng }
 }
 
 async function mapGeocode(req) {
@@ -142,14 +146,14 @@ async function mapGeocode(req) {
     return adminResult(200, cached)
   }
 
-  const mapKey = process.env.TENCENT_MAP_KEY
+  const mapKey = process.env.AMAP_WEB_SERVICE_KEY
   if (!mapKey || !String(mapKey).trim()) {
-    logger.error('TENCENT_MAP_KEY 未配置')
+    logger.error('AMAP_WEB_SERVICE_KEY 未配置')
     return adminResult(500, { error: '地图服务未配置' })
   }
 
   try {
-    const coords = await fetchGeocodeFromTencent(address, mapKey)
+    const coords = await fetchGeocodeFromAmap(address, mapKey)
     if (!coords) {
       return adminResult(400, { error: '地址解析失败' })
     }
@@ -157,7 +161,7 @@ async function mapGeocode(req) {
     await setGeocodeCache(address, coords.lat, coords.lng)
     return adminResult(200, coords)
   } catch (err) {
-    logger.error('腾讯地理编码请求失败', { err: err?.message || err })
+    logger.error('高德地理编码请求失败', { err: err?.message || err })
     return adminResult(500, { error: '地址解析失败' })
   }
 }
