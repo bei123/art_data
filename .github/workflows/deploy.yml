@@ -64,15 +64,29 @@ jobs:
           NODE_ENV: production
           VITE_PUBLIC_API_BASE_URL: ${{ vars.VITE_PUBLIC_API_BASE_URL || 'https://api.wx.2000gallery.art' }}
 
+      - name: Setup SSH for rsync
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+
       - name: Deploy admin static
-        uses: burnett01/rsync-deployments@7.0.1
-        with:
-          switches: -avzr --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r --exclude=.user.ini --filter=P .user.ini
-          path: dist/
-          remote_path: ${{ vars.ADMIN_DEPLOY_PATH || '/www/wwwroot/wx.ht.2000gallery.art/' }}
-          remote_host: ${{ secrets.SSH_HOST }}
-          remote_user: ${{ secrets.SSH_USER }}
-          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          rsync -avzr --delete \
+            --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
+            --exclude='.user.ini' \
+            --filter='protect .user.ini' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            dist/ \
+            "${SSH_USER}@${SSH_HOST}:${ADMIN_DEPLOY_PATH}"
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          ADMIN_DEPLOY_PATH: ${{ vars.ADMIN_DEPLOY_PATH || '/www/wwwroot/wx.ht.2000gallery.art/' }}
 
       - name: Deploy backend
         uses: appleboy/ssh-action@v1.2.0
