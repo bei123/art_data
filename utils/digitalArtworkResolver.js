@@ -44,7 +44,7 @@ function resolveSubmittedDigitalPriceYuan(submittedPrice, dbPriceYuan) {
 function parseDigitalArtworkId(raw) {
   if (raw === undefined || raw === null) return { error: '缺少有效的数字艺术品ID' }
 
-  let sid = ''
+  let sid
   if (typeof raw === 'string') {
     sid = raw.trim()
   } else if (typeof raw === 'number' && Number.isFinite(raw)) {

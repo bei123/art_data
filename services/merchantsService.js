@@ -292,10 +292,9 @@ async function updateMerchantAdmin(rawId, body) {
     return adminResult(400, { error: '无效的Logo URL' });
   }
 
-  let previousAddress = null;
   try {
     const [existingRows] = await db.query('SELECT address FROM merchants WHERE id = ?', [id]);
-    previousAddress = existingRows[0]?.address || null;
+    const previousAddress = existingRows[0]?.address || null;
 
     const connection = await db.getConnection();
     try {
@@ -346,10 +345,9 @@ async function deleteMerchantAdmin(rawId) {
   const id = parsePositiveIntId(rawId);
   if (!id) return adminResult(400, { error: '无效的商家ID' });
 
-  let previousAddress = null;
   try {
     const [existingRows] = await db.query('SELECT address FROM merchants WHERE id = ?', [id]);
-    previousAddress = existingRows[0]?.address || null;
+    const previousAddress = existingRows[0]?.address || null;
 
     const connection = await db.getConnection();
     try {

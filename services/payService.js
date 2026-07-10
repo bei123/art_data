@@ -4414,7 +4414,7 @@ function buildBuyerWechatConfirmReceiptBlock({
         : null;
 
     let canOpen = false;
-    let hint = '可调用 wx.openBusinessView(businessType: weappOrderConfirm) 拉起确认收货组件';
+    let hint;
 
     if (!paid) {
         hint = '订单未支付成功，无法确认收货';

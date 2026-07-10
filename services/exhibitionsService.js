@@ -687,7 +687,7 @@ async function validateAndPrepareItems(exhibitionId, rawItems, mode) {
     const artwork_type = normalizeArtworkType(it.artwork_type);
     if (!artwork_type) throw Object.assign(new Error('artwork_type 无效'), { statusCode: 400 });
 
-    let artwork_id = null;
+    let artwork_id
     if (artwork_type === 'original') {
       const aid = parsePositiveInt(it.artwork_id);
       if (!aid) throw Object.assign(new Error('original artwork_id 无效'), { statusCode: 400 });

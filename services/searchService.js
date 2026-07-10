@@ -286,8 +286,8 @@ async function getSearchResults(query, includeHidden = false, options = {}) {
   const searchTerm = `%${keyword}%`;
   const digitalLikeParams = [searchTerm, searchTerm, searchTerm, searchTerm];
   const searchType = type || 'all';
-  let results = [];
-  let totalCount = 0;
+  let results
+  let totalCount
 
   if (searchType !== 'artist') {
     const cacheKey = buildSearchCacheKey({

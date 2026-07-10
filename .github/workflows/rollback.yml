@@ -22,7 +22,7 @@ jobs:
   rollback:
     name: Rollback to ${{ inputs.ref }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     environment: production
 
     steps:
@@ -87,14 +87,18 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          timeout: 60s
+          command_timeout: 30m
           script_stop: true
           script: |
             set -euo pipefail
-            cd ${{ vars.BACKEND_DEPLOY_PATH || '/www/wwwroot/art_data' }}
+            BACKEND="${{ vars.BACKEND_DEPLOY_PATH || '/www/wwwroot/art_data' }}"
+            cd "$BACKEND"
             git fetch origin --tags
             git reset --hard ${{ inputs.ref }}
-            npm ci --omit=dev
             chmod +x deploy/*.sh
+            bash deploy/install-backend-deps.sh "$BACKEND"
             BT_NODE_PROJECT_NAME=${{ vars.BT_NODE_PROJECT_NAME || 'art_data' }} bash deploy/restart-baota-node.sh
 
       - name: Wait for API

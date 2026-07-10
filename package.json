@@ -13,7 +13,7 @@
     "audit:deps": "npm audit --audit-level=high",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "node index.js",
+    "start": "node --max-old-space-size=768 index.js",
     "server": "nodemon index.js"
   },
   "dependencies": {
