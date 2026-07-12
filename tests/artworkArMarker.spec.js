@@ -20,7 +20,7 @@ describe('artworkArMarker', () => {
     expect(url).not.toBe(DEFAULT_MARKER_URL)
   })
 
-  it('buildArtworkMarkerUrl falls back for non-OSS', () => {
-    expect(buildArtworkMarkerUrl('https://example.com/a.jpg')).toBe(DEFAULT_MARKER_URL)
+  it('buildArtworkMarkerUrl uses artwork image for non-OSS', () => {
+    expect(buildArtworkMarkerUrl('https://example.com/a.jpg')).toBe('https://example.com/a.jpg')
   })
 })

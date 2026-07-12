@@ -33,7 +33,8 @@ function buildArtworkMarkerUrl(imageUrl) {
   if (!imageUrl || typeof imageUrl !== 'string') return DEFAULT_MARKER_URL
 
   if (!isAliyunOssUrl(imageUrl)) {
-    return DEFAULT_MARKER_URL
+    const base = stripOssProcess(imageUrl)
+    return base || imageUrl
   }
 
   const base = stripOssProcess(imageUrl)

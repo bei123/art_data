@@ -103,7 +103,7 @@ function buildArtworkArPayload(artwork) {
       android: 'desk-preview',
       fallback: 'marker-wall',
     },
-    marker_is_custom: markerUrl !== DEFAULT_MARKER_URL,
+    marker_is_custom: !!image,
   }
 }
 
