@@ -2,7 +2,14 @@ const logger = require('./logger')
 
 const BASE_URL = String(process.env.ART_VISION_BASE_URL || '').replace(/\/$/, '')
 const INTERNAL_TOKEN = String(process.env.ART_VISION_INTERNAL_TOKEN || '').trim()
-const TIMEOUT_MS = Math.min(60000, Math.max(3000, Number(process.env.ART_VISION_TIMEOUT_MS) || 25000))
+const SEARCH_TIMEOUT_MS = Math.min(
+  120000,
+  Math.max(3000, Number(process.env.ART_VISION_TIMEOUT_MS) || 30000)
+)
+const INDEX_TIMEOUT_MS = Math.min(
+  600000,
+  Math.max(10000, Number(process.env.ART_VISION_INDEX_TIMEOUT_MS) || 180000)
+)
 
 function isArtVisionEnabled() {
   if (process.env.ART_VISION_ENABLED !== 'true') return false
@@ -10,9 +17,9 @@ function isArtVisionEnabled() {
   return true
 }
 
-async function artVisionRequest(method, path, body) {
+async function artVisionRequest(method, path, body, timeoutMs = SEARCH_TIMEOUT_MS) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
@@ -45,7 +52,7 @@ async function indexExhibition(exhibitionId, payload) {
   if (!isArtVisionEnabled()) return { ok: false, skipped: true }
   const id = parseInt(String(exhibitionId), 10)
   if (!Number.isFinite(id) || id <= 0) return { ok: false, status: 400, body: { error: 'invalid_id' } }
-  return artVisionRequest('POST', `/internal/exhibitions/${id}/index`, payload)
+  return artVisionRequest('POST', `/internal/exhibitions/${id}/index`, payload, INDEX_TIMEOUT_MS)
 }
 
 async function searchExhibition(exhibitionId, imageBase64) {
@@ -60,7 +67,7 @@ async function searchExhibition(exhibitionId, imageBase64) {
 async function getHealth() {
   if (!BASE_URL) return { ok: false, skipped: true }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), Math.min(TIMEOUT_MS, 5000))
+  const timer = setTimeout(() => controller.abort(), Math.min(SEARCH_TIMEOUT_MS, 5000))
   try {
     const res = await fetch(`${BASE_URL}/internal/health`, { signal: controller.signal })
     const body = await res.json().catch(() => ({}))
