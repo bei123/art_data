@@ -59,12 +59,9 @@ function resolveArDimensionsMeters(artwork) {
     return { widthM: null, heightM: null, frameDepthM: null }
   }
 
-  let frameDepthM = null
-  if (goods.height_cm && goods.height_cm > 0) {
-    frameDepthM = goods.height_cm / 100
-  } else {
-    frameDepthM = getDefaultArtworkThicknessCm() / 100
-  }
+  const frameDepthM = goods.height_cm && goods.height_cm > 0
+    ? goods.height_cm / 100
+    : getDefaultArtworkThicknessCm() / 100
 
   return {
     widthM: widthCm / 100,
