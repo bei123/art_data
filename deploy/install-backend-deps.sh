@@ -24,11 +24,13 @@ if [ "$NEW_HASH" = "$OLD_HASH" ] && [ -d node_modules ]; then
 fi
 
 echo "==> Installing production dependencies (package-lock changed or node_modules missing)"
-# Limit Node heap during install on small-memory servers (e.g. 4GB VPS)
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024}"
+# Limit Node heap during npm ci on production ECS (default 512MB; override via DEPLOY_NPM_CI_HEAP_MB)
+HEAP_MB="${DEPLOY_NPM_CI_HEAP_MB:-512}"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=${HEAP_MB}}"
 export npm_config_audit=false
 export npm_config_fund=false
 
+echo "==> npm ci with NODE_OPTIONS=${NODE_OPTIONS}"
 npm ci --omit=dev
 
 echo "$NEW_HASH" > "$LOCK_HASH_FILE"

@@ -189,6 +189,7 @@ bash deploy/verify-deploy-ready.sh
 | 脚本 | 用途 |
 |------|------|
 | `deploy/smoke-test.sh` | 外网冒烟 |
+| `deploy/install-backend-deps.sh` | 生产机 `npm ci --omit=dev`（默认 Node 堆 512MB，`DEPLOY_NPM_CI_HEAP_MB` 可覆盖） |
 | `deploy/restart-baota-node.sh` | 宝塔 Node 重启 |
 | `deploy/rollback.yml` | 手动回滚 workflow |
 | `deploy/notify-deploy.mjs` | 企业微信 + 公众号通知 |
