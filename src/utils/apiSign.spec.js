@@ -8,6 +8,7 @@ import {
   resolveAxiosSignBody,
   signApiRequestHeaders,
   applyApiSignToAxiosConfig,
+  applyApiSignToFetchInit,
 } from './apiSign.js'
 
 describe('admin apiSign client', () => {
@@ -123,5 +124,21 @@ describe('admin apiSign client', () => {
     expect(requestConfig.headers.get('x-api-signature')).toBeTruthy()
     expect(requestConfig.headers.get('x-api-nonce')).toBeTruthy()
     expect(requestConfig.headers.get('x-api-timestamp')).toBeTruthy()
+  })
+
+  it('applyApiSignToFetchInit adds signature headers for admin wms image fetch', async () => {
+    const init = await applyApiSignToFetchInit(
+      'https://api.wx.2000gallery.art/api/original-artworks/2057/admin/wms-image?index=0',
+      {
+        method: 'GET',
+        headers: { Authorization: 'Bearer test-token' },
+      }
+    )
+
+    expect(init.headers.Authorization).toBe('Bearer test-token')
+    expect(init.headers['x-api-key']).toBe('admin-web')
+    expect(init.headers['x-api-signature']).toBeTruthy()
+    expect(init.headers['x-api-nonce']).toBeTruthy()
+    expect(init.headers['x-api-timestamp']).toBeTruthy()
   })
 })

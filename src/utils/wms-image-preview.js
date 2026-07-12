@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '../config'
 import { isSafariWebKit } from './browser'
+import { applyApiSignToFetchInit } from './apiSign'
 
 const CACHE_MAX_ENTRIES = 80
 /** Safari 对同域并发更敏感，略降低并发 */
@@ -84,12 +85,14 @@ export async function fetchWmsImageObjectUrl(artworkId, index = 0, options = {})
     const token = localStorage.getItem('token') || ''
     const url = buildWmsAdminImageUrl(id, index)
 
-    const res = await fetch(url, {
+    const fetchInit = await applyApiSignToFetchInit(url, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       credentials: 'include',
       signal: options.signal,
     })
+
+    const res = await fetch(url, fetchInit)
 
     if (!res.ok) {
       let message = `仓库图加载失败 (${res.status})`

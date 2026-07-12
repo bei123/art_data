@@ -209,6 +209,48 @@ function applySignHeadersToConfig(config, signHeaders) {
   }
 }
 
+async function applyApiSignToFetchInit(url, init = {}) {
+  const { apiKey, secret, enabled } = resolveApiSignConfig()
+  const nextInit = {
+    ...init,
+    headers: init.headers ? { ...init.headers } : {},
+  }
+  if (!enabled) return nextInit
+
+  let parsedUrl
+  try {
+    parsedUrl = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+  } catch {
+    return nextInit
+  }
+
+  const path = parsedUrl.pathname
+  if (shouldSkipClientApiSign(path)) return nextInit
+
+  const method = String(init.method || 'GET').toUpperCase()
+  const body =
+    method === 'GET' || method === 'HEAD' || method === 'OPTIONS' || init.body == null
+      ? ''
+      : typeof init.body === 'string'
+        ? init.body
+        : ''
+
+  const signHeaders = await signApiRequestHeaders({
+    method,
+    path,
+    query: parseQueryString(parsedUrl.search),
+    body,
+    apiKey,
+    secret,
+  })
+
+  nextInit.headers = {
+    ...nextInit.headers,
+    ...signHeaders,
+  }
+  return nextInit
+}
+
 async function applyApiSignToAxiosConfig(config) {
   const { apiKey, secret, enabled } = resolveApiSignConfig()
   if (!enabled) {
@@ -250,6 +292,7 @@ export {
   resolveAxiosSignBody,
   signApiRequestHeaders,
   applySignHeadersToConfig,
+  applyApiSignToFetchInit,
   applyApiSignToAxiosConfig,
   buildCanonicalStringAsync,
 }
