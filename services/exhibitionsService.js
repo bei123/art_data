@@ -3,6 +3,12 @@ const redisClient = require('../utils/redisClient');
 const logger = require('../utils/logger');
 const { processObjectImages } = require('../utils/image');
 const { validatePublicImageUrl: validateImageUrl } = require('../config/publicEnv');
+const { scheduleExhibitionVisionIndexSync } = require('../utils/exhibitionVisionIndex');
+const { loadExhibitionCandidates } = require('./artworkVisualSearchService');
+
+function scheduleExhibitionVisionIndexAfterItemsChange(exhibitionId) {
+  scheduleExhibitionVisionIndexSync(exhibitionId, loadExhibitionCandidates);
+}
 
 const REDIS_EXHIBITIONS_LIST_KEY_PREFIX = 'exhibitions:list:';
 const REDIS_EXHIBITION_DETAIL_KEY_PREFIX = 'exhibitions:detail:';
@@ -1041,6 +1047,9 @@ async function createExhibitionAdmin(body) {
       ]
     );
     await invalidateExhibitionListCaches();
+    if (cleanStatus === 'published') {
+      scheduleExhibitionVisionIndexAfterItemsChange(result.insertId);
+    }
     return adminResult(200, {
       id: result.insertId,
       title: cleanTitle,
@@ -1123,6 +1132,9 @@ async function updateExhibitionAdmin(rawExhibitionId, body) {
     if (!result || result.affectedRows === 0) return adminResult(404, { error: '展览不存在' });
     await invalidateExhibitionListCaches();
     await invalidateExhibitionDetailCache(exhibitionId);
+    if (status !== undefined) {
+      scheduleExhibitionVisionIndexAfterItemsChange(exhibitionId);
+    }
     const detail = await getExhibitionDetail(exhibitionId);
     await setCachedExhibitionDetail(exhibitionId, detail);
     return adminResult(200, { message: '更新成功', detail });
@@ -1159,6 +1171,7 @@ async function appendExhibitionItemsAdmin(rawExhibitionId, body) {
     await connection.commit();
     connection.release();
     await invalidateExhibitionDetailCache(exhibitionId);
+    scheduleExhibitionVisionIndexAfterItemsChange(exhibitionId);
     return adminResult(200, {
       message: '已追加展览作品',
       inserted_item_ids: insertedItemIds,
@@ -1210,6 +1223,7 @@ async function replaceExhibitionItemsAdmin(rawExhibitionId, body) {
     await connection.commit();
     connection.release();
     await invalidateExhibitionDetailCache(exhibitionId);
+    scheduleExhibitionVisionIndexAfterItemsChange(exhibitionId);
     const detail = await getExhibitionDetail(exhibitionId);
     await setCachedExhibitionDetail(exhibitionId, detail);
     return adminResult(200, { message: '已替换展览作品', detail, inserted_item_ids: insertedItemIds });
@@ -1366,6 +1380,7 @@ async function deleteExhibitionItemAdmin(rawExhibitionId, rawItemId) {
     await connection.commit();
     connection.release();
     await invalidateExhibitionDetailCache(exhibitionId);
+    scheduleExhibitionVisionIndexAfterItemsChange(exhibitionId);
     return adminResult(200, { message: '移除成功', exhibition_id: exhibitionId, item_id: itemId });
   } catch (e) {
     await connection.rollback();

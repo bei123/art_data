@@ -2,6 +2,7 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
 const { buildArtworkMarkerLiveUrl } = require('../utils/artworkArMarker')
+const { isArtVisionEnabled, searchExhibition: searchExhibitionViaVision } = require('../utils/artVisionClient')
 const {
   computeDifferenceHashFromBuffer,
   hammingDistance,
@@ -197,17 +198,14 @@ async function searchInCandidates(queryHash, candidates) {
   return scored
 }
 
-async function visualSearchByExhibition(exhibitionId, body) {
-  const id = parsePositiveInt(exhibitionId)
-  if (!id) {
-    return { ok: false, status: 400, body: { error: '展览 ID 无效' } }
-  }
+function shouldFallbackToDhash(visionResult) {
+  if (!visionResult || visionResult.skipped) return true
+  if (!visionResult.ok) return true
+  const reason = visionResult.body?.reason
+  return reason === 'index_missing' || reason === 'index_empty'
+}
 
-  const imageBuffer = decodeBase64Image(body?.image_base64 || body?.image)
-  if (!imageBuffer) {
-    return { ok: false, status: 400, body: { error: '请提供有效的拍摄图片' } }
-  }
-
+async function visualSearchByDhash(id, body, imageBuffer) {
   const loaded = await loadExhibitionCandidates(id)
   if (!loaded) {
     return { ok: false, status: 404, body: { error: '展览不存在' } }
@@ -224,6 +222,7 @@ async function visualSearchByExhibition(exhibitionId, body) {
         message: '本展览暂无可识别作品',
         exhibition_id: exhibition.id,
         exhibition_title: exhibition.title,
+        engine: 'dhash',
       },
     }
   }
@@ -244,6 +243,7 @@ async function visualSearchByExhibition(exhibitionId, body) {
         message: '暂无法加载作品图进行比对，请稍后重试',
         exhibition_id: exhibition.id,
         exhibition_title: exhibition.title,
+        engine: 'dhash',
       },
     }
   }
@@ -262,6 +262,7 @@ async function visualSearchByExhibition(exhibitionId, body) {
         exhibition_title: exhibition.title,
         threshold: MATCH_THRESHOLD,
         best_distance: best.distance,
+        engine: 'dhash',
       },
     }
   }
@@ -283,6 +284,7 @@ async function visualSearchByExhibition(exhibitionId, body) {
           distance: row.distance,
           confidence: row.confidence,
         })),
+        engine: 'dhash',
       },
     }
   }
@@ -305,11 +307,56 @@ async function visualSearchByExhibition(exhibitionId, body) {
       distance: best.distance,
       threshold: MATCH_THRESHOLD,
       detail_path: detailPath,
+      engine: 'dhash',
     },
   }
 }
 
+async function visualSearchByExhibition(exhibitionId, body) {
+  const id = parsePositiveInt(exhibitionId)
+  if (!id) {
+    return { ok: false, status: 400, body: { error: '展览 ID 无效' } }
+  }
+
+  const rawImage = body?.image_base64 || body?.image
+  const imageBuffer = decodeBase64Image(rawImage)
+  if (!imageBuffer) {
+    return { ok: false, status: 400, body: { error: '请提供有效的拍摄图片' } }
+  }
+
+  if (isArtVisionEnabled()) {
+    try {
+      const visionResult = await searchExhibitionViaVision(id, rawImage)
+      if (visionResult.ok && visionResult.body && !shouldFallbackToDhash(visionResult)) {
+        return {
+          ok: true,
+          status: visionResult.status || 200,
+          body: {
+            ...visionResult.body,
+            engine: visionResult.body.engine || 'clip',
+          },
+        }
+      }
+      if (!visionResult.ok && visionResult.status !== 0) {
+        logger.warn('artworkVisualSearch clip unavailable, fallback dhash', {
+          exhibition_id: id,
+          status: visionResult.status,
+          error: visionResult.body?.error,
+        })
+      }
+    } catch (err) {
+      logger.warn('artworkVisualSearch clip failed, fallback dhash', {
+        exhibition_id: id,
+        err: err?.message || String(err),
+      })
+    }
+  }
+
+  return visualSearchByDhash(id, body, imageBuffer)
+}
+
 module.exports = {
   visualSearchByExhibition,
+  loadExhibitionCandidates,
   MATCH_THRESHOLD,
 }
