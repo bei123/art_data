@@ -244,6 +244,7 @@ async function invalidateExhibitionCachesForArtworks(options = {}) {
     ];
     for (const eid of exhibitionIds) {
       await invalidateExhibitionDetailCache(eid);
+      scheduleExhibitionVisionIndexAfterItemsChange(eid);
     }
     if (exhibitionIds.length > 0) {
       logger.info('invalidateExhibitionCachesForArtworks', {
@@ -634,6 +635,16 @@ async function fetchArtworkArtistIds(items) {
   }
 
   return { originalArtistByArtworkId, digitalArtistByArtworkId };
+}
+
+async function listPublishedExhibitionIds() {
+  await ensureSchemaReady()
+  const [rows] = await db.query(
+    `SELECT id FROM ${EXHIBITIONS_TABLE} WHERE status = 'published' ORDER BY id ASC`
+  )
+  return (rows || [])
+    .map((row) => parsePositiveInt(row.id))
+    .filter(Boolean)
 }
 
 async function ensureExhibitionExists(exhibitionId) {
@@ -1405,6 +1416,7 @@ module.exports = {
   invalidateExhibitionCachesForArtworks,
   setCachedExhibitionDetail,
   getExhibitionDetail,
+  listPublishedExhibitionIds,
   ensureExhibitionExists,
   parsePositiveInt,
   parseLivePhotoImageList,

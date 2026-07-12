@@ -28,7 +28,7 @@ function scheduleExhibitionVisionIndexSync(exhibitionId, loadCandidates) {
 
 async function syncExhibitionVisionIndex(exhibitionId, loadCandidates) {
   const loaded = await loadCandidates(exhibitionId)
-  if (!loaded) return
+  if (!loaded) return { ok: false, reason: 'not_found' }
 
   const { exhibition, candidates } = loaded
   const items = (candidates || []).map((row) => ({
@@ -50,7 +50,7 @@ async function syncExhibitionVisionIndex(exhibitionId, loadCandidates) {
       status: result.status,
       error: result.body?.error,
     })
-    return
+    return { ok: false, status: result.status, body: result.body }
   }
 
   if (result.ok) {
@@ -60,9 +60,63 @@ async function syncExhibitionVisionIndex(exhibitionId, loadCandidates) {
       candidate_count: result.body?.candidate_count,
     })
   }
+
+  return { ok: true, body: result.body }
+}
+
+async function syncAllPublishedExhibitionVisionIndexes(deps) {
+  if (!isArtVisionEnabled()) return { synced: 0, total: 0, skipped: true }
+
+  const listPublishedExhibitionIds = deps?.listPublishedExhibitionIds
+  const loadCandidates = deps?.loadCandidates
+  if (typeof listPublishedExhibitionIds !== 'function' || typeof loadCandidates !== 'function') {
+    return { synced: 0, total: 0, error: 'invalid_deps' }
+  }
+
+  const ids = await listPublishedExhibitionIds()
+  let synced = 0
+  for (const exhibitionId of ids) {
+    try {
+      const result = await syncExhibitionVisionIndex(exhibitionId, loadCandidates)
+      if (result.ok) synced += 1
+    } catch (err) {
+      logger.warn('exhibition vision index sync failed', {
+        exhibition_id: exhibitionId,
+        err: err?.message || String(err),
+      })
+    }
+  }
+
+  logger.info('exhibition vision index bootstrap finished', {
+    synced,
+    total: ids.length,
+  })
+  return { synced, total: ids.length }
+}
+
+function startExhibitionVisionIndexBootstrap(deps) {
+  if (!isArtVisionEnabled()) return
+  if (process.env.ART_VISION_INDEX_SYNC_ON_STARTUP === 'false') return
+
+  const delayMs = Math.max(
+    3000,
+    Number(process.env.ART_VISION_INDEX_STARTUP_DELAY_MS) || 15000
+  )
+
+  setTimeout(() => {
+    syncAllPublishedExhibitionVisionIndexes(deps).catch((err) => {
+      logger.warn('exhibition vision index bootstrap failed', {
+        err: err?.message || String(err),
+      })
+    })
+  }, delayMs)
+
+  logger.info('exhibition vision index bootstrap scheduled', { delay_ms: delayMs })
 }
 
 module.exports = {
   scheduleExhibitionVisionIndexSync,
   syncExhibitionVisionIndex,
+  syncAllPublishedExhibitionVisionIndexes,
+  startExhibitionVisionIndexBootstrap,
 }

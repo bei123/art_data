@@ -49,6 +49,9 @@ const webviewRouter = require('./routes/webview');
 const exhibitionsRouter = require('./routes/exhibitions');
 const dashboardRouter = require('./routes/dashboard');
 const { startDigitalArtworksSync } = require('./utils/digitalArtworksSync');
+const { startExhibitionVisionIndexBootstrap } = require('./utils/exhibitionVisionIndex');
+const { loadExhibitionCandidates } = require('./services/artworkVisualSearchService');
+const exhibitionsService = require('./services/exhibitionsService');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('./utils/orderShipmentsSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
@@ -531,6 +534,10 @@ startLogisticsPathNotifyScheduler();
 startCommissionSettlementScheduler();
 startReferralReconciliationScheduler();
 startOrderAutoCloseScheduler();
+startExhibitionVisionIndexBootstrap({
+  loadCandidates: loadExhibitionCandidates,
+  listPublishedExhibitionIds: exhibitionsService.listPublishedExhibitionIds,
+});
 
 // 使用仪表盘路由
 app.use('/api/dashboard', dashboardRouter);

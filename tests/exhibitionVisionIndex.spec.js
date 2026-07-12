@@ -57,4 +57,35 @@ describe('exhibitionVisionIndex', () => {
     expect(body.exhibition_title).toBe('测试展')
     expect(body.items).toHaveLength(1)
   })
+
+  it('syncs all published exhibitions on bootstrap', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ indexed_count: 1, candidate_count: 1 }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const loadCandidates = vi.fn(async (id) => ({
+      exhibition: { id, title: `展${id}` },
+      candidates: [{
+        item_id: 1,
+        artwork_type: 'original',
+        artwork_id: '1',
+        title: 'A',
+        image_url: 'https://example.com/a.jpg',
+      }],
+    }))
+    const listPublishedExhibitionIds = vi.fn(async () => [2, 3])
+
+    const { syncAllPublishedExhibitionVisionIndexes } = await import('../utils/exhibitionVisionIndex.js')
+    const result = await syncAllPublishedExhibitionVisionIndexes({
+      loadCandidates,
+      listPublishedExhibitionIds,
+    })
+
+    expect(result.synced).toBe(2)
+    expect(result.total).toBe(2)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
 })
