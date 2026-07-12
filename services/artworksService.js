@@ -13,6 +13,7 @@ const {
   stripWmsFieldsForPublic,
 } = require('./wmsArtworkImageService');
 const { ORIGINAL_ARTWORK_PUBLIC_WHERE, toIsPublicEff } = require('../utils/publicVisibilitySchema');
+const { buildArtworkArPayload } = require('../utils/artworkArPayload');
 
 const REDIS_ARTWORKS_LIST_KEY = 'artworks:list';
 const REDIS_ARTWORKS_LIST_KEY_PREFIX = 'artworks:list:artist:';
@@ -482,6 +483,13 @@ async function getPublicArtworkDetail(rawId, includeHidden = false) {
     };
     if (includeHidden) result = attachAdminWmsImageFields(result);
     else result = stripWmsFieldsForPublic(result);
+    result.ar = buildArtworkArPayload({
+      image: artwork.image,
+      collection_size: artwork.collection_size,
+      length_cm: artwork.length_cm,
+      width_cm: artwork.width_cm,
+      height_cm: artwork.height_cm,
+    });
     try {
       if (!includeHidden) {
         await redisClient.setEx(REDIS_ARTWORK_DETAIL_KEY_PREFIX + id, 604800, JSON.stringify(result));
