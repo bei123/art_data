@@ -4,7 +4,12 @@ const {
   getDefaultArtworkThicknessCm,
 } = require('./artworkShippingDimensions')
 
-const { buildArtworkMarkerUrl, DEFAULT_MARKER_URL } = require('./artworkArMarker')
+const {
+  buildArtworkMarkerLiveUrl,
+  buildArtworkMarkerPrintUrl,
+  buildArtworkMarkerUrl,
+  DEFAULT_MARKER_URL,
+} = require('./artworkArMarker')
 
 const MARKER_REF_WIDTH_M = 0.21
 const AR_TEXTURE_MAX_WIDTH = Math.max(512, Number(process.env.AR_TEXTURE_MAX_WIDTH) || 2048)
@@ -82,17 +87,23 @@ function buildArtworkArPayload(artwork) {
 
   const enabled = !!(textureUrl && widthM && heightM)
 
-  const markerUrl = image ? buildArtworkMarkerUrl(image) : DEFAULT_MARKER_URL
+  const markerLiveUrl = image ? buildArtworkMarkerLiveUrl(image) : DEFAULT_MARKER_URL
+  const markerPrintUrl = image ? buildArtworkMarkerPrintUrl(image) : DEFAULT_MARKER_URL
+  const markerRefWidthM = widthM > 0 ? widthM : MARKER_REF_WIDTH_M
 
   return {
     enabled,
     texture_url: textureUrl,
-    marker_url: markerUrl,
+    marker_url: markerLiveUrl,
+    marker_live_url: markerLiveUrl,
+    marker_print_url: markerPrintUrl,
     width_m: widthM,
     height_m: heightM,
     aspect_ratio: widthM && heightM ? widthM / heightM : null,
     frame_depth_m: frameDepthM,
-    marker_ref_width_m: MARKER_REF_WIDTH_M,
+    marker_ref_width_m: markerRefWidthM,
+    marker_ref_source: widthM > 0 ? 'artwork_width' : 'print_a4',
+    marker_scan_target: 'live_artwork',
     size_text: artwork?.collection_size || null,
     suggested_mode: 'plane-wall',
     suggested_modes: {

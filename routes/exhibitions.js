@@ -1,8 +1,22 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const logger = require('../utils/logger');
 const { authenticateToken, checkRole } = require('../auth');
 const svc = require('../services/exhibitionsService');
+const visualSearchSvc = require('../services/artworkVisualSearchService');
+const { rateLimitIpKey } = require('../utils/rateLimitKeys');
+
+const visualSearchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Math.min(60, Math.max(8, Number(process.env.ARTWORK_VISUAL_SEARCH_RATE_MAX) || 20)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `visual-search:ip:${rateLimitIpKey(req)}`,
+  handler: (req, res) => {
+    res.status(429).json({ error: '识图请求过于频繁，请稍后再试' });
+  },
+});
 
 router.use(async (req, res, next) => {
   try {
@@ -22,6 +36,18 @@ router.get('/', async (req, res) => {
   } catch (e) {
     logger.error('get exhibitions failed', { err: e });
     res.status(500).json({ error: '获取展览列表失败' });
+  }
+});
+
+// 展览现场扫画识图（公开，限流）
+router.post('/:id/visual-search', visualSearchLimiter, async (req, res) => {
+  try {
+    const result = await visualSearchSvc.visualSearchByExhibition(req.params.id, req.body);
+    if (!result.ok) return res.status(result.status).json(result.body);
+    return res.json(result.body);
+  } catch (e) {
+    logger.error('exhibition visual-search failed', { err: e });
+    res.status(500).json({ error: '识图失败，请稍后重试' });
   }
 });
 

@@ -29,10 +29,15 @@ describe('artworkArPayload', () => {
     expect(payload.width_m).toBeCloseTo(0.3)
     expect(payload.height_m).toBeCloseTo(0.4)
     expect(payload.marker_url).toBeTruthy()
+    expect(payload.marker_live_url).toBeTruthy()
+    expect(payload.marker_print_url).toContain('m_pad')
+    expect(payload.marker_live_url).not.toContain('m_pad')
     expect(payload.marker_is_custom).toBe(true)
+    expect(payload.marker_scan_target).toBe('live_artwork')
+    expect(payload.marker_ref_source).toBe('artwork_width')
+    expect(payload.marker_ref_width_m).toBeCloseTo(0.3)
     expect(payload.suggested_modes.android).toBe('desk-preview')
     expect(payload.suggested_modes.ios).toBe('plane-wall')
-    expect(payload.marker_ref_width_m).toBe(0.21)
   })
 
   it('buildArtworkArPayload disabled without size', () => {

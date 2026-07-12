@@ -6,6 +6,7 @@ const DEFAULT_MARKER_URL =
 
 const MARKER_PAD_WIDTH = Math.max(400, Number(process.env.AR_MARKER_PAD_WIDTH) || 600)
 const MARKER_PAD_HEIGHT = Math.max(500, Number(process.env.AR_MARKER_PAD_HEIGHT) || 800)
+const MARKER_LIVE_MAX_WIDTH = Math.max(480, Number(process.env.AR_MARKER_LIVE_MAX_WIDTH) || 1280)
 const MARKER_QUALITY = Math.min(100, Math.max(60, Number(process.env.AR_MARKER_QUALITY) || 90))
 
 function isAliyunOssUrl(url) {
@@ -25,11 +26,7 @@ function stripOssProcess(url) {
   return url.replace(/[?&]x-oss-process=[^&]*/gi, '').replace(/\?$/, '')
 }
 
-/**
- * 为作品生成可打印/识别的标记图 URL（OSS 白边卡片，便于贴墙识别）
- * 非 OSS 图回退通用 demo 标记图。
- */
-function buildArtworkMarkerUrl(imageUrl) {
+function buildOssMarkerUrl(imageUrl, processParts) {
   if (!imageUrl || typeof imageUrl !== 'string') return DEFAULT_MARKER_URL
 
   if (!isAliyunOssUrl(imageUrl)) {
@@ -38,18 +35,41 @@ function buildArtworkMarkerUrl(imageUrl) {
   }
 
   const base = stripOssProcess(imageUrl)
-  const process = [
-    'x-oss-process=image',
+  const process = ['x-oss-process=image', ...processParts].join('/')
+  return `${base}?${process}`
+}
+
+/**
+ * 实景扫描标记图：无白边，比例与原作一致，便于对准墙上真画识别
+ */
+function buildArtworkMarkerLiveUrl(imageUrl) {
+  return buildOssMarkerUrl(imageUrl, [
+    `resize,w_${MARKER_LIVE_MAX_WIDTH},m_lfit`,
+    `quality,q_${MARKER_QUALITY}`,
+    'format,jpg',
+  ])
+}
+
+/**
+ * 打印标记图：白边卡片，适合 A4/A5 打印或手机展示
+ */
+function buildArtworkMarkerPrintUrl(imageUrl) {
+  return buildOssMarkerUrl(imageUrl, [
     `resize,w_${MARKER_PAD_WIDTH},h_${MARKER_PAD_HEIGHT},m_pad,color_FFFFFF`,
     `quality,q_${MARKER_QUALITY}`,
     'format,jpg',
-  ].join('/')
+  ])
+}
 
-  return `${base}?${process}`
+/** @deprecated 默认返回实景扫描图 */
+function buildArtworkMarkerUrl(imageUrl) {
+  return buildArtworkMarkerLiveUrl(imageUrl)
 }
 
 module.exports = {
   buildArtworkMarkerUrl,
+  buildArtworkMarkerLiveUrl,
+  buildArtworkMarkerPrintUrl,
   DEFAULT_MARKER_URL,
   stripOssProcess,
 }
