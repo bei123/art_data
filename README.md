@@ -8,6 +8,7 @@
 | 管理后台 | `https://wx.ht.2000gallery.art` |
 | 静态资源 OSS | `https://wx.oss.2000gallery.art` |
 | 微信小程序 | 见 [art_wx](https://github.com/bei123/art_wx) |
+| 识图服务 | 见 [art_vision](https://github.com/bei123/art_vision)（内网，不对小程序暴露） |
 
 接口文档：[docs/PROJECT-API.md](./docs/PROJECT-API.md) · OpenAPI：[docs/openapi-esa.json](./docs/openapi-esa.json)  
 发布流程：[deploy/CI-CD.md](./deploy/CI-CD.md) · 小程序发布：[art_wx/docs/WECHAT-RELEASE.md](https://github.com/bei123/art_wx/blob/main/docs/WECHAT-RELEASE.md)
@@ -52,6 +53,50 @@
 - 微信小程序用户、购物车、下单、支付
 - 收藏、搜索、物流、WebView 代理
 - 数字藏品申领、资产流转与核验
+- **展览扫画识图**（`POST /api/exhibitions/:id/visual-search`）
+- **作品 AR 预览数据**（尺寸、纹理、marker 等，供小程序 xr-frame 使用）
+
+---
+
+## 展览扫画识图（art_vision）
+
+展览现场「对准墙上原作拍摄 → 跳转作品页」由本仓库编排，CLIP 向量检索在独立服务 [art_vision](https://github.com/bei123/art_vision) 完成。
+
+```text
+art_wx  scan.uvue
+    → POST /api/exhibitions/:id/visual-search
+        → art_vision  POST /internal/exhibitions/:id/search   （优先，engine: clip）
+        → dHash 本地回退                                      （art_vision 不可用）
+
+管理端发布 / 修改展览作品
+    → exhibitionVisionIndex（防抖）
+    → art_vision  POST /internal/exhibitions/:id/index
+```
+
+相关代码：
+
+| 路径 | 说明 |
+|------|------|
+| `routes/exhibitions.js` | 公开识图接口，带 IP 限流 |
+| `services/artworkVisualSearchService.js` | CLIP 优先 + dHash 回退 |
+| `utils/artVisionClient.js` | 调用 art_vision 内网 API |
+| `utils/exhibitionVisionIndex.js` | 异步建索引；启动后可全量同步已发布展览 |
+
+在 `.env` 中启用（完整项见 `env.example`）：
+
+```env
+ART_VISION_ENABLED=true
+ART_VISION_BASE_URL=http://127.0.0.1:3100
+ART_VISION_INTERNAL_TOKEN=与 art_vision 相同
+ART_VISION_TIMEOUT_MS=30000
+ART_VISION_INDEX_TIMEOUT_MS=180000
+ART_VISION_INDEX_SYNC_ON_STARTUP=true
+ART_VISION_INDEX_STARTUP_DELAY_MS=15000
+```
+
+- `ART_VISION_ENABLED=false` 或未配置 `BASE_URL` / `TOKEN` 时，仅使用 dHash。
+- 生产可将 `art_vision` 部署在 GPU 机器（如 AutoDL），ECS 通过内网或 HTTPS 代理访问；**勿对公网暴露** `3100` 端口。
+- 部署、GPU、HF 镜像等详见 **[art_vision README](https://github.com/bei123/art_vision)**。
 
 ---
 
@@ -68,7 +113,9 @@ art_data/
 ├── routes/                 # Express 路由
 ├── services/               # 业务服务层
 ├── middleware/             # 鉴权、CORS、签名等
-├── utils/                  # 后端工具与 Schema 迁移
+├── utils/                  # 后端工具、Schema 迁移、art_vision 客户端
+│   ├── artVisionClient.js
+│   └── exhibitionVisionIndex.js
 ├── config/                 # OSS、微信、WMS 等配置
 ├── deploy/                 # CI/CD 脚本与运维文档
 ├── docs/                   # API、OpenAPI、安全文档
@@ -178,9 +225,12 @@ feature/* → PR → CI 绿灯 → merge main
 
 **发布顺序（与小程序联动）：**
 
-1. 先部署 `art_data`，确认冒烟通过  
-2. 再发布 `art_wx` 体验版  
-3. 微信公众平台人工提审、发布正式版  
+1. 若涉及识图：部署 / 重启 **art_vision**，确认 `GET /internal/health` 正常  
+2. 部署 **art_data**，确认冒烟通过（含 `ART_VISION_*` 环境变量）  
+3. 发布 **art_wx** 体验版  
+4. 微信公众平台人工提审、发布正式版  
+
+生产 ECS 上 `npm ci` 默认限制 Node 堆为 **512MB**（见 `deploy/install-backend-deps.sh`，可通过 `DEPLOY_NPM_CI_HEAP_MB` 覆盖）。
 
 完整 Secrets、冒烟、回滚与通知配置见 **[deploy/CI-CD.md](./deploy/CI-CD.md)**。
 
@@ -203,6 +253,7 @@ curl -s https://api.wx.2000gallery.art/api/health
 | [docs/PROJECT-API.md](./docs/PROJECT-API.md) | 接口说明 |
 | [docs/SECURITY-REVIEW.md](./docs/SECURITY-REVIEW.md) | 安全审查报告 |
 | [docs/ESA-API-SCHEMA.md](./docs/ESA-API-SCHEMA.md) | ESA API Schema |
+| [art_vision README](https://github.com/bei123/art_vision) | CLIP 识图服务部署与内网 API |
 
 Nginx 示例：`deploy/nginx-api-origin.example.conf`、`deploy/nginx-admin.example.conf`
 
