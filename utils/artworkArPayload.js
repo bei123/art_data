@@ -4,9 +4,7 @@ const {
   getDefaultArtworkThicknessCm,
 } = require('./artworkShippingDimensions')
 
-const DEFAULT_MARKER_URL =
-  process.env.AR_MARKER_DEFAULT_URL ||
-  'https://mmbizwxaminiprogram-1258344707.cos.ap-guangzhou.myqcloud.com/xr-frame/demo/marker/2dmarker-test.jpg'
+const { buildArtworkMarkerUrl, DEFAULT_MARKER_URL } = require('./artworkArMarker')
 
 const MARKER_REF_WIDTH_M = 0.21
 const AR_TEXTURE_MAX_WIDTH = Math.max(512, Number(process.env.AR_TEXTURE_MAX_WIDTH) || 2048)
@@ -33,7 +31,7 @@ function appendOssProcess(url, processParam) {
 function buildArTextureUrl(imageUrl) {
   if (!imageUrl || typeof imageUrl !== 'string') return ''
 
-  const process = `x-oss-process=image/resize,w_${AR_TEXTURE_MAX_WIDTH},m_lfit/quality,q_${AR_TEXTURE_QUALITY}/format,webp`
+  const process = `x-oss-process=image/resize,w_${AR_TEXTURE_MAX_WIDTH},m_lfit/quality,q_${AR_TEXTURE_QUALITY}/format,jpg`
 
   if (isAliyunOssUrl(imageUrl)) {
     return appendOssProcess(imageUrl, process)
@@ -87,16 +85,25 @@ function buildArtworkArPayload(artwork) {
 
   const enabled = !!(textureUrl && widthM && heightM)
 
+  const markerUrl = image ? buildArtworkMarkerUrl(image) : DEFAULT_MARKER_URL
+
   return {
     enabled,
     texture_url: textureUrl,
-    marker_url: DEFAULT_MARKER_URL,
+    marker_url: markerUrl,
     width_m: widthM,
     height_m: heightM,
     aspect_ratio: widthM && heightM ? widthM / heightM : null,
     frame_depth_m: frameDepthM,
     marker_ref_width_m: MARKER_REF_WIDTH_M,
     size_text: artwork?.collection_size || null,
+    suggested_mode: 'plane-wall',
+    suggested_modes: {
+      ios: 'plane-wall',
+      android: 'desk-preview',
+      fallback: 'marker-wall',
+    },
+    marker_is_custom: markerUrl !== DEFAULT_MARKER_URL,
   }
 }
 
@@ -104,6 +111,7 @@ module.exports = {
   buildArTextureUrl,
   buildArtworkArPayload,
   resolveArDimensionsMeters,
+  buildArtworkMarkerUrl,
   DEFAULT_MARKER_URL,
   MARKER_REF_WIDTH_M,
 }

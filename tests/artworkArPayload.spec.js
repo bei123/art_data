@@ -16,7 +16,7 @@ describe('artworkArPayload', () => {
   it('buildArTextureUrl appends oss process for ali OSS urls', () => {
     const url = buildArTextureUrl('https://wx.oss.2000gallery.art/demo.jpg')
     expect(url).toContain('x-oss-process=image/resize')
-    expect(url).toContain('format,webp')
+    expect(url).toContain('format,jpg')
   })
 
   it('buildArtworkArPayload returns enabled when image and size exist', () => {
@@ -29,6 +29,9 @@ describe('artworkArPayload', () => {
     expect(payload.width_m).toBeCloseTo(0.3)
     expect(payload.height_m).toBeCloseTo(0.4)
     expect(payload.marker_url).toBeTruthy()
+    expect(payload.marker_is_custom).toBe(true)
+    expect(payload.suggested_modes.android).toBe('desk-preview')
+    expect(payload.suggested_modes.ios).toBe('plane-wall')
     expect(payload.marker_ref_width_m).toBe(0.21)
   })
 
