@@ -85,7 +85,7 @@ jobs:
           ADMIN_DEPLOY_PATH: ${{ vars.ADMIN_DEPLOY_PATH || '/www/wwwroot/wx.ht.2000gallery.art/' }}
 
       - name: Deploy backend at ref
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
