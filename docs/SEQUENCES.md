@@ -1,6 +1,6 @@
 # 时序图
 
-端到端调用时序（参与者、接口路径、关键副作用）。业务泳道总览见 [`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md)，组件边界见 [`COMPONENTS.md`](./COMPONENTS.md)。
+端到端调用时序（参与者、接口路径、关键副作用）。业务泳道见 [`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md)，状态迁移见 [`STATE-MACHINES.md`](./STATE-MACHINES.md)，组件边界见 [`COMPONENTS.md`](./COMPONENTS.md)。
 
 ## 目录
 

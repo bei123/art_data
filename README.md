@@ -11,8 +11,9 @@
 | 识图服务 | 见 [art_vision](https://github.com/bei123/art_vision)（内网，不对小程序暴露） |
 
 接口文档：[docs/PROJECT-API.md](./docs/PROJECT-API.md) · OpenAPI：[docs/openapi-esa.json](./docs/openapi-esa.json)  
-业务流：[docs/BUSINESS-FLOWS.md](./docs/BUSINESS-FLOWS.md) · 时序图：[docs/SEQUENCES.md](./docs/SEQUENCES.md) · 系统/物理架构：[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) · 组件/模块：[docs/COMPONENTS.md](./docs/COMPONENTS.md)  
-发布流程：[deploy/CI-CD.md](./deploy/CI-CD.md) · 小程序发布：[art_wx/docs/WECHAT-RELEASE.md](https://github.com/bei123/art_wx/blob/main/docs/WECHAT-RELEASE.md)
+业务流：[docs/BUSINESS-FLOWS.md](./docs/BUSINESS-FLOWS.md) · 用例：[docs/USE-CASES.md](./docs/USE-CASES.md) · 时序：[docs/SEQUENCES.md](./docs/SEQUENCES.md) · 状态机：[docs/STATE-MACHINES.md](./docs/STATE-MACHINES.md)  
+架构：[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) · 网络：[docs/NETWORK.md](./docs/NETWORK.md) · 组件：[docs/COMPONENTS.md](./docs/COMPONENTS.md) · 数据模型：[docs/DATA-MODEL.md](./docs/DATA-MODEL.md) · 集成：[docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md)  
+发布：[docs/CICD-FLOW.md](./docs/CICD-FLOW.md) · [deploy/CI-CD.md](./deploy/CI-CD.md) · 小程序：[art_wx/docs/WECHAT-RELEASE.md](https://github.com/bei123/art_wx/blob/main/docs/WECHAT-RELEASE.md)
 
 ---
 
@@ -119,7 +120,7 @@ art_data/
 │   └── exhibitionVisionIndex.js
 ├── config/                 # OSS、微信、WMS 等配置
 ├── deploy/                 # CI/CD 脚本与运维文档
-├── docs/                   # API、架构、业务流、OpenAPI、安全文档
+├── docs/                   # API、架构、业务流、状态机、数据模型、集成、安全
 ├── tests/                  # Vitest 单测
 ├── scripts/                # OpenAPI 审计等脚本
 ├── index.js                # 后端入口
@@ -247,15 +248,21 @@ curl -s https://api.wx.2000gallery.art/api/health
 
 | 文档 | 内容 |
 |------|------|
-| [deploy/CI-CD.md](./deploy/CI-CD.md) | CI/CD 发布手册 |
+| [deploy/CI-CD.md](./deploy/CI-CD.md) | CI/CD 发布手册（Secrets / 操作） |
+| [docs/CICD-FLOW.md](./docs/CICD-FLOW.md) | CI/CD 流水线图 |
 | [deploy/CDN-API-CORS.md](./deploy/CDN-API-CORS.md) | API CDN 与 CORS |
 | [deploy/WECHAT-MINIPROGRAM.md](./deploy/WECHAT-MINIPROGRAM.md) | 小程序域名与请求排错 |
 | [deploy/ADMIN-SITE-RECOVERY.md](./deploy/ADMIN-SITE-RECOVERY.md) | 管理台 502 / 恢复 |
 | [docs/PROJECT-API.md](./docs/PROJECT-API.md) | 接口说明 |
 | [docs/BUSINESS-FLOWS.md](./docs/BUSINESS-FLOWS.md) | 业务流程图 / 泳道图 |
-| [docs/SEQUENCES.md](./docs/SEQUENCES.md) | 时序图（登录/支付/发货/数字品/推荐/识图） |
+| [docs/USE-CASES.md](./docs/USE-CASES.md) | 用例图 / 角色能力 |
+| [docs/SEQUENCES.md](./docs/SEQUENCES.md) | 时序图 |
+| [docs/STATE-MACHINES.md](./docs/STATE-MACHINES.md) | 状态机（订单/退款/提现/佣金） |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 系统架构图 / 物理架构图 |
+| [docs/NETWORK.md](./docs/NETWORK.md) | 网络与信任边界 |
 | [docs/COMPONENTS.md](./docs/COMPONENTS.md) | 组件图 / 模块结构图 |
+| [docs/DATA-MODEL.md](./docs/DATA-MODEL.md) | 数据模型 / ER |
+| [docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md) | 第三方集成图 |
 | [docs/SECURITY-REVIEW.md](./docs/SECURITY-REVIEW.md) | 安全审查报告 |
 | [docs/ESA-API-SCHEMA.md](./docs/ESA-API-SCHEMA.md) | ESA API Schema |
 | [art_vision README](https://github.com/bei123/art_vision) | CLIP 识图服务部署与内网 API |

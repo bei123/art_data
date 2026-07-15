@@ -2,7 +2,7 @@
 
 仓库协作：`art_data` = Express API + Vue 管理后台；`art_wx` = 微信小程序；`art_vision` = 展览识图（内网）。
 
-相关：[`SEQUENCES.md`](./SEQUENCES.md) · [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`COMPONENTS.md`](./COMPONENTS.md) · [接口文档](./PROJECT-API.md)
+相关：[`SEQUENCES.md`](./SEQUENCES.md) · [`USE-CASES.md`](./USE-CASES.md) · [`STATE-MACHINES.md`](./STATE-MACHINES.md) · [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`COMPONENTS.md`](./COMPONENTS.md) · [接口文档](./PROJECT-API.md)
 
 ## 泳道角色
 

@@ -2,7 +2,7 @@
 
 形态：**单机宝塔 ECS + GitHub Actions SSH 部署**（宝塔 Node 项目，非 PM2）。管理台为静态文件，API 为同机 HTTPS 进程；小程序无服务端进程。
 
-相关：[`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md) · [`SEQUENCES.md`](./SEQUENCES.md) · [`COMPONENTS.md`](./COMPONENTS.md) · [发布流程](../deploy/CI-CD.md)
+相关：[`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md) · [`SEQUENCES.md`](./SEQUENCES.md) · [`COMPONENTS.md`](./COMPONENTS.md) · [`NETWORK.md`](./NETWORK.md) · [发布流程](../deploy/CI-CD.md) · [流水线图](./CICD-FLOW.md)
 
 ## 逻辑分层（系统架构）
 
@@ -144,7 +144,7 @@ flowchart TB
     └─ ④ art_vision :3100 + INTERNAL_TOKEN（不对小程序暴露）
 ```
 
-运维面（SSH、宝塔面板、`.env`）不在小程序可达路径内。小程序合法域名只配 `api.wx` / `wx.oss` 等，**禁止**写成 `:2000`。
+运维面（SSH、宝塔面板、`.env`）不在小程序可达路径内。小程序合法域名只配 `api.wx` / `wx.oss` 等，**禁止**写成 `:2000`。完整端口与边界见 [`NETWORK.md`](./NETWORK.md)。
 
 ## 进程与制品拓扑
 

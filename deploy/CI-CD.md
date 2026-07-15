@@ -1,5 +1,7 @@
 # CI/CD 发布手册
 
+流程图见 [docs/CICD-FLOW.md](../docs/CICD-FLOW.md)。
+
 单机宝塔 + GitHub Actions，两仓库分工：
 
 | 仓库 | 职责 | 触发 |

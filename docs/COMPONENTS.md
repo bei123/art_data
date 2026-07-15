@@ -1,6 +1,6 @@
 # 组件图 / 模块结构图
 
-本仓库 `art_data` 的逻辑组件与目录模块关系。物理部署见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)，端到端业务见 [`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md)，调用时序见 [`SEQUENCES.md`](./SEQUENCES.md)。
+本仓库 `art_data` 的逻辑组件与目录模块关系。物理部署见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)，端到端业务见 [`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md)，调用时序见 [`SEQUENCES.md`](./SEQUENCES.md)，外部系统见 [`INTEGRATIONS.md`](./INTEGRATIONS.md)，表关系见 [`DATA-MODEL.md`](./DATA-MODEL.md)。
 
 ## 组件依赖总览
 
