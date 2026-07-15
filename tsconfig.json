@@ -9,7 +9,6 @@
     "skipLibCheck": true,
     "allowJs": true,
     "checkJs": false,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
