@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: deploy-production
@@ -39,6 +40,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test
         run: npm run test
@@ -50,6 +53,7 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ci-test-oss-access-key-secret
           OSS_BUCKET: ci-test-bucket
           OSS_REGION: oss-cn-hangzhou
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build admin frontend
         run: npm run build
@@ -86,6 +90,8 @@ jobs:
 
       - name: Deploy backend at ref
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -93,6 +99,7 @@ jobs:
           port: 22
           timeout: 60s
           command_timeout: 30m
+          envs: NODE_AUTH_TOKEN
           script: |
             set -euo pipefail
             BACKEND="${{ vars.BACKEND_DEPLOY_PATH || '/www/wwwroot/art_data' }}"
