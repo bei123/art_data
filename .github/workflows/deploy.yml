@@ -13,6 +13,11 @@ on:
         description: 'Deploy or rollback to a commit SHA or tag (empty = current SHA)'
         required: false
         default: ''
+      force_full:
+        description: 'Force full deploy (build + restart) even if no FE/BE code changes'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -37,17 +42,105 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Detect frontend / backend changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch 默认全量；取消 force_full 时按相对上一次提交的 diff 判断
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_full }}" != "false" ]; then
+            echo "Manual full deploy"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          AFTER="$(git rev-parse HEAD)"
+          BEFORE=""
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE="${{ github.event.before }}"
+          fi
+          if [ -z "$BEFORE" ] || [[ "$BEFORE" =~ ^0+$ ]]; then
+            BEFORE="$(git rev-parse "${AFTER}^" 2>/dev/null || true)"
+          fi
+
+          if [ -z "$BEFORE" ] || [[ "$BEFORE" =~ ^0+$ ]]; then
+            echo "No usable before SHA, default to full deploy"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mapfile -t FILES < <(git diff --name-only "$BEFORE" "$AFTER" || true)
+          echo "Diff $BEFORE..$AFTER (${#FILES[@]} files)"
+          printf '  %s\n' "${FILES[@]:-}"
+
+          frontend=false
+          backend=false
+
+          is_frontend() {
+            case "$1" in
+              src/*|public/*|index.html|vite.config.js|components.json|tsconfig.json|favicon.ico)
+                return 0 ;;
+              package.json|package-lock.json)
+                return 0 ;;
+              *)
+                return 1 ;;
+            esac
+          }
+
+          is_backend() {
+            case "$1" in
+              index.js|auth.js|db.js|schema.sql|.nvmrc|.env.production.example)
+                return 0 ;;
+              routes/*|services/*|middleware/*|utils/*|config/*|sql/*|scripts/*)
+                return 0 ;;
+              package.json|package-lock.json)
+                return 0 ;;
+              *)
+                return 1 ;;
+            esac
+          }
+
+          for f in "${FILES[@]:-}"; do
+            [ -z "$f" ] && continue
+            if is_frontend "$f"; then frontend=true; fi
+            if is_backend "$f"; then backend=true; fi
+          done
+
+          if [ "$frontend" = "true" ] && [ "$backend" = "true" ]; then
+            mode=full
+          elif [ "$frontend" = "true" ]; then
+            mode=frontend
+          elif [ "$backend" = "true" ]; then
+            mode=backend
+          else
+            mode=pull-only
+          fi
+
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "Deploy mode=$mode frontend=$frontend backend=$backend"
 
       - name: Setup Node.js
+        if: steps.changes.outputs.frontend == 'true' || steps.changes.outputs.backend == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
+        if: steps.changes.outputs.frontend == 'true' || steps.changes.outputs.backend == 'true'
         run: npm ci
 
       - name: Test
+        if: steps.changes.outputs.frontend == 'true' || steps.changes.outputs.backend == 'true'
         run: npm run test
         env:
           NODE_ENV: test
@@ -59,6 +152,7 @@ jobs:
           OSS_REGION: oss-cn-hangzhou
 
       - name: Build admin frontend
+        if: steps.changes.outputs.frontend == 'true'
         run: npm run build
         env:
           NODE_ENV: production
@@ -68,6 +162,7 @@ jobs:
           VITE_API_SIGN_SECRET: ${{ secrets.VITE_API_SIGN_SECRET }}
 
       - name: Setup SSH for rsync
+        if: steps.changes.outputs.frontend == 'true'
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -78,6 +173,7 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
 
       - name: Deploy admin static
+        if: steps.changes.outputs.frontend == 'true'
         run: |
           rsync -avzr --delete \
             --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
@@ -91,8 +187,10 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           ADMIN_DEPLOY_PATH: ${{ vars.ADMIN_DEPLOY_PATH || '/www/wwwroot/wx.ht.2000gallery.art/' }}
 
-      - name: Deploy backend
+      - name: Sync backend on server
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          NEED_BACKEND_RESTART: ${{ steps.changes.outputs.backend }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -100,27 +198,36 @@ jobs:
           port: 22
           timeout: 60s
           command_timeout: 30m
+          envs: NEED_BACKEND_RESTART
           script: |
             set -euo pipefail
             BACKEND="${{ vars.BACKEND_DEPLOY_PATH || '/www/wwwroot/art_data' }}"
             cd "$BACKEND"
             git fetch origin main
             git reset --hard origin/main
-            chmod +x deploy/*.sh
-            bash deploy/install-backend-deps.sh "$BACKEND"
-            BT_NODE_PROJECT_NAME=${{ vars.BT_NODE_PROJECT_NAME || 'art_data' }} bash deploy/restart-baota-node.sh
+            echo "==> Server repo synced to $(git rev-parse --short HEAD)"
+
+            if [ "${NEED_BACKEND_RESTART}" = "true" ]; then
+              chmod +x deploy/*.sh
+              bash deploy/install-backend-deps.sh "$BACKEND"
+              BT_NODE_PROJECT_NAME=${{ vars.BT_NODE_PROJECT_NAME || 'art_data' }} bash deploy/restart-baota-node.sh
+            else
+              echo "==> No backend runtime change, skip npm ci / Baota restart"
+            fi
 
       - name: Wait for API
+        if: steps.changes.outputs.backend == 'true'
         run: sleep 5
 
       - name: Smoke test
+        if: steps.changes.outputs.frontend == 'true' || steps.changes.outputs.backend == 'true'
         run: bash deploy/smoke-test.sh
         env:
           API_BASE_URL: ${{ vars.API_BASE_URL || 'https://api.wx.2000gallery.art' }}
           ADMIN_BASE_URL: ${{ vars.ADMIN_BASE_URL || 'https://wx.ht.2000gallery.art' }}
 
       - name: Nginx reload via Baota API
-        if: success()
+        if: success() && (steps.changes.outputs.frontend == 'true' || steps.changes.outputs.backend == 'true')
         continue-on-error: true
         run: node deploy/bt-api-call.mjs
         env:
@@ -136,6 +243,7 @@ jobs:
         env:
           DEPLOY_STATUS: ${{ job.status }}
           DEPLOY_PROJECT: art_data
+          DEPLOY_VERSION: ${{ steps.changes.outputs.mode }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           DEPLOY_NOTIFY_WEBHOOK_URL: ${{ secrets.DEPLOY_NOTIFY_WEBHOOK_URL }}
           WECHAT_OA_APPID: ${{ secrets.WECHAT_OA_APPID }}
