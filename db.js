@@ -106,7 +106,8 @@ const query = async (sql, params) => {
             console.log('查询参数:', redactLogValue(params));
         }
 
-        // codeql[js/sql-injection]: Callers use parameterized SQL; user values are bound via `params`.
+        // Callers must pass parameterized SQL; user values belong in `params`.
+        // codeql[js/sql-injection]
         const results = await pool.query(sql, params);
         const queryTime = Date.now() - startTime;
         

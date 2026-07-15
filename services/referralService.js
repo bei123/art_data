@@ -43,10 +43,16 @@ function normalizeBindSource(raw) {
 }
 
 function randomReferralCode() {
-  const bytes = crypto.randomBytes(CODE_LENGTH)
+  // Unbiased selection: reject bytes in the biased remainder of 256 % alphabetSize.
+  const alphabetSize = CODE_CHARS.length
+  const limit = 256 - (256 % alphabetSize)
   let code = ''
-  for (let i = 0; i < CODE_LENGTH; i += 1) {
-    code += CODE_CHARS[bytes[i] % CODE_CHARS.length]
+  while (code.length < CODE_LENGTH) {
+    const bytes = crypto.randomBytes(CODE_LENGTH - code.length + 8)
+    for (let i = 0; i < bytes.length && code.length < CODE_LENGTH; i += 1) {
+      const value = bytes[i]
+      if (value < limit) code += CODE_CHARS[value % alphabetSize]
+    }
   }
   return code
 }

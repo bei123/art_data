@@ -22,7 +22,8 @@ const REDIS_EXTERNAL_USER_CACHE_TTL = 86400; // 24小时过期
 
 /** Wespace 注册接口要求 MD5 密码，非本地存储用途 */
 function md5ForExternalWespaceApi(str) {
-  // codeql[js/insufficient-password-hash]: Remote Wespace API contract requires MD5.
+  // Remote Wespace API contract requires MD5; local auth uses bcrypt elsewhere.
+  // codeql[js/insufficient-password-hash]
   return crypto.createHash('md5').update(str).digest('hex');
 }
 

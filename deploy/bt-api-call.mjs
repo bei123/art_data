@@ -1,8 +1,11 @@
 import crypto from 'crypto'
 
 function getBtAuthParams(apiKey) {
+  // Baota Open API auth contract: request_token = md5(request_time + md5(api_key))
   const request_time = String(Math.floor(Date.now() / 1000))
+  // codeql[js/insufficient-password-hash]
   const md5Key = crypto.createHash('md5').update(apiKey).digest('hex')
+  // codeql[js/insufficient-password-hash]
   const request_token = crypto.createHash('md5')
     .update(request_time + md5Key)
     .digest('hex')

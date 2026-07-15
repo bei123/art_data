@@ -214,6 +214,8 @@ function buildCanonicalString({
 }
 
 function computeSignature(secret, canonicalString) {
+  // Request signing (HMAC), not password storage.
+  // codeql[js/insufficient-password-hash]
   return crypto.createHmac('sha256', secret).update(canonicalString).digest('hex').toLowerCase()
 }
 

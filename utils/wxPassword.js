@@ -8,11 +8,13 @@ function isBcryptHash(hash) {
 }
 
 function legacyMd5WithSalt(password, salt, times = 3) {
-  let hash = password + salt;
+  // Legacy verify-only path for pre-bcrypt wx passwords; new hashes use bcrypt.
+  let hash = password + salt
   for (let i = 0; i < times; i++) {
-    hash = crypto.createHash('md5').update(hash).digest('hex');
+    // codeql[js/insufficient-password-hash]
+    hash = crypto.createHash('md5').update(hash).digest('hex')
   }
-  return hash;
+  return hash
 }
 
 async function hashWxPassword(password) {

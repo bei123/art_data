@@ -15,6 +15,8 @@ function isWespaceTlsInsecure() {
 function getWespaceHttpsAgent() {
   if (!isWespaceTlsInsecure()) return undefined
   if (!insecureAgent) {
+    // Only enabled when WESPACE_NODE_TLS_INSECURE=true (legacy peer cert issues).
+    // codeql[js/disabling-certificate-validation]
     insecureAgent = new https.Agent({ rejectUnauthorized: false })
   }
   return insecureAgent

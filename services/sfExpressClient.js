@@ -80,7 +80,9 @@ function sfUrlEncode(text) {
  * 标准 MD5 鉴权：URLEncode(msgData + timestamp + checkWord) → MD5 → Base64
  */
 function buildMsgDigest(msgData, timestamp, checkWord) {
+  // SF Express Open Platform MD5 digest contract (not local password storage).
   const toVerifyText = sfUrlEncode(`${msgData}${timestamp}${checkWord}`)
+  // codeql[js/weak-cryptographic-algorithm]
   return crypto.createHash('md5').update(toVerifyText, 'utf8').digest('base64')
 }
 
