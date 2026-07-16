@@ -145,13 +145,23 @@ function formatDate(v) {
 }
 
 async function loadTemplates() {
-  const { data } = await axios.get('/admin/referral/coupon-templates')
-  templates.value = data.items || []
+  try {
+    const data = await axios.get('/admin/referral/coupon-templates')
+    templates.value = data?.items || []
+  } catch (error) {
+    console.error('加载代金券模板失败:', error)
+    templates.value = []
+  }
 }
 
 async function loadCoupons() {
-  const { data } = await axios.get('/admin/referral/coupons', { params: { pageSize: 50 } })
-  coupons.value = data.items || []
+  try {
+    const data = await axios.get('/admin/referral/coupons', { params: { pageSize: 50 } })
+    coupons.value = data?.items || []
+  } catch (error) {
+    console.error('加载发放记录失败:', error)
+    coupons.value = []
+  }
 }
 
 async function handleCreateTemplate() {
@@ -169,6 +179,8 @@ async function handleCreateTemplate() {
     form.title = ''
     form.discount_yuan = ''
     await loadTemplates()
+  } catch (error) {
+    console.error('创建代金券模板失败:', error)
   } finally {
     creating.value = false
   }
@@ -183,6 +195,8 @@ async function handleGrant() {
     })
     showPageSuccess('已发放')
     await loadCoupons()
+  } catch (error) {
+    console.error('发放代金券失败:', error)
   } finally {
     granting.value = false
   }
