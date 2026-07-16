@@ -18,6 +18,10 @@ const SHIPPING_COLUMNS = [
     name: 'shipping_snapshot',
     ddl: "JSON NULL COMMENT '运费询价快照'",
   },
+  {
+    name: 'payment_total',
+    ddl: "DECIMAL(10,2) NULL COMMENT '提交微信JSAPI的标价(元)，退款amount.total用；券后actual_fee为实付'",
+  },
 ]
 
 async function hasIndex(tableName, indexName) {

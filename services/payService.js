@@ -437,6 +437,28 @@ function resolveOrderPaidCents(order, wxPay) {
 }
 
 /**
+ * 原支付交易标价金额（JSAPI / amount.total），退款接口 amount.total 必须与此一致。
+ * 含券订单：total 为券前标价，payer_total 为用户实付。
+ */
+function resolveOrderTransactionTotalCents(order, wxPay) {
+    const wxTotal = Number(wxPay?.amount?.total);
+    if (Number.isFinite(wxTotal) && wxTotal > 0) return Math.round(wxTotal);
+
+    // 下单时写入的 JSAPI 标价（券核销后 actual_fee 会被改成 payer_total，不能再用）
+    const paymentTotal = parseFloat(order?.payment_total);
+    if (Number.isFinite(paymentTotal) && paymentTotal > 0) return Math.round(paymentTotal * 100);
+
+    // 未支付或尚未对齐实付时，actual_fee 仍是下单应付（= JSAPI 标价）
+    const actualFee = parseFloat(order?.actual_fee);
+    if (Number.isFinite(actualFee) && actualFee > 0) return Math.round(actualFee * 100);
+
+    const totalFee = parseFloat(order?.total_fee);
+    if (Number.isFinite(totalFee) && totalFee > 0) return Math.round(totalFee * 100);
+
+    return 0;
+}
+
+/**
  * Align local actual_fee / discount_amount with WeChat payer_total (券后实付).
  * total_fee 保持下单时商品+运费；discount = total_fee - 实付（含身份折扣+微信券）.
  */
@@ -446,6 +468,7 @@ async function reconcileOrderFeesWithPayerTotal({
     totalFeeYuan,
     currentActualYuan,
     payerTotalFen,
+    wxAmountTotalFen = null,
 }) {
     if (!orderId || payerTotalFen == null) return { changed: false };
     const fen = Number(payerTotalFen);
@@ -453,7 +476,13 @@ async function reconcileOrderFeesWithPayerTotal({
 
     const paidYuan = Math.round(fen) / 100;
     const prevActual = Number(currentActualYuan);
-    if (Number.isFinite(prevActual) && Math.abs(paidYuan - prevActual) < 0.005) {
+    const wxTotalFen = Number(wxAmountTotalFen);
+    const paymentTotalYuan = Number.isFinite(wxTotalFen) && wxTotalFen > 0
+        ? Math.round(wxTotalFen) / 100
+        : null;
+    const actualUnchanged = Number.isFinite(prevActual) && Math.abs(paidYuan - prevActual) < 0.005;
+
+    if (actualUnchanged && paymentTotalYuan == null) {
         return { changed: false, actualFeeYuan: paidYuan };
     }
 
@@ -462,30 +491,45 @@ async function reconcileOrderFeesWithPayerTotal({
         ? Math.round(Math.max(0, totalYuan - paidYuan) * 100) / 100
         : null;
 
-    if (nextDiscount == null) {
-        await connection.query(
-            `UPDATE orders SET actual_fee = ?, updated_at = NOW() WHERE id = ?`,
-            [paidYuan, orderId]
-        );
-    } else {
-        await connection.query(
-            `UPDATE orders
-             SET actual_fee = ?, discount_amount = ?, updated_at = NOW()
-             WHERE id = ?`,
-            [paidYuan, nextDiscount, orderId]
-        );
+    const sets = [];
+    const params = [];
+    if (!actualUnchanged) {
+        sets.push('actual_fee = ?');
+        params.push(paidYuan);
+        if (nextDiscount != null) {
+            sets.push('discount_amount = ?');
+            params.push(nextDiscount);
+        }
+    }
+    // 回填 JSAPI 标价，供退款 amount.total（仅空时写入，避免覆盖下单值）
+    if (paymentTotalYuan != null) {
+        sets.push('payment_total = COALESCE(payment_total, ?)');
+        params.push(paymentTotalYuan);
+    }
+    if (!sets.length) {
+        return { changed: false, actualFeeYuan: paidYuan };
     }
 
-    logger.info('订单实付已按微信 payer_total 对齐', {
-        orderId,
-        payer_total_fen: fen,
-        actual_fee_yuan: paidYuan,
-        discount_amount_yuan: nextDiscount,
-        previous_actual_yuan: Number.isFinite(prevActual) ? prevActual : null,
-    });
+    sets.push('updated_at = NOW()');
+    params.push(orderId);
+    await connection.query(
+        `UPDATE orders SET ${sets.join(', ')} WHERE id = ?`,
+        params
+    );
+
+    if (!actualUnchanged) {
+        logger.info('订单实付已按微信 payer_total 对齐', {
+            orderId,
+            payer_total_fen: fen,
+            actual_fee_yuan: paidYuan,
+            discount_amount_yuan: nextDiscount,
+            previous_actual_yuan: Number.isFinite(prevActual) ? prevActual : null,
+            payment_total_yuan: paymentTotalYuan,
+        });
+    }
 
     return {
-        changed: true,
+        changed: !actualUnchanged,
         actualFeeYuan: paidYuan,
         discountYuan: nextDiscount,
     };
@@ -516,25 +560,49 @@ async function resolveRefundAmountCentsForOrder(orderRow, connection = null) {
         return { error: '仅支付成功的订单可发起退款', status: 400 };
     }
 
-    const paidCents = resolveOrderPaidCents(order, synced.wxPay);
-    if (paidCents <= 0) {
-        return { error: '无法确定订单实付金额，无法退款', status: 400 };
+    const wxPay = synced.wxPay;
+    const transactionTotalCents = resolveOrderTransactionTotalCents(order, wxPay);
+    const payerPaidCents = resolveOrderPaidCents(order, wxPay);
+
+    if (transactionTotalCents <= 0) {
+        return { error: '无法确定原支付订单金额，无法退款', status: 400 };
     }
 
+    // 含券订单：必须拿到微信 amount.total 或本地 payment_total，避免误用券后 actual_fee
+    const hasWxTotal = Number(wxPay?.amount?.total) > 0;
+    const hasPaymentTotal = Number.isFinite(parseFloat(order?.payment_total)) && parseFloat(order.payment_total) > 0;
+    if (!hasWxTotal && !hasPaymentTotal) {
+        return {
+            error: '无法确认微信原支付标价，请稍后重试或先同步订单支付状态',
+            status: 502,
+        };
+    }
+
+    // 微信退款：amount.total = 原支付标价；amount.refund = 本次申请退款（可含券，全额退应用标价总额）
+    // 用户现金实付为 payer_total；全额退时微信会拆成现金退款 + 券退回
     const refundedCents = await sumSuccessfulRefundCents(order.out_trade_no, connection);
-    const refundCents = paidCents - refundedCents;
+    const refundCents = transactionTotalCents - refundedCents;
     if (refundCents <= 0) {
         return { error: '该订单可退款余额为 0', status: 400 };
     }
 
+    if (!hasWxTotal) {
+        logger.warn('退款未拿到微信 amount.total，使用本地 payment_total', {
+            out_trade_no: order.out_trade_no,
+            transaction_total_cents: transactionTotalCents,
+            payer_paid_cents: payerPaidCents,
+        });
+    }
+
     return {
         refundCents,
-        totalCents: paidCents,
+        totalCents: transactionTotalCents,
+        payerPaidCents,
         refundedCents,
         currency: 'CNY',
         order,
-        wxPay: synced.wxPay,
-        transactionId: synced.wxPay?.transaction_id || order.transaction_id || null,
+        wxPay,
+        transactionId: wxPay?.transaction_id || order.transaction_id || null,
     };
 }
 
@@ -544,6 +612,53 @@ function buildWechatRefundAmountPayload({ refundCents, totalCents, currency = 'C
         total: totalCents,
         currency,
     };
+}
+
+/** 合并微信退款回包金额（含 payer_refund / discount_refund 等含券字段） */
+function buildStoredRefundAmount(base, wxAmount) {
+    const stored = {
+        refund: Math.round(Number(base?.refund ?? wxAmount?.refund) || 0),
+        total: Math.round(Number(base?.total ?? wxAmount?.total) || 0),
+        currency: base?.currency || wxAmount?.currency || 'CNY',
+    };
+    if (!wxAmount || typeof wxAmount !== 'object') return stored;
+
+    for (const key of [
+        'payer_total',
+        'payer_refund',
+        'discount_refund',
+        'settlement_refund',
+        'settlement_total',
+    ]) {
+        if (wxAmount[key] == null) continue;
+        const fen = Number(wxAmount[key]);
+        if (Number.isFinite(fen)) stored[key] = Math.round(fen);
+    }
+    return stored;
+}
+
+async function updateRefundAmountSnapshot(outRefundNo, wxAmount, connection = db) {
+    if (!outRefundNo || !wxAmount) return null;
+    const runner = connection || db;
+    const [rows] = await runner.query(
+        'SELECT id, amount FROM refund_requests WHERE out_refund_no = ? LIMIT 1',
+        [outRefundNo]
+    );
+    if (!rows.length) return null;
+
+    let base = {};
+    try {
+        base = typeof rows[0].amount === 'string' ? JSON.parse(rows[0].amount) : (rows[0].amount || {});
+    } catch {
+        base = {};
+    }
+
+    const next = buildStoredRefundAmount(base, wxAmount);
+    await runner.query(
+        'UPDATE refund_requests SET amount = ? WHERE id = ?',
+        [JSON.stringify(next), rows[0].id]
+    );
+    return next;
 }
 
 function buyerUserIdFromReq(req) {
@@ -644,7 +759,7 @@ async function loadOrderForBuyer(req, outTradeNo, connection = null) {
     const runner = connection || db;
     const [rows] = await runner.query(
         `SELECT id, out_trade_no, transaction_id, trade_state, trade_state_desc,
-                actual_fee, total_fee, shipping_fee, discount_amount, referral_coupon_id, user_id, body,
+                actual_fee, total_fee, payment_total, shipping_fee, discount_amount, referral_coupon_id, user_id, body,
                 created_at, updated_at, success_time, inventory_reserved
          FROM orders WHERE out_trade_no = ? LIMIT 1`,
         [cleanOutTradeNo]
@@ -879,8 +994,8 @@ async function unifiedOrder(req) {
                     await releaseClosedOrderInventory(orderId, connection);
                 }
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = NULL, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, payment_total = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = NULL, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
                 );
 
                 // 删除旧的订单项
@@ -889,8 +1004,8 @@ async function unifiedOrder(req) {
                 // 创建新订单（微信免充值券在收银台核销，不再写入 referral_coupon_id）
                 void referralCouponId;
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, payment_total, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -1168,15 +1283,15 @@ async function singleOrder(req) {
                     await releaseClosedOrderInventory(orderId, connection);
                 }
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = NULL, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, payment_total = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = NULL, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
                 );
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
                 void referralCouponId;
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, payment_total, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -1442,6 +1557,7 @@ async function payNotify(req) {
                         totalFeeYuan: orders[0].total_fee,
                         currentActualYuan: orders[0].actual_fee,
                         payerTotalFen,
+                        wxAmountTotalFen: callbackData.amount?.total,
                     });
                     if (reconciled.actualFeeYuan != null) {
                         settledActualFee = reconciled.actualFeeYuan;
@@ -1812,7 +1928,7 @@ async function markRefundPendingRetry(refundRow, reason) {
     );
 }
 
-async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id }) {
+async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id, amount = null }) {
     const callbackKey = `refund:callback:${out_refund_no}`;
 
     try {
@@ -1845,6 +1961,10 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
             affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
             const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
             await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+        }
+
+        if (amount) {
+            await updateRefundAmountSnapshot(out_refund_no, amount, connection);
         }
 
         await connection.query(
@@ -1922,6 +2042,7 @@ async function syncRefundStatusFromWechat(refundRow) {
             out_refund_no: refundRow.out_refund_no,
             out_trade_no: wxRefund.out_trade_no || refundRow.out_trade_no,
             wx_refund_id: wxRefundId,
+            amount: wxRefund.amount || null,
         });
         return {
             refund: { ...refundRow, status: 'SUCCESS', wx_refund_id: wxRefundId },
@@ -1935,6 +2056,10 @@ async function syncRefundStatusFromWechat(refundRow) {
             refund: { ...refundRow, status: 'FAILED', wx_refund_id: wxRefundId },
             didSync: true,
         };
+    }
+
+    if (wxRefund.amount) {
+        await updateRefundAmountSnapshot(refundRow.out_refund_no, wxRefund.amount);
     }
 
     return { refund: refundRow, didSync: false };
@@ -1990,7 +2115,7 @@ async function refundApprove(req) {
                 );
 
                 const [orderRows] = await connection.query(
-                    `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee
+                    `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee, payment_total
                      FROM orders WHERE out_trade_no = ? LIMIT 1`,
                     [refund.out_trade_no]
                 );
@@ -2051,11 +2176,12 @@ async function refundApprove(req) {
                 if (response.status === 200) {
                     const wxRefundId = response.data?.refund_id || null;
                     const wxStatus = response.data?.status || 'PROCESSING';
+                    const mergedAmount = buildStoredRefundAmount(amountData, response.data?.amount);
 
                     if (wxStatus === 'SUCCESS') {
                         await connection.query(
-                            'UPDATE refund_requests SET status = "SUCCESS", wx_refund_id = ? WHERE id = ?',
-                            [wxRefundId, cleanRefundId]
+                            'UPDATE refund_requests SET status = "SUCCESS", wx_refund_id = ?, amount = ? WHERE id = ?',
+                            [wxRefundId, JSON.stringify(mergedAmount), cleanRefundId]
                         );
                         await connection.commit();
 
@@ -2063,6 +2189,7 @@ async function refundApprove(req) {
                             out_refund_no: refund.out_refund_no,
                             out_trade_no: response.data?.out_trade_no || refund.out_trade_no,
                             wx_refund_id: wxRefundId,
+                            amount: response.data?.amount || mergedAmount,
                         });
 
                         return adminResult(200, {
@@ -2076,8 +2203,8 @@ async function refundApprove(req) {
 
                     if (wxStatus === 'CLOSED' || wxStatus === 'ABNORMAL') {
                         await connection.query(
-                            'UPDATE refund_requests SET status = "FAILED", wx_refund_id = ? WHERE id = ?',
-                            [wxRefundId, cleanRefundId]
+                            'UPDATE refund_requests SET status = "FAILED", wx_refund_id = ?, amount = ? WHERE id = ?',
+                            [wxRefundId, JSON.stringify(mergedAmount), cleanRefundId]
                         );
                         await connection.commit();
                         return adminResult(200, {
@@ -2090,8 +2217,8 @@ async function refundApprove(req) {
                     }
 
                     await connection.query(
-                        'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ? WHERE id = ?',
-                        [wxRefundId, cleanRefundId]
+                        'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ?, amount = ? WHERE id = ?',
+                        [wxRefundId, JSON.stringify(mergedAmount), cleanRefundId]
                     );
 
                     await connection.commit();
@@ -2160,7 +2287,7 @@ async function adminOrderRefund(req) {
         }
 
         const [orders] = await db.query(
-            `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee
+            `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee, payment_total
              FROM orders WHERE id = ? LIMIT 1`,
             [orderId]
         );
@@ -2409,11 +2536,14 @@ async function refundNotify(req) {
             logger.info('退款成功回调', {
                 out_refund_no: callbackData.out_refund_no,
                 out_trade_no: callbackData.out_trade_no,
+                payer_refund: callbackData.amount?.payer_refund,
+                discount_refund: callbackData.amount?.discount_refund,
             });
             await completeRefundSuccess({
                 out_refund_no: callbackData.out_refund_no,
                 out_trade_no: callbackData.out_trade_no,
                 wx_refund_id: callbackData.refund_id,
+                amount: callbackData.amount || null,
             });
             return adminResult(200, { code: 'SUCCESS', message: 'OK' });
         }
@@ -3611,17 +3741,37 @@ function tradeTypeLabel(code) {
 }
 
 function parseRefundAmountJson(amountRaw) {
-    if (!amountRaw) return { refund_yuan: null, total_yuan: null };
+    if (!amountRaw) {
+        return {
+            refund_yuan: null,
+            total_yuan: null,
+            payer_total_yuan: null,
+            payer_refund_yuan: null,
+            discount_refund_yuan: null,
+        };
+    }
     try {
         const a = typeof amountRaw === 'string' ? JSON.parse(amountRaw) : amountRaw;
-        const refundFen = a.refund != null ? Number(a.refund) : null;
-        const totalFen = a.total != null ? Number(a.total) : null;
+        const toYuan = (fen) => {
+            if (fen == null) return null;
+            const n = Number(fen);
+            return Number.isFinite(n) ? Math.round(n) / 100 : null;
+        };
         return {
-            refund_yuan: refundFen != null && !Number.isNaN(refundFen) ? Math.round(refundFen) / 100 : null,
-            total_yuan: totalFen != null && !Number.isNaN(totalFen) ? Math.round(totalFen) / 100 : null,
+            refund_yuan: toYuan(a.refund),
+            total_yuan: toYuan(a.total),
+            payer_total_yuan: toYuan(a.payer_total),
+            payer_refund_yuan: toYuan(a.payer_refund),
+            discount_refund_yuan: toYuan(a.discount_refund),
         };
     } catch {
-        return { refund_yuan: null, total_yuan: null };
+        return {
+            refund_yuan: null,
+            total_yuan: null,
+            payer_total_yuan: null,
+            payer_refund_yuan: null,
+            discount_refund_yuan: null,
+        };
     }
 }
 
@@ -4064,6 +4214,13 @@ async function orderDetailForActor(req, options = {}) {
             amount_payable_yuan: Math.round((paidYuan != null ? paidYuan : actualFeeYuan) * 100) / 100,
             amount_paid_yuan: paidYuan,
             order_total_before_discount_yuan: Math.round(totalFeeYuan * 100) / 100,
+            payment_total_yuan: (() => {
+                const wxTotalFen = wxPay?.amount?.total != null ? Number(wxPay.amount.total) : null;
+                if (Number.isFinite(wxTotalFen) && wxTotalFen > 0) return Math.round(wxTotalFen) / 100;
+                const pt = parseFloat(order.payment_total);
+                if (Number.isFinite(pt) && pt > 0) return Math.round(pt * 100) / 100;
+                return null;
+            })(),
         };
 
         const payment = {
@@ -4098,6 +4255,8 @@ async function orderDetailForActor(req, options = {}) {
                 reject_reason: r.reject_reason || null,
                 refund_amount_yuan: amt.refund_yuan,
                 order_total_snapshot_yuan: amt.total_yuan,
+                payer_refund_yuan: amt.payer_refund_yuan,
+                discount_refund_yuan: amt.discount_refund_yuan,
                 created_at: toIsoOrNull(r.created_at),
                 approved_at: toIsoOrNull(r.approved_at),
                 rejected_at: toIsoOrNull(r.rejected_at),
@@ -4784,22 +4943,28 @@ async function syncOrderTradeStateFromWechat(orderRow) {
         let currentActualYuan = orderRow.actual_fee;
         if (totalFeeYuan == null || currentActualYuan == null) {
             const [freshRows] = await db.query(
-                'SELECT total_fee, actual_fee FROM orders WHERE id = ? LIMIT 1',
+                'SELECT total_fee, actual_fee, payment_total FROM orders WHERE id = ? LIMIT 1',
                 [orderRow.id]
             );
             totalFeeYuan = freshRows[0]?.total_fee;
             currentActualYuan = freshRows[0]?.actual_fee;
+            if (freshRows[0]?.payment_total != null) orderRow.payment_total = freshRows[0].payment_total;
         }
         const reconciled = await reconcileOrderFeesWithPayerTotal({
             orderId: orderRow.id,
             totalFeeYuan,
             currentActualYuan,
             payerTotalFen: wxPay.amount.payer_total,
+            wxAmountTotalFen: wxPay.amount?.total,
         });
-        if (reconciled.changed) {
-            orderRow.actual_fee = reconciled.actualFeeYuan;
+        if (reconciled.changed || reconciled.actualFeeYuan != null) {
+            if (reconciled.actualFeeYuan != null) orderRow.actual_fee = reconciled.actualFeeYuan;
             if (reconciled.discountYuan != null) orderRow.discount_amount = reconciled.discountYuan;
-            didSync = true;
+            if (reconciled.changed) didSync = true;
+        }
+        const wxTotalFen = Number(wxPay.amount?.total);
+        if (Number.isFinite(wxTotalFen) && wxTotalFen > 0 && orderRow.payment_total == null) {
+            orderRow.payment_total = Math.round(wxTotalFen) / 100;
         }
     }
 

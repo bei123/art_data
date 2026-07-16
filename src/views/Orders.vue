@@ -407,7 +407,16 @@
               <div class="rounded-lg border border-border p-3">
                 <div class="text-xs text-muted-foreground">支付金额</div>
                 <div class="mt-1 text-sm">
-                  {{ selectedOrder.pay_status?.amount ? `¥${selectedOrder.pay_status.amount.total / 100}` : '—' }}
+                  <template v-if="selectedOrder.pay_status?.amount">
+                    标价 ¥{{ (selectedOrder.pay_status.amount.total / 100).toFixed(2) }}
+                    <span
+                      v-if="selectedOrder.pay_status.amount.payer_total != null"
+                      class="text-muted-foreground"
+                    >
+                      · 实付 ¥{{ (selectedOrder.pay_status.amount.payer_total / 100).toFixed(2) }}
+                    </span>
+                  </template>
+                  <template v-else>—</template>
                 </div>
               </div>
             </div>
@@ -434,6 +443,10 @@
                 </div>
                 <div class="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
                   <span>退款金额：¥{{ refund.refund_amount_yuan ?? '—' }}</span>
+                  <span v-if="refund.payer_refund_yuan != null">现金退回：¥{{ refund.payer_refund_yuan }}</span>
+                  <span v-if="refund.discount_refund_yuan != null && Number(refund.discount_refund_yuan) > 0">
+                    券退回：¥{{ refund.discount_refund_yuan }}
+                  </span>
                   <span v-if="refund.reason">原因：{{ refund.reason }}</span>
                   <span v-if="refund.created_at">申请：{{ formatRefundDate(refund.created_at) }}</span>
                 </div>
@@ -714,9 +727,16 @@
             <span class="font-mono text-xs break-all">{{ refundForm.out_trade_no }}</span>
           </div>
           <div class="grid gap-1 text-sm">
-            <span class="text-muted-foreground">预计退款金额（服务端按微信实付计算）</span>
-            <span class="font-medium tabular-nums">¥{{ refundForm.display_payable_yuan }}</span>
+            <span class="text-muted-foreground">原支付标价（退款 total）</span>
+            <span class="font-medium tabular-nums">¥{{ refundForm.display_payment_total_yuan || '—' }}</span>
           </div>
+          <div class="grid gap-1 text-sm">
+            <span class="text-muted-foreground">用户实付（现金）</span>
+            <span class="font-medium tabular-nums">¥{{ refundForm.display_payable_yuan || '—' }}</span>
+          </div>
+          <p class="text-xs text-muted-foreground leading-relaxed">
+            全额退款按微信原单标价提交；使用了免充值券时，现金退回用户实付，券面额由微信退回卡包。
+          </p>
           <div class="flex flex-col gap-2">
             <Label for="refund-reason">退款原因 <span class="text-destructive">*</span></Label>
             <Textarea
@@ -1301,6 +1321,7 @@ const refundForm = reactive({
   orderId: null,
   out_trade_no: '',
   display_payable_yuan: '',
+  display_payment_total_yuan: '',
   reason: '',
 })
 
@@ -1542,7 +1563,11 @@ function mergeAdminOrderDetail(listOrder, data) {
     transaction_id: data.payment?.transaction_id ?? listOrder.pay_status?.transaction_id,
     success_time: data.payment?.success_time ?? listOrder.pay_status?.success_time,
     amount: data.payment?.amount_total_fen != null
-      ? { total: data.payment.amount_total_fen, currency: data.payment?.currency || 'CNY' }
+      ? {
+          total: data.payment.amount_total_fen,
+          payer_total: data.payment.amount_payer_total_fen ?? undefined,
+          currency: data.payment?.currency || 'CNY',
+        }
       : listOrder.pay_status?.amount,
   }
 
@@ -1633,7 +1658,24 @@ function openRefundDialog(order) {
 
   refundForm.orderId = order.id
   refundForm.out_trade_no = order.out_trade_no || ''
-  refundForm.display_payable_yuan = String(order.actual_fee ?? order.fee?.amount_payable_yuan ?? '')
+  refundForm.display_payable_yuan = String(
+    order.fee?.amount_paid_yuan
+      ?? order.actual_fee
+      ?? order.fee?.amount_payable_yuan
+      ?? ''
+  )
+  const paymentTotalFen = order.payment?.amount_total_fen
+    ?? order.pay_status?.amount?.total
+    ?? null
+  refundForm.display_payment_total_yuan = paymentTotalFen != null
+    ? String((Number(paymentTotalFen) / 100).toFixed(2))
+    : String(
+      order.fee?.payment_total_yuan
+        ?? order.payment_total
+        ?? order.fee?.amount_payable_yuan
+        ?? order.actual_fee
+        ?? ''
+    )
   refundForm.reason = ''
   refundDialogVisible.value = true
 }

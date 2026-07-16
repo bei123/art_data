@@ -171,7 +171,7 @@
             <span class="font-mono text-xs">{{ approveForm.out_refund_no }}</span>
           </div>
           <div class="grid gap-1 text-sm">
-            <span class="text-muted-foreground">退款金额</span>
+            <span class="text-muted-foreground">申请退款金额（原单标价）</span>
             <span class="font-medium tabular-nums">{{ formatAmount(parseRefundCents(approveForm.amount)) }} 元</span>
           </div>
           <div class="grid gap-1 text-sm">
@@ -245,6 +245,20 @@
           <div class="flex flex-col gap-1 border-b border-border pb-3 sm:grid sm:grid-cols-[8rem_1fr] sm:items-baseline sm:gap-2 sm:pb-2">
             <span class="text-muted-foreground">退款金额</span>
             <span class="font-medium tabular-nums">{{ formatAmount(parseRefundCents(currentRefund.amount)) }} 元</span>
+          </div>
+          <div
+            v-if="parseRefundAmountField(currentRefund.amount, 'payer_refund') != null"
+            class="flex flex-col gap-1 border-b border-border pb-3 sm:grid sm:grid-cols-[8rem_1fr] sm:items-baseline sm:gap-2 sm:pb-2"
+          >
+            <span class="text-muted-foreground">现金退回</span>
+            <span class="tabular-nums">{{ formatAmount(parseRefundAmountField(currentRefund.amount, 'payer_refund')) }} 元</span>
+          </div>
+          <div
+            v-if="Number(parseRefundAmountField(currentRefund.amount, 'discount_refund') || 0) > 0"
+            class="flex flex-col gap-1 border-b border-border pb-3 sm:grid sm:grid-cols-[8rem_1fr] sm:items-baseline sm:gap-2 sm:pb-2"
+          >
+            <span class="text-muted-foreground">券退回</span>
+            <span class="tabular-nums">{{ formatAmount(parseRefundAmountField(currentRefund.amount, 'discount_refund')) }} 元</span>
           </div>
           <div class="flex flex-col gap-1 border-b border-border pb-3 sm:grid sm:grid-cols-[8rem_1fr] sm:items-baseline sm:gap-2 sm:pb-2">
             <span class="text-muted-foreground">退款原因</span>
@@ -346,6 +360,19 @@ function parseRefundCents(amountStr) {
     return j?.refund ?? 0
   } catch {
     return 0
+  }
+}
+
+function parseRefundAmountField(amountStr, key) {
+  if (!amountStr || !key) return null
+  try {
+    const j = typeof amountStr === 'string' ? JSON.parse(amountStr) : amountStr
+    const fen = j?.[key]
+    if (fen == null) return null
+    const n = Number(fen)
+    return Number.isFinite(n) ? n : null
+  } catch {
+    return null
   }
 }
 
