@@ -1064,6 +1064,50 @@ async function handleFavorCouponUseNotify(req) {
   return notifySuccessResult()
 }
 
+/**
+ * 支付查单/回调 promotion_detail 补齐：将核销的券标记为 used（免充值券 notify 的兜底）。
+ */
+async function markFavorGrantsUsedFromPromotionDetail(promotionDetail, { transactionId = null } = {}) {
+  if (!Array.isArray(promotionDetail) || !promotionDetail.length) {
+    return { marked: 0 }
+  }
+
+  await ensureReferralRewardsSchema()
+  let marked = 0
+
+  for (const item of promotionDetail) {
+    const couponId = item?.coupon_id != null ? String(item.coupon_id) : null
+    if (!couponId) continue
+
+    try {
+      const [result] = await db.query(
+        `UPDATE wx_favor_coupon_grants
+         SET status = 'used', updated_at = NOW()
+         WHERE coupon_id = ? AND status = 'sent'`,
+        [couponId]
+      )
+      const n = result?.affectedRows || 0
+      if (n > 0) {
+        marked += n
+        logger.info('favor grant marked used from promotion_detail', {
+          couponId,
+          stockId: item.stock_id != null ? String(item.stock_id) : null,
+          amount_fen: item.amount != null ? Number(item.amount) : null,
+          type: item.type || null,
+          transactionId,
+        })
+      }
+    } catch (err) {
+      logger.warn('mark favor grant from promotion_detail failed', {
+        couponId,
+        err: err?.message || err,
+      })
+    }
+  }
+
+  return { marked }
+}
+
 async function grantCouponToUser({ userId, templateId, source = 'admin' }) {
   await ensureReferralRewardsSchema()
 
@@ -1204,6 +1248,7 @@ module.exports = {
   getAdminFavorCallback,
   setAdminFavorCallback,
   handleFavorCouponUseNotify,
+  markFavorGrantsUsedFromPromotionDetail,
   grantCouponToUser,
   listAdminUserCoupons,
 }

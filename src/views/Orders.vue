@@ -419,6 +419,30 @@
                   <template v-else>—</template>
                 </div>
               </div>
+              <div
+                v-if="selectedOrder.payment?.promotion_detail?.length"
+                class="rounded-lg border border-border p-3 sm:col-span-2"
+              >
+                <div class="text-xs text-muted-foreground">微信代金券</div>
+                <ul class="mt-2 space-y-1.5 text-sm">
+                  <li
+                    v-for="promo in selectedOrder.payment.promotion_detail"
+                    :key="promo.coupon_id || promo.stock_id || promo.name"
+                    class="flex flex-wrap gap-x-3 gap-y-0.5"
+                  >
+                    <span>{{ promo.name || '代金券' }}</span>
+                    <span v-if="promo.amount_yuan != null" class="tabular-nums font-medium">
+                      -¥{{ Number(promo.amount_yuan).toFixed(2) }}
+                    </span>
+                    <span v-if="promo.type" class="text-xs text-muted-foreground">
+                      {{ promo.type === 'NOCASH' ? '免充值' : promo.type === 'CASH' ? '预充值' : promo.type }}
+                    </span>
+                    <span v-if="promo.coupon_id" class="font-mono text-xs text-muted-foreground">
+                      {{ promo.coupon_id }}
+                    </span>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
 
@@ -1581,6 +1605,7 @@ function mergeAdminOrderDetail(listOrder, data) {
     discount_amount: data.fee?.discount_yuan ?? listOrder.discount_amount,
     total_fee: data.fee?.order_total_before_discount_yuan ?? listOrder.total_fee ?? data.total_fee,
     pay_status: payStatus,
+    payment: data.payment || listOrder.payment || null,
     fulfillment_status: data.fulfillment_status || listOrder.fulfillment_status,
     items: mapDetailItemsToOrderItems(data.detail_items?.length ? data.detail_items : listOrder.items),
     refunds: data.refunds || [],

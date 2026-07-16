@@ -7,6 +7,7 @@ const ADMIN_ORDER_LIST_SELECT = `
   o.out_trade_no,
   o.total_fee,
   o.actual_fee,
+  o.payment_total,
   o.discount_amount,
   o.shipping_fee,
   o.express_type_id,

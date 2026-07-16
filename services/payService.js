@@ -408,6 +408,39 @@ function generateOutRefundNo(orderId) {
 
 const BLOCKING_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING', 'SUCCESS'];
 
+/** 规范化查单/回调中的代金券 promotion_detail */
+function normalizePromotionDetail(list) {
+    if (!Array.isArray(list) || !list.length) return [];
+    return list.map((p) => {
+        const amountFen = p?.amount != null ? Number(p.amount) : null;
+        return {
+            coupon_id: p?.coupon_id != null ? String(p.coupon_id) : null,
+            name: p?.name || null,
+            scope: p?.scope || null,
+            type: p?.type || null,
+            amount_fen: Number.isFinite(amountFen) ? Math.round(amountFen) : null,
+            amount_yuan: Number.isFinite(amountFen) ? Math.round(amountFen) / 100 : null,
+            stock_id: p?.stock_id != null ? String(p.stock_id) : null,
+            wechatpay_contribute: p?.wechatpay_contribute != null ? Number(p.wechatpay_contribute) : null,
+            merchant_contribute: p?.merchant_contribute != null ? Number(p.merchant_contribute) : null,
+            other_contribute: p?.other_contribute != null ? Number(p.other_contribute) : null,
+        };
+    }).filter((p) => p.coupon_id || p.amount_fen != null);
+}
+
+async function applyPromotionDetailSideEffects(promotionDetail, { transactionId = null } = {}) {
+    if (!Array.isArray(promotionDetail) || !promotionDetail.length) return;
+    try {
+        const { markFavorGrantsUsedFromPromotionDetail } = require('./referralRewardService');
+        await markFavorGrantsUsedFromPromotionDetail(promotionDetail, { transactionId });
+    } catch (err) {
+        logger.warn('promotion_detail 同步券核销状态失败', {
+            err: err?.message || err,
+            transactionId,
+        });
+    }
+}
+
 function parseStoredRefundAmountCents(amountRaw) {
     try {
         const data = typeof amountRaw === 'string' ? JSON.parse(amountRaw) : amountRaw;
@@ -1639,6 +1672,10 @@ async function payNotify(req) {
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                 logger.info('支付回调处理完成', { out_trade_no });
 
+                await applyPromotionDetailSideEffects(promotionDetail, {
+                    transactionId: transaction_id || null,
+                });
+
                 await cancelPaymentPendingReminder(out_trade_no).catch((err) => {
                     logger.warn('取消待付款提醒排期失败', { outTradeNo: out_trade_no, err: err?.message || err });
                 });
@@ -2837,17 +2874,57 @@ async function fetchListOrderItemsByOrderIds(orderIds) {
 }
 
 function buildListPayStatusFromOrder(order) {
-    const actualFeeYuan = parseFloat(order.actual_fee) || parseFloat(order.total_fee) || 0;
-    const totalFen = Number.isFinite(actualFeeYuan) && actualFeeYuan > 0
-        ? Math.round(actualFeeYuan * 100)
-        : null;
     const tradeState = order.trade_state || 'UNKNOWN';
+    const actualFeeYuan = parseFloat(order.actual_fee);
+    const paymentTotalYuan = parseFloat(order.payment_total);
+    const totalFeeYuan = parseFloat(order.total_fee);
+
+    // 与微信查单一致：total=标价(分)，payer_total=用户实付(分)
+    const markYuan = Number.isFinite(paymentTotalYuan) && paymentTotalYuan > 0
+        ? paymentTotalYuan
+        : (Number.isFinite(actualFeeYuan) && actualFeeYuan > 0 ? actualFeeYuan : totalFeeYuan);
+    const payerYuan = tradeState === 'SUCCESS' || tradeState === 'REFUND'
+        ? (Number.isFinite(actualFeeYuan) && actualFeeYuan >= 0 ? actualFeeYuan : markYuan)
+        : null;
+
+    const totalFen = Number.isFinite(markYuan) && markYuan > 0 ? Math.round(markYuan * 100) : null;
+    const payerFen = payerYuan != null && Number.isFinite(payerYuan) ? Math.round(payerYuan * 100) : null;
+
     return {
         trade_state: tradeState,
         trade_state_desc: order.trade_state_desc || getOrderStatusText(tradeState),
         success_time: order.success_time || null,
-        amount: totalFen != null ? { total: totalFen, currency: 'CNY' } : null,
+        amount: totalFen != null
+            ? {
+                total: totalFen,
+                ...(payerFen != null ? { payer_total: payerFen } : {}),
+                currency: 'CNY',
+            }
+            : null,
         transaction_id: order.transaction_id || null,
+    };
+}
+
+function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus) {
+    const statusFields = buildOrderStatusFields(
+        order.trade_state,
+        order.trade_state_desc,
+        fulfillmentStatus,
+    );
+    const actualFeeYuan = parseFloat(order.actual_fee);
+    const totalFeeYuan = parseFloat(order.total_fee);
+    return {
+        out_trade_no: order.out_trade_no,
+        created_at: toIsoOrNull(order.created_at),
+        total_fee: Number.isFinite(totalFeeYuan) ? totalFeeYuan : 0,
+        // 列表「实付」：已对齐 payer_total；未支付时为下单应付（JSAPI 标价）
+        actual_fee: Number.isFinite(actualFeeYuan) ? actualFeeYuan : (Number.isFinite(totalFeeYuan) ? totalFeeYuan : 0),
+        discount_amount: order.discount_amount != null ? Number(order.discount_amount) || 0 : 0,
+        payment_total: order.payment_total != null ? Number(order.payment_total) : null,
+        ...statusFields,
+        pay_status: buildListPayStatusFromOrder(order),
+        refund_status: refundStatus || null,
+        items,
     };
 }
 
@@ -3109,22 +3186,6 @@ function filterOrdersByStatus(orders, statusStates) {
     return orders.filter((order) => statusStates.includes(order.trade_state));
 }
 
-function mapOrderToListCard(order, items, refundStatus, fulfillmentStatus) {
-    const statusFields = buildOrderStatusFields(
-        order.trade_state,
-        order.trade_state_desc,
-        fulfillmentStatus,
-    );
-    return {
-        out_trade_no: order.out_trade_no,
-        created_at: toIsoOrNull(order.created_at),
-        total_fee: Number(order.total_fee) || 0,
-        ...statusFields,
-        refund_status: refundStatus || null,
-        items,
-    };
-}
-
 async function listOrders(req) {
     try {
         const {
@@ -3196,7 +3257,8 @@ async function listOrders(req) {
 
         const [[orders], [[{ total }]]] = await Promise.all([
             db.query(
-                `SELECT id, out_trade_no, created_at, total_fee, trade_state, trade_state_desc
+                `SELECT id, out_trade_no, created_at, total_fee, actual_fee, discount_amount,
+                        payment_total, trade_state, trade_state_desc, transaction_id, success_time
                  FROM orders FORCE INDEX (idx_orders_user_id)
                  WHERE ${whereSql}
                  ORDER BY created_at DESC
@@ -4200,10 +4262,26 @@ async function orderDetailForActor(req, options = {}) {
         const wxPayerFen = wxPay?.amount?.payer_total != null ? Number(wxPay.amount.payer_total) : null;
         const paidYuan = effectiveTradeState === 'SUCCESS' && Number.isFinite(wxPayerFen) && wxPayerFen >= 0
             ? Math.round(wxPayerFen) / 100
-            : (effectiveTradeState === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null);
+            : (effectiveTradeState === 'SUCCESS' || effectiveTradeState === 'REFUND'
+                ? Math.round(actualFeeYuan * 100) / 100
+                : null);
+
+        const paymentTotalYuan = (() => {
+            const wxTotalFen = wxPay?.amount?.total != null ? Number(wxPay.amount.total) : null;
+            if (Number.isFinite(wxTotalFen) && wxTotalFen > 0) return Math.round(wxTotalFen) / 100;
+            const pt = parseFloat(order.payment_total);
+            if (Number.isFinite(pt) && pt > 0) return Math.round(pt * 100) / 100;
+            return null;
+        })();
+
         const displayDiscountYuan = paidYuan != null && Number.isFinite(totalFeeYuan)
             ? Math.round(Math.max(0, totalFeeYuan - paidYuan) * 100) / 100
             : Math.round(discountYuan * 100) / 100;
+
+        // 未支付：应付=下单标价；已支付：应付/订单金额=微信 amount.total，实付=payer_total
+        const amountPayableYuan = paidYuan != null
+            ? (paymentTotalYuan != null ? paymentTotalYuan : Math.round(actualFeeYuan * 100) / 100)
+            : Math.round(actualFeeYuan * 100) / 100;
 
         const fee = {
             currency: 'CNY',
@@ -4211,16 +4289,10 @@ async function orderDetailForActor(req, options = {}) {
             shipping_fee_yuan: Math.round(shippingFeeYuan * 100) / 100,
             express_type_id: order.express_type_id != null ? Number(order.express_type_id) : null,
             discount_yuan: displayDiscountYuan,
-            amount_payable_yuan: Math.round((paidYuan != null ? paidYuan : actualFeeYuan) * 100) / 100,
+            amount_payable_yuan: amountPayableYuan,
             amount_paid_yuan: paidYuan,
             order_total_before_discount_yuan: Math.round(totalFeeYuan * 100) / 100,
-            payment_total_yuan: (() => {
-                const wxTotalFen = wxPay?.amount?.total != null ? Number(wxPay.amount.total) : null;
-                if (Number.isFinite(wxTotalFen) && wxTotalFen > 0) return Math.round(wxTotalFen) / 100;
-                const pt = parseFloat(order.payment_total);
-                if (Number.isFinite(pt) && pt > 0) return Math.round(pt * 100) / 100;
-                return null;
-            })(),
+            payment_total_yuan: paymentTotalYuan,
         };
 
         const payment = {
@@ -4237,6 +4309,7 @@ async function orderDetailForActor(req, options = {}) {
             amount_total_fen: wxPay?.amount?.total != null ? Number(wxPay.amount.total) : null,
             currency: wxPay?.amount?.currency || 'CNY',
             payer_openid_masked: maskOpenid(wxPay?.payer?.openid),
+            promotion_detail: normalizePromotionDetail(wxPay?.promotion_detail),
         };
 
         const [refundRows] = await db.query(
@@ -4685,7 +4758,7 @@ async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
         const pathUrl = `/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}?mchid=${WX_PAY_CONFIG.mchId}`;
         const signature = generateSignV3(method, pathUrl, timestamp, nonceStr, '');
         const response = await axios.get(
-            `https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/${cleanOutTradeNo}?mchid=${WX_PAY_CONFIG.mchId}`,
+            `${wechatPayOutTradeNoQueryUrl(cleanOutTradeNo)}?mchid=${encodeURIComponent(WX_PAY_CONFIG.mchId)}`,
             {
                 headers: {
                     Accept: 'application/json',
@@ -4698,7 +4771,22 @@ async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
         );
         if (response.status === 200) return response.data;
     } catch (err) {
-        logger.warn('查询微信支付单失败', { err: err.message, out_trade_no: cleanOutTradeNo });
+        const wxCode = err?.response?.data?.code;
+        const status = err?.response?.status;
+        // 未支付订单也可能查不到：ORDER_NOT_EXIST 属正常，不当作异常告警
+        if (status === 404 || String(wxCode || '').toUpperCase() === 'ORDER_NOT_EXIST') {
+            logger.info('查询微信支付单：订单不存在或未下单成功', {
+                out_trade_no: cleanOutTradeNo,
+                code: wxCode || null,
+            });
+        } else {
+            logger.warn('查询微信支付单失败', {
+                err: err.message,
+                out_trade_no: cleanOutTradeNo,
+                code: wxCode || null,
+                status: status || null,
+            });
+        }
     }
     return null;
 }
@@ -4966,6 +5054,12 @@ async function syncOrderTradeStateFromWechat(orderRow) {
         if (Number.isFinite(wxTotalFen) && wxTotalFen > 0 && orderRow.payment_total == null) {
             orderRow.payment_total = Math.round(wxTotalFen) / 100;
         }
+    }
+
+    if (wxState === 'SUCCESS') {
+        await applyPromotionDetailSideEffects(wxPay.promotion_detail, {
+            transactionId: wxPay.transaction_id || orderRow?.transaction_id || null,
+        });
     }
 
     if (wxState === 'SUCCESS' && orderRow?.out_trade_no) {
