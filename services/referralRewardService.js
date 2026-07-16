@@ -772,8 +772,8 @@ async function listAdminWxFavorStockItems(stockId, query = {}) {
   }
 
   const items = result.data || []
+  let unrestricted = result.unrestricted === true || result.totalCount === 0
   let availableForGoods = null
-  let unrestricted = result.totalCount === 0
 
   if (checkGoodsId) {
     if (unrestricted) {
@@ -784,7 +784,7 @@ async function listAdminWxFavorStockItems(stockId, query = {}) {
       const check = await isGoodsIdAvailableForStock(id, checkGoodsId)
       if (check.ok) {
         availableForGoods = check.available
-        unrestricted = Boolean(check.unrestricted)
+        unrestricted = Boolean(check.unrestricted) || unrestricted
       }
     } else {
       availableForGoods = false

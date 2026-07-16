@@ -254,7 +254,7 @@ async function loadCoupons() {
 async function handleCreateTemplate() {
   creating.value = true
   try {
-    await axios.post('/admin/referral/coupon-templates', {
+    const data = await axios.post('/admin/referral/coupon-templates', {
       title: form.title,
       discount_yuan: form.discount_yuan,
       min_order_yuan: form.min_order_yuan,
@@ -262,7 +262,11 @@ async function handleCreateTemplate() {
       max_coupons: form.max_coupons,
       is_welcome: form.is_welcome,
     })
-    showPageSuccess('批次已创建')
+    if (data?.start_error || data?.wx_status === 'created') {
+      showPageSuccess('批次已创建，卡包同步中，请稍后点「激活」')
+    } else {
+      showPageSuccess('批次已创建并激活')
+    }
     form.title = ''
     form.discount_yuan = ''
     await loadTemplates()

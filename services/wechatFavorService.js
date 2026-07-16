@@ -22,6 +22,11 @@ function isFavorEnabled() {
   return String(process.env.WX_FAVOR_ENABLED || 'false').toLowerCase() === 'true'
 }
 
+/** Optional card-pack style pattern_info; causes WeChat 卡包 sync lag on start. Default off. */
+function isFavorPatternInfoEnabled() {
+  return String(process.env.WX_FAVOR_PATTERN_INFO || 'false').toLowerCase() === 'true'
+}
+
 function getStockCreatorMchid() {
   return String(process.env.WX_FAVOR_STOCK_CREATOR_MCHID || WX_PAY_CONFIG.mchId || '').trim()
 }
@@ -235,7 +240,7 @@ async function createCouponStock({
     out_request_no: outRequestNo,
   }
 
-  if (appId) {
+  if (appId && isFavorPatternInfoEnabled()) {
     body.pattern_info = {
       description: String(comment || title || '微信支付代金券，下单支付时自动抵扣').slice(0, 1000),
       jump_target: 'MINI_PROGRAM',
@@ -361,19 +366,31 @@ async function startStock(stockId, stockCreatorMchid = getStockCreatorMchid(), o
   return last
 }
 
-/** Create-then-activate helper with delayed retries (WeChat sync lag). */
+/** Create-then-activate helper with delayed retries (WeChat card-pack / rule sync lag). */
 async function startStockWithRetry(stockId, stockCreatorMchid = getStockCreatorMchid()) {
-  // 官方：创建后不可马上激活（卡包/规则同步），先等待再重试；接口支持幂等重入
-  await sleep(2500)
+  // 官方：创建后卡包/规则可能尚未同步；先等再幂等重试
+  const initialDelayMs = Math.max(1000, parseInt(process.env.WX_FAVOR_START_INITIAL_DELAY_MS, 10) || 5000)
+  const maxAttempts = Math.max(1, parseInt(process.env.WX_FAVOR_START_MAX_ATTEMPTS, 10) || 8)
+  const baseDelayMs = Math.max(1000, parseInt(process.env.WX_FAVOR_START_RETRY_DELAY_MS, 10) || 4000)
+
+  await sleep(initialDelayMs)
   let last = null
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     last = await startStockOnce(stockId, stockCreatorMchid)
     last.attempt = attempt
     if (last.ok) return last
     last.retryable = isStartStockRetryable(last)
-    if (!last.retryable || attempt >= 3) break
-    logger.warn('startStockWithRetry waiting', { stockId, attempt, error: last.error })
-    await sleep(2500)
+    if (!last.retryable || attempt >= maxAttempts) break
+
+    // 指数退避：4s、6s、9s… capped 20s
+    const delayMs = Math.min(20000, Math.round(baseDelayMs * (1 + (attempt - 1) * 0.5)))
+    logger.warn('startStockWithRetry waiting', {
+      stockId,
+      attempt,
+      delayMs,
+      error: last.error,
+    })
+    await sleep(delayMs)
   }
   return last
 }
@@ -912,10 +929,32 @@ async function listStockItems({
     }
   }
 
+  // 全场券（非单品）查询商品编码会返回 PARAM_ERROR，视为无单品限制
+  const errMsg = wxErrorMessage(result.data)
+  if (
+    result.status === 400
+    && (errMsg.includes('非单品') || errMsg.includes('商品信息为空'))
+  ) {
+    logger.info('listStockItems treated as unrestricted (non-singleitem)', {
+      stockId: id,
+      message: errMsg,
+    })
+    return {
+      ok: true,
+      stockId: id,
+      totalCount: 0,
+      offset: pageOffset,
+      limit: pageSize,
+      data: [],
+      unrestricted: true,
+      raw: result.data,
+    }
+  }
+
   logger.error('listStockItems failed', { stockId: id, status: result.status, data: result.data })
   return {
     ok: false,
-    error: wxErrorMessage(result.data),
+    error: errMsg,
     code: result.data?.code || null,
     httpStatus: result.status,
     raw: result.data,
