@@ -99,7 +99,7 @@ async function getWxUserAdminDetail(userId) {
        (SELECT COUNT(*) FROM referral_bindings WHERE referrer_id = ? OR referee_id = ?) AS binding_count,
        (SELECT COUNT(*) FROM commission_ledger WHERE user_id = ? OR referee_id = ?) AS commission_count,
        (SELECT COUNT(*) FROM withdrawal_requests WHERE user_id = ?) AS withdrawal_count,
-       (SELECT COUNT(*) FROM user_referral_coupons WHERE user_id = ?) AS coupon_count,
+       (SELECT COUNT(*) FROM wx_favor_coupon_grants WHERE user_id = ? AND status = 'sent') AS coupon_count,
        (SELECT COUNT(*) FROM favorites WHERE user_id = ?) AS favorite_count,
        (SELECT COUNT(*) FROM cart_items WHERE user_id = ?) AS cart_count`,
     [id, id, id, id, id, id, id, id, id, id]
@@ -208,6 +208,12 @@ async function purgeWxUserData(connection, userId) {
     'DELETE FROM user_referral_coupons WHERE user_id = ?',
     [userId],
     'user_referral_coupons'
+  )
+  counts.wx_favor_coupon_grants = await safeDelete(
+    connection,
+    'DELETE FROM wx_favor_coupon_grants WHERE user_id = ?',
+    [userId],
+    'wx_favor_coupon_grants'
   )
   counts.art_advisor_applications = await safeDelete(
     connection,

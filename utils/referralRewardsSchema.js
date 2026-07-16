@@ -71,13 +71,74 @@ async function ensureReferralCouponTemplatesTable() {
       min_order_yuan DECIMAL(12,2) NOT NULL DEFAULT 0,
       valid_days INT NOT NULL DEFAULT 30,
       is_active TINYINT(1) NOT NULL DEFAULT 1,
+      stock_id VARCHAR(32) NULL,
+      stock_creator_mchid VARCHAR(32) NULL,
+      wx_status VARCHAR(32) NULL,
+      is_welcome TINYINT(1) NOT NULL DEFAULT 0,
+      max_coupons INT UNSIGNED NOT NULL DEFAULT 10000,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
-      KEY idx_active (is_active)
+      KEY idx_active (is_active),
+      KEY idx_welcome (is_welcome, is_active),
+      KEY idx_stock_id (stock_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `)
   logger.info('referral_coupon_templates table created')
+}
+
+async function ensureReferralCouponTemplateFavorColumns() {
+  try {
+    const columns = [
+      ['stock_id', 'VARCHAR(32) NULL'],
+      ['stock_creator_mchid', 'VARCHAR(32) NULL'],
+      ['wx_status', 'VARCHAR(32) NULL'],
+      ['is_welcome', 'TINYINT(1) NOT NULL DEFAULT 0'],
+      ['max_coupons', 'INT UNSIGNED NOT NULL DEFAULT 10000'],
+    ]
+    for (const [name, def] of columns) {
+      const [rows] = await db.query(
+        `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'referral_coupon_templates'
+           AND COLUMN_NAME = ?
+         LIMIT 1`,
+        [name]
+      )
+      if (!rows.length) {
+        await db.query(`ALTER TABLE referral_coupon_templates ADD COLUMN ${name} ${def}`)
+        logger.info(`referral_coupon_templates.${name} column added`)
+      }
+    }
+  } catch (err) {
+    logger.warn('ensureReferralCouponTemplateFavorColumns failed', { err: err.message })
+  }
+}
+
+async function ensureWxFavorCouponGrantsTable() {
+  if (await hasTable('wx_favor_coupon_grants')) return
+
+  await db.query(`
+    CREATE TABLE wx_favor_coupon_grants (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      template_id INT UNSIGNED NULL,
+      stock_id VARCHAR(32) NOT NULL,
+      coupon_id VARCHAR(64) NULL,
+      out_request_no VARCHAR(64) NOT NULL,
+      source VARCHAR(32) NOT NULL DEFAULT 'admin',
+      status ENUM('sent','failed') NOT NULL DEFAULT 'sent',
+      error_message VARCHAR(255) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_out_request_no (out_request_no),
+      KEY idx_user_source (user_id, source),
+      KEY idx_stock_id (stock_id),
+      KEY idx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `)
+  logger.info('wx_favor_coupon_grants table created')
 }
 
 async function ensureUserReferralCouponsTable() {
@@ -214,6 +275,8 @@ async function ensureReferralRewardsSchema() {
   await ensureWithdrawalUserConfirmColumns()
   await ensureReferralBonusGrantsTable()
   await ensureReferralCouponTemplatesTable()
+  await ensureReferralCouponTemplateFavorColumns()
+  await ensureWxFavorCouponGrantsTable()
   await ensureUserReferralCouponsTable()
   await ensureUserReferralCouponReservedStatus()
   await ensureCommissionLedgerBonusType()

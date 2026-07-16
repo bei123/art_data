@@ -819,17 +819,18 @@ async function unifiedOrder(req) {
                     await releaseClosedOrderInventory(orderId, connection);
                 }
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = ?, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, referralCouponId || null, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = NULL, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
                 );
 
                 // 删除旧的订单项
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
-                // 创建新订单
+                // 创建新订单（微信免充值券在收银台核销，不再写入 referral_coupon_id）
+                void referralCouponId;
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, orderReferrerId, referralCouponId || null, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -873,21 +874,6 @@ async function unifiedOrder(req) {
                     SET discount_amount = 0 
                     WHERE user_id = ? AND discount_amount > 0
                 `, [userId]);
-            }
-
-            const { syncReferralCouponForOrder } = require('./referralRewardService');
-            const couponSync = await syncReferralCouponForOrder({
-                userId,
-                orderId,
-                referralCouponId,
-                previousReferralCouponId: existingOrders[0]?.referral_coupon_id,
-            }, connection);
-            if (couponSync.error) {
-                await connection.rollback();
-                return adminResult(400, {
-                    error: couponSync.error,
-                    code: 'REFERRAL_COUPON_INVALID',
-                });
             }
 
             // 构建统一下单参数
@@ -1122,14 +1108,15 @@ async function singleOrder(req) {
                     await releaseClosedOrderInventory(orderId, connection);
                 }
                 await connection.query(
-                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = ?, updated_at = NOW() WHERE id = ?',
-                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, referralCouponId || null, orderId]
+                    'UPDATE orders SET total_fee = ?, actual_fee = ?, discount_amount = ?, shipping_fee = ?, express_type_id = ?, shipping_snapshot = ?, body = ?, referrer_id = ?, referral_coupon_id = NULL, updated_at = NOW() WHERE id = ?',
+                    [cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, orderReferrerId, orderId]
                 );
                 await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
             } else {
+                void referralCouponId;
                 const [orderResult] = await connection.query(
-                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [userId, orderReferrerId, referralCouponId || null, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
+                    'INSERT INTO orders (user_id, referrer_id, referral_coupon_id, out_trade_no, total_fee, actual_fee, discount_amount, shipping_fee, express_type_id, shipping_snapshot, body, trade_state, trade_state_desc) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [userId, orderReferrerId, cleanOutTradeNo, cleanTotalFee, actualTotalFee, availableDiscount, shippingFeeYuan, expressTypeId, shippingSnapshotJson, cleanBody, 'NOTPAY', '订单未支付']
                 );
                 orderId = orderResult.insertId;
             }
@@ -1168,21 +1155,6 @@ async function singleOrder(req) {
                     SET discount_amount = 0 
                     WHERE user_id = ? AND discount_amount > 0
                 `, [userId]);
-            }
-
-            const { syncReferralCouponForOrder } = require('./referralRewardService');
-            const couponSync = await syncReferralCouponForOrder({
-                userId,
-                orderId,
-                referralCouponId,
-                previousReferralCouponId: existingOrders[0]?.referral_coupon_id,
-            }, connection);
-            if (couponSync.error) {
-                await connection.rollback();
-                return adminResult(400, {
-                    error: couponSync.error,
-                    code: 'REFERRAL_COUPON_INVALID',
-                });
             }
 
             const jsapiAmountTotalCents = Math.round(actualTotalFee * 100);
@@ -1452,15 +1424,18 @@ async function payNotify(req) {
                                 connection,
                             });
                         }
-                        if (orders[0].referral_coupon_id) {
-                            const { markReferralCouponUsed } = require('./referralRewardService');
-                            await markReferralCouponUsed({
-                                userId,
-                                couponId: orders[0].referral_coupon_id,
-                                orderId: orders[0].id,
-                            }, connection);
-                        }
                     }
+                }
+
+                const payerTotalFen = callbackData.amount?.payer_total;
+                const promotionDetail = callbackData.promotion_detail;
+                if (payerTotalFen != null || (Array.isArray(promotionDetail) && promotionDetail.length)) {
+                    logger.info('支付回调含微信优惠信息', {
+                        out_trade_no,
+                        payer_total_fen: payerTotalFen != null ? Number(payerTotalFen) : null,
+                        promotion_count: Array.isArray(promotionDetail) ? promotionDetail.length : 0,
+                        promotion_detail: promotionDetail || null,
+                    });
                 }
 
                 await connection.commit();

@@ -800,38 +800,13 @@ async function buildCheckoutQuote({
     deliverTmList = shipping.deliverTmList || []
   }
 
+  // 微信免充值代金券在支付收银台核销，结账不再本地减价；referralCouponId 忽略
+  void referralCouponId
   const identityDiscountYuan = await getAvailableDiscount(connection, userId)
-  let referralCouponDiscountYuan = 0
-  let referralCouponMeta = null
+  const referralCouponDiscountYuan = 0
+  const referralCouponMeta = null
 
-  if (referralCouponId) {
-    const { resolveReferralCouponDiscount } = require('./referralRewardService')
-    const orderBaseYuan = roundYuan(priced.itemsSubtotalYuan + shippingFeeYuan)
-    const couponResolved = await resolveReferralCouponDiscount(
-      connection,
-      userId,
-      referralCouponId,
-      orderBaseYuan,
-      priced.itemsSubtotalYuan,
-      reserveOrderId
-    )
-    if (couponResolved.error) {
-      return {
-        error: adminResult(400, {
-          error: couponResolved.error,
-          code: 'REFERRAL_COUPON_INVALID',
-        }),
-      }
-    }
-    referralCouponDiscountYuan = couponResolved.discountYuan
-    referralCouponMeta = {
-      id: couponResolved.coupon.id,
-      title: couponResolved.coupon.title,
-      discount_yuan: couponResolved.discountYuan,
-    }
-  }
-
-  const discountYuan = roundYuan(identityDiscountYuan + referralCouponDiscountYuan)
+  const discountYuan = roundYuan(identityDiscountYuan)
   const fee = buildFeeBreakdown({
     itemsSubtotalYuan: priced.itemsSubtotalYuan,
     shippingFeeYuan,

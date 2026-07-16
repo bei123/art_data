@@ -194,7 +194,7 @@ const routes = [
         name: 'ReferralCoupons',
         component: () => import('@/views/ReferralCoupons.vue'),
         meta: {
-          title: '推荐优惠券',
+          title: '微信代金券',
           requiresAuth: true,
           roles: ['admin']
         }

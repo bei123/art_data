@@ -150,10 +150,6 @@ router.post('/coupons/grant', async (req, res) => {
     const r = await grantCouponToUser({
       userId,
       templateId: req.body?.template_id ? parseInt(req.body.template_id, 10) : null,
-      title: req.body?.title,
-      discountYuan: req.body?.discount_yuan,
-      minOrderYuan: req.body?.min_order_yuan,
-      validDays: req.body?.valid_days,
       source: 'admin',
     })
     return res.status(r.status).json(r.body)
