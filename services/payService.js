@@ -419,6 +419,10 @@ function parseStoredRefundAmountCents(amountRaw) {
 }
 
 function resolveOrderPaidCents(order, wxPay) {
+    // 用户实付优先：免充值券核销后 payer_total < total
+    const wxPayer = Number(wxPay?.amount?.payer_total);
+    if (Number.isFinite(wxPayer) && wxPayer >= 0) return Math.round(wxPayer);
+
     const wxTotal = Number(wxPay?.amount?.total);
     if (Number.isFinite(wxTotal) && wxTotal > 0) return Math.round(wxTotal);
 
@@ -429,6 +433,61 @@ function resolveOrderPaidCents(order, wxPay) {
     if (Number.isFinite(totalFee) && totalFee > 0) return Math.round(totalFee * 100);
 
     return 0;
+}
+
+/**
+ * Align local actual_fee / discount_amount with WeChat payer_total (券后实付).
+ * total_fee 保持下单时商品+运费；discount = total_fee - 实付（含身份折扣+微信券）.
+ */
+async function reconcileOrderFeesWithPayerTotal({
+    connection = db,
+    orderId,
+    totalFeeYuan,
+    currentActualYuan,
+    payerTotalFen,
+}) {
+    if (!orderId || payerTotalFen == null) return { changed: false };
+    const fen = Number(payerTotalFen);
+    if (!Number.isFinite(fen) || fen < 0) return { changed: false };
+
+    const paidYuan = Math.round(fen) / 100;
+    const prevActual = Number(currentActualYuan);
+    if (Number.isFinite(prevActual) && Math.abs(paidYuan - prevActual) < 0.005) {
+        return { changed: false, actualFeeYuan: paidYuan };
+    }
+
+    const totalYuan = Number(totalFeeYuan);
+    const nextDiscount = Number.isFinite(totalYuan)
+        ? Math.round(Math.max(0, totalYuan - paidYuan) * 100) / 100
+        : null;
+
+    if (nextDiscount == null) {
+        await connection.query(
+            `UPDATE orders SET actual_fee = ?, updated_at = NOW() WHERE id = ?`,
+            [paidYuan, orderId]
+        );
+    } else {
+        await connection.query(
+            `UPDATE orders
+             SET actual_fee = ?, discount_amount = ?, updated_at = NOW()
+             WHERE id = ?`,
+            [paidYuan, nextDiscount, orderId]
+        );
+    }
+
+    logger.info('订单实付已按微信 payer_total 对齐', {
+        orderId,
+        payer_total_fen: fen,
+        actual_fee_yuan: paidYuan,
+        discount_amount_yuan: nextDiscount,
+        previous_actual_yuan: Number.isFinite(prevActual) ? prevActual : null,
+    });
+
+    return {
+        changed: true,
+        actualFeeYuan: paidYuan,
+        discountYuan: nextDiscount,
+    };
 }
 
 async function sumSuccessfulRefundCents(outTradeNo, connection = null) {
@@ -1358,7 +1417,7 @@ async function payNotify(req) {
             let shouldFulfillInventory = false;
             try {
                 const [orders] = await connection.query(
-                    'SELECT id, trade_state, user_id, actual_fee, referrer_id, referral_coupon_id, inventory_reserved FROM orders WHERE out_trade_no = ? FOR UPDATE',
+                    'SELECT id, trade_state, user_id, actual_fee, total_fee, discount_amount, referrer_id, referral_coupon_id, inventory_reserved FROM orders WHERE out_trade_no = ? FOR UPDATE',
                     [out_trade_no]
                 );
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
@@ -1370,6 +1429,34 @@ async function payNotify(req) {
 
                 const userId = orders[0]?.user_id;
                 const previousTradeState = orders[0]?.trade_state;
+
+                const payerTotalFen = callbackData.amount?.payer_total;
+                const promotionDetail = callbackData.promotion_detail;
+                let settledActualFee = orders[0]?.actual_fee;
+
+                if (orders[0]?.id && payerTotalFen != null) {
+                    const reconciled = await reconcileOrderFeesWithPayerTotal({
+                        connection,
+                        orderId: orders[0].id,
+                        totalFeeYuan: orders[0].total_fee,
+                        currentActualYuan: orders[0].actual_fee,
+                        payerTotalFen,
+                    });
+                    if (reconciled.actualFeeYuan != null) {
+                        settledActualFee = reconciled.actualFeeYuan;
+                        orders[0].actual_fee = reconciled.actualFeeYuan;
+                        if (reconciled.discountYuan != null) {
+                            orders[0].discount_amount = reconciled.discountYuan;
+                        }
+                    }
+                } else if (payerTotalFen != null || (Array.isArray(promotionDetail) && promotionDetail.length)) {
+                    logger.info('支付回调含微信优惠信息', {
+                        out_trade_no,
+                        payer_total_fen: payerTotalFen != null ? Number(payerTotalFen) : null,
+                        promotion_count: Array.isArray(promotionDetail) ? promotionDetail.length : 0,
+                        promotion_detail: promotionDetail || null,
+                    });
+                }
 
                 await connection.query(
                     `UPDATE orders SET 
@@ -1410,7 +1497,7 @@ async function payNotify(req) {
                 }
 
                 if (userId && previousTradeState !== 'SUCCESS') {
-                    await onPaymentSuccess(userId, orders[0].actual_fee, connection);
+                    await onPaymentSuccess(userId, settledActualFee, connection);
                     if (orders[0].id) {
                         await createCommissionsForPaidOrder({
                             orderId: orders[0].id,
@@ -1425,17 +1512,6 @@ async function payNotify(req) {
                             });
                         }
                     }
-                }
-
-                const payerTotalFen = callbackData.amount?.payer_total;
-                const promotionDetail = callbackData.promotion_detail;
-                if (payerTotalFen != null || (Array.isArray(promotionDetail) && promotionDetail.length)) {
-                    logger.info('支付回调含微信优惠信息', {
-                        out_trade_no,
-                        payer_total_fen: payerTotalFen != null ? Number(payerTotalFen) : null,
-                        promotion_count: Array.isArray(promotionDetail) ? promotionDetail.length : 0,
-                        promotion_detail: promotionDetail || null,
-                    });
                 }
 
                 await connection.commit();
@@ -3975,14 +4051,23 @@ async function orderDetailForActor(req, options = {}) {
         const actualFeeYuan = parseFloat(order.actual_fee) || 0;
         const shippingFeeYuan = order.shipping_fee != null ? parseFloat(order.shipping_fee) || 0 : 0;
 
+        // 已支付：优先展示微信 payer_total（与收银台实付一致）
+        const wxPayerFen = wxPay?.amount?.payer_total != null ? Number(wxPay.amount.payer_total) : null;
+        const paidYuan = effectiveTradeState === 'SUCCESS' && Number.isFinite(wxPayerFen) && wxPayerFen >= 0
+            ? Math.round(wxPayerFen) / 100
+            : (effectiveTradeState === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null);
+        const displayDiscountYuan = paidYuan != null && Number.isFinite(totalFeeYuan)
+            ? Math.round(Math.max(0, totalFeeYuan - paidYuan) * 100) / 100
+            : Math.round(discountYuan * 100) / 100;
+
         const fee = {
             currency: 'CNY',
             items_subtotal_yuan: Math.round(itemsSubtotalYuan * 100) / 100,
             shipping_fee_yuan: Math.round(shippingFeeYuan * 100) / 100,
             express_type_id: order.express_type_id != null ? Number(order.express_type_id) : null,
-            discount_yuan: Math.round(discountYuan * 100) / 100,
-            amount_payable_yuan: Math.round(actualFeeYuan * 100) / 100,
-            amount_paid_yuan: effectiveTradeState === 'SUCCESS' ? Math.round(actualFeeYuan * 100) / 100 : null,
+            discount_yuan: displayDiscountYuan,
+            amount_payable_yuan: Math.round((paidYuan != null ? paidYuan : actualFeeYuan) * 100) / 100,
+            amount_paid_yuan: paidYuan,
             order_total_before_discount_yuan: Math.round(totalFeeYuan * 100) / 100,
         };
 
@@ -4695,6 +4780,31 @@ async function syncOrderTradeStateFromWechat(orderRow) {
                     });
                 });
             }
+        }
+    }
+
+    // 支付成功：用 payer_total 对齐本地实付（含仅查单补齐、券后金额）
+    if (wxState === 'SUCCESS' && orderRow?.id && wxPay?.amount?.payer_total != null) {
+        let totalFeeYuan = orderRow.total_fee;
+        let currentActualYuan = orderRow.actual_fee;
+        if (totalFeeYuan == null || currentActualYuan == null) {
+            const [freshRows] = await db.query(
+                'SELECT total_fee, actual_fee FROM orders WHERE id = ? LIMIT 1',
+                [orderRow.id]
+            );
+            totalFeeYuan = freshRows[0]?.total_fee;
+            currentActualYuan = freshRows[0]?.actual_fee;
+        }
+        const reconciled = await reconcileOrderFeesWithPayerTotal({
+            orderId: orderRow.id,
+            totalFeeYuan,
+            currentActualYuan,
+            payerTotalFen: wxPay.amount.payer_total,
+        });
+        if (reconciled.changed) {
+            orderRow.actual_fee = reconciled.actualFeeYuan;
+            if (reconciled.discountYuan != null) orderRow.discount_amount = reconciled.discountYuan;
+            didSync = true;
         }
     }
 
