@@ -23,7 +23,6 @@ const { PUBLIC_API_BASE_URL } = require('./config/publicEnv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const wxRouter = require('./routes/wx');
-const wxOaRouter = require('./routes/wxOa');
 const wxpayRouter = require('./routes/pay');
 const favoritesRouter = require('./routes/favorites');
 const merchantsRouter = require('./routes/merchants');
@@ -97,11 +96,6 @@ app.set('trust proxy', resolveTrustProxy());
 app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/pay/refund/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/referral/withdraw/notify', express.raw({ type: 'application/json' }));
-// 服务号消息/卡券事件推送（text/xml）
-app.use(
-  '/api/wx/oa/callback',
-  express.text({ type: ['text/*', 'application/xml', 'text/xml'], limit: '2mb' })
-);
 
 // CORS 与 OPTIONS 预检必须在 helmet、限流之前，否则 CDN/限流响应无 ACAO
 app.use(corsPreflightMiddleware);
@@ -467,9 +461,6 @@ app.get(
 
 // 使用微信路由
 app.use('/api/wx', wxRouter);
-
-// 服务号消息 / 卡券事件回调
-app.use('/api/wx/oa', wxOaRouter);
 
 // 使用微信支付路由
 app.use('/api/wx/pay', wxpayRouter);

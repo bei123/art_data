@@ -13,7 +13,6 @@ const SIGN_SKIP_PREFIXES = [
   '/api/wx/pay/notify',
   '/api/wx/pay/refund/notify',
   '/api/wx/referral/withdraw/notify',
-  '/api/wx/oa/callback',
   '/api/upload',
   '/uploads/',
 ]

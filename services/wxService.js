@@ -154,36 +154,24 @@ const { code } = req.body;
         // 1. 用 code 换 openid 和 session_key
         const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${appid}&secret=${secret}&js_code=${cleanCode}&grant_type=authorization_code`;
         const wxRes = await axios.get(url);
-        const { openid, session_key, unionid } = wxRes.data;
-        const normalizedUnionid = typeof unionid === 'string' && unionid.trim() ? unionid.trim() : null;
+        const { openid, session_key } = wxRes.data;
 
         if (!openid) {
             return adminResult(400, appendClientErrorDetail({ error: '微信登录失败' }, wxRes.data?.errmsg ? new Error(String(wxRes.data.errmsg)) : null));
         }
 
-        const { ensureWxUserIdentityColumns } = require('../utils/wxCardSchema');
-        await ensureWxUserIdentityColumns();
-
         // 2. 在你自己的数据库查找或注册用户（表名改为 wx_users）
-        let [users] = await db.query(
-          'SELECT id, openid, unionid, oa_openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?',
-          [openid]
-        );
+        let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?', [openid]);
         let user;
         let isNewUser = false;
 
         if (users.length === 0) {
             // 没有则注册，只插入必要字段
-            const [result] = await db.query(
-              'INSERT INTO wx_users (openid, session_key, unionid) VALUES (?, ?, ?)',
-              [openid, session_key, normalizedUnionid]
-            );
+            const [result] = await db.query('INSERT INTO wx_users (openid, session_key) VALUES (?, ?)', [openid, session_key]);
             isNewUser = true;
             user = {
                 id: result.insertId,
                 openid,
-                unionid: normalizedUnionid,
-                oa_openid: null,
                 nickname: null,
                 avatar: null,
                 phone: null,
@@ -191,16 +179,8 @@ const { code } = req.body;
                 updated_at: new Date()
             };
         } else {
-            // 有则更新 session_key；开放平台绑定后补写 unionid
-            if (normalizedUnionid && !users[0].unionid) {
-              await db.query(
-                'UPDATE wx_users SET session_key = ?, unionid = ?, updated_at = NOW() WHERE openid = ?',
-                [session_key, normalizedUnionid, openid]
-              );
-              users[0].unionid = normalizedUnionid;
-            } else {
-              await db.query('UPDATE wx_users SET session_key = ?, updated_at = NOW() WHERE openid = ?', [session_key, openid]);
-            }
+            // 有则更新 session_key，只查询必要字段
+            await db.query('UPDATE wx_users SET session_key = ?, updated_at = NOW() WHERE openid = ?', [session_key, openid]);
             user = users[0];
         }
 

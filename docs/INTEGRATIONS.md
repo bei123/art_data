@@ -9,7 +9,6 @@ flowchart LR
   API[art_data]
 
   API <-->|登录/支付/退款/发货/转账/订阅| WX[微信开放平台 · 支付 · 小程序]
-  API <-->|服务号 token/卡券事件| OA[微信服务号 · 卡券]
   API -->|下单/轨迹/面单| SF[顺丰开放平台]
   API <-->|目录/下单/收银台/资产| WS[Wespace]
   API -->|商品主档同步| WMS[WMS]
@@ -22,8 +21,7 @@ flowchart LR
 
 | 系统 | 方向 | 主要用途 | 代码落点 | 回调 / 入口 |
 |------|------|----------|----------|-------------|
-| 微信小程序登录 | 出 | `jscode2session`（可写 `unionid`） | `wxService` | — |
-| 微信服务号 | 出+入 | `access_token` / 卡券 `api_ticket`；消息与卡券事件 | `wechatOaTokenService` · `wxCardEventService` | `GET|POST /api/wx/oa/callback` |
+| 微信小程序登录 | 出 | `jscode2session` | `wxService` | — |
 | 微信支付 JSAPI | 出+入 | 预下单、查单、关单 | `payService` | `POST /api/wx/pay/notify` |
 | 微信退款 | 出+入 | 退款申请 | `payService` | `POST /api/wx/pay/refund/notify` |
 | 微信发货录入 | 出 | 物流信息上报 | `wechatShippingInfoService` | — |
@@ -43,7 +41,6 @@ flowchart LR
 | `/api/wx/pay/notify` | 微信支付 | 平台证书验签 + 资源解密；raw body |
 | `/api/wx/pay/refund/notify` | 微信退款 | 同上 |
 | `/api/wx/referral/withdraw/notify` | 商家转账 | 平台验签 |
-| `/api/wx/oa/callback` | 微信服务号 | Token/`msg_signature` 验签；明文或 AES 安全模式；XML body |
 | 资产相关 webhook（若启用） | Wespace 等 | 按路由校验 |
 
 管理端 / 小程序业务 API：JWT +（管理台）HMAC API 签名 + Redis nonce。详见安全文档与 `middleware/apiRequestSign`。
@@ -53,7 +50,6 @@ flowchart LR
 | 族 | 示例前缀 | 备注 |
 |----|----------|------|
 | 微信小程序 / 支付 | `WX_` · `WECHAT_PAY_` | 商户号、证书、notify 域名须为 `api.wx…` |
-| 微信服务号 / 卡券 | `WECHAT_OA_` · `WX_CARD_` | `TOKEN`/`AES_KEY` 用于回调；与小程序同开放平台 |
 | 顺丰 | `SF_` | 顾客编码、校验码、环境 |
 | Wespace | `WESPACE_` | Base URL、密钥；TLS 策略受控 |
 | WMS | `WMS_` | HTTP / 七牛相关见 `config/` |

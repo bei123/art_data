@@ -1,6 +1,5 @@
 const db = require('../db')
 const logger = require('./logger')
-const { ensureWxCardSchema } = require('./wxCardSchema')
 
 let schemaReady = false
 
@@ -134,7 +133,6 @@ async function ensureReferralSchema() {
   if (schemaReady) return
 
   await ensureWxUserTierColumns()
-  await ensureWxCardSchema()
   await ensureReferralCodesTable()
   await ensureReferralBindingsTable()
   await ensureShareEventsTable()
