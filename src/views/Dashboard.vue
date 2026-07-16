@@ -48,6 +48,9 @@
           艺术推荐官
         </h3>
         <div class="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" size="sm" @click="router.push('/referral/coupons')">
+            微信代金券
+          </Button>
           <Button type="button" variant="secondary" size="sm" @click="router.push('/referral/share-events')">
             分享记录
           </Button>

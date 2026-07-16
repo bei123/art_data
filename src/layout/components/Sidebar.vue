@@ -60,6 +60,7 @@ import {
   Wallet,
   Share2,
   ClipboardCheck,
+  TicketPercent,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { useUserStore } from '@/stores/user'
@@ -93,7 +94,7 @@ const navItems = [
   { path: '/referral/commissions', label: '推荐佣金', icon: HandCoins, role: 'admin' },
   { path: '/referral/commission-rules', label: '佣金规则', icon: HandCoins, role: 'admin' },
   { path: '/referral/withdrawals', label: '推荐官提现', icon: Wallet, role: 'admin' },
-  { path: '/referral/coupons', label: '微信代金券', icon: HandCoins, role: 'admin' },
+  { path: '/referral/coupons', label: '微信代金券', icon: TicketPercent, role: 'admin' },
   { path: '/referral/advisor-applications', label: '艺术顾问', icon: User, role: 'admin' },
   { path: '/referral/vip-early-access', label: 'VIP优先购', icon: HandCoins, role: 'admin' },
   { path: '/referral/share-events', label: '分享记录', icon: Share2, role: 'admin' },

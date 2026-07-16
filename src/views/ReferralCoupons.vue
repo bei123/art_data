@@ -145,19 +145,19 @@ function formatDate(v) {
 }
 
 async function loadTemplates() {
-  const { data } = await axios.get('/api/admin/referral/coupon-templates')
+  const { data } = await axios.get('/admin/referral/coupon-templates')
   templates.value = data.items || []
 }
 
 async function loadCoupons() {
-  const { data } = await axios.get('/api/admin/referral/coupons', { params: { pageSize: 50 } })
+  const { data } = await axios.get('/admin/referral/coupons', { params: { pageSize: 50 } })
   coupons.value = data.items || []
 }
 
 async function handleCreateTemplate() {
   creating.value = true
   try {
-    await axios.post('/api/admin/referral/coupon-templates', {
+    await axios.post('/admin/referral/coupon-templates', {
       title: form.title,
       discount_yuan: form.discount_yuan,
       min_order_yuan: form.min_order_yuan,
@@ -177,7 +177,7 @@ async function handleCreateTemplate() {
 async function handleGrant() {
   granting.value = true
   try {
-    await axios.post('/api/admin/referral/coupons/grant', {
+    await axios.post('/admin/referral/coupons/grant', {
       user_id: Number(grantForm.user_id),
       template_id: Number(grantForm.template_id),
     })
