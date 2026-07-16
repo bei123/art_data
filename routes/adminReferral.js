@@ -141,6 +141,50 @@ router.post('/coupon-templates', async (req, res) => {
   }
 })
 
+router.post('/coupon-templates/:id/wx-card', async (req, res) => {
+  try {
+    const action = String(req.body?.action || 'create').toLowerCase()
+    const {
+      createWxCardForTemplate,
+      refreshWxCardStatusForTemplate,
+    } = require('../services/wxCardService')
+
+    if (action === 'refresh') {
+      const r = await refreshWxCardStatusForTemplate(req.params.id)
+      return res.status(r.status).json(r.body)
+    }
+
+    // 允许创建时覆盖 logo/brand
+    if (req.body?.wx_logo_url || req.body?.wx_brand_name || req.body?.wx_color || req.body?.wx_quantity != null) {
+      const db = require('../db')
+      const { ensureReferralRewardsSchema } = require('../utils/referralRewardsSchema')
+      await ensureReferralRewardsSchema()
+      await db.query(
+        `UPDATE referral_coupon_templates
+         SET wx_logo_url = COALESCE(?, wx_logo_url),
+             wx_brand_name = COALESCE(?, wx_brand_name),
+             wx_color = COALESCE(?, wx_color),
+             wx_quantity = COALESCE(?, wx_quantity),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [
+          req.body.wx_logo_url || null,
+          req.body.wx_brand_name || null,
+          req.body.wx_color || null,
+          req.body.wx_quantity != null ? Number(req.body.wx_quantity) : null,
+          parseInt(req.params.id, 10),
+        ]
+      )
+    }
+
+    const r = await createWxCardForTemplate(req.params.id)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin create/sync wx card failed', { err: error })
+    res.status(500).json({ error: '创建/同步微信卡券失败' })
+  }
+})
+
 router.post('/coupons/grant', async (req, res) => {
   try {
     const userId = parseInt(req.body?.user_id, 10)

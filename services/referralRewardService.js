@@ -1,15 +1,54 @@
 const db = require('../db')
 const logger = require('../utils/logger')
+const redisClient = require('../utils/redisClient')
 const { ensureReferralRewardsSchema } = require('../utils/referralRewardsSchema')
 const { ensureCommissionSchema } = require('../utils/commissionSchema')
 const { adjustWalletBalances, roundMoney, parseMoney } = require('./commissionService')
+const { generateWxCouponCode } = require('./wxCardService')
+const { isWxCardSyncEnabled } = require('./wechatOaTokenService')
 
 const FIRST_REFERRAL_BONUS_YUAN = parseFloat(process.env.FIRST_REFERRAL_BONUS_YUAN || '30')
 const NEW_USER_COUPON_YUAN = parseFloat(process.env.NEW_USER_COUPON_YUAN || '50')
 const NEW_USER_COUPON_MIN_ORDER_YUAN = parseFloat(process.env.NEW_USER_COUPON_MIN_ORDER_YUAN || '0')
 const NEW_USER_COUPON_VALID_DAYS = parseInt(process.env.NEW_USER_COUPON_VALID_DAYS || '30', 10)
+const NEW_USER_COUPON_TEMPLATE_ID = parseInt(process.env.NEW_USER_COUPON_TEMPLATE_ID || '0', 10)
 const NEW_USER_COUPON_SOURCE = 'new_user_welcome'
 const BONUS_TYPE_FIRST_REFERRAL = 'first_referral_order'
+const LIST_CACHE_SECONDS = Math.max(
+  0,
+  parseInt(process.env.WX_CARD_LIST_CACHE_SECONDS || '45', 10) || 45
+)
+
+function mapCouponListItem(row, { inWalletSet = null, walletSync = 'local' } = {}) {
+  const inWallet = inWalletSet
+    ? inWalletSet.has(String(row.wx_code || ''))
+    : ['in_wallet', 'consumed'].includes(String(row.wx_wallet_status || ''))
+  const canCheckout = ['available', 'reserved'].includes(String(row.status || ''))
+  const needAddCard = Boolean(
+    row.wx_card_id &&
+      row.wx_code &&
+      canCheckout &&
+      !inWallet &&
+      row.wx_wallet_status !== 'consumed'
+  )
+
+  return {
+    id: row.id,
+    title: row.title,
+    discount_yuan: row.discount_yuan,
+    min_order_yuan: row.min_order_yuan,
+    status: row.status,
+    expires_at: row.expires_at,
+    created_at: row.created_at,
+    wx_card_id: row.wx_card_id || null,
+    wx_code: row.wx_code || null,
+    wx_wallet_status: row.wx_wallet_status || 'not_added',
+    in_wallet: inWallet,
+    can_checkout: canCheckout,
+    need_add_card: needAddCard,
+    wallet_sync: walletSync,
+  }
+}
 
 function adminResult(status, body) {
   return { ok: status >= 200 && status < 400, status, body }
@@ -50,20 +89,50 @@ async function tryGrantNewUserWelcomeCoupon(userId, connection = db) {
     return { granted: false, alreadyGranted: true }
   }
 
-  const discount = roundMoney(NEW_USER_COUPON_YUAN)
+  let templateId = null
+  let title = '新人礼包'
+  let discount = roundMoney(NEW_USER_COUPON_YUAN)
+  let minOrder = Math.max(0, NEW_USER_COUPON_MIN_ORDER_YUAN)
+  let validDays = NEW_USER_COUPON_VALID_DAYS
+  let wxCardId = null
+
+  if (NEW_USER_COUPON_TEMPLATE_ID > 0) {
+    const [templates] = await connection.query(
+      `SELECT id, title, discount_yuan, min_order_yuan, valid_days, wx_card_id, wx_sync_enabled
+       FROM referral_coupon_templates
+       WHERE id = ? AND is_active = 1
+       LIMIT 1`,
+      [NEW_USER_COUPON_TEMPLATE_ID]
+    )
+    if (templates[0]) {
+      const tpl = templates[0]
+      templateId = tpl.id
+      title = tpl.title
+      discount = roundMoney(tpl.discount_yuan)
+      minOrder = Math.max(0, parseMoney(tpl.min_order_yuan))
+      validDays = parseInt(tpl.valid_days, 10) || validDays
+      if (tpl.wx_sync_enabled && tpl.wx_card_id) wxCardId = tpl.wx_card_id
+    }
+  }
+
   if (discount <= 0) return { granted: false, reason: 'invalid_amount' }
 
-  const expiresAt = addDays(new Date(), NEW_USER_COUPON_VALID_DAYS)
+  const expiresAt = addDays(new Date(), validDays)
+  const wxCode = generateWxCouponCode()
   try {
     const [result] = await connection.query(
       `INSERT INTO user_referral_coupons
-       (user_id, template_id, title, discount_yuan, min_order_yuan, status, source, expires_at)
-       VALUES (?, NULL, ?, ?, ?, 'available', ?, ?)`,
+       (user_id, template_id, wx_card_id, wx_code, title, discount_yuan, min_order_yuan,
+        status, source, expires_at, wx_wallet_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?, ?, 'not_added')`,
       [
         userId,
-        '新人礼包',
+        templateId,
+        wxCardId,
+        wxCode,
+        title,
         discount,
-        Math.max(0, NEW_USER_COUPON_MIN_ORDER_YUAN),
+        minOrder,
         NEW_USER_COUPON_SOURCE,
         expiresAt,
       ]
@@ -73,12 +142,14 @@ async function tryGrantNewUserWelcomeCoupon(userId, connection = db) {
       return { granted: false }
     }
 
-    logger.info('new user welcome coupon granted', { userId, discount })
+    logger.info('new user welcome coupon granted', { userId, discount, wxCode, wxCardId })
     return {
       granted: true,
       coupon_id: result.insertId,
       discount_yuan: discount,
       expires_at: expiresAt,
+      wx_card_id: wxCardId,
+      need_add_card: Boolean(wxCardId),
     }
   } catch (err) {
     if (err && (err.code === 'ER_DUP_ENTRY' || err.errno === 1062)) {
@@ -130,10 +201,7 @@ async function tryGrantFirstReferralOrderBonus({ referrerId, orderId, connection
   }
 }
 
-async function listUserCoupons(userId, { status = 'available' } = {}) {
-  await ensureReferralRewardsSchema()
-  await expireCouponsIfNeeded(userId)
-
+async function loadLocalUserCoupons(userId, status) {
   const params = [userId]
   let where = 'WHERE user_id = ?'
   if (status) {
@@ -142,14 +210,176 @@ async function listUserCoupons(userId, { status = 'available' } = {}) {
   }
 
   const [rows] = await db.query(
-    `SELECT id, title, discount_yuan, min_order_yuan, status, expires_at, created_at
+    `SELECT id, title, discount_yuan, min_order_yuan, status, expires_at, created_at,
+            template_id, wx_card_id, wx_code, wx_wallet_status
      FROM user_referral_coupons
      ${where}
      ORDER BY expires_at ASC, id DESC`,
     params
   )
-
   return rows || []
+}
+
+async function importWalletCouponForUser(userId, { cardId, code }) {
+  const [existing] = await db.query(
+    `SELECT id, user_id FROM user_referral_coupons WHERE wx_code = ? LIMIT 1`,
+    [code]
+  )
+  if (existing[0]) {
+    if (Number(existing[0].user_id) !== Number(userId)) {
+      logger.warn('wx_code belongs to another user', {
+        code,
+        userId,
+        owner: existing[0].user_id,
+      })
+      return null
+    }
+    await db.query(
+      `UPDATE user_referral_coupons
+       SET wx_card_id = COALESCE(wx_card_id, ?),
+           wx_wallet_status = 'in_wallet',
+           wx_added_at = COALESCE(wx_added_at, NOW()),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [cardId, existing[0].id]
+    )
+    return existing[0].id
+  }
+
+  const [templates] = await db.query(
+    `SELECT id, title, discount_yuan, min_order_yuan, valid_days
+     FROM referral_coupon_templates
+     WHERE wx_card_id = ? AND is_active = 1
+     LIMIT 1`,
+    [cardId]
+  )
+  const tpl = templates[0]
+  if (!tpl) {
+    logger.warn('wallet coupon has no local template', { userId, cardId, code })
+    return null
+  }
+
+  const expiresAt = addDays(new Date(), parseInt(tpl.valid_days, 10) || 30)
+  const [result] = await db.query(
+    `INSERT INTO user_referral_coupons
+     (user_id, template_id, wx_card_id, wx_code, title, discount_yuan, min_order_yuan,
+      status, source, expires_at, wx_wallet_status, wx_added_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'available', 'wx_wallet_import', ?, 'in_wallet', NOW())`,
+    [
+      userId,
+      tpl.id,
+      cardId,
+      code,
+      tpl.title,
+      tpl.discount_yuan,
+      tpl.min_order_yuan,
+      expiresAt,
+    ]
+  )
+  return result.insertId
+}
+
+async function syncUserCouponsFromWallet(userId) {
+  const [users] = await db.query(
+    'SELECT id, oa_openid FROM wx_users WHERE id = ? LIMIT 1',
+    [userId]
+  )
+  const oaOpenid = users[0]?.oa_openid
+  if (!oaOpenid) {
+    return { walletSync: 'unavailable', inWalletCodes: new Set() }
+  }
+
+  try {
+    const { getUserCardList } = require('./wxCardService')
+    const [templates] = await db.query(
+      `SELECT wx_card_id FROM referral_coupon_templates
+       WHERE wx_card_id IS NOT NULL AND wx_sync_enabled = 1`
+    )
+    const cardIds = (templates || []).map((t) => t.wx_card_id).filter(Boolean)
+
+    const lists = []
+    if (cardIds.length === 0) {
+      lists.push(await getUserCardList(oaOpenid))
+    } else {
+      for (const cardId of cardIds) {
+        lists.push(await getUserCardList(oaOpenid, cardId))
+      }
+    }
+
+    const flat = lists.flat()
+    const inWalletCodes = new Set()
+    for (const item of flat) {
+      const code = String(item.code || '').trim()
+      const cardId = String(item.card_id || '').trim()
+      if (!code || !cardId) continue
+      inWalletCodes.add(code)
+      await importWalletCouponForUser(userId, { cardId, code })
+    }
+
+    // 本地标记卡包已有
+    if (inWalletCodes.size > 0) {
+      const codes = [...inWalletCodes]
+      await db.query(
+        `UPDATE user_referral_coupons
+         SET wx_wallet_status = 'in_wallet',
+             wx_added_at = COALESCE(wx_added_at, NOW()),
+             updated_at = NOW()
+         WHERE user_id = ?
+           AND wx_code IN (${codes.map(() => '?').join(',')})
+           AND wx_wallet_status NOT IN ('consumed')`,
+        [userId, ...codes]
+      )
+    }
+
+    return { walletSync: 'ok', inWalletCodes }
+  } catch (err) {
+    logger.warn('syncUserCouponsFromWallet failed', { userId, err: err.message })
+    return { walletSync: 'stale', inWalletCodes: new Set(), error: err.message }
+  }
+}
+
+async function listUserCoupons(userId, { status = 'available', sync = false, force = false } = {}) {
+  await ensureReferralRewardsSchema()
+  await expireCouponsIfNeeded(userId)
+
+  const wantSync = Boolean(sync) && isWxCardSyncEnabled()
+  const cacheKey = `wx:coupon_list:${userId}:${status || 'all'}`
+
+  if (wantSync && !force && LIST_CACHE_SECONDS > 0) {
+    try {
+      const cached = await redisClient.get(cacheKey)
+      if (cached) return JSON.parse(cached)
+    } catch {
+      // ignore cache errors
+    }
+  }
+
+  let walletSync = 'local'
+  let inWalletCodes = new Set()
+
+  if (wantSync) {
+    const synced = await syncUserCouponsFromWallet(userId)
+    walletSync = synced.walletSync
+    inWalletCodes = synced.inWalletCodes || new Set()
+  }
+
+  const rows = await loadLocalUserCoupons(userId, status)
+  const items = rows.map((row) =>
+    mapCouponListItem(row, {
+      inWalletSet: wantSync ? inWalletCodes : null,
+      walletSync,
+    })
+  )
+
+  if (wantSync && LIST_CACHE_SECONDS > 0) {
+    try {
+      await redisClient.setEx(cacheKey, LIST_CACHE_SECONDS, JSON.stringify(items))
+    } catch {
+      // ignore
+    }
+  }
+
+  return items
 }
 
 async function expireCouponsIfNeeded(userId) {
@@ -384,7 +614,8 @@ async function releaseReferralCouponByOrderId(orderId, connection = db) {
 async function listAdminCouponTemplates() {
   await ensureReferralRewardsSchema()
   const [rows] = await db.query(
-    `SELECT id, title, discount_yuan, min_order_yuan, valid_days, is_active, updated_at
+    `SELECT id, title, discount_yuan, min_order_yuan, valid_days, is_active, updated_at,
+            wx_card_id, wx_card_status, wx_sync_enabled, wx_logo_url, wx_brand_name, wx_color, wx_quantity
      FROM referral_coupon_templates
      ORDER BY id DESC`
   )
@@ -402,11 +633,15 @@ async function createAdminCouponTemplate(body) {
   if (discountYuan <= 0) return adminResult(400, { error: '优惠金额无效' })
   if (validDays <= 0 || validDays > 365) return adminResult(400, { error: '有效期无效' })
 
+  const wxLogoUrl = String(body?.wx_logo_url || '').trim() || null
+  const wxBrandName = String(body?.wx_brand_name || '').trim() || null
+  const wxColor = String(body?.wx_color || '').trim() || null
+
   const [result] = await db.query(
     `INSERT INTO referral_coupon_templates
-     (title, discount_yuan, min_order_yuan, valid_days, is_active)
-     VALUES (?, ?, ?, ?, 1)`,
-    [title, discountYuan, Math.max(0, minOrderYuan), validDays]
+     (title, discount_yuan, min_order_yuan, valid_days, is_active, wx_logo_url, wx_brand_name, wx_color)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+    [title, discountYuan, Math.max(0, minOrderYuan), validDays, wxLogoUrl, wxBrandName, wxColor]
   )
 
   return adminResult(200, { success: true, id: result.insertId })
@@ -420,9 +655,11 @@ async function grantCouponToUser({ userId, templateId, title, discountYuan, minO
   let minOrder = parseMoney(minOrderYuan)
   let days = parseInt(validDays, 10) || 30
 
+  let wxCardId = null
+
   if (templateId) {
     const [templates] = await db.query(
-      `SELECT id, title, discount_yuan, min_order_yuan, valid_days
+      `SELECT id, title, discount_yuan, min_order_yuan, valid_days, wx_card_id, wx_sync_enabled
        FROM referral_coupon_templates
        WHERE id = ? AND is_active = 1 LIMIT 1`,
       [templateId]
@@ -433,6 +670,7 @@ async function grantCouponToUser({ userId, templateId, title, discountYuan, minO
     discount = parseMoney(tpl.discount_yuan)
     minOrder = parseMoney(tpl.min_order_yuan)
     days = parseInt(tpl.valid_days, 10) || 30
+    if (tpl.wx_sync_enabled && tpl.wx_card_id) wxCardId = tpl.wx_card_id
   }
 
   if (!couponTitle || discount <= 0) {
@@ -440,13 +678,17 @@ async function grantCouponToUser({ userId, templateId, title, discountYuan, minO
   }
 
   const expiresAt = addDays(new Date(), days)
+  const wxCode = generateWxCouponCode()
   const [result] = await db.query(
     `INSERT INTO user_referral_coupons
-     (user_id, template_id, title, discount_yuan, min_order_yuan, status, source, expires_at)
-     VALUES (?, ?, ?, ?, ?, 'available', ?, ?)`,
+     (user_id, template_id, wx_card_id, wx_code, title, discount_yuan, min_order_yuan,
+      status, source, expires_at, wx_wallet_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'available', ?, ?, 'not_added')`,
     [
       userId,
       templateId || null,
+      wxCardId,
+      wxCode,
       couponTitle,
       discount,
       Math.max(0, minOrder),
@@ -455,7 +697,13 @@ async function grantCouponToUser({ userId, templateId, title, discountYuan, minO
     ]
   )
 
-  return adminResult(200, { success: true, coupon_id: result.insertId })
+  return adminResult(200, {
+    success: true,
+    coupon_id: result.insertId,
+    wx_card_id: wxCardId,
+    wx_code: wxCode,
+    need_add_card: Boolean(wxCardId),
+  })
 }
 
 async function listAdminUserCoupons({ userId, page = 1, pageSize = 20 } = {}) {

@@ -189,19 +189,21 @@ CREATE TABLE IF NOT EXISTS wx_card_sync_jobs (
 
 **上线前运维**：公众平台将服务器 URL 设为 `https://<api-host>/api/wx/oa/callback`，填入与 `WECHAT_OA_TOKEN`（及安全模式 `AES_KEY`）一致的值；小程序与服务号绑定同一开放平台。
 
-### P1 进卡包 + 列表合并（约 5–7 人日）
+### P1 进卡包 + 列表合并（约 5–7 人日） — ✅ 已落地代码
 
-| ID | 任务 | 落点（建议） | 完成标准 |
-|----|------|--------------|----------|
-| P1-1 | 模板 DDL + Admin：绑定/创建/刷新 `wx_card_id` | `referralRewardsSchema` · `adminReferral` · `ReferralCoupons.vue` | 后台可对模板建卡并显示审核状态 |
-| P1-2 | 创建卡券封装（CASH/GENERAL_COUPON、自定义 code、跳转小程序 cell） | `services/wxCardService.js` | 审核通过后有 card_id |
+| ID | 任务 | 落点 | 完成标准 |
+|----|------|------|----------|
+| P1-1 | 模板 DDL + Admin：绑定/创建/刷新 `wx_card_id` | `referralRewardsSchema` · `adminReferral` · `ReferralCoupons.vue` | 后台可创建微信卡 / 刷新状态 |
+| P1-2 | 创建卡券封装（CASH、自定义 code、跳转小程序 cell） | `services/wxCardService.js` | 创建后写入 `wx_card_id` |
 | P1-3 | 发券时生成 `wx_code`，写 `wx_card_id` | `referralRewardService` | 新人礼/后台发放均有 code |
 | P1-4 | `GET .../coupons/:id/card-ext`：签 cardExt | `routes/referral.js` + `wxCardService` | 签名用服务号 api_ticket |
-| P1-5 | `POST .../coupons/:id/card-added`：解码 encrypt_code 并绑定 | 同上 | `wx_wallet_status=in_wallet` |
-| P1-6 | `user_get_card` / `card_pass_check` 处理：补 oa_openid、绑 code | `wxCardEventService` | 事件与 addCard 回调幂等 |
-| P1-7 | 列表合并：`getcardlist` + 本地补建/并集 | `referralRewardService.listCouponsForUser` | 卡包有、本地无 → 自动出现可结算券 |
-| P1-8 | 小程序：放入卡包 / 打开卡包 / 同步刷新 | `art_wx` `coupons.uvue` · `referralApi.js` | addCard/openCard 可用；失败不影响站内展示 |
-| P1-9 | 卡面跳小程序：onShow 解析 encrypt_code → 解码选券 | `art_wx` app/结算入口 | 从卡包进结算能选中对应券 |
+| P1-5 | `POST .../coupons/:id/card-added`：解码并绑定 | 同上 | `wx_wallet_status=in_wallet` |
+| P1-6 | `user_get_card` / `card_pass_check` / `user_del_card` | `wxCardEventService` | 事件对齐本地券与模板状态 |
+| P1-7 | 列表合并：`getcardlist` + 本地补建/并集 | `listUserCoupons(sync/force)` | 卡包有、本地无 → 补建可用 |
+| P1-8 | 小程序：放入卡包 / 查看卡包 / 同步刷新 | `art_wx` coupons + referralApi | addCard/openCard |
+| P1-9 | 卡面跳小程序：对齐 encrypt_code → 结算预选 | `wxCardLaunch.js` · App · checkout | 从卡包进结算可带券 |
+
+**联调注意：** 需配置 `WX_CARD_DEFAULT_LOGO_URL`（或模板 `wx_logo_url`）、`WX_MP_GH_ID`；卡券审核通过后 `wx_card_status=approved` 方可稳定投放。
 
 ### P2 支付核销同步（约 3–4 人日）
 

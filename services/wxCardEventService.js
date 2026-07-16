@@ -40,14 +40,15 @@ function pickEventFields(parsed) {
 async function insertEventLog(row) {
   const [result] = await db.query(
     `INSERT INTO wx_card_event_log
-      (event_type, card_id, code, oa_openid, outer_str, raw_body, process_status, process_error, processed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (event_type, card_id, code, oa_openid, outer_str, coupon_id, raw_body, process_status, process_error, processed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.eventType,
       row.cardId,
       row.code,
       row.oaOpenid,
       row.outerStr,
+      row.couponId || null,
       row.rawBody,
       row.processStatus,
       row.processError,
@@ -58,18 +59,25 @@ async function insertEventLog(row) {
 }
 
 /**
- * P0：尽量把服务号 openid 回填到已有用户（仅当该 oa_openid 尚未占用且 outer_str=uid:{id}）
- * 更完整的 unionid 关联在后续登录/领券流程补齐。
+ * 将服务号 openid 回填到用户（outer_str=uid:{id}，或 voucher 已有 user）
  */
-async function tryBindOaOpenidFromEvent({ eventType, oaOpenid, outerStr }) {
-  if (eventType !== 'user_get_card' || !oaOpenid) return null
+async function tryBindOaOpenidFromEvent({ eventType, oaOpenid, outerStr, code }) {
+  if (!oaOpenid) return null
 
+  let userId = null
   const outer = String(outerStr || '').trim()
   const uidMatch = /^uid:(\d+)$/i.exec(outer)
-  if (!uidMatch) return null
+  if (uidMatch) userId = Number(uidMatch[1])
 
-  const userId = Number(uidMatch[1])
-  if (!Number.isFinite(userId) || userId <= 0) return null
+  if (!userId && code && eventType === 'user_get_card') {
+    const [coupons] = await db.query(
+      'SELECT user_id FROM user_referral_coupons WHERE wx_code = ? LIMIT 1',
+      [code]
+    )
+    if (coupons[0]) userId = Number(coupons[0].user_id)
+  }
+
+  if (!userId || !Number.isFinite(userId) || userId <= 0) return null
 
   const [existing] = await db.query(
     'SELECT id FROM wx_users WHERE oa_openid = ? AND id <> ? LIMIT 1',
@@ -87,15 +95,53 @@ async function tryBindOaOpenidFromEvent({ eventType, oaOpenid, outerStr }) {
   return userId
 }
 
+async function bindCouponFromGetCardEvent({ cardId, code, oaOpenid }) {
+  if (!code) return null
+
+  const [rows] = await db.query(
+    `SELECT id, user_id, wx_wallet_status
+     FROM user_referral_coupons
+     WHERE wx_code = ?
+     LIMIT 1`,
+    [code]
+  )
+  const coupon = rows[0]
+  if (!coupon) return null
+
+  await db.query(
+    `UPDATE user_referral_coupons
+     SET wx_card_id = COALESCE(?, wx_card_id),
+         wx_oa_openid = COALESCE(wx_oa_openid, ?),
+         wx_wallet_status = 'in_wallet',
+         wx_added_at = COALESCE(wx_added_at, NOW()),
+         wx_last_error = NULL,
+         updated_at = NOW()
+     WHERE id = ?`,
+    [cardId || null, oaOpenid || null, coupon.id]
+  )
+  return coupon.id
+}
+
+async function applyCardAuditEvent({ eventType, cardId }) {
+  if (!cardId) return
+  const status = eventType === 'card_pass_check' ? 'approved' : 'rejected'
+  await db.query(
+    `UPDATE referral_coupon_templates
+     SET wx_card_status = ?, wx_sync_enabled = IF(? = 'approved', 1, wx_sync_enabled), updated_at = NOW()
+     WHERE wx_card_id = ?`,
+    [status, status, cardId]
+  )
+}
+
 async function processParsedEvent(parsed, rawBody) {
   const fields = pickEventFields(parsed)
   let processStatus = 'pending'
   let processError = null
   let processedAt = null
+  let couponId = null
 
   try {
     if (!CARD_EVENT_TYPES.has(fields.eventType) && fields.eventType !== 'event') {
-      // 普通文本/关注等：落库后标 ignored，避免积压
       if (!String(parsed.Event || '').trim()) {
         processStatus = 'ignored'
         processedAt = new Date()
@@ -104,8 +150,22 @@ async function processParsedEvent(parsed, rawBody) {
 
     if (fields.eventType === 'user_get_card') {
       await tryBindOaOpenidFromEvent(fields)
-      // code↔本地券对齐留给 P1；P0 仅先存后处理
-      processStatus = 'pending'
+      couponId = await bindCouponFromGetCardEvent(fields)
+      processStatus = couponId ? 'done' : 'pending'
+      if (couponId) processedAt = new Date()
+    } else if (fields.eventType === 'card_pass_check' || fields.eventType === 'card_not_pass_check') {
+      await applyCardAuditEvent(fields)
+      processStatus = 'done'
+      processedAt = new Date()
+    } else if (fields.eventType === 'user_del_card' && fields.code) {
+      await db.query(
+        `UPDATE user_referral_coupons
+         SET wx_wallet_status = 'deleted', updated_at = NOW()
+         WHERE wx_code = ? AND wx_wallet_status <> 'consumed'`,
+        [fields.code]
+      )
+      processStatus = 'done'
+      processedAt = new Date()
     } else if (
       fields.eventType === 'subscribe' ||
       fields.eventType === 'unsubscribe' ||
@@ -124,13 +184,14 @@ async function processParsedEvent(parsed, rawBody) {
 
   const id = await insertEventLog({
     ...fields,
+    couponId,
     rawBody,
     processStatus,
     processError,
     processedAt,
   })
 
-  return { id, ...fields, processStatus }
+  return { id, ...fields, couponId, processStatus }
 }
 
 /**

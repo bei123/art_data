@@ -207,6 +207,166 @@ async function ensureOrdersReferralCouponColumn() {
   }
 }
 
+async function hasColumn(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [tableName, columnName]
+  )
+  return rows.length > 0
+}
+
+async function hasIndex(tableName, indexName) {
+  const [rows] = await db.query(
+    `SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND INDEX_NAME = ?
+     LIMIT 1`,
+    [tableName, indexName]
+  )
+  return rows.length > 0
+}
+
+async function ensureReferralCouponTemplateWxColumns() {
+  const columns = [
+    {
+      name: 'wx_card_id',
+      ddl: "VARCHAR(64) NULL COMMENT '微信卡券 card_id' AFTER is_active",
+    },
+    {
+      name: 'wx_card_status',
+      ddl: "VARCHAR(32) NOT NULL DEFAULT 'none' COMMENT 'none|creating|approved|rejected|deleted' AFTER wx_card_id",
+    },
+    {
+      name: 'wx_sync_enabled',
+      ddl: 'TINYINT(1) NOT NULL DEFAULT 0 AFTER wx_card_status',
+    },
+    {
+      name: 'wx_logo_url',
+      ddl: 'VARCHAR(512) NULL AFTER wx_sync_enabled',
+    },
+    {
+      name: 'wx_brand_name',
+      ddl: 'VARCHAR(36) NULL AFTER wx_logo_url',
+    },
+    {
+      name: 'wx_color',
+      ddl: 'VARCHAR(16) NULL AFTER wx_brand_name',
+    },
+    {
+      name: 'wx_quantity',
+      ddl: "INT UNSIGNED NULL COMMENT '微信侧库存快照' AFTER wx_color",
+    },
+  ]
+
+  for (const col of columns) {
+    try {
+      if (await hasColumn('referral_coupon_templates', col.name)) continue
+      await db.query(`ALTER TABLE referral_coupon_templates ADD COLUMN ${col.name} ${col.ddl}`)
+      logger.info('referral_coupon_templates column added', { column: col.name })
+    } catch (err) {
+      logger.warn('ensureReferralCouponTemplateWxColumns failed', { column: col.name, err: err.message })
+    }
+  }
+
+  try {
+    if (!(await hasIndex('referral_coupon_templates', 'uk_referral_tpl_wx_card_id'))) {
+      await db.query(
+        'ALTER TABLE referral_coupon_templates ADD UNIQUE KEY uk_referral_tpl_wx_card_id (wx_card_id)'
+      )
+      logger.info('referral_coupon_templates.uk_referral_tpl_wx_card_id added')
+    }
+  } catch (err) {
+    logger.warn('ensure uk_referral_tpl_wx_card_id failed', { err: err.message })
+  }
+}
+
+async function ensureUserReferralCouponWxColumns() {
+  const columns = [
+    {
+      name: 'wx_card_id',
+      ddl: 'VARCHAR(64) NULL AFTER template_id',
+    },
+    {
+      name: 'wx_code',
+      ddl: "VARCHAR(32) NULL COMMENT '微信真实 code' AFTER wx_card_id",
+    },
+    {
+      name: 'wx_mp_openid',
+      ddl: 'VARCHAR(64) NULL AFTER wx_code',
+    },
+    {
+      name: 'wx_oa_openid',
+      ddl: 'VARCHAR(64) NULL AFTER wx_mp_openid',
+    },
+    {
+      name: 'wx_wallet_status',
+      ddl: "VARCHAR(32) NOT NULL DEFAULT 'not_added' COMMENT 'not_added|pending_add|in_wallet|consumed|deleted|consume_failed' AFTER wx_oa_openid",
+    },
+    {
+      name: 'wx_added_at',
+      ddl: 'DATETIME NULL AFTER wx_wallet_status',
+    },
+    {
+      name: 'wx_consumed_at',
+      ddl: 'DATETIME NULL AFTER wx_added_at',
+    },
+    {
+      name: 'wx_last_error',
+      ddl: 'VARCHAR(255) NULL AFTER wx_consumed_at',
+    },
+    {
+      name: 'wx_consume_retry_count',
+      ddl: 'INT UNSIGNED NOT NULL DEFAULT 0 AFTER wx_last_error',
+    },
+  ]
+
+  for (const col of columns) {
+    try {
+      if (await hasColumn('user_referral_coupons', col.name)) continue
+      await db.query(`ALTER TABLE user_referral_coupons ADD COLUMN ${col.name} ${col.ddl}`)
+      logger.info('user_referral_coupons column added', { column: col.name })
+    } catch (err) {
+      logger.warn('ensureUserReferralCouponWxColumns failed', { column: col.name, err: err.message })
+    }
+  }
+
+  try {
+    if (!(await hasIndex('user_referral_coupons', 'uk_urc_wx_code'))) {
+      await db.query('ALTER TABLE user_referral_coupons ADD UNIQUE KEY uk_urc_wx_code (wx_code)')
+      logger.info('user_referral_coupons.uk_urc_wx_code added')
+    }
+  } catch (err) {
+    logger.warn('ensure uk_urc_wx_code failed', { err: err.message })
+  }
+
+  try {
+    if (!(await hasIndex('user_referral_coupons', 'idx_urc_wx_card_code'))) {
+      await db.query(
+        'ALTER TABLE user_referral_coupons ADD KEY idx_urc_wx_card_code (wx_card_id, wx_code)'
+      )
+      logger.info('user_referral_coupons.idx_urc_wx_card_code added')
+    }
+  } catch (err) {
+    logger.warn('ensure idx_urc_wx_card_code failed', { err: err.message })
+  }
+
+  try {
+    if (!(await hasIndex('user_referral_coupons', 'idx_urc_wallet_status'))) {
+      await db.query(
+        'ALTER TABLE user_referral_coupons ADD KEY idx_urc_wallet_status (wx_wallet_status)'
+      )
+      logger.info('user_referral_coupons.idx_urc_wallet_status added')
+    }
+  } catch (err) {
+    logger.warn('ensure idx_urc_wallet_status failed', { err: err.message })
+  }
+}
+
 async function ensureReferralRewardsSchema() {
   if (schemaReady) return
 
@@ -216,6 +376,8 @@ async function ensureReferralRewardsSchema() {
   await ensureReferralCouponTemplatesTable()
   await ensureUserReferralCouponsTable()
   await ensureUserReferralCouponReservedStatus()
+  await ensureReferralCouponTemplateWxColumns()
+  await ensureUserReferralCouponWxColumns()
   await ensureCommissionLedgerBonusType()
   await ensureOrdersReferralCouponColumn()
 

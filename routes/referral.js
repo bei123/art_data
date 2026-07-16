@@ -223,13 +223,81 @@ router.get('/coupons', authenticateToken, async (req, res) => {
     if (!session.ok) return res.status(session.result.status).json(session.result.body)
 
     const { listUserCoupons } = require('../services/referralRewardService')
+    const syncRaw = String(req.query.sync ?? '1').toLowerCase()
+    const forceRaw = String(req.query.force ?? '').toLowerCase()
     const items = await listUserCoupons(session.userId, {
       status: req.query.status || 'available',
+      sync: syncRaw !== '0' && syncRaw !== 'false',
+      force: forceRaw === '1' || forceRaw === 'true',
     })
     return res.json({ items })
   } catch (error) {
     logger.error('获取优惠券失败', { err: error })
     res.status(500).json({ error: '获取优惠券失败' })
+  }
+})
+
+router.get('/coupons/:id/card-ext', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const couponId = parseInt(req.params.id, 10)
+    if (!Number.isFinite(couponId) || couponId <= 0) {
+      return res.status(400).json({ error: '无效的优惠券 ID' })
+    }
+
+    const { getCouponCardExtForUser } = require('../services/wxCardService')
+    const r = await getCouponCardExtForUser(session.userId, couponId)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('获取 card-ext 失败', { err: error })
+    res.status(500).json({ error: '获取放入卡包参数失败' })
+  }
+})
+
+router.post('/coupons/:id/card-added', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const couponId = parseInt(req.params.id, 10)
+    if (!Number.isFinite(couponId) || couponId <= 0) {
+      return res.status(400).json({ error: '无效的优惠券 ID' })
+    }
+
+    const { markCouponCardAdded } = require('../services/wxCardService')
+    const r = await markCouponCardAdded({
+      userId: session.userId,
+      couponId,
+      encryptCode: req.body?.code || req.body?.encrypt_code || '',
+      cardId: req.body?.card_id || req.body?.cardId || '',
+      isSuccess: req.body?.is_success !== false && req.body?.isSuccess !== false,
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('上报卡券领取结果失败', { err: error })
+    res.status(500).json({ error: '上报卡券领取结果失败' })
+  }
+})
+
+router.post('/coupons/from-card', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { resolveCouponFromCardJump } = require('../services/wxCardService')
+    const r = await resolveCouponFromCardJump({
+      userId: session.userId,
+      encryptCode: req.body?.encrypt_code || req.body?.encryptCode || '',
+      cardId: req.body?.card_id || req.body?.cardId || '',
+      oaOpenid: req.body?.openid || req.body?.oa_openid || '',
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('卡面跳转对齐优惠券失败', { err: error })
+    const status = error.code === 'WX_CODE_DECRYPT_FAILED' ? 502 : 500
+    res.status(status).json({ error: error.message || '对齐优惠券失败' })
   }
 })
 
