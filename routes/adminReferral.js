@@ -18,8 +18,19 @@ const {
 const {
   listAdminCouponTemplates,
   createAdminCouponTemplate,
+  startAdminCouponTemplate,
+  pauseAdminCouponTemplate,
+  restartAdminCouponTemplate,
+  listAdminWxFavorStocks,
+  getAdminWxFavorStock,
+  listAdminWxFavorStockMerchants,
+  listAdminWxFavorStockItems,
+  syncAdminCouponTemplatesFromWx,
+  getAdminFavorCallback,
+  setAdminFavorCallback,
   grantCouponToUser,
   listAdminUserCoupons,
+  getAdminUserCouponDetail,
 } = require('../services/referralRewardService')
 const {
   listAdminArtAdvisorApplications,
@@ -131,6 +142,76 @@ router.get('/coupon-templates', async (req, res) => {
   }
 })
 
+router.get('/wx-stocks', async (req, res) => {
+  try {
+    const r = await listAdminWxFavorStocks(req.query)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin list wx favor stocks failed', { err: error })
+    res.status(500).json({ error: '查询微信批次失败' })
+  }
+})
+
+router.get('/wx-stocks/:stockId/merchants', async (req, res) => {
+  try {
+    const r = await listAdminWxFavorStockMerchants(req.params.stockId, req.query)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin list wx favor stock merchants failed', { err: error })
+    res.status(500).json({ error: '查询可用商户失败' })
+  }
+})
+
+router.get('/wx-stocks/:stockId/items', async (req, res) => {
+  try {
+    const r = await listAdminWxFavorStockItems(req.params.stockId, req.query)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin list wx favor stock items failed', { err: error })
+    res.status(500).json({ error: '查询可用商品编码失败' })
+  }
+})
+
+router.get('/wx-stocks/:stockId', async (req, res) => {
+  try {
+    const r = await getAdminWxFavorStock(req.params.stockId)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin get wx favor stock failed', { err: error })
+    res.status(500).json({ error: '查询批次详情失败' })
+  }
+})
+
+router.get('/favor-callback', async (req, res) => {
+  try {
+    const r = await getAdminFavorCallback()
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin get favor callback failed', { err: error })
+    res.status(500).json({ error: '查询营销回调地址失败' })
+  }
+})
+
+router.post('/favor-callback', async (req, res) => {
+  try {
+    const r = await setAdminFavorCallback(req.body || {})
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin set favor callback failed', { err: error })
+    res.status(500).json({ error: '设置营销回调地址失败' })
+  }
+})
+
+router.post('/coupon-templates/sync-wx', async (req, res) => {
+  try {
+    const r = await syncAdminCouponTemplatesFromWx()
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin sync coupon templates from wx failed', { err: error })
+    res.status(500).json({ error: '同步微信批次状态失败' })
+  }
+})
+
 router.post('/coupon-templates', async (req, res) => {
   try {
     const r = await createAdminCouponTemplate(req.body)
@@ -138,6 +219,36 @@ router.post('/coupon-templates', async (req, res) => {
   } catch (error) {
     logger.error('admin create coupon template failed', { err: error })
     res.status(500).json({ error: '创建优惠券模板失败' })
+  }
+})
+
+router.post('/coupon-templates/:id/start', async (req, res) => {
+  try {
+    const r = await startAdminCouponTemplate(req.params.id)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin start coupon template failed', { err: error })
+    res.status(500).json({ error: '激活优惠券批次失败' })
+  }
+})
+
+router.post('/coupon-templates/:id/pause', async (req, res) => {
+  try {
+    const r = await pauseAdminCouponTemplate(req.params.id)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin pause coupon template failed', { err: error })
+    res.status(500).json({ error: '暂停优惠券批次失败' })
+  }
+})
+
+router.post('/coupon-templates/:id/restart', async (req, res) => {
+  try {
+    const r = await restartAdminCouponTemplate(req.params.id)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin restart coupon template failed', { err: error })
+    res.status(500).json({ error: '重启优惠券批次失败' })
   }
 })
 
@@ -170,6 +281,16 @@ router.get('/coupons', async (req, res) => {
   } catch (error) {
     logger.error('admin list coupons failed', { err: error })
     res.status(500).json({ error: '获取优惠券记录失败' })
+  }
+})
+
+router.get('/coupons/:couponId', async (req, res) => {
+  try {
+    const r = await getAdminUserCouponDetail(req.query.user_id, req.params.couponId)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin get coupon detail failed', { err: error })
+    res.status(500).json({ error: '查询券详情失败' })
   }
 })
 

@@ -12,6 +12,9 @@ function getNotifyBodyString(req) {
 function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body }) {
   if (!serial || !signature || !timestamp || !nonce || body == null) return false
 
+  // 签名探测流量：带此前缀的签名必然验签失败，应按失败应答（4xx/5xx）等待微信重试真实通知
+  if (String(signature).startsWith('WECHATPAY/SIGNTEST/')) return false
+
   const publicKey = getWechatpayPublicKey(serial)
   if (!publicKey) return false
 
@@ -61,6 +64,10 @@ function parseAndVerifyWechatPayNotify(req) {
   const nonce = req.headers['wechatpay-nonce']
   const signature = req.headers['wechatpay-signature']
   const serial = req.headers['wechatpay-serial']
+
+  if (String(signature || '').startsWith('WECHATPAY/SIGNTEST/')) {
+    return { ok: false, status: 401, error: '签名验证失败', signTest: true }
+  }
 
   if (!verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })) {
     return { ok: false, status: 401, error: '签名验证失败' }

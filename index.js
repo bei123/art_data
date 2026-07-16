@@ -96,6 +96,7 @@ app.set('trust proxy', resolveTrustProxy());
 app.use('/api/wx/pay/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/pay/refund/notify', express.raw({ type: 'application/json' }));
 app.use('/api/wx/referral/withdraw/notify', express.raw({ type: 'application/json' }));
+app.use('/api/wx/referral/favor/notify', express.raw({ type: 'application/json' }));
 
 // CORS 与 OPTIONS 预检必须在 helmet、限流之前，否则 CDN/限流响应无 ACAO
 app.use(corsPreflightMiddleware);

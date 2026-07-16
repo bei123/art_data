@@ -127,7 +127,7 @@ async function ensureWxFavorCouponGrantsTable() {
       coupon_id VARCHAR(64) NULL,
       out_request_no VARCHAR(64) NOT NULL,
       source VARCHAR(32) NOT NULL DEFAULT 'admin',
-      status ENUM('sent','failed') NOT NULL DEFAULT 'sent',
+      status ENUM('sent','failed','used') NOT NULL DEFAULT 'sent',
       error_message VARCHAR(255) NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -139,6 +139,28 @@ async function ensureWxFavorCouponGrantsTable() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `)
   logger.info('wx_favor_coupon_grants table created')
+}
+
+async function ensureWxFavorCouponGrantsUsedStatus() {
+  try {
+    const [rows] = await db.query(
+      `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'wx_favor_coupon_grants'
+         AND COLUMN_NAME = 'status'
+       LIMIT 1`
+    )
+    const columnType = String(rows[0]?.COLUMN_TYPE || '')
+    if (!columnType || columnType.includes("'used'")) return
+
+    await db.query(
+      `ALTER TABLE wx_favor_coupon_grants
+       MODIFY status ENUM('sent','failed','used') NOT NULL DEFAULT 'sent'`
+    )
+    logger.info('wx_favor_coupon_grants.status extended with used')
+  } catch (err) {
+    logger.warn('ensureWxFavorCouponGrantsUsedStatus failed', { err: err.message })
+  }
 }
 
 async function ensureUserReferralCouponsTable() {
@@ -277,6 +299,7 @@ async function ensureReferralRewardsSchema() {
   await ensureReferralCouponTemplatesTable()
   await ensureReferralCouponTemplateFavorColumns()
   await ensureWxFavorCouponGrantsTable()
+  await ensureWxFavorCouponGrantsUsedStatus()
   await ensureUserReferralCouponsTable()
   await ensureUserReferralCouponReservedStatus()
   await ensureCommissionLedgerBonusType()

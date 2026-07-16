@@ -106,6 +106,20 @@ router.post('/withdraw/notify', async (req, res) => {
   }
 })
 
+router.post('/favor/notify', async (req, res) => {
+  try {
+    const { handleFavorCouponUseNotify } = require('../services/referralRewardService')
+    const result = await handleFavorCouponUseNotify(req)
+    if (result.noContent) {
+      return res.status(result.status).end()
+    }
+    return res.status(result.status).json(result.body)
+  } catch (error) {
+    logger.error('代金券核销回调处理失败', { err: error })
+    return res.status(500).json({ code: 'FAIL', message: '处理失败' })
+  }
+})
+
 router.post('/withdraw', authenticateToken, async (req, res) => {
   try {
     const session = await svc.resolveWxUserId(req)
@@ -223,13 +237,43 @@ router.get('/coupons', authenticateToken, async (req, res) => {
     if (!session.ok) return res.status(session.result.status).json(session.result.body)
 
     const { listUserCoupons } = require('../services/referralRewardService')
-    const items = await listUserCoupons(session.userId, {
+    const result = await listUserCoupons(session.userId, {
       status: req.query.status || 'available',
+      stockId: req.query.stock_id || undefined,
+      offset: parseInt(req.query.offset, 10) || 0,
+      limit: parseInt(req.query.limit, 10) || 50,
     })
-    return res.json({ items })
+    // Backward compatible: items at top level; also expose total
+    return res.json({
+      items: result.items || [],
+      total: result.total || 0,
+      offset: result.offset,
+      limit: result.limit,
+      ...(result.error ? { warning: result.error } : {}),
+    })
   } catch (error) {
     logger.error('获取优惠券失败', { err: error })
     res.status(500).json({ error: '获取优惠券失败' })
+  }
+})
+
+router.get('/coupons/:couponId', authenticateToken, async (req, res) => {
+  try {
+    const session = await svc.resolveWxUserId(req)
+    if (!session.ok) return res.status(session.result.status).json(session.result.body)
+
+    const { getUserCouponDetail } = require('../services/referralRewardService')
+    const result = await getUserCouponDetail(session.userId, req.params.couponId)
+    if (!result.ok) {
+      return res.status(result.status || 400).json({
+        error: result.error,
+        code: result.code,
+      })
+    }
+    return res.json({ item: result.item })
+  } catch (error) {
+    logger.error('获取优惠券详情失败', { err: error })
+    res.status(500).json({ error: '获取优惠券详情失败' })
   }
 })
 

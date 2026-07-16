@@ -6,10 +6,24 @@ const { adjustWalletBalances, roundMoney, parseMoney } = require('./commissionSe
 const {
   isFavorConfigured,
   createCouponStock,
-  startStock,
+  startStockWithRetry,
+  pauseStock,
+  restartStock,
+  listStocks,
+  getStock,
+  listStockMerchants,
+  isMchidAvailableForStock,
+  listStockItems,
+  isGoodsIdAvailableForStock,
+  mapFavorStockToClient,
+  mapWxStockStatusToLocal,
   sendCoupon,
   listUserCoupons: listFavorUserCoupons,
+  getCoupon,
   mapFavorCouponToClient,
+  getFavorCallback,
+  setFavorCallback,
+  getDefaultFavorNotifyUrl,
   buildOutRequestNo,
   getStockCreatorMchid,
 } = require('./wechatFavorService')
@@ -95,6 +109,9 @@ async function sendFavorCouponToUser({
   if (!template?.stock_id) {
     return { ok: false, error: '模板未绑定微信批次' }
   }
+  if (template.wx_status && template.wx_status !== 'running') {
+    return { ok: false, error: '批次未在运营中，无法发券' }
+  }
   if (!isFavorConfigured()) {
     return { ok: false, error: '微信免充值代金券未启用或配置不完整' }
   }
@@ -115,6 +132,7 @@ async function sendFavorCouponToUser({
     stockId: template.stock_id,
     stockCreatorMchid: template.stock_creator_mchid || getStockCreatorMchid(),
     outRequestNo,
+    userId,
   })
 
   if (!sent.ok) {
@@ -254,35 +272,131 @@ async function hasGrantedBonus(userId, bonusType, connection = db) {
 
 /**
  * Proxy WeChat Favor user coupons for mini program read-only list.
+ * query.status:
+ *   available | SENDED → 创建方商户号 + SENDED
+ *   used | USED → 创建方商户号 + USED（可用+已实扣）
+ *   all → 创建方商户号，不限状态
+ *   usable → 可用商户号（仅本店可用券，无分页）
  */
-async function listUserCoupons(userId, { status } = {}) {
+async function listUserCoupons(userId, {
+  status,
+  stockId,
+  offset = 0,
+  limit = 50,
+} = {}) {
   await ensureReferralRewardsSchema()
 
   if (!isFavorConfigured()) {
-    return []
+    return { items: [], total: 0 }
   }
 
   const openid = await getUserOpenid(userId)
-  if (!openid) return []
+  if (!openid) return { items: [], total: 0 }
 
-  const favorStatus = status === 'available' || status === 'SENDED'
-    ? 'SENDED'
-    : (status || undefined)
+  const rawStatus = status != null ? String(status).trim() : 'available'
+  const upper = rawStatus.toUpperCase()
 
-  const result = await listFavorUserCoupons({
-    openid,
-    status: favorStatus,
-    limit: 50,
-  })
+  let favorOpts
+  if (upper === 'USABLE' || upper === 'AVAILABLE_MCH') {
+    favorOpts = {
+      openid,
+      queryBy: 'available',
+      availableMchid: getStockCreatorMchid(),
+    }
+  } else {
+    let favorStatus
+    if (upper === 'ALL' || upper === '') {
+      favorStatus = undefined
+    } else if (upper === 'AVAILABLE' || upper === 'SENDED') {
+      favorStatus = 'SENDED'
+    } else if (upper === 'USED') {
+      favorStatus = 'USED'
+    } else {
+      favorStatus = upper
+    }
+    favorOpts = {
+      openid,
+      queryBy: 'creator',
+      creatorMchid: getStockCreatorMchid(),
+      status: favorStatus,
+      stockId: stockId || undefined,
+      offset,
+      limit,
+    }
+  }
+
+  const result = await listFavorUserCoupons(favorOpts)
 
   if (!result.ok) {
     logger.warn('listUserCoupons favor failed', { userId, error: result.error })
-    return []
+    return { items: [], total: 0, error: result.error }
   }
 
-  return (result.data || [])
+  const items = (result.data || [])
     .map(mapFavorCouponToClient)
     .filter(Boolean)
+
+  return {
+    items,
+    total: result.totalCount,
+    offset: result.offset,
+    limit: result.limit,
+  }
+}
+
+/**
+ * Query one Favor coupon detail for a user:
+ * GET /v3/marketing/favor/users/{openid}/coupons/{coupon_id}
+ */
+async function getUserCouponDetail(userId, couponId) {
+  await ensureReferralRewardsSchema()
+
+  if (!isFavorConfigured()) {
+    return { ok: false, status: 400, error: '微信免充值代金券未启用或配置不完整' }
+  }
+
+  const cid = String(couponId || '').trim()
+  if (!cid) return { ok: false, status: 400, error: '缺少 coupon_id' }
+
+  const openid = await getUserOpenid(userId)
+  if (!openid) return { ok: false, status: 400, error: '用户未绑定微信 openid' }
+
+  const result = await getCoupon({ openid, couponId: cid })
+  if (!result.ok) {
+    return {
+      ok: false,
+      status: result.httpStatus === 404 ? 404 : 400,
+      error: result.error || '查询券详情失败',
+      code: result.code,
+      detail: result.raw,
+    }
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    item: mapFavorCouponToClient(result.coupon),
+    raw: result.raw,
+  }
+}
+
+/**
+ * Admin: query Favor coupon by user_id + coupon_id.
+ */
+async function getAdminUserCouponDetail(userId, couponId) {
+  const uid = parseInt(userId, 10)
+  if (Number.isNaN(uid) || uid <= 0) {
+    return adminResult(400, { error: '无效的用户ID' })
+  }
+  const result = await getUserCouponDetail(uid, couponId)
+  if (!result.ok) {
+    return adminResult(result.status || 400, {
+      error: result.error,
+      code: result.code,
+      detail: result.detail,
+    })
+  }
+  return adminResult(200, { item: result.item, raw: result.raw })
 }
 
 /** Local referral coupons no longer apply at checkout. */
@@ -328,7 +442,7 @@ async function createAdminCouponTemplate(body) {
   const discountYuan = parseMoney(body?.discount_yuan)
   const minOrderYuan = parseMoney(body?.min_order_yuan)
   const validDays = parseInt(body?.valid_days, 10) || 30
-  const maxCoupons = Math.max(1, parseInt(body?.max_coupons, 10) || 10000)
+  const maxCoupons = Math.max(5, parseInt(body?.max_coupons, 10) || 10000)
   const isWelcome = Boolean(body?.is_welcome)
 
   if (!title) return adminResult(400, { error: '请填写优惠券名称' })
@@ -351,12 +465,13 @@ async function createAdminCouponTemplate(body) {
     return adminResult(400, { error: created.error || '创建微信批次失败', detail: created.raw })
   }
 
-  const started = await startStock(created.stockId, created.stockCreatorMchid)
+  const started = await startStockWithRetry(created.stockId, created.stockCreatorMchid)
   const wxStatus = started.ok ? 'running' : 'created'
   if (!started.ok) {
     logger.warn('createAdminCouponTemplate startStock failed', {
       stockId: created.stockId,
       error: started.error,
+      attempts: started.attempt,
     })
   }
 
@@ -389,8 +504,564 @@ async function createAdminCouponTemplate(body) {
     id: result.insertId,
     stock_id: created.stockId,
     wx_status: wxStatus,
+    start_time: started.startTime || null,
     start_error: started.ok ? null : started.error,
   })
+}
+
+async function startAdminCouponTemplate(templateId) {
+  await ensureReferralRewardsSchema()
+  const id = parseInt(templateId, 10)
+  if (Number.isNaN(id) || id <= 0) {
+    return adminResult(400, { error: '无效的模板ID' })
+  }
+
+  const [rows] = await db.query(
+    `SELECT id, stock_id, stock_creator_mchid, wx_status
+     FROM referral_coupon_templates
+     WHERE id = ? LIMIT 1`,
+    [id]
+  )
+  const tpl = rows[0]
+  if (!tpl) return adminResult(404, { error: '模板不存在' })
+  if (!tpl.stock_id) return adminResult(400, { error: '模板未绑定微信批次' })
+  if (tpl.wx_status === 'running') {
+    return adminResult(200, { success: true, wx_status: 'running', stock_id: tpl.stock_id })
+  }
+
+  const started = await startStockWithRetry(
+    tpl.stock_id,
+    tpl.stock_creator_mchid || getStockCreatorMchid()
+  )
+  if (!started.ok) {
+    return adminResult(400, {
+      error: started.error || '激活失败',
+      detail: started.raw,
+      stock_id: tpl.stock_id,
+    })
+  }
+
+  await db.query(
+    `UPDATE referral_coupon_templates
+     SET wx_status = 'running', updated_at = NOW()
+     WHERE id = ?`,
+    [id]
+  )
+
+  return adminResult(200, {
+    success: true,
+    stock_id: tpl.stock_id,
+    wx_status: 'running',
+    start_time: started.startTime || null,
+  })
+}
+
+async function pauseAdminCouponTemplate(templateId) {
+  await ensureReferralRewardsSchema()
+  const id = parseInt(templateId, 10)
+  if (Number.isNaN(id) || id <= 0) {
+    return adminResult(400, { error: '无效的模板ID' })
+  }
+
+  const [rows] = await db.query(
+    `SELECT id, stock_id, stock_creator_mchid, wx_status
+     FROM referral_coupon_templates
+     WHERE id = ? LIMIT 1`,
+    [id]
+  )
+  const tpl = rows[0]
+  if (!tpl) return adminResult(404, { error: '模板不存在' })
+  if (!tpl.stock_id) return adminResult(400, { error: '模板未绑定微信批次' })
+  if (tpl.wx_status === 'paused') {
+    return adminResult(200, { success: true, wx_status: 'paused', stock_id: tpl.stock_id })
+  }
+  if (tpl.wx_status !== 'running') {
+    return adminResult(400, { error: '仅运营中的批次可暂停' })
+  }
+
+  const paused = await pauseStock(
+    tpl.stock_id,
+    tpl.stock_creator_mchid || getStockCreatorMchid()
+  )
+  if (!paused.ok) {
+    return adminResult(400, {
+      error: paused.error || '暂停失败',
+      detail: paused.raw,
+      stock_id: tpl.stock_id,
+    })
+  }
+
+  await db.query(
+    `UPDATE referral_coupon_templates
+     SET wx_status = 'paused', updated_at = NOW()
+     WHERE id = ?`,
+    [id]
+  )
+
+  return adminResult(200, {
+    success: true,
+    stock_id: tpl.stock_id,
+    wx_status: 'paused',
+    pause_time: paused.pauseTime || null,
+  })
+}
+
+async function restartAdminCouponTemplate(templateId) {
+  await ensureReferralRewardsSchema()
+  const id = parseInt(templateId, 10)
+  if (Number.isNaN(id) || id <= 0) {
+    return adminResult(400, { error: '无效的模板ID' })
+  }
+
+  const [rows] = await db.query(
+    `SELECT id, stock_id, stock_creator_mchid, wx_status
+     FROM referral_coupon_templates
+     WHERE id = ? LIMIT 1`,
+    [id]
+  )
+  const tpl = rows[0]
+  if (!tpl) return adminResult(404, { error: '模板不存在' })
+  if (!tpl.stock_id) return adminResult(400, { error: '模板未绑定微信批次' })
+  if (tpl.wx_status === 'running') {
+    return adminResult(200, { success: true, wx_status: 'running', stock_id: tpl.stock_id })
+  }
+  if (tpl.wx_status !== 'paused') {
+    return adminResult(400, { error: '仅已暂停的批次可重启' })
+  }
+
+  const restarted = await restartStock(
+    tpl.stock_id,
+    tpl.stock_creator_mchid || getStockCreatorMchid()
+  )
+  if (!restarted.ok) {
+    return adminResult(400, {
+      error: restarted.error || '重启失败',
+      detail: restarted.raw,
+      stock_id: tpl.stock_id,
+    })
+  }
+
+  await db.query(
+    `UPDATE referral_coupon_templates
+     SET wx_status = 'running', updated_at = NOW()
+     WHERE id = ?`,
+    [id]
+  )
+
+  return adminResult(200, {
+    success: true,
+    stock_id: tpl.stock_id,
+    wx_status: 'running',
+    restart_time: restarted.restartTime || null,
+  })
+}
+
+async function listAdminWxFavorStocks(query = {}) {
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+
+  const offset = parseInt(query.offset, 10) || 0
+  const limit = Math.min(10, Math.max(1, parseInt(query.limit, 10) || 10))
+  const status = query.status ? String(query.status) : undefined
+
+  const result = await listStocks({ offset, limit, status })
+  if (!result.ok) {
+    return adminResult(400, { error: result.error || '查询微信批次失败', detail: result.raw })
+  }
+
+  return adminResult(200, {
+    items: (result.data || []).map(mapFavorStockToClient).filter(Boolean),
+    total: result.totalCount,
+    offset: result.offset,
+    limit: result.limit,
+  })
+}
+
+/**
+ * Query one WeChat stock by stock_id: GET /v3/marketing/favor/stocks/{stock_id}
+ */
+async function getAdminWxFavorStock(stockId) {
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+  const id = String(stockId || '').trim()
+  if (!id) return adminResult(400, { error: '缺少 stock_id' })
+
+  const result = await getStock(id)
+  if (!result.ok) {
+    return adminResult(result.httpStatus === 404 ? 404 : 400, {
+      error: result.error || '查询批次详情失败',
+      detail: result.raw,
+    })
+  }
+
+  return adminResult(200, {
+    item: mapFavorStockToClient(result.stock),
+    raw: result.raw,
+  })
+}
+
+/**
+ * List available merchants for a stock:
+ * GET /v3/marketing/favor/stocks/{stock_id}/merchants
+ */
+async function listAdminWxFavorStockMerchants(stockId, query = {}) {
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+  const id = String(stockId || '').trim()
+  if (!id) return adminResult(400, { error: '缺少 stock_id' })
+
+  const offset = Math.max(0, parseInt(query.offset, 10) || 0)
+  const limit = Math.min(50, Math.max(1, parseInt(query.limit, 10) || 50))
+  const checkMchid = query.check_mchid
+    ? String(query.check_mchid).trim()
+    : getStockCreatorMchid()
+
+  const result = await listStockMerchants({ stockId: id, offset, limit })
+  if (!result.ok) {
+    return adminResult(result.httpStatus === 404 ? 404 : 400, {
+      error: result.error || '查询可用商户失败',
+      detail: result.raw,
+    })
+  }
+
+  const merchants = result.data || []
+  let availableForMchid = merchants.includes(checkMchid)
+  // If not on this page but total > page size, do a full scan when asking for our mchid
+  if (!availableForMchid && checkMchid && result.totalCount > merchants.length) {
+    const check = await isMchidAvailableForStock(id, checkMchid)
+    if (check.ok) availableForMchid = check.available
+  }
+
+  return adminResult(200, {
+    stock_id: result.stockId,
+    merchants,
+    total: result.totalCount,
+    offset: result.offset,
+    limit: result.limit,
+    check_mchid: checkMchid || null,
+    available_for_mchid: checkMchid ? availableForMchid : null,
+  })
+}
+
+/**
+ * List available goods codes for a stock:
+ * GET /v3/marketing/favor/stocks/{stock_id}/items
+ */
+async function listAdminWxFavorStockItems(stockId, query = {}) {
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+  const id = String(stockId || '').trim()
+  if (!id) return adminResult(400, { error: '缺少 stock_id' })
+
+  const offset = Math.max(0, parseInt(query.offset, 10) || 0)
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 100))
+  const checkGoodsId = query.check_goods_id
+    ? String(query.check_goods_id).trim()
+    : ''
+
+  const result = await listStockItems({ stockId: id, offset, limit })
+  if (!result.ok) {
+    return adminResult(result.httpStatus === 404 ? 404 : 400, {
+      error: result.error || '查询可用商品编码失败',
+      detail: result.raw,
+    })
+  }
+
+  const items = result.data || []
+  let availableForGoods = null
+  let unrestricted = result.totalCount === 0
+
+  if (checkGoodsId) {
+    if (unrestricted) {
+      availableForGoods = true
+    } else if (items.includes(checkGoodsId)) {
+      availableForGoods = true
+    } else if (result.totalCount > items.length) {
+      const check = await isGoodsIdAvailableForStock(id, checkGoodsId)
+      if (check.ok) {
+        availableForGoods = check.available
+        unrestricted = Boolean(check.unrestricted)
+      }
+    } else {
+      availableForGoods = false
+    }
+  }
+
+  return adminResult(200, {
+    stock_id: result.stockId,
+    items,
+    total: result.totalCount,
+    offset: result.offset,
+    limit: result.limit,
+    unrestricted,
+    check_goods_id: checkGoodsId || null,
+    available_for_goods_id: availableForGoods,
+  })
+}
+
+/**
+ * Pull each local template's stock via getStock and sync wx_status.
+ */
+async function syncAdminCouponTemplatesFromWx() {
+  await ensureReferralRewardsSchema()
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+
+  const [localRows] = await db.query(
+    `SELECT id, stock_id, stock_creator_mchid, wx_status FROM referral_coupon_templates
+     WHERE stock_id IS NOT NULL AND stock_id <> ''`
+  )
+  if (!localRows.length) {
+    return adminResult(200, { success: true, updated: 0, message: '本地无可同步模板' })
+  }
+
+  let updated = 0
+  let checked = 0
+  const errors = []
+
+  for (const row of localRows) {
+    const result = await getStock(
+      row.stock_id,
+      row.stock_creator_mchid || getStockCreatorMchid()
+    )
+    if (!result.ok) {
+      errors.push({ stock_id: row.stock_id, error: result.error })
+      continue
+    }
+    checked += 1
+    const nextStatus = mapWxStockStatusToLocal(result.stock?.status)
+    if (nextStatus && nextStatus !== row.wx_status) {
+      await db.query(
+        `UPDATE referral_coupon_templates
+         SET wx_status = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [nextStatus, row.id]
+      )
+      updated += 1
+    }
+  }
+
+  return adminResult(200, {
+    success: true,
+    updated,
+    checked,
+    failed: errors.length,
+    errors: errors.length ? errors.slice(0, 10) : undefined,
+  })
+}
+
+/**
+ * Query Favor marketing notify callback URL:
+ * GET /v3/marketing/favor/callbacks
+ */
+async function getAdminFavorCallback() {
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+
+  const result = await getFavorCallback()
+  if (!result.ok) {
+    return adminResult(result.httpStatus === 404 ? 404 : 400, {
+      error: result.error || '查询回调地址失败',
+      detail: result.raw,
+    })
+  }
+
+  return adminResult(200, {
+    mchid: result.mchid,
+    notify_url: result.notifyUrl,
+    unset: Boolean(result.unset),
+    recommended_url: getDefaultFavorNotifyUrl(),
+  })
+}
+
+/**
+ * Set Favor marketing notify callback URL:
+ * POST /v3/marketing/favor/callbacks
+ */
+async function setAdminFavorCallback(body = {}) {
+  if (!isFavorConfigured()) {
+    return adminResult(400, { error: '请先启用 WX_FAVOR_ENABLED 并配置微信支付证书' })
+  }
+
+  const notifyUrl = body.notify_url
+    ? String(body.notify_url).trim()
+    : getDefaultFavorNotifyUrl()
+
+  const result = await setFavorCallback({ notifyUrl, switchOn: true })
+  if (!result.ok) {
+    return adminResult(400, {
+      error: result.error || '设置回调地址失败',
+      detail: result.raw,
+    })
+  }
+
+  return adminResult(200, {
+    success: true,
+    notify_url: result.notifyUrl,
+    update_time: result.updateTime,
+  })
+}
+
+/**
+ * Handle Favor coupon use notify (COUPON.USE).
+ * Spec: verify signature → decrypt → idempotent update → HTTP 204.
+ * Duplicate notifies and concurrent re-entry are safe.
+ */
+async function handleFavorCouponUseNotify(req) {
+  const {
+    parseAndVerifyWechatPayNotify,
+    decryptWechatPayNotifyPayload,
+    notifySuccessResult,
+    notifyFailResult,
+  } = require('../utils/wechatPayNotify')
+  const redisClient = require('../utils/redisClient')
+
+  const verified = parseAndVerifyWechatPayNotify(req)
+  if (!verified.ok) {
+    if (verified.signTest) {
+      logger.warn('favor notify signature probe traffic (SIGNTEST)')
+    }
+    return notifyFailResult(verified.status, verified.error)
+  }
+
+  const { payload } = verified
+  const notifyId = payload.id != null ? String(payload.id) : null
+  const eventType = String(payload.event_type || '')
+
+  if (eventType && eventType !== 'COUPON.USE') {
+    logger.info('favor notify ignored event', { notifyId, eventType })
+    return notifySuccessResult()
+  }
+
+  if (String(payload.resource_type || '') && payload.resource_type !== 'encrypt-resource') {
+    logger.warn('favor notify unexpected resource_type', {
+      notifyId,
+      resourceType: payload.resource_type,
+    })
+  }
+
+  if (!payload.resource) {
+    return notifyFailResult(400, '回调数据格式错误')
+  }
+
+  // 通知 id 幂等：已处理过则直接成功应答
+  if (notifyId) {
+    try {
+      const done = await redisClient.get(`favor:notify:done:${notifyId}`)
+      if (done) {
+        logger.info('favor notify already processed', { notifyId })
+        return notifySuccessResult()
+      }
+    } catch (err) {
+      logger.warn('favor notify redis done-check failed', { notifyId, err: err.message })
+    }
+  }
+
+  let coupon
+  try {
+    coupon = decryptWechatPayNotifyPayload(payload)
+  } catch (err) {
+    logger.error('favor notify decrypt failed', { notifyId, err: err.message })
+    return notifyFailResult(400, '解密失败')
+  }
+
+  const couponId = coupon?.coupon_id != null ? String(coupon.coupon_id) : null
+  const stockId = coupon?.stock_id != null ? String(coupon.stock_id) : null
+  const couponStatus = String(coupon?.status || '').toUpperCase()
+  const consume = coupon?.consume_information || {}
+  const transactionId = consume.transaction_id != null ? String(consume.transaction_id) : null
+
+  logger.info('favor coupon use notify', {
+    notifyId,
+    couponId,
+    stockId,
+    status: couponStatus,
+    consumeMchid: consume.consume_mchid || null,
+    transactionId,
+    consumeTime: consume.consume_time || null,
+  })
+
+  if (!couponId) {
+    // 无券 id 无法落库，仍应答成功避免死循环；依赖查券接口对账
+    logger.warn('favor notify missing coupon_id', { notifyId })
+    return notifySuccessResult()
+  }
+
+  // 并发锁：同一 notify / coupon 仅一个处理中
+  const lockKey = notifyId
+    ? `favor:notify:lock:${notifyId}`
+    : `favor:notify:lock:coupon:${couponId}`
+  let lockAcquired = false
+  try {
+    lockAcquired = await redisClient.setNxEx(lockKey, 60, 'processing')
+  } catch (err) {
+    logger.warn('favor notify redis lock failed', { lockKey, err: err.message })
+  }
+
+  if (lockAcquired === false) {
+    // 其他实例正在处理或刚完成：按已接收成功应答（重入安全）
+    logger.info('favor notify lock not acquired, treat as duplicate', { notifyId, couponId })
+    return notifySuccessResult()
+  }
+
+  try {
+    await ensureReferralRewardsSchema()
+
+    const [existing] = await db.query(
+      `SELECT id, status FROM wx_favor_coupon_grants
+       WHERE coupon_id = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [couponId]
+    )
+    const row = existing[0]
+
+    if (row?.status === 'used') {
+      logger.info('favor grant already used', { couponId, grantId: row.id })
+    } else if (couponStatus === 'USED' || couponStatus === '' || Boolean(consume.consume_time)) {
+      const [result] = await db.query(
+        `UPDATE wx_favor_coupon_grants
+         SET status = 'used', updated_at = NOW()
+         WHERE coupon_id = ? AND status = 'sent'`,
+        [couponId]
+      )
+      logger.info('favor grant marked used', {
+        couponId,
+        grantId: row?.id || null,
+        transactionId,
+        affected: result?.affectedRows || 0,
+      })
+    } else {
+      logger.info('favor notify coupon not in USED state, skip mark', {
+        couponId,
+        status: couponStatus,
+      })
+    }
+
+    if (notifyId) {
+      try {
+        await redisClient.setEx(`favor:notify:done:${notifyId}`, 7 * 24 * 3600, '1')
+      } catch (err) {
+        logger.warn('favor notify redis done-mark failed', { notifyId, err: err.message })
+      }
+    }
+  } catch (err) {
+    logger.error('favor grant mark used failed', { couponId, err: err.message })
+    try {
+      await redisClient.del(lockKey)
+    } catch {
+      /* ignore */
+    }
+    return notifyFailResult(500, '更新本地发放记录失败')
+  }
+
+  return notifySuccessResult()
 }
 
 async function grantCouponToUser({ userId, templateId, source = 'admin' }) {
@@ -511,6 +1182,8 @@ module.exports = {
   tryGrantNewUserWelcomeCoupon,
   tryGrantFirstReferralOrderBonus,
   listUserCoupons,
+  getUserCouponDetail,
+  getAdminUserCouponDetail,
   evaluateReferralCouponApplicability,
   resolveReferralCouponDiscount,
   reserveReferralCouponForOrder,
@@ -520,6 +1193,17 @@ module.exports = {
   cancelBonusGrantsByOrderId,
   listAdminCouponTemplates,
   createAdminCouponTemplate,
+  startAdminCouponTemplate,
+  pauseAdminCouponTemplate,
+  restartAdminCouponTemplate,
+  listAdminWxFavorStocks,
+  getAdminWxFavorStock,
+  listAdminWxFavorStockMerchants,
+  listAdminWxFavorStockItems,
+  syncAdminCouponTemplatesFromWx,
+  getAdminFavorCallback,
+  setAdminFavorCallback,
+  handleFavorCouponUseNotify,
   grantCouponToUser,
   listAdminUserCoupons,
 }
