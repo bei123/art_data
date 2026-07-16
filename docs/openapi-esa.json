@@ -483,6 +483,204 @@
         }
       }
     },
+    "/api/admin/referral/wx-stocks": {
+      "get": {
+        "operationId": "get_admin_referral_wx_stocks",
+        "summary": "GET /api/admin/referral/wx-stocks",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/wx-stocks/{stockId}/merchants": {
+      "get": {
+        "operationId": "get_admin_referral_wx_stocks_stockId_merchants",
+        "summary": "GET /api/admin/referral/wx-stocks/{stockId}/merchants",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "stockId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/wx-stocks/{stockId}/items": {
+      "get": {
+        "operationId": "get_admin_referral_wx_stocks_stockId_items",
+        "summary": "GET /api/admin/referral/wx-stocks/{stockId}/items",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "stockId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/wx-stocks/{stockId}": {
+      "get": {
+        "operationId": "get_admin_referral_wx_stocks_stockId",
+        "summary": "GET /api/admin/referral/wx-stocks/{stockId}",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "stockId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/favor-callback": {
+      "get": {
+        "operationId": "get_admin_referral_favor_callback",
+        "summary": "GET /api/admin/referral/favor-callback",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_admin_referral_favor_callback",
+        "summary": "POST /api/admin/referral/favor-callback",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/coupon-templates/sync-wx": {
+      "post": {
+        "operationId": "post_admin_referral_coupon_templates_sync_wx",
+        "summary": "POST /api/admin/referral/coupon-templates/sync-wx",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/coupon-templates/{id}/start": {
+      "post": {
+        "operationId": "post_admin_referral_coupon_templates_id_start",
+        "summary": "POST /api/admin/referral/coupon-templates/{id}/start",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/coupon-templates/{id}/pause": {
+      "post": {
+        "operationId": "post_admin_referral_coupon_templates_id_pause",
+        "summary": "POST /api/admin/referral/coupon-templates/{id}/pause",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/admin/referral/coupon-templates/{id}/restart": {
+      "post": {
+        "operationId": "post_admin_referral_coupon_templates_id_restart",
+        "summary": "POST /api/admin/referral/coupon-templates/{id}/restart",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
     "/api/admin/referral/coupons/grant": {
       "post": {
         "operationId": "post_admin_referral_coupons_grant",
@@ -509,6 +707,30 @@
             "description": "ok"
           }
         }
+      }
+    },
+    "/api/admin/referral/coupons/{couponId}": {
+      "get": {
+        "operationId": "get_admin_referral_coupons_couponId",
+        "summary": "GET /api/admin/referral/coupons/{couponId}",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "couponId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/api/admin/referral/advisor-applications": {
@@ -1809,6 +2031,30 @@
             "description": "ok"
           }
         }
+      }
+    },
+    "/api/exhibitions/{id}/visual-search": {
+      "post": {
+        "operationId": "post_exhibitions_id_visual_search",
+        "summary": "POST /api/exhibitions/{id}/visual-search",
+        "tags": [
+          "exhibitions"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/api/exhibitions/{id}": {
@@ -3389,6 +3635,20 @@
         }
       }
     },
+    "/api/wx/referral/favor/notify": {
+      "post": {
+        "operationId": "post_wx_referral_favor_notify",
+        "summary": "POST /api/wx/referral/favor/notify",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/api/wx/referral/withdraw": {
       "post": {
         "operationId": "post_wx_referral_withdraw",
@@ -3519,6 +3779,30 @@
             "description": "ok"
           }
         }
+      }
+    },
+    "/api/wx/referral/coupons/{couponId}": {
+      "get": {
+        "operationId": "get_wx_referral_coupons_couponId",
+        "summary": "GET /api/wx/referral/coupons/{couponId}",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "couponId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/api/rights": {

@@ -679,9 +679,12 @@ async function updateRefundAmountSnapshot(outRefundNo, wxAmount, connection = db
     );
     if (!rows.length) return null;
 
-    let base = {};
+    let base;
     try {
-        base = typeof rows[0].amount === 'string' ? JSON.parse(rows[0].amount) : (rows[0].amount || {});
+        const parsed = typeof rows[0].amount === 'string'
+            ? JSON.parse(rows[0].amount)
+            : rows[0].amount;
+        base = parsed && typeof parsed === 'object' ? parsed : {};
     } catch {
         base = {};
     }
