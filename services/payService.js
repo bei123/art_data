@@ -19,6 +19,7 @@ const {
     wechatPayOutTradeNoQueryUrl,
     wechatPayOutTradeNoCloseUrl,
 } = require('../utils/safeOutboundUrl');
+const { bankTypeDisplay } = require('../utils/wechatBankType');
 const { ensureOrderItemsQrCodeColumns } = require('../utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('../utils/orderShipmentsSchema');
 const {
@@ -3607,12 +3608,6 @@ const TRADE_TYPE_LABEL_MAP = {
 function tradeTypeLabel(code) {
     if (!code) return null;
     return TRADE_TYPE_LABEL_MAP[code] || String(code);
-}
-
-function bankTypeDisplay(code) {
-    if (!code) return null;
-    if (code === 'OTHERS' || code === 'OTHER') return '其他/余额等';
-    return String(code);
 }
 
 function parseRefundAmountJson(amountRaw) {
