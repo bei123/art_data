@@ -8,6 +8,7 @@ const ROOT = path.join(__dirname, '..')
 
 const ROUTE_PREFIX = {
   'wx.js': '/api/wx',
+  'wxOa.js': '/api/wx/oa',
   'pay.js': '/api/wx/pay',
   'favorites.js': '/api/favorites',
   'merchants.js': '/api/merchants',

@@ -234,6 +234,8 @@ describe('apiRequestSign', () => {
     expect(shouldSkipApiSign({ method: 'GET', path: '/api/health' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'GET', path: '/api/health/live' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'POST', path: '/api/wx/pay/notify' })).toBe(true)
+    expect(shouldSkipApiSign({ method: 'GET', path: '/api/wx/oa/callback' })).toBe(true)
+    expect(shouldSkipApiSign({ method: 'POST', path: '/api/wx/oa/callback' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'GET', path: '/uploads/demo.jpg' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'POST', path: '/api/upload' })).toBe(true)
     expect(shouldSkipApiSign({ method: 'GET', path: '/api/merchants' })).toBe(false)

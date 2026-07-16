@@ -141,7 +141,7 @@ flowchart LR
 | 数字品 | `digitalClaimCopyService` · `utils/digitalArtworksSync` |
 | WMS | `wmsProductSyncService` · `wmsArtworkImageService` |
 | 识图 | `artworkVisualSearchService` ← `utils/artVisionClient`（CLIP）+ dHash |
-| 微信能力 | `wxService` · `subscribeMessage*` · `mapGeocodeService` |
+| 微信能力 | `wxService` · `subscribeMessage*` · `mapGeocodeService` · `wechatOaTokenService` · `wxCardEventService` |
 
 ### 中间件与横切
 

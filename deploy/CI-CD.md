@@ -34,6 +34,10 @@
 | `WECOM_WEBHOOK_URL` | Secret | 企业微信群机器人 Webhook |
 | `WECHAT_OA_APPID` | Secret | 微信公众号 AppID |
 | `WECHAT_OA_SECRET` | Secret | 微信公众号 AppSecret |
+| `WECHAT_OA_TOKEN` | Secret | 服务号服务器配置 Token（卡券事件回调） |
+| `WECHAT_OA_AES_KEY` | Secret | 服务号 EncodingAESKey（安全模式；明文模式可留空） |
+| `WECHAT_OA_CALLBACK_ENABLED` | Variable | 默认 true；设 false 关闭 `/api/wx/oa/callback` |
+| `WX_CARD_SYNC_ENABLED` | Variable | 卡券双账本总开关（默认 true） |
 | `WECHAT_OA_TEMPLATE_ID` | Secret | 公众号模板消息 ID |
 | `WECHAT_OA_TOUSER` | Secret | 接收人 openid，多个用英文逗号分隔 |
 | `WECHAT_OA_TEMPLATE_DATA_JSON` | Secret | 可选，自定义模板字段 JSON |
@@ -57,6 +61,8 @@
 | `WECOM_WEBHOOK_URL` | Secret | 企业微信群机器人 Webhook |
 | `WECHAT_OA_APPID` | Secret | 微信公众号 AppID（可与 art_data 共用） |
 | `WECHAT_OA_SECRET` | Secret | 微信公众号 AppSecret |
+| `WECHAT_OA_TOKEN` | Secret | 服务号服务器配置 Token（卡券事件；art_data 使用） |
+| `WECHAT_OA_AES_KEY` | Secret | 服务号 EncodingAESKey |
 | `WECHAT_OA_TEMPLATE_ID` | Secret | 公众号模板消息 ID |
 | `WECHAT_OA_TOUSER` | Secret | 接收人 openid，多个用英文逗号分隔 |
 | `WECHAT_OA_TEMPLATE_DATA_JSON` | Secret | 可选，自定义模板字段 JSON |
