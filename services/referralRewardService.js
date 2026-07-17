@@ -1153,6 +1153,228 @@ async function grantCouponToUser({ userId, templateId, source = 'admin' }) {
   })
 }
 
+const BATCH_GRANT_MAX_USERS = Math.max(
+  1,
+  Math.min(parseInt(process.env.WX_FAVOR_BATCH_GRANT_MAX || '500', 10) || 500, 2000),
+)
+const GRANT_ALL_MAX_USERS = Math.max(
+  BATCH_GRANT_MAX_USERS,
+  Math.min(parseInt(process.env.WX_FAVOR_GRANT_ALL_MAX || '10000', 10) || 10000, 50000),
+)
+const BATCH_GRANT_GAP_MS = Math.max(
+  0,
+  parseInt(process.env.WX_FAVOR_BATCH_GRANT_GAP_MS || '50', 10) || 0,
+)
+const BATCH_GRANT_RESULT_FAIL_LIMIT = 200
+
+function parseBatchUserIds(raw) {
+  let parts = []
+  if (Array.isArray(raw)) {
+    parts = raw
+  } else if (typeof raw === 'string') {
+    parts = raw.split(/[\s,;，；]+/)
+  } else if (raw != null) {
+    parts = [raw]
+  }
+
+  const seen = new Set()
+  const userIds = []
+  for (const part of parts) {
+    const uid = parseInt(String(part).trim(), 10)
+    if (Number.isNaN(uid) || uid <= 0) continue
+    if (seen.has(uid)) continue
+    seen.add(uid)
+    userIds.push(uid)
+  }
+  return userIds
+}
+
+function sleepMs(ms) {
+  if (!ms || ms <= 0) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function countFavorGrantEligibleUsers() {
+  const [rows] = await db.query(
+    `SELECT COUNT(*) AS total
+     FROM wx_users
+     WHERE openid IS NOT NULL AND TRIM(openid) <> ''`
+  )
+  return Number(rows?.[0]?.total || 0)
+}
+
+async function listFavorGrantEligibleUserIds({ limit = GRANT_ALL_MAX_USERS } = {}) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || GRANT_ALL_MAX_USERS, GRANT_ALL_MAX_USERS))
+  const [rows] = await db.query(
+    `SELECT id
+     FROM wx_users
+     WHERE openid IS NOT NULL AND TRIM(openid) <> ''
+     ORDER BY id ASC
+     LIMIT ?`,
+    [safeLimit]
+  )
+  return (rows || []).map((row) => Number(row.id)).filter((id) => id > 0)
+}
+
+async function loadRunningCouponTemplate(templateId) {
+  const tid = parseInt(templateId, 10)
+  if (Number.isNaN(tid) || tid <= 0) {
+    return { error: adminResult(400, { error: '请选择优惠券模板' }) }
+  }
+
+  const [templates] = await db.query(
+    `SELECT id, title, discount_yuan, min_order_yuan, valid_days, stock_id,
+            stock_creator_mchid, wx_status, is_active
+     FROM referral_coupon_templates
+     WHERE id = ? AND is_active = 1 LIMIT 1`,
+    [tid]
+  )
+  if (!templates.length) return { error: adminResult(404, { error: '优惠券模板不存在' }) }
+
+  const tpl = templates[0]
+  if (!tpl.stock_id || tpl.wx_status !== 'running') {
+    return { error: adminResult(400, { error: '模板批次未激活，无法发放' }) }
+  }
+  return { template: tpl, templateId: tid }
+}
+
+async function runFavorGrantForUserIds({ userIds, template, templateId, source }) {
+  const results = []
+  let successCount = 0
+  let failedCount = 0
+
+  for (let i = 0; i < userIds.length; i += 1) {
+    const uid = userIds[i]
+    try {
+      const result = await sendFavorCouponToUser({
+        userId: uid,
+        template,
+        source,
+      })
+      if (result.ok) {
+        successCount += 1
+        results.push({
+          user_id: uid,
+          ok: true,
+          coupon_id: result.coupon_id,
+          stock_id: result.stock_id,
+          out_request_no: result.out_request_no,
+        })
+      } else {
+        failedCount += 1
+        results.push({
+          user_id: uid,
+          ok: false,
+          error: result.error || '发放失败',
+          code: result.code || null,
+        })
+      }
+    } catch (err) {
+      failedCount += 1
+      results.push({
+        user_id: uid,
+        ok: false,
+        error: err?.message || '发放异常',
+      })
+      logger.warn('batch grant coupon item failed', {
+        userId: uid,
+        templateId,
+        err: err?.message || err,
+      })
+    }
+
+    if (i < userIds.length - 1 && BATCH_GRANT_GAP_MS > 0) {
+      await sleepMs(BATCH_GRANT_GAP_MS)
+    }
+  }
+
+  const failures = results.filter((row) => !row.ok)
+  return {
+    success: true,
+    template_id: templateId,
+    stock_id: template.stock_id,
+    total: userIds.length,
+    success_count: successCount,
+    failed_count: failedCount,
+    results: failures.slice(0, BATCH_GRANT_RESULT_FAIL_LIMIT),
+    results_truncated: failures.length > BATCH_GRANT_RESULT_FAIL_LIMIT,
+  }
+}
+
+/**
+ * 批量向用户发放微信免充值代金券（逐个调用微信发券接口）。
+ * - 指定用户：user_ids / user_ids_text
+ * - 全部用户：grant_all=true（仅 openid 非空；需 confirm_grant_all=true）
+ */
+async function grantCouponToUsersBatch({
+  userIds,
+  userIdsText,
+  templateId,
+  grantAll = false,
+  confirmGrantAll = false,
+  source = 'admin',
+} = {}) {
+  await ensureReferralRewardsSchema()
+
+  const loaded = await loadRunningCouponTemplate(templateId)
+  if (loaded.error) return loaded.error
+  const { template: tpl, templateId: tid } = loaded
+
+  let ids = []
+  let mode = 'selected'
+
+  if (grantAll === true || grantAll === 'true' || grantAll === 1 || grantAll === '1') {
+    if (!(confirmGrantAll === true || confirmGrantAll === 'true' || confirmGrantAll === 1 || confirmGrantAll === '1')) {
+      return adminResult(400, { error: '发放给全部用户需确认 confirm_grant_all=true' })
+    }
+    mode = 'all'
+    const eligibleCount = await countFavorGrantEligibleUsers()
+    if (eligibleCount <= 0) {
+      return adminResult(400, { error: '没有可发放的用户（需已绑定 openid）' })
+    }
+    if (eligibleCount > GRANT_ALL_MAX_USERS) {
+      return adminResult(400, {
+        error: `可发放用户超过上限 ${GRANT_ALL_MAX_USERS}，请提高 WX_FAVOR_GRANT_ALL_MAX 或分批发放`,
+        max: GRANT_ALL_MAX_USERS,
+        eligible_count: eligibleCount,
+      })
+    }
+    ids = await listFavorGrantEligibleUserIds({ limit: GRANT_ALL_MAX_USERS })
+  } else {
+    ids = parseBatchUserIds(
+      Array.isArray(userIds) && userIds.length ? userIds : userIdsText,
+    )
+    if (!ids.length) {
+      return adminResult(400, { error: '请至少选择一个用户' })
+    }
+    if (ids.length > BATCH_GRANT_MAX_USERS) {
+      return adminResult(400, {
+        error: `单次最多发放 ${BATCH_GRANT_MAX_USERS} 个用户`,
+        max: BATCH_GRANT_MAX_USERS,
+        submitted: ids.length,
+      })
+    }
+  }
+
+  const body = await runFavorGrantForUserIds({
+    userIds: ids,
+    template: tpl,
+    templateId: tid,
+    source,
+  })
+  body.mode = mode
+  return adminResult(200, body)
+}
+
+async function getFavorGrantEligibleCount() {
+  const count = await countFavorGrantEligibleUsers()
+  return adminResult(200, {
+    eligible_count: count,
+    grant_all_max: GRANT_ALL_MAX_USERS,
+    batch_max: BATCH_GRANT_MAX_USERS,
+  })
+}
+
 async function listAdminUserCoupons({ userId, page = 1, pageSize = 20 } = {}) {
   await ensureReferralRewardsSchema()
   const limit = Math.max(1, Math.min(pageSize, 100))
@@ -1250,5 +1472,7 @@ module.exports = {
   handleFavorCouponUseNotify,
   markFavorGrantsUsedFromPromotionDetail,
   grantCouponToUser,
+  grantCouponToUsersBatch,
+  getFavorGrantEligibleCount,
   listAdminUserCoupons,
 }

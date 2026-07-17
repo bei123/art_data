@@ -29,6 +29,8 @@ const {
   getAdminFavorCallback,
   setAdminFavorCallback,
   grantCouponToUser,
+  grantCouponToUsersBatch,
+  getFavorGrantEligibleCount,
   listAdminUserCoupons,
   getAdminUserCouponDetail,
 } = require('../services/referralRewardService')
@@ -267,6 +269,33 @@ router.post('/coupons/grant', async (req, res) => {
   } catch (error) {
     logger.error('admin grant coupon failed', { err: error })
     res.status(500).json({ error: '发放优惠券失败' })
+  }
+})
+
+router.post('/coupons/grant-batch', async (req, res) => {
+  try {
+    const r = await grantCouponToUsersBatch({
+      userIds: req.body?.user_ids,
+      userIdsText: req.body?.user_ids_text || req.body?.users_text,
+      templateId: req.body?.template_id ? parseInt(req.body.template_id, 10) : null,
+      grantAll: req.body?.grant_all,
+      confirmGrantAll: req.body?.confirm_grant_all,
+      source: 'admin',
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin batch grant coupon failed', { err: error })
+    res.status(500).json({ error: '批量发放优惠券失败' })
+  }
+})
+
+router.get('/coupons/grant-eligible-count', async (req, res) => {
+  try {
+    const r = await getFavorGrantEligibleCount()
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin grant eligible count failed', { err: error })
+    res.status(500).json({ error: '查询可发放用户数失败' })
   }
 })
 
