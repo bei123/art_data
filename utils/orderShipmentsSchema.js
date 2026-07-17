@@ -24,6 +24,22 @@ const OPTIONAL_COLUMNS = [
     name: 'latest_path_action_at',
     ddl: "DATETIME NULL COMMENT '微信物流最新轨迹时间'",
   },
+  {
+    name: 'waybill_token',
+    ddl: "VARCHAR(512) NULL COMMENT '微信物流消息 follow_waybill 返回的 waybill_token'",
+  },
+  {
+    name: 'follow_status',
+    ddl: "VARCHAR(32) NULL COMMENT 'pending|followed|failed'",
+  },
+  {
+    name: 'follow_error',
+    ddl: "VARCHAR(512) NULL COMMENT 'follow_waybill 失败信息'",
+  },
+  {
+    name: 'ship_source',
+    ddl: "VARCHAR(32) NULL COMMENT 'sf|manual'",
+  },
 ]
 
 async function hasTable(tableName) {
@@ -72,13 +88,17 @@ async function ensureOrderShipmentsTable() {
           wx_appid VARCHAR(64) NULL,
           waybill_data_json JSON NULL,
           company_name VARCHAR(64) NULL COMMENT '快递公司名称',
+          waybill_token VARCHAR(512) NULL COMMENT '微信物流消息 waybill_token',
+          follow_status VARCHAR(32) NULL COMMENT 'pending|followed|failed',
+          follow_error VARCHAR(512) NULL,
+          ship_source VARCHAR(32) NULL COMMENT 'sf|manual',
           status VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT 'active|cancelled',
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           KEY idx_order_shipments_order_id (order_id),
           KEY idx_order_shipments_waybill (delivery_id, waybill_id),
           KEY idx_order_shipments_status (status)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='微信物流运单记录'
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单运单记录'
       `)
       logger.info('order_shipments 表已创建')
     }

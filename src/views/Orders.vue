@@ -610,10 +610,10 @@
 
           <div v-if="isOrderLogisticsEligible(selectedOrder)" class="rounded-lg border border-border bg-muted/10 p-4">
             <h3 class="mb-2 text-base font-semibold text-foreground">
-              物流（顺丰 + 微信发货管理）
+              物流（顺丰 / 手工运单 + 微信物流消息）
             </h3>
             <p class="mb-3 text-sm text-muted-foreground leading-relaxed">
-              含实物且已支付成功时可发货；顺丰下单成功后会自动向微信录入发货信息。
+              含实物且已支付成功时可发货。发货成功后登记微信物流消息（揽件/派件/签收由微信推送），并同步交易发货信息管理。
             </p>
             <div v-if="selectedOrder.shipments?.length" class="mb-4 space-y-2">
               <div
@@ -624,21 +624,58 @@
                 <div class="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">{{ shipment.delivery_id }}</Badge>
                   <span v-if="shipment.company_name" class="text-muted-foreground">{{ shipment.company_name }}</span>
+                  <Badge v-if="shipment.ship_source" variant="outline">
+                    {{ shipment.ship_source === 'manual' ? '手工' : '顺丰' }}
+                  </Badge>
                   <Badge :variant="shipment.status === 'active' ? 'default' : 'outline'">
                     {{ shipment.status === 'active' ? '有效' : shipment.status }}
+                  </Badge>
+                  <Badge
+                    v-if="shipment.follow_status"
+                    :variant="shipment.follow_status === 'followed' ? 'default' : shipment.follow_status === 'failed' ? 'destructive' : 'secondary'"
+                  >
+                    物流消息 {{ followStatusLabel(shipment.follow_status) }}
                   </Badge>
                 </div>
                 <div class="mt-2 font-mono text-xs break-all">
                   运单号：{{ shipment.waybill_id }}
                 </div>
+                <div v-if="shipment.waybill_token" class="mt-1 font-mono text-xs text-muted-foreground break-all">
+                  waybill_token：{{ shipment.waybill_token }}
+                </div>
+                <div v-if="shipment.follow_error" class="mt-1 text-xs text-destructive">
+                  {{ shipment.follow_error }}
+                </div>
                 <div v-if="shipment.created_at" class="mt-1 text-xs text-muted-foreground tabular-nums">
                   发货时间：{{ shipment.created_at }}
+                </div>
+                <div
+                  v-if="shipment.follow_status === 'failed' || (shipment.status === 'active' && !shipment.waybill_token)"
+                  class="mt-2"
+                >
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="followRetryingId === shipment.id"
+                    @click="retryFollowWaybill(shipment)"
+                  >
+                    <Loader2
+                      v-if="followRetryingId === shipment.id"
+                      class="mr-1.5 size-3.5 animate-spin"
+                      aria-hidden="true"
+                    />
+                    重试物流消息
+                  </Button>
                 </div>
               </div>
             </div>
             <div class="flex flex-wrap gap-2">
               <Button type="button" @click="openShipDialog">
-                发货
+                顺丰下单
+              </Button>
+              <Button type="button" variant="secondary" @click="openManualShipDialog">
+                手工填运单
               </Button>
               <Button type="button" variant="secondary" @click="openPathDialog">
                 查询轨迹
@@ -985,6 +1022,67 @@
           </Button>
           <Button type="button" :disabled="shipSubmitting" @click="submitShip">
             <Loader2 v-if="shipSubmitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            提交发货
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="manualShipDialogVisible">
+      <DialogContent class="max-w-[calc(100%-2rem)] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>手工填运单发货</DialogTitle>
+        </DialogHeader>
+        <div class="grid gap-4 py-2">
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            填写已有运单号并选择运力公司，系统将登记微信物流消息并补录交易发货信息。
+          </p>
+          <div class="flex flex-col gap-2">
+            <Label>运力公司 <span class="text-destructive">*</span></Label>
+            <Select
+              :disabled="!openMsgDeliveryOptions.length"
+              :model-value="manualShipForm.delivery_id || undefined"
+              @update:model-value="(v) => onManualDeliveryChange(typeof v === 'string' ? v : '')"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue placeholder="加载运力中…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="row in openMsgDeliveryOptions"
+                  :key="row.delivery_id"
+                  :value="row.delivery_id"
+                >
+                  {{ row.delivery_name || row.delivery_id }}（{{ row.delivery_id }}）
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="manual-waybill">运单号 <span class="text-destructive">*</span></Label>
+            <Input
+              id="manual-waybill"
+              v-model="manualShipForm.waybill_id"
+              placeholder="快递运单号"
+              autocomplete="off"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="manual-phone">收件人手机</Label>
+            <Input
+              id="manual-phone"
+              v-model="manualShipForm.receiver_phone"
+              placeholder="默认取订单收货地址"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+        <DialogFooter class="gap-2 sm:justify-end">
+          <Button type="button" variant="outline" @click="manualShipDialogVisible = false">
+            取消
+          </Button>
+          <Button type="button" :disabled="manualShipSubmitting" @click="submitManualShip">
+            <Loader2 v-if="manualShipSubmitting" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
             提交发货
           </Button>
         </DialogFooter>
@@ -1376,6 +1474,17 @@ const shipForm = reactive({
     area: '',
     address: '',
   },
+})
+
+const manualShipDialogVisible = ref(false)
+const manualShipSubmitting = ref(false)
+const followRetryingId = ref(null)
+const openMsgDeliveryOptions = ref([])
+const manualShipForm = reactive({
+  delivery_id: '',
+  company_name: '',
+  waybill_id: '',
+  receiver_phone: '',
 })
 
 const pathDialogVisible = ref(false)
@@ -2120,6 +2229,111 @@ function openShipDialog() {
   shipDialogVisible.value = true
 }
 
+function followStatusLabel(status) {
+  if (status === 'followed') return '已登记'
+  if (status === 'failed') return '失败'
+  if (status === 'pending') return '登记中'
+  return status || ''
+}
+
+async function loadOpenMsgDeliveryList() {
+  try {
+    const data = await axios.get('/wx/logistics/delivery-list', { timeout: 20000 })
+    const list = Array.isArray(data?.delivery_list) ? data.delivery_list : []
+    openMsgDeliveryOptions.value = list
+    return list
+  } catch (e) {
+    openMsgDeliveryOptions.value = []
+    ElMessage.error(e?.response?.data?.error || '获取运力列表失败')
+    return []
+  }
+}
+
+function onManualDeliveryChange(deliveryId) {
+  manualShipForm.delivery_id = deliveryId || ''
+  const matched = openMsgDeliveryOptions.value.find((row) => row.delivery_id === deliveryId)
+  manualShipForm.company_name = matched?.delivery_name || ''
+}
+
+async function openManualShipDialog() {
+  if (!selectedOrder.value) return
+  const receiver = getShipReceiverAddress(selectedOrder.value)
+  manualShipForm.delivery_id = ''
+  manualShipForm.company_name = ''
+  manualShipForm.waybill_id = ''
+  manualShipForm.receiver_phone = receiver?.receiver_phone || ''
+  manualShipDialogVisible.value = true
+  const list = await loadOpenMsgDeliveryList()
+  if (list.length && !manualShipForm.delivery_id) {
+    onManualDeliveryChange(list[0].delivery_id)
+  }
+}
+
+async function submitManualShip() {
+  if (!selectedOrder.value) return
+  if (!manualShipForm.delivery_id?.trim()) {
+    ElMessage.warning('请选择运力公司')
+    return
+  }
+  if (!manualShipForm.waybill_id?.trim()) {
+    ElMessage.warning('请填写运单号')
+    return
+  }
+
+  manualShipSubmitting.value = true
+  try {
+    const payload = {
+      internal_order_id: selectedOrder.value.id,
+      delivery_id: manualShipForm.delivery_id.trim(),
+      waybill_id: manualShipForm.waybill_id.trim(),
+      company_name: manualShipForm.company_name?.trim() || undefined,
+      receiver_phone: manualShipForm.receiver_phone?.trim() || undefined,
+    }
+    const res = await axios.post('/wx/logistics/manual-shipment', payload, { timeout: 60000 })
+    if (res?.waybill_id) {
+      saveLastWaybill(selectedOrder.value.id, payload.delivery_id, String(res.waybill_id))
+      ElMessage.success(`手工发货成功，运单号：${res.waybill_id}`)
+    } else {
+      ElMessage.success('手工发货已提交')
+    }
+    if (res?.open_msg_follow?.ok === false) {
+      ElMessage.warning(`物流消息登记失败：${res.open_msg_follow.error || '可稍后重试'}`)
+    }
+    if (res?.wx_shipping_upload?.ok === false) {
+      ElMessage.warning(`微信发货信息录入失败：${res.wx_shipping_upload.error || '请稍后补录'}`)
+    }
+    manualShipDialogVisible.value = false
+    await refreshSelectedOrderDetail(selectedOrder.value.id)
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '手工发货失败')
+  } finally {
+    manualShipSubmitting.value = false
+  }
+}
+
+async function retryFollowWaybill(shipment) {
+  if (!shipment?.id) {
+    ElMessage.warning('运单记录缺少 id，无法重试')
+    return
+  }
+  followRetryingId.value = shipment.id
+  try {
+    const res = await axios.post('/wx/logistics/follow-waybill', {
+      shipment_id: shipment.id,
+    }, { timeout: 30000 })
+    if (res?.open_msg_follow?.ok) {
+      ElMessage.success('物流消息登记成功')
+    } else {
+      ElMessage.warning(res?.open_msg_follow?.error || '物流消息登记未成功')
+    }
+    if (selectedOrder.value?.id) await refreshSelectedOrderDetail(selectedOrder.value.id)
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '重试失败')
+  } finally {
+    followRetryingId.value = null
+  }
+}
+
 function openPathDialog() {
   if (!selectedOrder.value) return
   prefillTrackFormFromStorage(selectedOrder.value.id)
@@ -2218,6 +2432,9 @@ async function submitShip() {
       if (res.filter_warning) ElMessage.warning(res.filter_warning)
       if (res.shipment_persisted === false) {
         ElMessage.warning('运单号未能写入数据库，请联系管理员检查 order_shipments 表')
+      }
+      if (res.open_msg_follow?.ok === false) {
+        ElMessage.warning(`物流消息登记失败：${res.open_msg_follow.error || '可稍后重试'}`)
       }
       if (res.wx_shipping_upload?.ok === false) {
         ElMessage.warning(`微信发货信息录入失败：${res.wx_shipping_upload.error || '请稍后在「补录发货信息」重试'}`)

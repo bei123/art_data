@@ -5,7 +5,7 @@ const { fetchSfPathItemList, assertSfConfig } = require('./sfExpressClient')
 const { isWxSubscribeNotifyEnabled } = require('../config/wxSubscribeTemplates')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
-const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
+const { fireSubscribeNotify } = require('./subscribeMessageNotify')
 const {
   maybeNotifyConfirmReceiveOnSignOff,
   fireWechatConfirmReceiveNotify,
@@ -284,45 +284,10 @@ async function handleLogisticsPathNotify({
   let notifiedCount = 0
   const notifyResults = []
 
+  // 物流状态提醒改由微信「物流消息」open_msg 推送；此处仅同步轨迹指纹与签收确认收货
   for (let i = 0; i < newNodes.length; i += 1) {
-    const { node, fingerprint } = newNodes[i]
-    const logisticsStatus = formatLogisticsStatusFromNode(node)
-
-    const notifyResult = await notifyLogisticsStatus({
-      orderId,
-      outTradeNo,
-      waybillId,
-      deliveryId,
-      companyName,
-      logisticsStatus,
-      pathNodeFingerprint: fingerprint,
-      force,
-    })
-
-    notifyResults.push({ fingerprint, logisticsStatus, result: notifyResult })
-
-    const shouldMarkSeen = notifyResult?.ok === true
-      || notifyResult?.skipped
-      || notifyResult?.error?.errcode === 43101
-
-    if (shouldMarkSeen) {
-      seenSet.add(fingerprint)
-      if (notifyResult?.ok === true) notifiedCount += 1
-    } else if (notifyResult?.ok === false) {
-      logger.warn('物流节点订阅消息未送达，稍后重试', {
-        source,
-        orderId,
-        waybillId,
-        actionType: node.action_type,
-        logisticsStatus,
-        error: notifyResult.error,
-      })
-      break
-    }
-
-    if (i < newNodes.length - 1 && PATH_NOTIFY_GAP_MS > 0) {
-      await sleep(PATH_NOTIFY_GAP_MS)
-    }
+    const { fingerprint } = newNodes[i]
+    if (fingerprint) seenSet.add(fingerprint)
   }
 
   await saveSeenPathFingerprints(orderId, waybillId, seenSet)
@@ -344,20 +309,19 @@ async function handleLogisticsPathNotify({
     )
   }
 
-  if (notifiedCount > 0) {
-    logger.info('物流轨迹新节点已推送订阅消息', {
-      source,
-      orderId,
-      waybillId,
-      notifiedCount,
-      newNodeCount: newNodes.length,
-    })
-  }
+  logger.info('物流轨迹新节点已同步（未推送本地订阅消息）', {
+    source,
+    orderId,
+    waybillId,
+    newNodeCount: newNodes.length,
+    nodeCount: nodes.length,
+  })
 
   return {
     ok: true,
-    notified: notifiedCount > 0,
+    notified: false,
     notifiedCount,
+    subscribe_notify: 'disabled_open_msg',
     newNodeCount: newNodes.length,
     nodeCount: nodes.length,
     details: notifyResults,

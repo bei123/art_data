@@ -3882,6 +3882,10 @@ function mapShipmentRowFromDb(row) {
         status: row.status,
         latest_path_action_type: row.latest_path_action_type != null ? Number(row.latest_path_action_type) : null,
         latest_path_action_at: toIsoOrNull(row.latest_path_action_at),
+        waybill_token: row.waybill_token != null ? String(row.waybill_token) : null,
+        follow_status: row.follow_status != null ? String(row.follow_status) : null,
+        follow_error: row.follow_error != null ? String(row.follow_error) : null,
+        ship_source: row.ship_source != null ? String(row.ship_source) : null,
         created_at: toIsoOrNull(row.created_at),
         updated_at: toIsoOrNull(row.updated_at),
     };
@@ -3974,8 +3978,8 @@ function buildPhysicalItemLogistics(primaryShipment, includeWechatPath, options 
             delivery_id: null,
             company_name: null,
             hint: audience === 'buyer'
-                ? '商家发货后将在此展示运单与物流进度。'
-                : '尚未生成微信运单；可在订单管理「物流」中发货。',
+                ? '商家发货后将在此展示运单与物流进度；关键节点由微信服务通知推送。'
+                : '尚未生成运单；可在订单管理「物流」中顺丰下单或手工填运单。',
         };
     }
     const out = {

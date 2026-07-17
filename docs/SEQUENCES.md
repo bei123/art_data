@@ -6,7 +6,7 @@
 
 1. [小程序登录 / Refresh](#1-小程序登录--refresh)
 2. [实物下单 · JSAPI · 支付回调](#2-实物下单--jsapi--支付回调)
-3. [管理端顺丰发货](#3-管理端顺丰发货)
+3. [管理端发货（顺丰 / 手工运单）](#3-管理端发货顺丰--手工运单)
 4. [数字品：站内购码 vs Wespace](#4-数字品站内购码-vs-wespace)
 5. [推荐绑定 · 佣金 · 提现](#5-推荐绑定--佣金--提现)
 6. [展览扫画识图](#6-展览扫画识图)
@@ -80,9 +80,9 @@ sequenceDiagram
 
 ---
 
-## 3. 管理端顺丰发货
+## 3. 管理端发货（顺丰 / 手工运单）
 
-**前提：** 订单 `trade_state === SUCCESS`，含实物行与地址。**代码：** `routes/wx.js` → `logisticsService` → `sfExpress*`
+**前提：** 订单 `trade_state === SUCCESS`，含实物行与地址。**代码：** `routes/wx.js` → `logisticsService` → `sfExpress*` / `wechatExpressOpenMsgService`
 
 ```mermaid
 sequenceDiagram
@@ -92,18 +92,23 @@ sequenceDiagram
   participant WX as 微信
   participant DB as MySQL
 
-  ADM->>API: POST /api/wx/logistics/orders<br/>{ internal_order_id, sender, … }
-  API->>DB: loadShippableOrderContext
-  API->>SF: createOrder
-  SF-->>API: 运单号
-  API->>DB: 写入 order_shipments
-  API->>API: notifyLogisticsStatus（订阅消息）
+  alt 顺丰下单
+    ADM->>API: POST /api/wx/logistics/orders
+    API->>SF: createOrder
+    SF-->>API: 运单号
+  else 手工填运单
+    ADM->>API: POST /api/wx/logistics/manual-shipment
+  end
+  API->>DB: 写入 order_shipments（ship_source=sf|manual）
+  API->>WX: follow_waybill（物流消息）
+  API->>DB: 存 waybill_token / follow_status
   opt 微信发货录入开启
-    API->>WX: uploadShippingInfoForOrder
+    API->>WX: uploadShippingInfoForOrder（交易发货管理）
   end
   API-->>ADM: 运单结果
 
-  Note over API: logisticsPathNotify 定时拉轨迹<br/>并推送后续物流通知
+  Note over WX: 微信在揽件/派件/签收推送服务通知
+  Note over API: logisticsPathNotify 仍可拉顺丰轨迹入库<br/>不再推送本地物流订阅消息
 ```
 
 ---
@@ -254,4 +259,4 @@ sequenceDiagram
 | `payNotify` 提交后 | 支付成功订阅消息（含重试） | `emitPaymentSuccessSubscribeNotifies` |
 | 进程常驻 | 催付、佣金结算、物流轨迹、推荐对账、订单自动关闭 | `index.js` 启的各 `*Scheduler` |
 | 上传数字码后 | 虚拟发货订阅消息 | `uploadDigitalItemQrCode` |
-| 顺丰下单后 | 物流状态订阅；轨迹由 `logisticsPathNotify` 续推 | `logisticsService` |
+| 顺丰下单后 | follow_waybill（物流消息）+ upload_shipping_info；轨迹由 logisticsPathNotify 同步（不推订阅） | `logisticsService` |

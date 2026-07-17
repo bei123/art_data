@@ -1,6 +1,5 @@
 const db = require('../db')
 const logger = require('../utils/logger')
-const { fireSubscribeNotify, notifyLogisticsStatus } = require('./subscribeMessageNotify')
 const {
   isWechatShippingUploadEnabled,
   uploadShippingInfoForOrder,
@@ -14,12 +13,18 @@ const {
   buildShippingItemDesc,
 } = require('./wechatShippingInfoService')
 const {
+  getDeliveryList: getOpenMsgDeliveryListApi,
+  followWaybill,
+  queryFollowTrace,
+} = require('./wechatExpressOpenMsgService')
+const {
   handleLogisticsPathNotifyAsync,
 } = require('./logisticsPathNotify')
 const { ensureOrderShipmentsTable, persistShipmentLatestPath } = require('../utils/orderShipmentsSchema')
 const { ensureRightsShippingColumns } = require('./rightsService')
 const { ensureArtworksShippingColumns } = require('../utils/artworkShippingDimensions')
 const { pickFulfillmentPathNode } = require('../utils/orderFulfillmentStatus')
+const { FIRST_RIGHT_IMAGE_SUBQUERY_SQL } = require('../utils/rightImagesQuery')
 const {
   assertSfConfig,
   getSfConfig,
@@ -133,8 +138,10 @@ async function loadShippableOrderContext(internalOrderId) {
   await ensureArtworksShippingColumns()
 
   const [orderRows] = await db.query(
-    `SELECT o.id, o.out_trade_no, o.user_id, o.trade_state, o.body
+    `SELECT o.id, o.out_trade_no, o.user_id, o.trade_state, o.body, o.transaction_id,
+            u.openid AS buyer_openid
      FROM orders o
+     LEFT JOIN wx_users u ON u.id = o.user_id
      WHERE o.id = ?
      LIMIT 1`,
     [internalOrderId]
@@ -165,6 +172,8 @@ async function loadShippableOrderContext(internalOrderId) {
         oi.artwork_id,
         oi.address_id,
         COALESCE(r.title, oa.title) AS item_title,
+        ${FIRST_RIGHT_IMAGE_SUBQUERY_SQL},
+        oa.image AS artwork_image,
         r.length_cm AS right_length_cm,
         r.width_cm AS right_width_cm,
         r.height_cm AS right_height_cm,
@@ -223,15 +232,127 @@ async function loadShippableOrderContext(internalOrderId) {
     })),
   }
 
+  const goodsItems = physicalItems.map((row) => ({
+    item_title: row.item_title || '商品',
+    image_url: row.type === 'artwork' ? row.artwork_image : row.right_image_url,
+    quantity: Number(row.quantity) > 0 ? Number(row.quantity) : 1,
+  }))
+
   const shippingMetrics = buildShippingMetricsFromPhysicalItems(physicalItems)
 
-  return { orderRow, receiver, cargoDefault, physicalItems, shippingMetrics }
+  return { orderRow, receiver, cargoDefault, physicalItems, goodsItems, shippingMetrics }
+}
+
+function buildFollowGoodsFromCargo(cargoDefault, goodsItems) {
+  if (Array.isArray(goodsItems) && goodsItems.length) return goodsItems
+  const details = cargoDefault?.detail_list
+  if (!Array.isArray(details)) return []
+  return details.map((row) => ({
+    item_title: row.name || '商品',
+    image_url: null,
+  }))
+}
+
+async function persistFollowResult(shipmentId, followResult) {
+  if (!shipmentId) return followResult
+  await ensureOrderShipmentsTable()
+  if (followResult?.ok && followResult.body?.waybill_token) {
+    await db.query(
+      `UPDATE order_shipments
+       SET waybill_token = ?, follow_status = 'followed', follow_error = NULL, updated_at = NOW()
+       WHERE id = ?`,
+      [String(followResult.body.waybill_token), shipmentId]
+    )
+    return {
+      ok: true,
+      waybill_token: followResult.body.waybill_token,
+      follow_status: 'followed',
+    }
+  }
+
+  const errMsg = clipUtf8(
+    followResult?.body?.error || followResult?.body?.errmsg || followResult?.error || 'follow_waybill 失败',
+    512,
+  )
+  await db.query(
+    `UPDATE order_shipments
+     SET follow_status = 'failed', follow_error = ?, updated_at = NOW()
+     WHERE id = ?`,
+    [errMsg, shipmentId]
+  )
+  return {
+    ok: false,
+    follow_status: 'failed',
+    error: errMsg,
+    errcode: followResult?.body?.errcode,
+  }
+}
+
+async function followWaybillForShipment({
+  shipmentId,
+  orderRow,
+  receiver,
+  waybillId,
+  deliveryId,
+  goodsItems,
+  senderPhone = null,
+}) {
+  const openid = orderRow.buyer_openid || orderRow.openid
+  const transId = orderRow.transaction_id
+  if (!openid) {
+    return persistFollowResult(shipmentId, {
+      ok: false,
+      body: { error: '订单用户缺少 openid，无法登记物流消息' },
+    })
+  }
+  if (!transId) {
+    return persistFollowResult(shipmentId, {
+      ok: false,
+      body: { error: '订单缺少微信支付 transaction_id，无法登记物流消息' },
+    })
+  }
+
+  await db.query(
+    `UPDATE order_shipments SET follow_status = 'pending', follow_error = NULL, updated_at = NOW() WHERE id = ?`,
+    [shipmentId]
+  )
+
+  const followResult = await followWaybill({
+    openid,
+    receiverPhone: receiver.mobile || receiver.tel,
+    waybillId,
+    transId,
+    outTradeNo: orderRow.out_trade_no,
+    goodsItems,
+    deliveryId,
+    senderPhone,
+  })
+  return persistFollowResult(shipmentId, followResult)
 }
 
 /**
- * 顺丰：支持的快递公司与产品类型（固定顺丰）
+ * 运力列表：优先微信物流消息 get_delivery_list；失败回退顺丰硬编码
  */
 async function getAllDelivery() {
+  try {
+    const openMsg = await getOpenMsgDeliveryListApi()
+    if (openMsg.ok && Array.isArray(openMsg.body?.delivery_list) && openMsg.body.delivery_list.length) {
+      const list = openMsg.body.delivery_list.map((row) => ({
+        delivery_id: row.delivery_id,
+        delivery_name: row.delivery_name,
+        service_type: row.delivery_id === DELIVERY_ID_SF ? loadSfServiceTypes() : undefined,
+      }))
+      return adminResult(200, {
+        count: list.length,
+        provider: 'wechat-open-msg',
+        configured: true,
+        data: list,
+      })
+    }
+  } catch (err) {
+    logger.warn('getAllDelivery open_msg 失败，回退顺丰列表', { err: err.message })
+  }
+
   const auth = assertSfConfig()
   if (!auth.ok) {
     return adminResult(503, { error: auth.error, configured: false })
@@ -246,6 +367,19 @@ async function getAllDelivery() {
       delivery_name: DELIVERY_NAME_SF,
       service_type: loadSfServiceTypes(),
     }],
+  })
+}
+
+/**
+ * 仅 open_msg 运力列表（管理端手工发货下拉）
+ */
+async function getOpenMsgDeliveryList() {
+  const result = await getOpenMsgDeliveryListApi()
+  if (!result.ok) return result
+  return adminResult(200, {
+    count: result.body?.count || 0,
+    delivery_list: result.body?.delivery_list || [],
+    cached: result.body?.cached || false,
   })
 }
 
@@ -391,6 +525,7 @@ async function addOrder(req) {
     }
 
     let shipment_persisted = true
+    let shipmentId = null
     const companyName = b.delivery_name || b.company_name
       ? clipUtf8(String(b.delivery_name || b.company_name).trim(), 64)
       : DELIVERY_NAME_SF
@@ -398,11 +533,12 @@ async function addOrder(req) {
 
     try {
       await ensureOrderShipmentsTable()
-      await db.query(
+      const [insertResult] = await db.query(
         `INSERT INTO order_shipments (
           order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
-          use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+          use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name,
+          ship_source, follow_status, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sf', 'pending', 'active')`,
         [
           internalOrderId,
           DELIVERY_ID_SF,
@@ -419,6 +555,7 @@ async function addOrder(req) {
           companyName,
         ]
       )
+      shipmentId = insertResult?.insertId || null
     } catch (dbErr) {
       shipment_persisted = false
       logger.error('addOrder 顺丰已成功但写入 order_shipments 失败', {
@@ -428,17 +565,19 @@ async function addOrder(req) {
       })
     }
 
-    fireSubscribeNotify(
-      notifyLogisticsStatus({
-        orderId: internalOrderId,
-        outTradeNo: orderRow.out_trade_no,
+    let open_msg_follow = { skipped: true, reason: 'shipment_not_persisted' }
+    if (shipment_persisted && shipmentId) {
+      const goodsItems = buildFollowGoodsFromCargo(cargoDefault, shipCtx.goodsItems)
+      open_msg_follow = await followWaybillForShipment({
+        shipmentId,
+        orderRow,
+        receiver,
         waybillId: String(waybillId).trim(),
         deliveryId: DELIVERY_ID_SF,
-        companyName,
-        logisticsStatus: '包裹已发出，快递公司已揽件',
-      }),
-      'logisticsStatus',
-    )
+        goodsItems,
+        senderPhone: senderOut.mobile || senderOut.tel,
+      })
+    }
 
     let wx_shipping_upload = { skipped: true, reason: 'disabled' }
     if (isWechatShippingUploadEnabled()) {
@@ -486,6 +625,7 @@ async function addOrder(req) {
       dest_code: sfResult.msgData?.destCode,
       shipping_metrics: packageMetrics,
       shipment_persisted,
+      open_msg_follow,
       wx_shipping_upload,
       provider: 'sf-express',
     })
@@ -493,6 +633,214 @@ async function addOrder(req) {
     logger.error('addOrder 失败', { err })
     return adminResult(500, { error: '生成运单失败', detail: err.message })
   }
+}
+
+/**
+ * 手工填运单号发货 → follow_waybill + upload_shipping_info
+ */
+async function addManualShipment(req) {
+  const b = req.body && typeof req.body === 'object' ? req.body : {}
+  const internalOrderId = parseInt(String(b.internal_order_id ?? b.order_id ?? ''), 10)
+  if (!internalOrderId || Number.isNaN(internalOrderId) || internalOrderId <= 0) {
+    return adminResult(400, { error: '缺少有效的 internal_order_id（或 order_id）' })
+  }
+
+  const deliveryId = b.delivery_id != null ? String(b.delivery_id).trim() : ''
+  const waybillId = b.waybill_id != null ? String(b.waybill_id).trim() : ''
+  if (!deliveryId) return adminResult(400, { error: '缺少 delivery_id（运力公司）' })
+  if (!waybillId) return adminResult(400, { error: '缺少 waybill_id（运单号）' })
+
+  try {
+    const shipCtx = await loadShippableOrderContext(internalOrderId)
+    if (shipCtx.error) return shipCtx.error
+    const { orderRow, receiver, cargoDefault, goodsItems } = shipCtx
+
+    const phoneOverride = b.receiver_phone != null ? String(b.receiver_phone).trim() : ''
+    if (phoneOverride) {
+      receiver.mobile = clipUtf8(phoneOverride, 32)
+      receiver.tel = clipUtf8(phoneOverride, 32)
+    }
+    if (!receiver.mobile && !receiver.tel) {
+      return adminResult(400, { error: '缺少收件人手机号' })
+    }
+
+    const companyName = b.company_name || b.delivery_name
+      ? clipUtf8(String(b.company_name || b.delivery_name).trim(), 64)
+      : deliveryId
+
+    await ensureOrderShipmentsTable()
+    const [insertResult] = await db.query(
+      `INSERT INTO order_shipments (
+        order_id, delivery_id, waybill_id, wechat_order_id, biz_id, service_type, service_name,
+        use_insured, insured_value_fen, add_source, wx_appid, waybill_data_json, company_name,
+        ship_source, follow_status, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, ?, 'manual', 'pending', 'active')`,
+      [
+        internalOrderId,
+        clipUtf8(deliveryId, 64),
+        clipUtf8(waybillId, 128),
+        clipUtf8(orderRow.out_trade_no || String(internalOrderId), 512),
+        'MANUAL',
+        0,
+        'manual',
+        JSON.stringify({ manual: true, delivery_id: deliveryId, waybill_id: waybillId }),
+        companyName,
+      ]
+    )
+    const shipmentId = insertResult?.insertId || null
+    if (!shipmentId) {
+      return adminResult(500, { error: '写入运单记录失败' })
+    }
+
+    const open_msg_follow = await followWaybillForShipment({
+      shipmentId,
+      orderRow,
+      receiver,
+      waybillId,
+      deliveryId,
+      goodsItems: buildFollowGoodsFromCargo(cargoDefault, goodsItems),
+      senderPhone: b.sender_phone != null ? String(b.sender_phone).trim() : null,
+    })
+
+    let wx_shipping_upload = { skipped: true, reason: 'disabled' }
+    if (isWechatShippingUploadEnabled()) {
+      const wxUploadResult = await uploadShippingInfoForOrder({
+        internalOrderId,
+        waybillId,
+        deliveryId,
+        itemDesc: buildShippingItemDesc(
+          (cargoDefault?.detail_list || []).map((row) => ({
+            item_title: row.name,
+            quantity: row.count,
+          })),
+        ),
+        receiverPhone: receiver.mobile || receiver.tel,
+        consignorPhone: b.sender_phone != null ? String(b.sender_phone).trim() : undefined,
+      })
+      if (wxUploadResult.ok) {
+        wx_shipping_upload = { ok: true, errcode: wxUploadResult.body?.errcode ?? 0 }
+      } else {
+        wx_shipping_upload = {
+          ok: false,
+          errcode: wxUploadResult.body?.errcode,
+          error: wxUploadResult.body?.error,
+          errmsg: wxUploadResult.body?.errmsg,
+        }
+        logger.warn('手工发货成功但微信发货信息录入失败', {
+          internalOrderId,
+          waybill_id: waybillId,
+          wx_shipping_upload,
+        })
+      }
+    }
+
+    return adminResult(200, {
+      internal_order_id: internalOrderId,
+      out_trade_no: orderRow.out_trade_no,
+      shipment_id: shipmentId,
+      delivery_id: deliveryId,
+      waybill_id: waybillId,
+      company_name: companyName,
+      ship_source: 'manual',
+      open_msg_follow,
+      wx_shipping_upload,
+    })
+  } catch (err) {
+    logger.error('addManualShipment 失败', { err })
+    return adminResult(500, { error: '手工发货失败', detail: err.message })
+  }
+}
+
+/**
+ * 对已有 shipment 补调 follow_waybill
+ */
+async function retryFollowWaybill(req) {
+  const b = req.body && typeof req.body === 'object' ? req.body : {}
+  const shipmentId = parseInt(String(b.shipment_id ?? b.id ?? ''), 10)
+  if (!shipmentId || Number.isNaN(shipmentId) || shipmentId <= 0) {
+    return adminResult(400, { error: '缺少有效的 shipment_id' })
+  }
+
+  try {
+    await ensureOrderShipmentsTable()
+    const [rows] = await db.query(
+      `SELECT s.*, o.out_trade_no, o.transaction_id, o.user_id, u.openid AS buyer_openid
+       FROM order_shipments s
+       INNER JOIN orders o ON o.id = s.order_id
+       LEFT JOIN wx_users u ON u.id = o.user_id
+       WHERE s.id = ?
+       LIMIT 1`,
+      [shipmentId]
+    )
+    if (!rows || !rows.length) {
+      return adminResult(404, { error: '运单记录不存在' })
+    }
+    const shipment = rows[0]
+    if (shipment.status && shipment.status !== 'active') {
+      return adminResult(400, { error: '运单已取消，无法登记物流消息' })
+    }
+
+    const shipCtx = await loadShippableOrderContext(shipment.order_id)
+    if (shipCtx.error) return shipCtx.error
+    const { orderRow, receiver, cargoDefault, goodsItems } = shipCtx
+
+    const phoneOverride = b.receiver_phone != null ? String(b.receiver_phone).trim() : ''
+    if (phoneOverride) {
+      receiver.mobile = clipUtf8(phoneOverride, 32)
+      receiver.tel = clipUtf8(phoneOverride, 32)
+    }
+
+    orderRow.buyer_openid = shipment.buyer_openid || orderRow.buyer_openid
+    orderRow.transaction_id = shipment.transaction_id || orderRow.transaction_id
+
+    const open_msg_follow = await followWaybillForShipment({
+      shipmentId,
+      orderRow,
+      receiver,
+      waybillId: shipment.waybill_id,
+      deliveryId: shipment.delivery_id,
+      goodsItems: buildFollowGoodsFromCargo(cargoDefault, goodsItems),
+      senderPhone: b.sender_phone != null ? String(b.sender_phone).trim() : null,
+    })
+
+    return adminResult(200, {
+      shipment_id: shipmentId,
+      delivery_id: shipment.delivery_id,
+      waybill_id: shipment.waybill_id,
+      open_msg_follow,
+    })
+  } catch (err) {
+    logger.error('retryFollowWaybill 失败', { err })
+    return adminResult(500, { error: '重试物流消息失败', detail: err.message })
+  }
+}
+
+/**
+ * 按 waybill_token 查询物流消息轨迹
+ */
+async function queryOpenMsgFollowTrace(req) {
+  const b = req.body && typeof req.body === 'object' ? req.body : {}
+  let waybillToken = b.waybill_token != null ? String(b.waybill_token).trim() : ''
+
+  if (!waybillToken && b.shipment_id) {
+    const shipmentId = parseInt(String(b.shipment_id), 10)
+    if (shipmentId > 0) {
+      await ensureOrderShipmentsTable()
+      const [rows] = await db.query(
+        `SELECT waybill_token FROM order_shipments WHERE id = ? LIMIT 1`,
+        [shipmentId]
+      )
+      waybillToken = rows?.[0]?.waybill_token ? String(rows[0].waybill_token) : ''
+    }
+  }
+
+  if (!waybillToken) {
+    return adminResult(400, { error: '缺少 waybill_token 或 shipment_id' })
+  }
+
+  const result = await queryFollowTrace({ waybillToken })
+  if (!result.ok) return result
+  return adminResult(200, result.body || {})
 }
 
 /**
@@ -1111,7 +1459,11 @@ async function queryDeliverTm(req) {
 
 module.exports = {
   getAllDelivery,
+  getOpenMsgDeliveryList,
   addOrder,
+  addManualShipment,
+  retryFollowWaybill,
+  queryOpenMsgFollowTrace,
   getPath,
   getOrder,
   confirmOrder,

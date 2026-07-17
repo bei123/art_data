@@ -135,7 +135,7 @@ flowchart LR
 | 域 | 代表模块 |
 |----|----------|
 | 支付履约 | `payService` · `checkoutPricing` · `orderAutoCloseScheduler` |
-| 物流顺丰 | `logisticsService` · `sfExpress*` · `logisticsPathNotify` · `wechatShippingInfoService` |
+| 物流顺丰 | `logisticsService` · `sfExpress*` · `logisticsPathNotify` · `wechatShippingInfoService` · `wechatExpressOpenMsgService` |
 | 推荐激励 | `referralService` · `commissionService` · `withdrawService` · `wechatTransferService` · `*Scheduler` |
 | 内容 CRUD | `artistsService` · `artworksService` · `rightsService` · `exhibitionsService` · … |
 | 数字品 | `digitalClaimCopyService` · `utils/digitalArtworksSync` |

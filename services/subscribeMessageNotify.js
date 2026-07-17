@@ -781,12 +781,12 @@ const RESEND_SCENES = [
   },
   {
     key: 'logisticsStatus',
-    label: '物流状态提醒',
-    description: '可传 waybill_id、delivery_id、logistics_status；不传则从 order_shipments 取最近一条',
+    label: '物流状态提醒（已废弃）',
+    description: '已停用自动推送，改用微信物流消息 open_msg；管理端补发仍可用。可传 waybill_id、delivery_id、logistics_status',
   },
   {
     key: 'orderShipped',
-    label: '订单发货（同物流状态提醒）',
+    label: '订单发货（已废弃，同物流状态提醒）',
     description: '兼容旧 scene；字段同 logisticsStatus',
   },
   {

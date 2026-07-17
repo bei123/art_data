@@ -94,7 +94,7 @@ flowchart TB
 |------|--------|
 | 登录 | `/api/auth/login` |
 | 目录 CRUD | artists / artworks / digital / rights / exhibitions / banners… |
-| 订单发货 | `POST /api/wx/logistics/orders` |
+| 订单发货 | `POST /api/wx/logistics/orders`（顺丰）· `POST /api/wx/logistics/manual-shipment`（手工） |
 | 上传数字码 | `PATCH .../items/:id/qr-code` |
 | 退款审批 | `/api/wx/pay/refund/approve` 等 |
 | 推荐运营 | `/api/admin/referral/*` |

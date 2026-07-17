@@ -24,9 +24,10 @@ flowchart LR
 | 微信小程序登录 | 出 | `jscode2session` | `wxService` | — |
 | 微信支付 JSAPI | 出+入 | 预下单、查单、关单 | `payService` | `POST /api/wx/pay/notify` |
 | 微信退款 | 出+入 | 退款申请 | `payService` | `POST /api/wx/pay/refund/notify` |
-| 微信发货录入 | 出 | 物流信息上报 | `wechatShippingInfoService` | — |
+| 微信发货录入 | 出 | 交易发货信息管理 `/wxa/sec/order/*` | `wechatShippingInfoService` | — |
+| 微信物流消息 | 出 | open_msg `follow_waybill` 等；揽件/派件/签收由微信推送 | `wechatExpressOpenMsgService` | — |
 | 商家转账 | 出+入 | 推荐提现 | `wechatTransferService` / `withdrawService` | `POST /api/wx/referral/withdraw/notify` |
-| 订阅消息 | 出 | 支付/物流/虚拟发货催付 | `subscribeMessage*` | — |
+| 订阅消息 | 出 | 支付/退款/催付等（物流状态提醒已停用，改 open_msg） | `subscribeMessage*` | — |
 | 顺丰 | 出 | 下单、改单、轨迹、面单 | `sfExpress*` / `logisticsService` | —（轨迹多为主动拉） |
 | Wespace | 出 | 数字品目录、purchase、资产代理 | `digital-artworks` · `external-api` · `wespaceHttp` | 资产 webhook（`asset-transfer` 等） |
 | WMS | 出 | 原作主档定时同步 | `wmsProductSyncService` | — |

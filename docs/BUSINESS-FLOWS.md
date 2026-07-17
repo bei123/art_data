@@ -151,7 +151,7 @@ sequenceDiagram
 
 | 类型 | 步骤 |
 |------|------|
-| 实物 | `Orders.vue` → `GET .../admin/orders` → `POST /api/wx/logistics/orders`（顺丰）→ `order_shipments` → 可选微信发货录入 → 用户查轨迹 |
+| 实物 | `Orders.vue` → 顺丰 `POST /api/wx/logistics/orders` 或手工 `POST /api/wx/logistics/manual-shipment` → `order_shipments` → `follow_waybill` + 可选 `upload_shipping_info` → 微信推送物流节点 |
 | 数字码 | 同订单页上传 `qr-code`（衔接支线 A） |
 | 辅线 | WMS 同步原作、退款审批、推荐提现审批 |
 

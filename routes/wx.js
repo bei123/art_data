@@ -369,6 +369,50 @@ router.post('/logistics/orders', authenticateToken, checkRole(['admin']), async 
     }
 });
 
+/** 微信物流消息：运力公司列表（需 admin） */
+router.get('/logistics/delivery-list', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.getOpenMsgDeliveryList();
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('获取物流消息运力列表失败', { err: error });
+        res.status(500).json(appendClientErrorDetail({ error: '获取运力列表服务暂时不可用' }, error));
+    }
+});
+
+/** 手工填运单号发货（需 admin） */
+router.post('/logistics/manual-shipment', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.addManualShipment(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('手工发货失败', { err: error });
+        res.status(500).json(appendClientErrorDetail({ error: '手工发货服务暂时不可用' }, error));
+    }
+});
+
+/** 补调 follow_waybill（需 admin） */
+router.post('/logistics/follow-waybill', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.retryFollowWaybill(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('重试物流消息登记失败', { err: error });
+        res.status(500).json(appendClientErrorDetail({ error: '物流消息登记服务暂时不可用' }, error));
+    }
+});
+
+/** 按 waybill_token 查询物流消息轨迹（需 admin） */
+router.post('/logistics/query-follow-trace', authenticateToken, checkRole(['admin']), async (req, res) => {
+    try {
+        const r = await logisticsSvc.queryOpenMsgFollowTrace(req);
+        return res.status(r.status).json(r.body);
+    } catch (error) {
+        logger.error('查询物流消息轨迹失败', { err: error });
+        res.status(500).json(appendClientErrorDetail({ error: '查询物流消息轨迹服务暂时不可用' }, error));
+    }
+});
+
 /** 顺丰开放平台：查询运单轨迹（需 admin） */
 router.post('/logistics/path', authenticateToken, checkRole(['admin']), async (req, res) => {
     try {
