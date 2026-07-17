@@ -105,9 +105,101 @@ async function getWxUserAdminDetail(userId) {
     [id, id, id, id, id, id, id, id, id, id]
   )
 
+  let referrer = null
+  let referees = []
+  let refereeTotal = 0
+
+  try {
+    const [asRefereeRows] = await db.query(
+      `SELECT
+          rb.id AS binding_id,
+          rb.referrer_id,
+          rb.referee_id,
+          rb.source,
+          rb.bound_at,
+          rb.expires_at,
+          (rb.expires_at IS NOT NULL AND rb.expires_at < NOW()) AS is_expired,
+          wu.nickname AS referrer_nickname,
+          wu.phone AS referrer_phone,
+          wu.openid AS referrer_openid,
+          wu.user_tier AS referrer_tier
+       FROM referral_bindings rb
+       LEFT JOIN wx_users wu ON wu.id = rb.referrer_id
+       WHERE rb.referee_id = ?
+       LIMIT 1`,
+      [id]
+    )
+    if (asRefereeRows.length) {
+      const row = asRefereeRows[0]
+      referrer = {
+        binding_id: row.binding_id,
+        user_id: row.referrer_id,
+        nickname: row.referrer_nickname,
+        phone: row.referrer_phone,
+        openid: row.referrer_openid,
+        user_tier: row.referrer_tier,
+        source: row.source,
+        bound_at: row.bound_at,
+        expires_at: row.expires_at,
+        is_expired: Boolean(Number(row.is_expired)),
+        role: 'referrer',
+      }
+    }
+
+    const [refereeCountRows] = await db.query(
+      `SELECT COUNT(*) AS total FROM referral_bindings WHERE referrer_id = ?`,
+      [id]
+    )
+    refereeTotal = Number(refereeCountRows[0]?.total || 0)
+
+    const [asReferrerRows] = await db.query(
+      `SELECT
+          rb.id AS binding_id,
+          rb.referrer_id,
+          rb.referee_id,
+          rb.source,
+          rb.bound_at,
+          rb.expires_at,
+          (rb.expires_at IS NOT NULL AND rb.expires_at < NOW()) AS is_expired,
+          wu.nickname AS referee_nickname,
+          wu.phone AS referee_phone,
+          wu.openid AS referee_openid,
+          wu.user_tier AS referee_tier
+       FROM referral_bindings rb
+       LEFT JOIN wx_users wu ON wu.id = rb.referee_id
+       WHERE rb.referrer_id = ?
+       ORDER BY rb.bound_at DESC, rb.id DESC
+       LIMIT 100`,
+      [id]
+    )
+    referees = (asReferrerRows || []).map((row) => ({
+      binding_id: row.binding_id,
+      user_id: row.referee_id,
+      nickname: row.referee_nickname,
+      phone: row.referee_phone,
+      openid: row.referee_openid,
+      user_tier: row.referee_tier,
+      source: row.source,
+      bound_at: row.bound_at,
+      expires_at: row.expires_at,
+      is_expired: Boolean(Number(row.is_expired)),
+      role: 'referee',
+    }))
+  } catch (err) {
+    if (err.code !== 'ER_NO_SUCH_TABLE') {
+      logger.warn('wx user detail referral bindings failed', { userId: id, message: err.message })
+    }
+  }
+
   return adminResult(200, {
     user: users[0],
     stats: statsRows[0] || {},
+    referral: {
+      referrer,
+      referees,
+      referee_total: refereeTotal,
+      referee_truncated: refereeTotal > referees.length,
+    },
   })
 }
 

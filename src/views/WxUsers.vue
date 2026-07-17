@@ -98,18 +98,21 @@
     </Card>
 
     <Dialog v-model:open="detailOpen">
-      <DialogContent class="max-w-lg">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>用户详情</DialogTitle>
           <DialogDescription v-if="detail?.user">
             ID {{ detail.user.id }} · {{ detail.user.nickname || '未设置昵称' }}
           </DialogDescription>
         </DialogHeader>
-        <div v-if="detail?.user" class="space-y-3 text-sm">
-          <p><span class="text-muted-foreground">OpenID：</span>{{ detail.user.openid }}</p>
-          <p><span class="text-muted-foreground">手机：</span>{{ detail.user.phone || '-' }}</p>
-          <p><span class="text-muted-foreground">等级：</span>{{ tierLabel(detail.user.user_tier) }}</p>
-          <p><span class="text-muted-foreground">注册：</span>{{ formatDate(detail.user.created_at) }}</p>
+        <div v-if="detail?.user" class="space-y-4 text-sm">
+          <div class="space-y-2">
+            <p><span class="text-muted-foreground">OpenID：</span>{{ detail.user.openid }}</p>
+            <p><span class="text-muted-foreground">手机：</span>{{ detail.user.phone || '-' }}</p>
+            <p><span class="text-muted-foreground">等级：</span>{{ tierLabel(detail.user.user_tier) }}</p>
+            <p><span class="text-muted-foreground">注册：</span>{{ formatDate(detail.user.created_at) }}</p>
+          </div>
+
           <div class="grid grid-cols-2 gap-2 rounded-md border border-border bg-muted/30 p-3">
             <p>订单 {{ detail.stats?.order_count ?? 0 }}</p>
             <p>作为推荐人订单 {{ detail.stats?.referred_order_count ?? 0 }}</p>
@@ -119,6 +122,93 @@
             <p>优惠券 {{ detail.stats?.coupon_count ?? 0 }}</p>
             <p>收藏 {{ detail.stats?.favorite_count ?? 0 }}</p>
             <p>购物车 {{ detail.stats?.cart_count ?? 0 }}</p>
+          </div>
+
+          <div class="space-y-3 rounded-md border border-border p-3">
+            <h4 class="font-medium text-foreground">推荐绑定关系</h4>
+
+            <div>
+              <p class="mb-1.5 text-xs text-muted-foreground">上级推荐人（我绑定的人）</p>
+              <div
+                v-if="detail.referral?.referrer"
+                class="rounded-md border border-border bg-muted/20 p-2.5"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium">
+                    {{ detail.referral.referrer.nickname || '未命名' }}
+                  </span>
+                  <span class="text-muted-foreground tabular-nums">
+                    #{{ detail.referral.referrer.user_id }}
+                  </span>
+                  <span class="text-xs text-muted-foreground">
+                    {{ tierLabel(detail.referral.referrer.user_tier) }}
+                  </span>
+                  <span
+                    class="rounded px-1.5 py-0.5 text-xs"
+                    :class="detail.referral.referrer.is_expired
+                      ? 'bg-destructive/10 text-destructive'
+                      : 'bg-primary/10 text-primary'"
+                  >
+                    {{ detail.referral.referrer.is_expired ? '已过期' : '有效' }}
+                  </span>
+                </div>
+                <div class="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                  <p>手机 {{ detail.referral.referrer.phone || '-' }}</p>
+                  <p>来源 {{ bindSourceLabel(detail.referral.referrer.source) }}</p>
+                  <p>绑定 {{ formatDate(detail.referral.referrer.bound_at) }}</p>
+                  <p>到期 {{ formatDate(detail.referral.referrer.expires_at) }}</p>
+                </div>
+              </div>
+              <p v-else class="text-xs text-muted-foreground">暂无上级推荐人</p>
+            </div>
+
+            <div>
+              <p class="mb-1.5 text-xs text-muted-foreground">
+                下级被推荐人（绑定我的人）
+                <span v-if="detail.referral?.referee_total != null" class="tabular-nums">
+                  · 共 {{ detail.referral.referee_total }} 人
+                </span>
+              </p>
+              <div
+                v-if="detail.referral?.referees?.length"
+                class="max-h-48 space-y-2 overflow-y-auto"
+              >
+                <div
+                  v-for="row in detail.referral.referees"
+                  :key="row.binding_id || row.user_id"
+                  class="rounded-md border border-border bg-muted/20 p-2.5"
+                >
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium">{{ row.nickname || '未命名' }}</span>
+                    <span class="text-muted-foreground tabular-nums">#{{ row.user_id }}</span>
+                    <span class="text-xs text-muted-foreground">{{ tierLabel(row.user_tier) }}</span>
+                    <span
+                      class="rounded px-1.5 py-0.5 text-xs"
+                      :class="row.is_expired
+                        ? 'bg-destructive/10 text-destructive'
+                        : 'bg-primary/10 text-primary'"
+                    >
+                      {{ row.is_expired ? '已过期' : '有效' }}
+                    </span>
+                  </div>
+                  <div class="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                    <p>手机 {{ row.phone || '-' }}</p>
+                    <p>
+                      来源 {{ bindSourceLabel(row.source) }}
+                      · 绑定 {{ formatDate(row.bound_at) }}
+                      · 到期 {{ formatDate(row.expires_at) }}
+                    </p>
+                  </div>
+                </div>
+                <p
+                  v-if="detail.referral?.referee_truncated"
+                  class="text-xs text-muted-foreground"
+                >
+                  仅展示最近 100 条下级绑定
+                </p>
+              </div>
+              <p v-else class="text-xs text-muted-foreground">暂无下级被推荐人</p>
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -227,6 +317,15 @@ const tierMap = {
 
 function tierLabel(tier) {
   return tierMap[tier] || tier || '-'
+}
+
+function bindSourceLabel(source) {
+  const map = {
+    link: '链接',
+    code: '推荐码',
+    poster: '海报',
+  }
+  return map[source] || source || '-'
 }
 
 function formatDate(value) {

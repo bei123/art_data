@@ -245,6 +245,25 @@ function formatBinding(binding) {
   }
 }
 
+async function enrichBindingWithReferrer(binding, connection = db) {
+  const formatted = formatBinding(binding)
+  if (!formatted) return null
+
+  const [rows] = await connection.query(
+    `SELECT id, nickname, avatar FROM wx_users WHERE id = ? LIMIT 1`,
+    [binding.referrer_id]
+  )
+  const referrer = rows[0]
+  return {
+    ...formatted,
+    referrer: {
+      id: Number(binding.referrer_id),
+      nickname: referrer?.nickname || null,
+      avatar: referrer?.avatar || null,
+    },
+  }
+}
+
 async function resolveOrderReferrerId(refereeId, connection = db) {
   const binding = await getBindingByRefereeId(refereeId, connection)
   if (!isBindingActive(binding)) return null
@@ -302,11 +321,12 @@ async function getReferralCenter(userId) {
   )
 
   const wallet = await getWalletSummary(userId)
+  const myBinding = await enrichBindingWithReferrer(binding)
 
   return adminResult(200, {
     tier: tierProfile,
     referral_code: codeRow?.status === 'active' ? codeRow.code : null,
-    my_binding: formatBinding(binding),
+    my_binding: myBinding,
     binding_days: REFERRAL_BINDING_DAYS,
     withdraw: {
       ...getWithdrawPolicy(),
@@ -461,7 +481,14 @@ async function getTierForRequest(req) {
     return adminResult(404, { error: '用户不存在' })
   }
 
-  return adminResult(200, { tier: profile })
+  const binding = await getBindingByRefereeId(session.userId)
+  const myBinding = await enrichBindingWithReferrer(binding)
+
+  return adminResult(200, {
+    tier: profile,
+    my_binding: myBinding,
+    my_referrer: myBinding?.referrer || null,
+  })
 }
 
 module.exports = {
