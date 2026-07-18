@@ -232,6 +232,19 @@ async function attributeReferral({ refereeId, code, referrerId, source = 'link',
   }
 
   const expiresAt = computeAttributionExpiresAt()
+  const existing = await getActiveAttribution(refereeId, connection)
+  if (
+    existing &&
+    Number(existing.referrer_id) === Number(resolvedReferrerId) &&
+    String(existing.source || '') === normalizedSource
+  ) {
+    return {
+      ok: true,
+      status: 200,
+      attribution: formatAttribution(existing),
+      unchanged: true,
+    }
+  }
 
   await connection.query(
     `INSERT INTO referral_attributions (user_id, referrer_id, source, attributed_at, expires_at)
