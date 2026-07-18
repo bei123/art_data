@@ -132,12 +132,38 @@ async function refreshWxAccessToken(refreshToken) {
   return { ok: true, ...pair }
 }
 
-async function revokeWxRefreshTokensForUser(userId) {
+async function revokeWxRefreshTokensForUser(userId, connection = null) {
   if (!userId) return
-  await query(
-    'UPDATE wx_refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL',
+  const runner = connection && typeof connection.query === 'function' ? connection : null
+  const sql =
+    'UPDATE wx_refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL'
+  if (runner) {
+    await runner.query(sql, [userId])
+    return
+  }
+  await query(sql, [userId])
+}
+
+/** 注销/踢下线：删除全部 access 会话并吊销 refresh */
+async function revokeAllWxAuthForUser(userId, connection = null) {
+  if (!userId) return { sessions: 0, refresh: 0 }
+  const runner = connection && typeof connection.query === 'function' ? connection : null
+  const exec = async (sql, params) => {
+    if (runner) return runner.query(sql, params)
+    return query(sql, params)
+  }
+
+  const [sessionResult] = await exec('DELETE FROM wx_user_sessions WHERE user_id = ?', [userId])
+  await revokeWxRefreshTokensForUser(userId, runner || undefined)
+  const [refreshResult] = await exec(
+    'DELETE FROM wx_refresh_tokens WHERE user_id = ?',
     [userId]
   )
+
+  return {
+    sessions: sessionResult?.affectedRows || 0,
+    refresh: refreshResult?.affectedRows || 0,
+  }
 }
 
 async function revokeWxAccessSession(token) {
@@ -160,5 +186,6 @@ module.exports = {
   issueWxTokenPair,
   refreshWxAccessToken,
   revokeWxRefreshTokensForUser,
+  revokeAllWxAuthForUser,
   revokeWxAccessSession,
 }

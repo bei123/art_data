@@ -1,7 +1,7 @@
 const db = require('../db')
 const logger = require('../utils/logger')
 const redisClient = require('../utils/redisClient')
-const { revokeWxRefreshTokensForUser } = require('../utils/wxSessionTokens')
+const { revokeAllWxAuthForUser } = require('../utils/wxSessionTokens')
 
 const PURGE_CONFIRM_PHRASE = '确认注销'
 const REDIS_EXTERNAL_USER_KEY_PREFIX = 'external_user:'
@@ -300,19 +300,15 @@ async function purgeWxUserData(connection, userId) {
   const orderIds = orders.map((row) => row.id)
   const outTradeNos = orders.map((row) => row.out_trade_no).filter(Boolean)
 
-  counts.sessions = await safeDelete(
-    connection,
-    'DELETE FROM wx_user_sessions WHERE user_id = ?',
-    [userId],
-    'wx_user_sessions'
-  )
-  await revokeWxRefreshTokensForUser(userId)
-  counts.refresh_tokens = await safeDelete(
-    connection,
-    'DELETE FROM wx_refresh_tokens WHERE user_id = ?',
-    [userId],
-    'wx_refresh_tokens'
-  )
+  counts.sessions = 0
+  counts.refresh_tokens = 0
+  try {
+    const revoked = await revokeAllWxAuthForUser(userId, connection)
+    counts.sessions = revoked.sessions || 0
+    counts.refresh_tokens = revoked.refresh || 0
+  } catch (err) {
+    if (err.code !== 'ER_NO_SUCH_TABLE') throw err
+  }
 
   if (orderIds.length) {
     counts.commission_ledger = await safeDelete(
