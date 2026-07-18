@@ -325,6 +325,12 @@ async function purgeWxUserData(connection, userId) {
     [userId, userId],
     'referral_bindings'
   )
+  counts.referral_attributions = await safeDelete(
+    connection,
+    'DELETE FROM referral_attributions WHERE user_id = ? OR referrer_id = ?',
+    [userId, userId],
+    'referral_attributions'
+  )
   counts.referral_codes = await safeDelete(
     connection,
     'DELETE FROM referral_codes WHERE user_id = ?',

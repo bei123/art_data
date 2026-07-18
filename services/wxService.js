@@ -186,9 +186,9 @@ const { code } = req.body;
 
         const tokenPair = await issueWxTokenPair({ userId: user.id, openid });
 
-        const { tryBindReferralOnLogin } = require('./referralService');
+        const { tryAttributeReferralOnLogin } = require('./referralService');
         const { getUserTierProfile } = require('./userTierService');
-        const referralBind = await tryBindReferralOnLogin(user.id, req.body);
+        const referralAttribution = await tryAttributeReferralOnLogin(user.id, req.body);
         const tier = await getUserTierProfile(user.id);
 
         let welcomeCoupon = null;
@@ -215,7 +215,8 @@ const { code } = req.body;
                 updated_at: user.updated_at
             },
             tier,
-            referral_bind: referralBind,
+            referral_attribution: referralAttribution,
+            referral_bind: referralAttribution,
             welcome_coupon: welcomeCoupon,
         });
 } catch (err) {

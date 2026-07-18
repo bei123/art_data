@@ -150,6 +150,28 @@ async function ensureShareEventsTable() {
   logger.info('share_events table created')
 }
 
+/**
+ * 成交临时归因（分享进店）：与永久绑定分离
+ * user_id 唯一，新归因覆盖旧归因
+ */
+async function ensureReferralAttributionsTable() {
+  if (await hasTable('referral_attributions')) return
+
+  await db.query(`
+    CREATE TABLE referral_attributions (
+      user_id INT NOT NULL COMMENT '被推荐人 wx_users.id',
+      referrer_id INT NOT NULL COMMENT '分享人 wx_users.id',
+      source ENUM('link','code','poster') NOT NULL DEFAULT 'link',
+      attributed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      PRIMARY KEY (user_id),
+      KEY idx_referrer_id (referrer_id),
+      KEY idx_expires_at (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `)
+  logger.info('referral_attributions table created')
+}
+
 const { ensureCommissionSchema } = require('./commissionSchema')
 const { ensureReferralRewardsSchema } = require('./referralRewardsSchema')
 
@@ -172,6 +194,7 @@ async function ensureReferralSchema() {
   await ensureWxUserTierColumns()
   await ensureReferralCodesTable()
   await ensureReferralBindingsTable()
+  await ensureReferralAttributionsTable()
   await ensureShareEventsTable()
   await ensureOrdersReferrerColumn()
   await ensureCommissionSchema()

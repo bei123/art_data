@@ -4,8 +4,11 @@ import {
   parseReferrerId,
   normalizeBindSource,
   computeBindingExpiresAt,
+  computeAttributionExpiresAt,
   isBindingActive,
+  isAttributionActive,
   isDuplicateKeyError,
+  REFERRAL_ATTRIBUTION_DAYS,
 } from '../services/referralService.js'
 
 describe('normalizeReferrerCode', () => {
@@ -61,6 +64,23 @@ describe('binding expiry', () => {
     expect(isBindingActive({ expires_at: '2099-12-31T00:00:00.000Z' }, now)).toBe(true)
     expect(isBindingActive({ expires_at: '2026-01-01T00:00:00.000Z' }, now)).toBe(false)
     expect(isBindingActive(null, now)).toBe(false)
+  })
+})
+
+describe('attribution expiry', () => {
+  it('computes expires_at from attribution days', () => {
+    const from = new Date('2026-07-01T00:00:00.000Z')
+    const expires = computeAttributionExpiresAt(from)
+    const expected = new Date(from)
+    expected.setDate(expected.getDate() + REFERRAL_ATTRIBUTION_DAYS)
+    expect(expires.getTime()).toBe(expected.getTime())
+  })
+
+  it('treats future expires_at as active', () => {
+    const now = new Date('2026-07-10T00:00:00.000Z')
+    expect(isAttributionActive({ expires_at: '2026-07-20T00:00:00.000Z' }, now)).toBe(true)
+    expect(isAttributionActive({ expires_at: '2026-07-01T00:00:00.000Z' }, now)).toBe(false)
+    expect(isAttributionActive(null, now)).toBe(false)
   })
 })
 

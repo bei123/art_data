@@ -3537,10 +3537,24 @@
         ]
       }
     },
+    "/api/wx/referral/attribute": {
+      "post": {
+        "operationId": "post_wx_referral_attribute",
+        "summary": "POST /api/wx/referral/attribute — 写入临时成交归因",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/api/wx/referral/bind": {
       "post": {
         "operationId": "post_wx_referral_bind",
-        "summary": "POST /api/wx/referral/bind",
+        "summary": "POST /api/wx/referral/bind — 确认永久绑定（需 confirm）",
         "tags": [
           "wechat"
         ],

@@ -11,6 +11,7 @@ function buildReferralRuleHighlights({
   newUserCouponValidDays,
   vipSpendThresholdYuan,
   withdrawPolicy,
+  attributionDays = 15,
 }) {
   const {
     max_yuan: maxYuan,
@@ -18,8 +19,8 @@ function buildReferralRuleHighlights({
   } = withdrawPolicy || {}
 
   return [
-    `分享有礼：好友通过您的链接购买，您可获得基于真实成交的${REFERRAL_BRAND.shareRewardLabel}`,
-    '推荐关系绑定后永久有效，首次绑定后不可修改',
+    `分享有礼：好友通过您的链接在 ${attributionDays} 天内购买，您可获得基于真实成交的${REFERRAL_BRAND.shareRewardLabel}`,
+    '推荐关系需好友主动确认后永久绑定，确认后不可修改',
     `${REFERRAL_BRAND.programName}首次成功推荐成交，额外奖励 ${firstReferralBonusYuan} 元（计入可提现余额）`,
     `新用户注册可获得 ${newUserCouponYuan} 元微信免充值代金券（支付时自动抵扣，约 ${newUserCouponValidDays} 天内可用）`,
     `累计消费满 ${vipSpendThresholdYuan} 元可升级 ${REFERRAL_BRAND.vipName}，${REFERRAL_BRAND.shareRewardLabel} +2%`,

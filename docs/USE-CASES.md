@@ -84,8 +84,9 @@ flowchart TB
 | 用例 | 主要 API |
 |------|----------|
 | 分享码 / 海报事件 | `/api/wx/referral/code` · share |
-| 绑定（登录或显式） | `/api/wx/referral/bind` |
-| 中心数据 | referral 中心接口 |
+| 临时归因（分享进店 / 登录） | `/api/wx/referral/attribute` |
+| 确认永久绑定 | `/api/wx/referral/bind`（需 `confirm: true`） |
+| 中心数据 | referral 中心接口（含 `pending_attribution`） |
 | 提现 | `/api/wx/referral/withdraw` |
 
 ### 管理运营

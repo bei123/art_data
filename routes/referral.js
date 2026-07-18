@@ -14,6 +14,16 @@ router.use(async (req, res, next) => {
   }
 })
 
+router.post('/attribute', authenticateToken, async (req, res) => {
+  try {
+    const r = await svc.attributeReferralFromRequest(req)
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('写入推荐归因失败', { err: error })
+    res.status(500).json({ error: '写入推荐归因失败' })
+  }
+})
+
 router.post('/bind', authenticateToken, async (req, res) => {
   try {
     const r = await svc.bindReferralFromRequest(req)

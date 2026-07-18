@@ -30,7 +30,9 @@ describe('buildReferralRuleHighlights', () => {
 
     expect(highlights).toHaveLength(7)
     expect(highlights[0]).toContain(REFERRAL_BRAND.shareRewardLabel)
-    expect(highlights[1]).toContain('永久有效')
+    expect(highlights[0]).toContain('15')
+    expect(highlights[1]).toContain('确认')
+    expect(highlights[1]).toContain('永久绑定')
     expect(highlights[2]).toContain(REFERRAL_BRAND.programName)
     expect(highlights[4]).toContain(REFERRAL_BRAND.vipName)
     expect(highlights[5]).toContain(REFERRAL_BRAND.advisorName)

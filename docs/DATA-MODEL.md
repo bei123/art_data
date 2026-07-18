@@ -83,6 +83,7 @@ erDiagram
   wx_users ||--o| referral_codes : code
   wx_users ||--o{ referral_bindings : as_referrer
   wx_users ||--o| referral_bindings : as_referee
+  wx_users ||--o| referral_attributions : temp_attribution
   orders ||--o{ commission_ledger : generates
   wx_users ||--o| user_wallets : balance
   wx_users ||--o{ withdrawal_requests : withdraws
@@ -92,7 +93,8 @@ erDiagram
 
 | 表 | 要点 |
 |----|------|
-| `referral_bindings` | referee 唯一；`source` link/code/poster；`expires_at` 为 NULL 表示永久有效 |
+| `referral_attributions` | user_id 唯一；分享进店临时归因；新归因覆盖；`expires_at` 内有效；下单佣金优先 |
+| `referral_bindings` | 需用户确认；referee 唯一不可改；`source` link/code/poster；`expires_at` 为 NULL 表示永久 |
 | `commission_ledger` | UK per order item；`pending|settlable|withdrawn|cancelled` |
 | `commission_rate_rules` | 按 `product_type` |
 | `user_wallets` | pending / available |

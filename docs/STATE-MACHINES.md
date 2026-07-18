@@ -149,14 +149,17 @@ stateDiagram-v2
 
 ---
 
-## 6. 优惠券 / 推荐绑定（简）
+## 6. 优惠券 / 推荐归因与绑定（简）
 
 | 实体 | 状态 |
 |------|------|
 | `user_referral_coupons` | `available` → `reserved`（未支付占券）→ `used`；或 `expired` / `cancelled` |
-| `referral_bindings` | 无 status；`expires_at IS NULL` 表示永久有效；referee 唯一 |
+| `referral_attributions` | 无 status；`expires_at` 内有效；按 user_id 覆盖；用于下单佣金优先归因 |
+| `referral_bindings` | 无 status；需用户确认写入；`expires_at IS NULL` 表示永久；referee 唯一、不可改 |
 | `referral_codes` | `active` / `disabled` |
 | `art_advisor_applications` | `pending` / `approved` / `rejected` |
+
+下单 `orders.referrer_id`：有效临时归因 → 已确认永久绑定 → 空。
 
 ---
 

@@ -32,7 +32,7 @@ sequenceDiagram
   WX-->>API: openid / session_key
   API->>DB: upsert wx_users
   API->>DB: issueWxTokenPair<br/>sessions + refresh_tokens
-  Note over API: tryBindReferralOnLogin<br/>新用户欢迎券 / tier
+  Note over API: tryAttributeReferralOnLogin<br/>新用户欢迎券 / tier
   API-->>MP: token + refreshToken + user
   MP->>API: Bearer 调业务接口
 
@@ -179,10 +179,15 @@ sequenceDiagram
 
   R->>API: GET /api/wx/referral/code
   API-->>R: 分享码
-  N->>API: 登录（body 带 referrer）或<br/>POST /api/wx/referral/bind
-  API->>DB: bindReferral
+  N->>API: 登录（body 带 referrer）或<br/>POST /api/wx/referral/attribute
+  API->>DB: attributeReferral（临时归因）
+  opt 用户确认上级
+    N->>API: POST /api/wx/referral/bind { confirm: true }
+    API->>DB: bindReferral（永久绑定）
+  end
 
   N->>API: 下单支付成功（payNotify）
+  Note over API: resolveOrderReferrerId<br/>归因优先，否则绑定
   API->>DB: createCommissionsForPaidOrder<br/>（commission_ledger pending）
   Note over API: commissionSettlementScheduler<br/>→ settlePendingCommissions
 
