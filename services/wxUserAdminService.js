@@ -231,6 +231,65 @@ async function clearExternalUserCache(conn, userId) {
   }
 }
 
+function extractOssObjectKeyFromUrl(url) {
+  if (!url) return null
+  const raw = String(url).trim()
+  if (!raw) return null
+  try {
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      const pathname = new URL(raw).pathname || ''
+      const key = pathname.replace(/^\/+/, '')
+      return key || null
+    }
+  } catch {
+    return null
+  }
+  if (raw.startsWith('/')) return raw.replace(/^\/+/, '') || null
+  return raw
+}
+
+/**
+ * 尽力删除实名身份证 OSS 对象（失败不阻断注销）
+ */
+async function clearUserIdcardOssObjects(connection, userId) {
+  let deleted = 0
+  try {
+    const [rows] = await connection.query(
+      `SELECT id_card_front_url, id_card_back_url
+       FROM real_name_registrations
+       WHERE user_id = ?`,
+      [userId]
+    )
+    if (!rows.length) return 0
+
+    const { deleteFromOSS } = require('../config/oss')
+    const keys = new Set()
+    for (const row of rows) {
+      for (const url of [row.id_card_front_url, row.id_card_back_url]) {
+        const key = extractOssObjectKeyFromUrl(url)
+        if (key && key.indexOf(`idcards/${userId}/`) >= 0) keys.add(key)
+      }
+    }
+
+    for (const key of keys) {
+      try {
+        await deleteFromOSS(key)
+        deleted += 1
+      } catch (err) {
+        logger.warn('wx user purge idcard oss delete failed', {
+          userId,
+          key,
+          message: err.message,
+        })
+      }
+    }
+  } catch (err) {
+    if (err.code === 'ER_NO_SUCH_TABLE') return 0
+    logger.warn('wx user purge idcard cleanup failed', { userId, message: err.message })
+  }
+  return deleted
+}
+
 async function purgeWxUserData(connection, userId) {
   const counts = {}
 
@@ -268,6 +327,12 @@ async function purgeWxUserData(connection, userId) {
       [userId, orderIds],
       'referral_bonus_grants'
     )
+    counts.wallet_debt_events = await safeDelete(
+      connection,
+      'DELETE FROM wallet_debt_events WHERE user_id = ? OR order_id IN (?)',
+      [userId, orderIds],
+      'wallet_debt_events'
+    )
   } else {
     counts.commission_ledger = await safeDelete(
       connection,
@@ -280,6 +345,12 @@ async function purgeWxUserData(connection, userId) {
       'DELETE FROM referral_bonus_grants WHERE user_id = ?',
       [userId],
       'referral_bonus_grants'
+    )
+    counts.wallet_debt_events = await safeDelete(
+      connection,
+      'DELETE FROM wallet_debt_events WHERE user_id = ?',
+      [userId],
+      'wallet_debt_events'
     )
   }
 
@@ -405,6 +476,8 @@ async function purgeWxUserData(connection, userId) {
     [userId],
     'wx_user_addresses'
   )
+
+  counts.idcard_oss_objects = await clearUserIdcardOssObjects(connection, userId)
   counts.real_name_registrations = await safeDelete(
     connection,
     'DELETE FROM real_name_registrations WHERE user_id = ?',
