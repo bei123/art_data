@@ -1323,7 +1323,7 @@ async function grantCouponToUsersBatch({
   if (loaded.error) return loaded.error
   const { template: tpl, templateId: tid } = loaded
 
-  let ids = []
+  let ids
   let mode = 'selected'
 
   if (grantAll === true || grantAll === 'true' || grantAll === 1 || grantAll === '1') {

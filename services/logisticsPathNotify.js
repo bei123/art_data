@@ -16,7 +16,6 @@ const PATH_TERMINAL_REDIS_PREFIX = 'logistics:path:terminal:'
 const PATH_SEEN_TTL_SEC = parseInt(process.env.WX_LOGISTICS_PATH_LAST_TTL_SEC || `${60 * 60 * 24 * 45}`, 10)
 const PATH_POLL_MS = parseInt(process.env.WX_LOGISTICS_PATH_POLL_MS || '300000', 10)
 const PATH_POLL_BATCH = parseInt(process.env.WX_LOGISTICS_PATH_POLL_BATCH || '20', 10)
-const PATH_NOTIFY_GAP_MS = parseInt(process.env.WX_LOGISTICS_PATH_NOTIFY_GAP_MS || '300', 10)
 
 const PATH_ACTION_LABELS = {
   100001: '揽件成功',
@@ -50,10 +49,6 @@ function clipText(value, maxLen) {
   const str = String(value).trim()
   if (!str) return ''
   return [...str].slice(0, maxLen).join('')
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function isLogisticsPathNotifyEnabled() {
@@ -224,10 +219,10 @@ function findNewPathNodes(pathItemList, seenSet) {
  */
 async function handleLogisticsPathNotify({
   orderId,
-  outTradeNo,
-  deliveryId,
+  outTradeNo: _outTradeNo,
+  deliveryId: _deliveryId,
   waybillId,
-  companyName,
+  companyName: _companyName,
   pathItemList,
   source = 'getPath',
   force = false,

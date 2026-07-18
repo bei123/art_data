@@ -695,6 +695,34 @@
         }
       }
     },
+    "/api/admin/referral/coupons/grant-batch": {
+      "post": {
+        "operationId": "post_admin_referral_coupons_grant_batch",
+        "summary": "POST /api/admin/referral/coupons/grant-batch",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/admin/referral/coupons/grant-eligible-count": {
+      "get": {
+        "operationId": "get_admin_referral_coupons_grant_eligible_count",
+        "summary": "GET /api/admin/referral/coupons/grant-eligible-count",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
     "/api/admin/referral/coupons": {
       "get": {
         "operationId": "get_admin_referral_coupons",
@@ -4533,6 +4561,62 @@
       "get": {
         "operationId": "get_wx_logistics_deliveries",
         "summary": "GET /api/wx/logistics/deliveries",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/delivery-list": {
+      "get": {
+        "operationId": "get_wx_logistics_delivery_list",
+        "summary": "GET /api/wx/logistics/delivery-list",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/manual-shipment": {
+      "post": {
+        "operationId": "post_wx_logistics_manual_shipment",
+        "summary": "POST /api/wx/logistics/manual-shipment",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/follow-waybill": {
+      "post": {
+        "operationId": "post_wx_logistics_follow_waybill",
+        "summary": "POST /api/wx/logistics/follow-waybill",
+        "tags": [
+          "wechat"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/wx/logistics/query-follow-trace": {
+      "post": {
+        "operationId": "post_wx_logistics_query_follow_trace",
+        "summary": "POST /api/wx/logistics/query-follow-trace",
         "tags": [
           "wechat"
         ],
