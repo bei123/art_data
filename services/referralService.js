@@ -167,24 +167,27 @@ async function getActiveAttribution(userId, connection = db) {
 
 /**
  * 从拟绑定的推荐人向上游走，若回到当前被推荐人则形成环（含互绑 A⇄B）。
+ * @returns {{ cycle: boolean, path?: number[] }}
  */
 async function wouldCreateReferralCycle(refereeId, referrerId, connection = db) {
   const startReferee = Number(refereeId)
   let current = Number(referrerId)
-  if (!startReferee || !current) return false
+  if (!startReferee || !current) return { cycle: false }
 
+  const path = []
   const seen = new Set()
   // 单层链通常很短；上限防止脏数据死循环
   for (let depth = 0; depth < 32; depth += 1) {
-    if (current === startReferee) return true
-    if (seen.has(current)) return true
+    path.push(current)
+    if (current === startReferee) return { cycle: true, path }
+    if (seen.has(current)) return { cycle: true, path }
     seen.add(current)
 
     const upstream = await getBindingByRefereeId(current, connection)
-    if (!upstream?.referrer_id) return false
+    if (!upstream?.referrer_id) return { cycle: false, path }
     current = Number(upstream.referrer_id)
   }
-  return true
+  return { cycle: true, path }
 }
 
 async function resolveReferrerId({ code, referrerId }, connection = db) {
@@ -298,16 +301,27 @@ async function bindReferral({ refereeId, code, referrerId, source = 'link', conn
     return { ok: true, status: 200, skipped: true, reason: 'self_referral' }
   }
 
-  if (await wouldCreateReferralCycle(refereeId, resolvedReferrerId, connection)) {
+  const cycleCheck = await wouldCreateReferralCycle(refereeId, resolvedReferrerId, connection)
+  if (cycleCheck.cycle) {
+    const isMutual =
+      Array.isArray(cycleCheck.path) &&
+      cycleCheck.path.length >= 1 &&
+      Number(cycleCheck.path[0]) === Number(resolvedReferrerId) &&
+      cycleCheck.path.includes(Number(refereeId))
     logger.info('referral binding rejected circular referral', {
       refereeId,
       referrerId: resolvedReferrerId,
+      chain: cycleCheck.path || [],
+      mutual: isMutual,
     })
     return {
       ok: false,
       status: 400,
-      error: '不能互相绑定为推荐人',
+      error: isMutual
+        ? '对方已是您的下级（或在您的推荐链上），不能互相绑定为推荐人'
+        : '不能互相绑定为推荐人',
       reason: 'circular_referral',
+      chain: cycleCheck.path || undefined,
     }
   }
 
