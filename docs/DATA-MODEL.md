@@ -92,7 +92,7 @@ erDiagram
 
 | 表 | 要点 |
 |----|------|
-| `referral_bindings` | referee 唯一；`source` link/code/poster；`expires_at` |
+| `referral_bindings` | referee 唯一；`source` link/code/poster；`expires_at` 为 NULL 表示永久有效 |
 | `commission_ledger` | UK per order item；`pending|settlable|withdrawn|cancelled` |
 | `commission_rate_rules` | 按 `product_type` |
 | `user_wallets` | pending / available |

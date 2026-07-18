@@ -46,7 +46,8 @@ async function getReferralOverviewStats() {
     ),
     db.query(
       `SELECT COUNT(*) AS activeBindings
-       FROM referral_bindings WHERE expires_at > NOW()`
+       FROM referral_bindings
+       WHERE expires_at IS NULL OR expires_at > NOW()`
     ),
     db.query('SELECT COUNT(*) AS totalShares FROM share_events'),
     db.query(

@@ -75,23 +75,60 @@ async function ensureReferralCodesTable() {
 }
 
 async function ensureReferralBindingsTable() {
-  if (await hasTable('referral_bindings')) return
+  if (!(await hasTable('referral_bindings'))) {
+    await db.query(`
+      CREATE TABLE referral_bindings (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        referrer_id INT NOT NULL,
+        referee_id INT NOT NULL,
+        source ENUM('link','code','poster') NOT NULL,
+        bound_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NULL COMMENT 'NULL=永久有效',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_referee_id (referee_id),
+        KEY idx_referrer_id (referrer_id),
+        KEY idx_expires_at (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `)
+    logger.info('referral_bindings table created')
+    return
+  }
 
-  await db.query(`
-    CREATE TABLE referral_bindings (
-      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-      referrer_id INT NOT NULL,
-      referee_id INT NOT NULL,
-      source ENUM('link','code','poster') NOT NULL,
-      bound_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      expires_at DATETIME NOT NULL,
-      PRIMARY KEY (id),
-      UNIQUE KEY uk_referee_id (referee_id),
-      KEY idx_referrer_id (referrer_id),
-      KEY idx_expires_at (expires_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  `)
-  logger.info('referral_bindings table created')
+  await ensureReferralBindingsPermanent()
+}
+
+/**
+ * 推荐绑定改为永久：expires_at 可空，并将历史记录清为 NULL
+ */
+async function ensureReferralBindingsPermanent() {
+  try {
+    const [cols] = await db.query(
+      `SELECT IS_NULLABLE
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'referral_bindings'
+         AND COLUMN_NAME = 'expires_at'
+       LIMIT 1`
+    )
+    if (cols.length && String(cols[0].IS_NULLABLE).toUpperCase() === 'NO') {
+      await db.query(
+        `ALTER TABLE referral_bindings
+         MODIFY COLUMN expires_at DATETIME NULL COMMENT 'NULL=永久有效'`
+      )
+      logger.info('referral_bindings.expires_at made nullable')
+    }
+
+    const [result] = await db.query(
+      `UPDATE referral_bindings SET expires_at = NULL WHERE expires_at IS NOT NULL`
+    )
+    if (result?.affectedRows > 0) {
+      logger.info('referral_bindings converted to permanent', {
+        updated: result.affectedRows,
+      })
+    }
+  } catch (err) {
+    logger.warn('ensureReferralBindingsPermanent failed', { message: err.message })
+  }
 }
 
 async function ensureShareEventsTable() {

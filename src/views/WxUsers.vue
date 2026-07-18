@@ -149,14 +149,14 @@
                       ? 'bg-destructive/10 text-destructive'
                       : 'bg-primary/10 text-primary'"
                   >
-                    {{ detail.referral.referrer.is_expired ? '已过期' : '有效' }}
+                    {{ detail.referral.referrer.is_expired ? '已失效' : '永久有效' }}
                   </span>
                 </div>
                 <div class="mt-1 space-y-0.5 text-xs text-muted-foreground">
                   <p>手机 {{ detail.referral.referrer.phone || '-' }}</p>
                   <p>来源 {{ bindSourceLabel(detail.referral.referrer.source) }}</p>
                   <p>绑定 {{ formatDate(detail.referral.referrer.bound_at) }}</p>
-                  <p>到期 {{ formatDate(detail.referral.referrer.expires_at) }}</p>
+                  <p>有效期 永久</p>
                 </div>
               </div>
               <p v-else class="text-xs text-muted-foreground">暂无上级推荐人</p>
@@ -188,7 +188,7 @@
                         ? 'bg-destructive/10 text-destructive'
                         : 'bg-primary/10 text-primary'"
                     >
-                      {{ row.is_expired ? '已过期' : '有效' }}
+                      {{ row.is_expired ? '已失效' : '永久有效' }}
                     </span>
                   </div>
                   <div class="mt-1 space-y-0.5 text-xs text-muted-foreground">
@@ -196,7 +196,7 @@
                     <p>
                       来源 {{ bindSourceLabel(row.source) }}
                       · 绑定 {{ formatDate(row.bound_at) }}
-                      · 到期 {{ formatDate(row.expires_at) }}
+                      · 永久有效
                     </p>
                   </div>
                 </div>

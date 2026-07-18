@@ -18,7 +18,6 @@ describe('buildReferralRuleHighlights', () => {
   it('builds seven highlight lines with consistent copy', () => {
     
     const highlights = buildReferralRuleHighlights({
-      bindingDays: 365,
       firstReferralBonusYuan: 30,
       newUserCouponYuan: 50,
       newUserCouponValidDays: 30,
@@ -31,6 +30,7 @@ describe('buildReferralRuleHighlights', () => {
 
     expect(highlights).toHaveLength(7)
     expect(highlights[0]).toContain(REFERRAL_BRAND.shareRewardLabel)
+    expect(highlights[1]).toContain('永久有效')
     expect(highlights[2]).toContain(REFERRAL_BRAND.programName)
     expect(highlights[4]).toContain(REFERRAL_BRAND.vipName)
     expect(highlights[5]).toContain(REFERRAL_BRAND.advisorName)

@@ -50,16 +50,15 @@ describe('normalizeBindSource', () => {
 })
 
 describe('binding expiry', () => {
-  it('computes expiry based on binding days', () => {
-    const from = new Date('2026-01-01T12:00:00.000Z')
-    const expires = computeBindingExpiresAt(from)
-    const diffDays = Math.round((expires.getTime() - from.getTime()) / (24 * 60 * 60 * 1000))
-    expect(diffDays).toBe(365)
+  it('uses permanent bindings (null expires_at)', () => {
+    expect(computeBindingExpiresAt()).toBe(null)
   })
 
-  it('detects active bindings', () => {
+  it('treats null expires_at as permanently active', () => {
     const now = new Date('2026-06-01T00:00:00.000Z')
-    expect(isBindingActive({ expires_at: '2026-12-31T00:00:00.000Z' }, now)).toBe(true)
+    expect(isBindingActive({ expires_at: null }, now)).toBe(true)
+    expect(isBindingActive({ expires_at: '' }, now)).toBe(true)
+    expect(isBindingActive({ expires_at: '2099-12-31T00:00:00.000Z' }, now)).toBe(true)
     expect(isBindingActive({ expires_at: '2026-01-01T00:00:00.000Z' }, now)).toBe(false)
     expect(isBindingActive(null, now)).toBe(false)
   })

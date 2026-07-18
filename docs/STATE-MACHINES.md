@@ -154,7 +154,7 @@ stateDiagram-v2
 | 实体 | 状态 |
 |------|------|
 | `user_referral_coupons` | `available` → `reserved`（未支付占券）→ `used`；或 `expired` / `cancelled` |
-| `referral_bindings` | 无 status；`expires_at` 判定是否有效；referee 唯一 |
+| `referral_bindings` | 无 status；`expires_at IS NULL` 表示永久有效；referee 唯一 |
 | `referral_codes` | `active` / `disabled` |
 | `art_advisor_applications` | `pending` / `approved` / `rejected` |
 

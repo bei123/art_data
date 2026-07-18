@@ -10,7 +10,7 @@ const { getWalletSummary } = require('./commissionService')
 const { getWithdrawPolicy } = require('./withdrawService')
 const { FIRST_REFERRAL_BONUS_YUAN, NEW_USER_COUPON_YUAN } = require('./referralRewardService')
 
-const REFERRAL_BINDING_DAYS = parseInt(process.env.REFERRAL_BINDING_DAYS || '365', 10)
+const REFERRAL_BINDING_DAYS = null // 永久绑定；保留导出名兼容旧调用
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_LENGTH = 8
 const VALID_BIND_SOURCES = new Set(['link', 'code', 'poster'])
@@ -57,15 +57,16 @@ function randomReferralCode() {
   return code
 }
 
-function computeBindingExpiresAt(fromDate = new Date()) {
-  const expires = new Date(fromDate)
-  expires.setDate(expires.getDate() + REFERRAL_BINDING_DAYS)
-  return expires
+/** 永久绑定：不再写入过期时间 */
+function computeBindingExpiresAt() {
+  return null
 }
 
-function isBindingActive(binding, now = new Date()) {
+function isBindingActive(binding) {
   if (!binding) return false
-  return new Date(binding.expires_at) > now
+  // expires_at 为 null 表示永久；兼容历史有期限的数据
+  if (binding.expires_at == null || binding.expires_at === '') return true
+  return new Date(binding.expires_at) > new Date()
 }
 
 function isDuplicateKeyError(err) {
@@ -328,7 +329,8 @@ async function getReferralCodeInfo(userId) {
     referral_code: code,
     share_query: code ? `referrerCode=${code}` : null,
     referrer_id: userId,
-    binding_days: REFERRAL_BINDING_DAYS,
+    binding_days: null,
+    binding_permanent: true,
   })
 }
 
@@ -362,7 +364,8 @@ async function getReferralCenter(userId) {
     tier: tierProfile,
     referral_code: codeRow?.status === 'active' ? codeRow.code : null,
     my_binding: myBinding,
-    binding_days: REFERRAL_BINDING_DAYS,
+    binding_days: null,
+    binding_permanent: true,
     withdraw: {
       ...getWithdrawPolicy(),
       requires_real_name: false,
@@ -488,7 +491,8 @@ async function getReferralRules() {
   const withdrawPolicy = getWithdrawPolicy()
 
   return adminResult(200, {
-    binding_days: REFERRAL_BINDING_DAYS,
+    binding_days: null,
+    binding_permanent: true,
     first_referral_bonus_yuan: FIRST_REFERRAL_BONUS_YUAN,
     new_user_coupon_yuan: NEW_USER_COUPON_YUAN,
     new_user_coupon_valid_days: newUserCouponValidDays,
@@ -497,7 +501,6 @@ async function getReferralRules() {
     max_withdraw_yuan: withdrawPolicy.max_yuan,
     user_daily_withdraw_limit_yuan: withdrawPolicy.user_daily_limit_yuan,
     highlights: buildReferralRuleHighlights({
-      bindingDays: REFERRAL_BINDING_DAYS,
       firstReferralBonusYuan: FIRST_REFERRAL_BONUS_YUAN,
       newUserCouponYuan: NEW_USER_COUPON_YUAN,
       newUserCouponValidDays,
