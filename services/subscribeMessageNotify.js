@@ -651,6 +651,31 @@ async function notifyOrderCancelled({ outTradeNo, orderId, reason = '订单已�
   })
 }
 
+/** 退款通知金额：优先现金退回 / 实付，避免含券标价 */
+function resolveRefundNotifyAmountYuan(amountRaw, fallbackYuan = null) {
+  if (amountRaw) {
+    try {
+      const parsed = typeof amountRaw === 'string' ? JSON.parse(amountRaw) : amountRaw
+      const toYuan = (fen) => {
+        const n = Number(fen)
+        return Number.isFinite(n) ? Math.round(n) / 100 : null
+      }
+      const payerRefund = toYuan(parsed?.payer_refund)
+      if (payerRefund != null) return payerRefund
+      const payerTotal = toYuan(parsed?.payer_total)
+      if (payerTotal != null) return payerTotal
+      const refund = toYuan(parsed?.refund)
+      if (refund != null) return refund
+    } catch {
+      // ignore parse error
+    }
+  }
+  if (fallbackYuan != null && Number.isFinite(Number(fallbackYuan))) {
+    return Math.round(Number(fallbackYuan) * 100) / 100
+  }
+  return null
+}
+
 /** 退款成功 */
 async function notifyRefundSuccess({
   outTradeNo,
@@ -663,20 +688,16 @@ async function notifyRefundSuccess({
   const ctx = await loadOrderNotifyContext({ outTradeNo })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
 
-  let amount = refundYuan
+  let amount = refundYuan != null && Number.isFinite(Number(refundYuan))
+    ? Math.round(Number(refundYuan) * 100) / 100
+    : null
   if (amount == null && outRefundNo) {
     const [rows] = await db.query(
       'SELECT amount FROM refund_requests WHERE out_refund_no = ? LIMIT 1',
       [outRefundNo],
     )
-    if (rows.length && rows[0].amount) {
-      try {
-        const parsed = typeof rows[0].amount === 'string' ? JSON.parse(rows[0].amount) : rows[0].amount
-        const refundFen = Number(parsed?.refund)
-        if (Number.isFinite(refundFen)) amount = refundFen / 100
-      } catch {
-        // ignore parse error
-      }
+    if (rows.length) {
+      amount = resolveRefundNotifyAmountYuan(rows[0].amount, ctx.payAmountYuan)
     }
   }
   if (amount == null) amount = ctx.payAmountYuan

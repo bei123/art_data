@@ -467,7 +467,12 @@
                 </div>
                 <div class="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
                   <span>退款金额：¥{{ refund.refund_amount_yuan ?? '—' }}</span>
-                  <span v-if="refund.payer_refund_yuan != null">现金退回：¥{{ refund.payer_refund_yuan }}</span>
+                  <span
+                    v-if="refund.payer_refund_yuan != null
+                      && Number(refund.payer_refund_yuan) !== Number(refund.refund_amount_yuan)"
+                  >
+                    现金退回：¥{{ refund.payer_refund_yuan }}
+                  </span>
                   <span v-if="refund.discount_refund_yuan != null && Number(refund.discount_refund_yuan) > 0">
                     券退回：¥{{ refund.discount_refund_yuan }}
                   </span>

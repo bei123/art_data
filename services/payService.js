@@ -647,6 +647,36 @@ function buildWechatRefundAmountPayload({ refundCents, totalCents, currency = 'C
     };
 }
 
+/**
+ * 本地存库金额快照：微信 API 只需 refund/total/currency；
+ * 额外写入 payer_total，便于订单详情在回调前就展示用户实付退款金额。
+ */
+function buildStoredRefundAmountFromResolved(amountResolved) {
+    const stored = buildWechatRefundAmountPayload(amountResolved)
+    const payerPaidCents = Math.round(Number(amountResolved?.payerPaidCents))
+    if (Number.isFinite(payerPaidCents) && payerPaidCents >= 0) {
+        stored.payer_total = payerPaidCents
+        // 全额退原单时，现金退回预期等于实付（微信成功回调后会以 payer_refund 覆盖）
+        if (
+            Number(amountResolved.refundCents) === Number(amountResolved.totalCents)
+            && payerPaidCents >= 0
+        ) {
+            stored.payer_refund = payerPaidCents
+        }
+    }
+    return stored
+}
+
+/** 订单详情展示用：优先现金退回 / 实付，避免含券标价误导用户 */
+function resolveDisplayRefundYuan(amt, fallbackPaidYuan = null) {
+    if (amt?.payer_refund_yuan != null) return amt.payer_refund_yuan
+    if (amt?.payer_total_yuan != null) return amt.payer_total_yuan
+    if (fallbackPaidYuan != null && Number.isFinite(Number(fallbackPaidYuan))) {
+        return Math.round(Number(fallbackPaidYuan) * 100) / 100
+    }
+    return amt?.refund_yuan ?? null
+}
+
 /** 合并微信退款回包金额（含 payer_refund / discount_refund 等含券字段） */
 function buildStoredRefundAmount(base, wxAmount) {
     const stored = {
@@ -1837,7 +1867,7 @@ async function refund(req) {
             return adminResult(amountResolved.status || 400, { error: amountResolved.error });
         }
 
-        const cleanAmount = buildWechatRefundAmountPayload(amountResolved);
+        const cleanAmount = buildStoredRefundAmountFromResolved(amountResolved);
         const resolvedTransactionId = amountResolved.transactionId || transaction_id || order.transaction_id || null;
 
         const connection = await db.getConnection();
@@ -2173,11 +2203,12 @@ async function refundApprove(req) {
                     });
                 }
 
-                const amountData = buildWechatRefundAmountPayload(amountResolved);
+                const storedAmount = buildStoredRefundAmountFromResolved(amountResolved);
+                const wechatAmount = buildWechatRefundAmountPayload(amountResolved);
                 await connection.query(
                     'UPDATE refund_requests SET amount = ?, transaction_id = COALESCE(?, transaction_id) WHERE id = ?',
                     [
-                        JSON.stringify(amountData),
+                        JSON.stringify(storedAmount),
                         amountResolved.transactionId || refund.transaction_id || null,
                         cleanRefundId,
                     ]
@@ -2188,7 +2219,7 @@ async function refundApprove(req) {
                     reason: refund.reason,
                     notify_url: WX_PAY_CONFIG.notify_url,
                     funds_account: 'AVAILABLE',
-                    amount: amountData,
+                    amount: wechatAmount,
                 };
 
                 let transactionId = amountResolved.transactionId || refund.transaction_id || null;
@@ -2216,7 +2247,7 @@ async function refundApprove(req) {
                 if (response.status === 200) {
                     const wxRefundId = response.data?.refund_id || null;
                     const wxStatus = response.data?.status || 'PROCESSING';
-                    const mergedAmount = buildStoredRefundAmount(amountData, response.data?.amount);
+                    const mergedAmount = buildStoredRefundAmount(storedAmount, response.data?.amount);
 
                     if (wxStatus === 'SUCCESS') {
                         await connection.query(
@@ -2354,7 +2385,7 @@ async function adminOrderRefund(req) {
             return adminResult(amountResolved.status || 400, { success: false, error: amountResolved.error });
         }
 
-        const cleanAmount = buildWechatRefundAmountPayload(amountResolved);
+        const cleanAmount = buildStoredRefundAmountFromResolved(amountResolved);
         const outRefundNo = generateOutRefundNo(orderId);
         const transactionId = amountResolved.transactionId || order.transaction_id || null;
 
@@ -4265,9 +4296,10 @@ async function orderDetailForActor(req, options = {}) {
         const actualFeeYuan = parseFloat(order.actual_fee) || 0;
         const shippingFeeYuan = order.shipping_fee != null ? parseFloat(order.shipping_fee) || 0 : 0;
 
-        // 已支付：优先展示微信 payer_total（与收银台实付一致）
+        // 已支付/已退款：优先展示微信 payer_total（与收银台实付一致）
         const wxPayerFen = wxPay?.amount?.payer_total != null ? Number(wxPay.amount.payer_total) : null;
-        const paidYuan = effectiveTradeState === 'SUCCESS' && Number.isFinite(wxPayerFen) && wxPayerFen >= 0
+        const paidYuan = (effectiveTradeState === 'SUCCESS' || effectiveTradeState === 'REFUND')
+            && Number.isFinite(wxPayerFen) && wxPayerFen >= 0
             ? Math.round(wxPayerFen) / 100
             : (effectiveTradeState === 'SUCCESS' || effectiveTradeState === 'REFUND'
                 ? Math.round(actualFeeYuan * 100) / 100
@@ -4333,8 +4365,9 @@ async function orderDetailForActor(req, options = {}) {
                 status: r.status,
                 reason: r.reason || null,
                 reject_reason: r.reject_reason || null,
-                refund_amount_yuan: amt.refund_yuan,
+                refund_amount_yuan: resolveDisplayRefundYuan(amt, paidYuan),
                 order_total_snapshot_yuan: amt.total_yuan,
+                listed_refund_yuan: amt.refund_yuan,
                 payer_refund_yuan: amt.payer_refund_yuan,
                 discount_refund_yuan: amt.discount_refund_yuan,
                 created_at: toIsoOrNull(r.created_at),
@@ -4346,20 +4379,24 @@ async function orderDetailForActor(req, options = {}) {
 
         const latestRefundRow = pickEffectiveRefundRow(refundRows || []);
         const latestRefund = latestRefundRow
-            ? {
-                id: latestRefundRow.id,
-                out_refund_no: latestRefundRow.out_refund_no,
-                wx_refund_id: latestRefundRow.wx_refund_id || null,
-                status: latestRefundRow.status,
-                reason: latestRefundRow.reason || null,
-                reject_reason: latestRefundRow.reject_reason || null,
-                refund_amount_yuan: parseRefundAmountJson(latestRefundRow.amount).refund_yuan,
-                order_total_snapshot_yuan: parseRefundAmountJson(latestRefundRow.amount).total_yuan,
-                created_at: toIsoOrNull(latestRefundRow.created_at),
-                approved_at: toIsoOrNull(latestRefundRow.approved_at),
-                rejected_at: toIsoOrNull(latestRefundRow.rejected_at),
-                updated_at: toIsoOrNull(latestRefundRow.updated_at),
-            }
+            ? (() => {
+                const amt = parseRefundAmountJson(latestRefundRow.amount);
+                return {
+                    id: latestRefundRow.id,
+                    out_refund_no: latestRefundRow.out_refund_no,
+                    wx_refund_id: latestRefundRow.wx_refund_id || null,
+                    status: latestRefundRow.status,
+                    reason: latestRefundRow.reason || null,
+                    reject_reason: latestRefundRow.reject_reason || null,
+                    refund_amount_yuan: resolveDisplayRefundYuan(amt, paidYuan),
+                    order_total_snapshot_yuan: amt.total_yuan,
+                    listed_refund_yuan: amt.refund_yuan,
+                    created_at: toIsoOrNull(latestRefundRow.created_at),
+                    approved_at: toIsoOrNull(latestRefundRow.approved_at),
+                    rejected_at: toIsoOrNull(latestRefundRow.rejected_at),
+                    updated_at: toIsoOrNull(latestRefundRow.updated_at),
+                };
+            })()
             : null;
 
         const timeline = [];
