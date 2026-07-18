@@ -49,6 +49,7 @@ const {
   listReconciliationLogs,
   getReconciliationLogById,
 } = require('../services/referralDashboardService')
+const { adminUnbindReferralBinding } = require('../services/referralService')
 
 router.get('/commissions', async (req, res) => {
   try {
@@ -386,6 +387,19 @@ router.put('/vip-early-access', async (req, res) => {
   } catch (error) {
     logger.error('admin set vip early access failed', { err: error })
     res.status(500).json({ error: '设置失败' })
+  }
+})
+
+router.delete('/bindings/:id', async (req, res) => {
+  try {
+    const r = await adminUnbindReferralBinding({
+      bindingId: req.params.id,
+      adminUserId: req.user?.id,
+    })
+    return res.status(r.status).json(r.body)
+  } catch (error) {
+    logger.error('admin unbind referral binding failed', { err: error })
+    res.status(500).json({ error: '解绑推荐关系失败' })
   }
 })
 

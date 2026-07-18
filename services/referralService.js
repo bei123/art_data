@@ -394,6 +394,7 @@ async function bindReferral({ refereeId, code, referrerId, source = 'link', conn
 function formatBinding(binding) {
   if (!binding) return null
   return {
+    id: binding.id != null ? Number(binding.id) : undefined,
     referrer_id: binding.referrer_id,
     referee_id: binding.referee_id,
     source: binding.source,
@@ -401,6 +402,61 @@ function formatBinding(binding) {
     expires_at: binding.expires_at,
     is_active: isBindingActive(binding),
   }
+}
+
+/**
+ * 管理端解绑任意推荐关系（永久绑定删除后，被推荐人可重新确认绑定）。
+ * 若存在指向同一推荐人的临时归因，一并清除，避免解绑后仍被归因到原推荐人。
+ */
+async function adminUnbindReferralBinding({
+  bindingId,
+  adminUserId = null,
+  clearMatchingAttribution = true,
+} = {}) {
+  await ensureReferralSchema()
+
+  const id = parseInt(bindingId, 10)
+  if (Number.isNaN(id) || id <= 0) {
+    return adminResult(400, { error: '无效的绑定 ID' })
+  }
+
+  const [rows] = await db.query(
+    `SELECT id, referrer_id, referee_id, source, bound_at, expires_at
+     FROM referral_bindings
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  )
+  if (!rows.length) {
+    return adminResult(404, { error: '绑定关系不存在' })
+  }
+
+  const binding = rows[0]
+  await db.query('DELETE FROM referral_bindings WHERE id = ?', [id])
+
+  let attributionCleared = false
+  if (clearMatchingAttribution) {
+    const [attrResult] = await db.query(
+      `DELETE FROM referral_attributions
+       WHERE user_id = ? AND referrer_id = ?`,
+      [binding.referee_id, binding.referrer_id]
+    )
+    attributionCleared = Number(attrResult?.affectedRows || 0) > 0
+  }
+
+  logger.info('admin unbound referral binding', {
+    bindingId: id,
+    referrerId: binding.referrer_id,
+    refereeId: binding.referee_id,
+    adminUserId: adminUserId || null,
+    attributionCleared,
+  })
+
+  return adminResult(200, {
+    success: true,
+    binding: formatBinding(binding),
+    attribution_cleared: attributionCleared,
+  })
 }
 
 function formatAttribution(attribution) {
@@ -771,6 +827,7 @@ module.exports = {
   isDuplicateKeyError,
   attributeReferral,
   bindReferral,
+  adminUnbindReferralBinding,
   resolveOrderReferrerId,
   getReferralCodeInfo,
   getReferralCenter,

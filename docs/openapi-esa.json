@@ -915,6 +915,30 @@
         ]
       }
     },
+    "/api/admin/referral/bindings/{id}": {
+      "delete": {
+        "operationId": "delete_admin_referral_bindings_id",
+        "summary": "DELETE /api/admin/referral/bindings/{id}",
+        "tags": [
+          "admin-referral"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
     "/api/admin/wx-users": {
       "get": {
         "operationId": "get_admin_wx_users",

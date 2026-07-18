@@ -133,24 +133,37 @@
                 v-if="detail.referral?.referrer"
                 class="rounded-md border border-border bg-muted/20 p-2.5"
               >
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-medium">
-                    {{ detail.referral.referrer.nickname || '未命名' }}
-                  </span>
-                  <span class="text-muted-foreground tabular-nums">
-                    #{{ detail.referral.referrer.user_id }}
-                  </span>
-                  <span class="text-xs text-muted-foreground">
-                    {{ tierLabel(detail.referral.referrer.user_tier) }}
-                  </span>
-                  <span
-                    class="rounded px-1.5 py-0.5 text-xs"
-                    :class="detail.referral.referrer.is_expired
-                      ? 'bg-destructive/10 text-destructive'
-                      : 'bg-primary/10 text-primary'"
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium">
+                      {{ detail.referral.referrer.nickname || '未命名' }}
+                    </span>
+                    <span class="text-muted-foreground tabular-nums">
+                      #{{ detail.referral.referrer.user_id }}
+                    </span>
+                    <span class="text-xs text-muted-foreground">
+                      {{ tierLabel(detail.referral.referrer.user_tier) }}
+                    </span>
+                    <span
+                      class="rounded px-1.5 py-0.5 text-xs"
+                      :class="detail.referral.referrer.is_expired
+                        ? 'bg-destructive/10 text-destructive'
+                        : 'bg-primary/10 text-primary'"
+                    >
+                      {{ detail.referral.referrer.is_expired ? '已失效' : '永久有效' }}
+                    </span>
+                  </div>
+                  <Button
+                    v-if="detail.referral.referrer.binding_id"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    class="shrink-0 text-destructive hover:text-destructive"
+                    :disabled="unbinding"
+                    @click="openUnbindDialog(detail.referral.referrer, 'referrer')"
                   >
-                    {{ detail.referral.referrer.is_expired ? '已失效' : '永久有效' }}
-                  </span>
+                    解绑
+                  </Button>
                 </div>
                 <div class="mt-1 space-y-0.5 text-xs text-muted-foreground">
                   <p>手机 {{ detail.referral.referrer.phone || '-' }}</p>
@@ -178,18 +191,31 @@
                   :key="row.binding_id || row.user_id"
                   class="rounded-md border border-border bg-muted/20 p-2.5"
                 >
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-medium">{{ row.nickname || '未命名' }}</span>
-                    <span class="text-muted-foreground tabular-nums">#{{ row.user_id }}</span>
-                    <span class="text-xs text-muted-foreground">{{ tierLabel(row.user_tier) }}</span>
-                    <span
-                      class="rounded px-1.5 py-0.5 text-xs"
-                      :class="row.is_expired
-                        ? 'bg-destructive/10 text-destructive'
-                        : 'bg-primary/10 text-primary'"
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="font-medium">{{ row.nickname || '未命名' }}</span>
+                      <span class="text-muted-foreground tabular-nums">#{{ row.user_id }}</span>
+                      <span class="text-xs text-muted-foreground">{{ tierLabel(row.user_tier) }}</span>
+                      <span
+                        class="rounded px-1.5 py-0.5 text-xs"
+                        :class="row.is_expired
+                          ? 'bg-destructive/10 text-destructive'
+                          : 'bg-primary/10 text-primary'"
+                      >
+                        {{ row.is_expired ? '已失效' : '永久有效' }}
+                      </span>
+                    </div>
+                    <Button
+                      v-if="row.binding_id"
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      class="shrink-0 text-destructive hover:text-destructive"
+                      :disabled="unbinding"
+                      @click="openUnbindDialog(row, 'referee')"
                     >
-                      {{ row.is_expired ? '已失效' : '永久有效' }}
-                    </span>
+                      解绑
+                    </Button>
                   </div>
                   <div class="mt-1 space-y-0.5 text-xs text-muted-foreground">
                     <p>手机 {{ row.phone || '-' }}</p>
@@ -224,6 +250,29 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="unbindOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>解绑推荐关系</AlertDialogTitle>
+          <AlertDialogDescription>
+            {{ unbindDescription }}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter class="gap-2 sm:justify-end">
+          <AlertDialogCancel type="button" :disabled="unbinding">取消</AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="unbinding || !unbindTarget?.binding_id"
+            @click="handleUnbind"
+          >
+            <Loader2 v-if="unbinding" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+            确认解绑
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     <AlertDialog v-model:open="purgeOpen">
       <AlertDialogContent>
@@ -305,8 +354,22 @@ const confirmUserId = ref('')
 const confirmPhrase = ref('')
 const purging = ref(false)
 const purgePhrase = PURGE_PHRASE
+const unbindOpen = ref(false)
+const unbindTarget = ref(null)
+const unbindRole = ref('')
+const unbinding = ref(false)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value) || 1))
+
+const unbindDescription = computed(() => {
+  const row = unbindTarget.value
+  if (!row) return '将删除该推荐绑定，被推荐人之后可重新确认推荐人。'
+  const name = row.nickname || `用户 #${row.user_id}`
+  if (unbindRole.value === 'referrer') {
+    return `将解除当前用户与上级「${name}」的绑定。解绑后可重新确认推荐人。`
+  }
+  return `将解除下级「${name}」与当前用户的绑定。解绑后对方可重新确认推荐人。`
+})
 
 const tierMap = {
   normal: '普通用户',
@@ -379,6 +442,38 @@ async function openDetail(row) {
   const response = await axios.get(`/admin/wx-users/${row.id}`)
   detail.value = response
   detailOpen.value = true
+}
+
+async function refreshDetail() {
+  if (!detail.value?.user?.id) return
+  const response = await axios.get(`/admin/wx-users/${detail.value.user.id}`)
+  detail.value = response
+}
+
+function openUnbindDialog(row, role) {
+  unbindTarget.value = row
+  unbindRole.value = role
+  unbindOpen.value = true
+}
+
+async function handleUnbind() {
+  const bindingId = unbindTarget.value?.binding_id
+  if (!bindingId) return
+  unbinding.value = true
+  try {
+    await axios.delete(`/admin/referral/bindings/${bindingId}`)
+    showPageSuccess('已解绑推荐关系')
+    unbindOpen.value = false
+    unbindTarget.value = null
+    unbindRole.value = ''
+    await refreshDetail()
+    await loadItems()
+  } catch (error) {
+    const message = error?.response?.data?.error || '解绑失败'
+    ElMessage.error(message)
+  } finally {
+    unbinding.value = false
+  }
 }
 
 function resetPurgeForm() {
