@@ -140,9 +140,12 @@ stateDiagram-v2
   withdrawn --> settlable: 提现失败回滚
   pending --> cancelled: 订单退款完成
   settlable --> cancelled: 订单退款完成
+  withdrawn --> cancelled: 订单退款完成\n(余额冲抵或记欠款)
 ```
 
 结算条件概要：订单仍 `SUCCESS`、无进行中退款、履约达终态（数字有码 / 实物路径 `300003` 等）+ `settlement_days`。
+
+退款追回已提现佣金：优先扣 `available_balance`，不足记入 `user_wallets.debt_balance`；后续入账自动冲抵，欠款未清不可提现。
 
 ---
 

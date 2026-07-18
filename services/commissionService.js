@@ -144,35 +144,124 @@ async function ensureWallet(userId, connection = db) {
   )
 }
 
-async function adjustWalletBalances(userId, { pendingDelta = 0, availableDelta = 0, earnedDelta = 0 }, connection = db) {
+async function adjustWalletBalances(
+  userId,
+  { pendingDelta = 0, availableDelta = 0, earnedDelta = 0, debtDelta = 0 } = {},
+  connection = db,
+) {
   await ensureWallet(userId, connection)
   await connection.query(
     `UPDATE user_wallets
      SET pending_balance = GREATEST(pending_balance + ?, 0),
          available_balance = GREATEST(available_balance + ?, 0),
+         debt_balance = GREATEST(COALESCE(debt_balance, 0) + ?, 0),
          total_earned = GREATEST(total_earned + ?, 0),
          updated_at = NOW()
      WHERE user_id = ?`,
-    [pendingDelta, availableDelta, earnedDelta, userId]
+    [pendingDelta, availableDelta, debtDelta, earnedDelta, userId]
   )
+}
+
+/**
+ * 用可提现余额冲抵欠款（提现前 / 入账后调用）
+ */
+async function repayDebtFromAvailable(userId, connection = db) {
+  await ensureCommissionSchema()
+  await ensureWallet(userId, connection)
+
+  const [rows] = await connection.query(
+    `SELECT available_balance, COALESCE(debt_balance, 0) AS debt_balance
+     FROM user_wallets WHERE user_id = ? FOR UPDATE`,
+    [userId]
+  )
+  const available = parseMoney(rows[0]?.available_balance)
+  const debt = parseMoney(rows[0]?.debt_balance)
+  if (debt <= 0 || available <= 0) return { repaid: 0, remaining_debt: debt }
+
+  const repaid = roundMoney(Math.min(available, debt))
+  if (repaid <= 0) return { repaid: 0, remaining_debt: debt }
+
+  await adjustWalletBalances(userId, {
+    availableDelta: -repaid,
+    debtDelta: -repaid,
+  }, connection)
+
+  return { repaid, remaining_debt: roundMoney(debt - repaid) }
+}
+
+/**
+ * 已提现金额追回：优先扣可提现余额，不足部分记欠款
+ */
+async function clawbackWithdrawnAmount(
+  userId,
+  amountYuan,
+  {
+    orderId = null,
+    sourceType = 'commission',
+    sourceId = null,
+    reason = 'order_refund',
+    connection = db,
+  } = {},
+) {
+  const amount = parseMoney(amountYuan)
+  if (amount <= 0) return { offset: 0, debtAdd: 0 }
+
+  await ensureCommissionSchema()
+  await ensureWallet(userId, connection)
+
+  const [rows] = await connection.query(
+    `SELECT available_balance, COALESCE(debt_balance, 0) AS debt_balance
+     FROM user_wallets WHERE user_id = ? FOR UPDATE`,
+    [userId]
+  )
+  const available = parseMoney(rows[0]?.available_balance)
+  const offset = roundMoney(Math.min(available, amount))
+  const debtAdd = roundMoney(amount - offset)
+
+  await adjustWalletBalances(userId, {
+    availableDelta: -offset,
+    debtDelta: debtAdd,
+    earnedDelta: -amount,
+  }, connection)
+
+  await connection.query(
+    `INSERT INTO wallet_debt_events
+     (user_id, order_id, source_type, source_id, amount, offset_from_available, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      orderId || null,
+      sourceType,
+      sourceId || null,
+      debtAdd,
+      offset,
+      String(reason || 'order_refund').slice(0, 64),
+    ]
+  )
+
+  return { offset, debtAdd }
 }
 
 async function getWalletSummary(userId, connection = db) {
   await ensureCommissionSchema()
   await ensureWallet(userId, connection)
   const [rows] = await connection.query(
-    'SELECT pending_balance, available_balance, total_earned, total_withdrawn FROM user_wallets WHERE user_id = ? LIMIT 1',
+    `SELECT pending_balance, available_balance, COALESCE(debt_balance, 0) AS debt_balance,
+            total_earned, total_withdrawn
+     FROM user_wallets WHERE user_id = ? LIMIT 1`,
     [userId]
   )
   const wallet = rows[0] || {
     pending_balance: 0,
     available_balance: 0,
+    debt_balance: 0,
     total_earned: 0,
     total_withdrawn: 0,
   }
   return {
     pending_commission_yuan: roundMoney(wallet.pending_balance),
     available_commission_yuan: roundMoney(wallet.available_balance),
+    debt_commission_yuan: roundMoney(wallet.debt_balance),
     withdrawn_commission_yuan: roundMoney(wallet.total_withdrawn),
     total_earned_yuan: roundMoney(wallet.total_earned),
   }
@@ -414,19 +503,29 @@ async function cancelCommissionsByOrderId(orderId, connection = db) {
   const [rows] = await connection.query(
     `SELECT id, user_id, commission_amount, status
      FROM commission_ledger
-     WHERE order_id = ? AND status IN ('pending', 'settlable')`,
+     WHERE order_id = ? AND status IN ('pending', 'settlable', 'withdrawn')`,
     [orderId]
   )
 
-  if (!rows.length) return { cancelled: 0 }
+  if (!rows.length) return { cancelled: 0, debt_added: 0 }
 
   let cancelled = 0
+  let debtAdded = 0
   for (const row of rows) {
     const amount = parseMoney(row.commission_amount)
     if (row.status === 'pending') {
       await adjustWalletBalances(row.user_id, { pendingDelta: -amount, earnedDelta: -amount }, connection)
     } else if (row.status === 'settlable') {
       await adjustWalletBalances(row.user_id, { availableDelta: -amount, earnedDelta: -amount }, connection)
+    } else if (row.status === 'withdrawn') {
+      const claw = await clawbackWithdrawnAmount(row.user_id, amount, {
+        orderId,
+        sourceType: 'commission',
+        sourceId: row.id,
+        reason: 'order_refund',
+        connection,
+      })
+      debtAdded = roundMoney(debtAdded + claw.debtAdd)
     }
 
     await connection.query(
@@ -437,10 +536,10 @@ async function cancelCommissionsByOrderId(orderId, connection = db) {
   }
 
   if (cancelled > 0) {
-    logger.info('commission ledger cancelled', { orderId, cancelled })
+    logger.info('commission ledger cancelled', { orderId, cancelled, debtAdded })
   }
 
-  return { cancelled }
+  return { cancelled, debt_added: debtAdded }
 }
 
 async function settlePendingCommissions({ limit = 50 } = {}) {
@@ -491,6 +590,7 @@ async function settlePendingCommissions({ limit = 50 } = {}) {
         pendingDelta: -amount,
         availableDelta: amount,
       }, connection)
+      await repayDebtFromAvailable(locked[0].user_id, connection)
 
       await connection.commit()
       settled += 1
@@ -672,6 +772,8 @@ module.exports = {
   getWalletSummary,
   ensureWallet,
   adjustWalletBalances,
+  repayDebtFromAvailable,
+  clawbackWithdrawnAmount,
   listUserCommissions,
   listAdminCommissions,
   listAdminCommissionRules,

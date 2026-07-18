@@ -3,7 +3,7 @@ const db = require('../db')
 const logger = require('../utils/logger')
 const { ensureReferralRewardsSchema } = require('../utils/referralRewardsSchema')
 const { ensureCommissionSchema } = require('../utils/commissionSchema')
-const { ensureWallet, adjustWalletBalances, roundMoney, parseMoney } = require('./commissionService')
+const { ensureWallet, adjustWalletBalances, roundMoney, parseMoney, repayDebtFromAvailable } = require('./commissionService')
 const {
   createTransferToWallet,
   isTransferConfigured,
@@ -239,12 +239,23 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
   try {
     await connection.beginTransaction()
     await ensureWallet(userId, connection)
+    await repayDebtFromAvailable(userId, connection)
 
     const [walletRows] = await connection.query(
       'SELECT available_balance FROM user_wallets WHERE user_id = ? FOR UPDATE',
       [userId]
     )
     const available = parseMoney(walletRows[0]?.available_balance)
+    const debt = parseMoney(walletRows[0]?.debt_balance)
+
+    if (debt > 0) {
+      await connection.commit()
+      return adminResult(400, {
+        error: `尚有欠款 ${debt} 元未结清，已优先用余额冲抵；请待后续佣金入账自动冲抵后再提现`,
+        debt_commission_yuan: debt,
+        available_commission_yuan: available,
+      })
+    }
 
     const todayUserTotal = await sumTodayWithdrawnYuan(userId, connection)
     const todayMerchantTotal = await sumMerchantTodayWithdrawnYuan(connection)

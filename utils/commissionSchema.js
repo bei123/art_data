@@ -73,6 +73,7 @@ async function ensureUserWalletsTable() {
       user_id INT NOT NULL,
       pending_balance DECIMAL(12,2) NOT NULL DEFAULT 0,
       available_balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+      debt_balance DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '退款追回欠款（已提现部分）',
       total_earned DECIMAL(12,2) NOT NULL DEFAULT 0,
       total_withdrawn DECIMAL(12,2) NOT NULL DEFAULT 0,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -80,6 +81,46 @@ async function ensureUserWalletsTable() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `)
   logger.info('user_wallets table created')
+}
+
+async function ensureUserWalletsDebtColumn() {
+  const [rows] = await db.query(
+    `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'user_wallets'
+       AND COLUMN_NAME = 'debt_balance'
+     LIMIT 1`
+  )
+  if (rows.length) return
+  await db.query(
+    `ALTER TABLE user_wallets
+     ADD COLUMN debt_balance DECIMAL(12,2) NOT NULL DEFAULT 0
+     COMMENT '退款追回欠款（已提现部分）' AFTER available_balance`
+  )
+  logger.info('user_wallets.debt_balance column added')
+}
+
+async function ensureWalletDebtEventsTable() {
+  if (await hasTable('wallet_debt_events')) return
+
+  await db.query(`
+    CREATE TABLE wallet_debt_events (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      order_id BIGINT UNSIGNED NULL,
+      source_type ENUM('commission','bonus') NOT NULL,
+      source_id BIGINT UNSIGNED NULL,
+      amount DECIMAL(12,2) NOT NULL COMMENT '计入欠款的金额',
+      offset_from_available DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '当时用余额冲抵的金额',
+      reason VARCHAR(64) NOT NULL DEFAULT 'order_refund',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_user_id (user_id),
+      KEY idx_order_id (order_id),
+      KEY idx_source (source_type, source_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `)
+  logger.info('wallet_debt_events table created')
 }
 
 async function ensureArtAdvisorApplicationsTable() {
@@ -113,6 +154,8 @@ async function ensureCommissionSchema() {
   await ensureCommissionRateRulesTable()
   await ensureCommissionLedgerTable()
   await ensureUserWalletsTable()
+  await ensureUserWalletsDebtColumn()
+  await ensureWalletDebtEventsTable()
   await ensureArtAdvisorApplicationsTable()
 
   schemaReady = true

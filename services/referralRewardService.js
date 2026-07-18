@@ -252,6 +252,9 @@ async function tryGrantFirstReferralOrderBonus({ referrerId, orderId, connection
       earnedDelta: amount,
     }, connection)
 
+    const { repayDebtFromAvailable } = require('./commissionService')
+    await repayDebtFromAvailable(referrerId, connection)
+
     logger.info('first referral order bonus granted', { referrerId, orderId, amount })
     return { granted: true, amount }
   } catch (err) {
@@ -1412,7 +1415,9 @@ async function listAdminUserCoupons({ userId, page = 1, pageSize = 20 } = {}) {
 }
 
 async function cancelBonusGrantsByOrderId(orderId, connection = db) {
-  if (!orderId) return { cancelled: 0 }
+  if (!orderId) return { cancelled: 0, debt_added: 0 }
+
+  const { clawbackWithdrawnAmount } = require('./commissionService')
 
   const [rows] = await connection.query(
     `SELECT id, user_id, amount, status
@@ -1422,6 +1427,7 @@ async function cancelBonusGrantsByOrderId(orderId, connection = db) {
   )
 
   let cancelled = 0
+  let debtAdded = 0
   for (const row of rows || []) {
     const amount = parseMoney(row.amount)
     if (row.status === 'settlable') {
@@ -1429,6 +1435,15 @@ async function cancelBonusGrantsByOrderId(orderId, connection = db) {
         availableDelta: -amount,
         earnedDelta: -amount,
       }, connection)
+    } else if (row.status === 'withdrawn') {
+      const claw = await clawbackWithdrawnAmount(row.user_id, amount, {
+        orderId,
+        sourceType: 'bonus',
+        sourceId: row.id,
+        reason: 'order_refund',
+        connection,
+      })
+      debtAdded = roundMoney(debtAdded + claw.debtAdd)
     }
     await connection.query(
       `UPDATE referral_bonus_grants SET status = 'cancelled', updated_at = NOW() WHERE id = ?`,
@@ -1437,7 +1452,7 @@ async function cancelBonusGrantsByOrderId(orderId, connection = db) {
     cancelled += 1
   }
 
-  return { cancelled }
+  return { cancelled, debt_added: debtAdded }
 }
 
 module.exports = {
