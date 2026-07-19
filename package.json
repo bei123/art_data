@@ -60,18 +60,18 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@tailwindcss/vite": "^4.3.2",
-    "@typescript-eslint/parser": "^8.63.0",
-    "@vitejs/plugin-vue": "^6.0.7",
+    "@tailwindcss/vite": "^4.3.3",
+    "@typescript-eslint/parser": "^8.64.0",
+    "@vitejs/plugin-vue": "^6.0.8",
     "eslint": "^10.7.0",
     "eslint-plugin-vue": "^10.9.2",
     "globals": "^17.7.0",
     "nodemon": "^3.1.14",
     "sass": "^1.101.0",
     "tailwindcss": "^4.3.0",
-    "typescript": "~6.0.2",
+    "typescript": "~7.0.2",
     "unplugin-vue-components": "^32.1.0",
-    "vite": "^8.1.4",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   },
   "overrides": {
