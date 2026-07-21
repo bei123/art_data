@@ -123,6 +123,9 @@
               </td>
               <td class="px-3 py-2.5">
                 <div class="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="secondary" type="button" @click="openQrPoolDialog(row)">
+                    领取码
+                  </Button>
                   <Button size="sm" variant="link" class="h-auto px-0" type="button" @click="openAssociateArtist(row)">
                     关联艺术家
                   </Button>
@@ -446,6 +449,105 @@
       </AlertDialogContent>
     </AlertDialog>
 
+    <Dialog v-model:open="qrPoolVisible">
+      <DialogContent class="max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>领取码库存</DialogTitle>
+        </DialogHeader>
+        <div v-if="qrPoolRow" class="space-y-4 py-2">
+          <p class="text-sm text-muted-foreground">
+            {{ qrPoolRow.title }}（ID: {{ qrPoolRow.id }}）。可售数量与领取码库存互相独立；支付成功后自动从码池按件领取。
+          </p>
+          <div class="flex flex-wrap gap-2 text-sm">
+            <Badge variant="secondary">可用 {{ qrPoolStats.available }}</Badge>
+            <Badge variant="outline">已分配 {{ qrPoolStats.assigned }}</Badge>
+            <Badge variant="outline">作废 {{ qrPoolStats.void }}</Badge>
+            <Badge variant="outline">合计 {{ qrPoolStats.total }}</Badge>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              id="qr-pool-upload"
+              type="file"
+              accept="image/*"
+              multiple
+              class="sr-only"
+              :disabled="qrPoolUploading"
+              @change="handleQrPoolFilesUpload"
+            >
+            <Button
+              type="button"
+              size="sm"
+              :disabled="qrPoolUploading"
+              @click="triggerQrPoolUpload"
+            >
+              <Loader2 v-if="qrPoolUploading" class="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+              批量上传领取码
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              :disabled="qrPoolLoading || qrPoolUploading"
+              @click="runQrPoolBackfill"
+            >
+              回填待发货
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              :disabled="qrPoolLoading"
+              @click="loadQrPoolCodes"
+            >
+              刷新
+            </Button>
+          </div>
+          <div
+            v-if="qrPoolLoading"
+            class="flex items-center justify-center py-8 text-muted-foreground"
+          >
+            <Loader2 class="size-6 animate-spin" aria-hidden="true" />
+          </div>
+          <div v-else class="max-h-[40vh] space-y-2 overflow-y-auto">
+            <div
+              v-for="code in qrPoolCodes"
+              :key="code.id"
+              class="flex items-center gap-3 rounded-md border border-border p-2"
+            >
+              <div class="size-14 shrink-0 overflow-hidden rounded border border-border bg-muted/30 p-0.5">
+                <img
+                  :src="getImageUrl(code.qr_code_url)"
+                  alt="领取码"
+                  class="size-full object-contain"
+                >
+              </div>
+              <div class="min-w-0 flex-1 text-xs text-muted-foreground">
+                <div class="font-medium text-foreground">#{{ code.id }} · {{ code.status }}</div>
+                <div class="truncate">{{ code.qr_code_url }}</div>
+              </div>
+              <Button
+                v-if="code.status === 'available'"
+                type="button"
+                size="sm"
+                variant="destructive"
+                @click="voidQrPoolCode(code)"
+              >
+                作废
+              </Button>
+            </div>
+            <p v-if="!qrPoolCodes.length" class="py-6 text-center text-sm text-muted-foreground">
+              暂无领取码，请先批量上传
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="secondary" @click="qrPoolVisible = false">
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <AlertDialog v-model:open="removeDigitalImageDialogOpen">
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -544,6 +646,114 @@ const deleteDigitalTargetId = ref('')
 const deletingDigital = ref(false)
 
 const removeDigitalImageDialogOpen = ref(false)
+
+const qrPoolVisible = ref(false)
+const qrPoolRow = ref(null)
+const qrPoolCodes = ref([])
+const qrPoolStats = ref({ available: 0, assigned: 0, void: 0, total: 0 })
+const qrPoolLoading = ref(false)
+const qrPoolUploading = ref(false)
+
+async function openQrPoolDialog(row) {
+  qrPoolRow.value = row
+  qrPoolVisible.value = true
+  await loadQrPoolCodes()
+}
+
+function triggerQrPoolUpload() {
+  document.getElementById('qr-pool-upload')?.click()
+}
+
+async function loadQrPoolCodes() {
+  if (!qrPoolRow.value?.id) return
+  qrPoolLoading.value = true
+  try {
+    const res = await axios.get(`/digital-artworks/admin/${qrPoolRow.value.id}/qr-codes`, {
+      params: { pageSize: 100 },
+    })
+    qrPoolCodes.value = res?.data || []
+    qrPoolStats.value = res?.stats || { available: 0, assigned: 0, void: 0, total: 0 }
+  } catch (error) {
+    console.error(error)
+    ElMessage.error(error.response?.data?.error || '加载领取码失败')
+  } finally {
+    qrPoolLoading.value = false
+  }
+}
+
+async function handleQrPoolFilesUpload(event) {
+  const files = Array.from(event?.target?.files || [])
+  if (!files.length || !qrPoolRow.value?.id) return
+
+  qrPoolUploading.value = true
+  try {
+    const urls = []
+    for (const file of files) {
+      const processedFile = await uploadImageToWebpLimit5MB(file)
+      if (!processedFile) continue
+      const formData = new FormData()
+      formData.append('file', processedFile)
+      const uploadRes = await axios.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      if (uploadRes?.url) urls.push(uploadRes.url)
+    }
+
+    if (!urls.length) {
+      ElMessage.error('图片上传失败')
+      return
+    }
+
+    const saveRes = await axios.post(`/digital-artworks/admin/${qrPoolRow.value.id}/qr-codes`, {
+      qr_code_urls: urls,
+    })
+    if (!saveRes?.success) {
+      ElMessage.error(saveRes?.error || '入库失败')
+      return
+    }
+    const backfillMsg = saveRes.backfill?.assigned_count
+      ? `，已回填 ${saveRes.backfill.assigned_count} 个待发货单位`
+      : ''
+    ElMessage.success(`已入库 ${saveRes.inserted || 0} 个领取码${backfillMsg}`)
+    await loadQrPoolCodes()
+  } catch (error) {
+    console.error(error)
+    ElMessage.error(error.response?.data?.error || '上传领取码失败')
+  } finally {
+    qrPoolUploading.value = false
+    if (event?.target) event.target.value = ''
+  }
+}
+
+async function voidQrPoolCode(code) {
+  if (!qrPoolRow.value?.id || !code?.id) return
+  try {
+    const res = await axios.delete(`/digital-artworks/admin/${qrPoolRow.value.id}/qr-codes/${code.id}`)
+    if (!res?.success) {
+      ElMessage.error(res?.error || '作废失败')
+      return
+    }
+    ElMessage.success('已作废')
+    await loadQrPoolCodes()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error || '作废失败')
+  }
+}
+
+async function runQrPoolBackfill() {
+  if (!qrPoolRow.value?.id) return
+  try {
+    const res = await axios.post(`/digital-artworks/admin/${qrPoolRow.value.id}/qr-codes/backfill`)
+    if (!res?.success) {
+      ElMessage.error(res?.error || '回填失败')
+      return
+    }
+    ElMessage.success(`回填完成：分配 ${res.assigned_count || 0}，齐套交付 ${res.fully_delivered_count || 0}`)
+    await loadQrPoolCodes()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error || '回填失败')
+  }
+}
 
 const filteredAssociateArtistOptions = computed(() => {
   const q = associateArtistSearch.value.trim().toLowerCase()

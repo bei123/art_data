@@ -87,6 +87,13 @@ const {
     notifyVirtualDeliveryShipped,
     hasPaymentSuccessNotifySent,
 } = require('./subscribeMessageNotify');
+const {
+    fulfillDigitalDeliveryForPaidOrder,
+    loadDeliveryUnitsByOrderItemIds,
+    manualFillDeliveryUnits,
+    voidAssignedPoolCodesForOrder,
+    hasQrCode: hasDeliveryQrCode,
+} = require('./digitalQrDeliveryService');
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 const REDIS_PAY_INVENTORY_FULFILLED_PREFIX = 'pay:inventory:fulfilled:';
@@ -276,6 +283,31 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
         if (ownsConnection) await connection.commit();
         await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
         await clearInventoryRelatedCaches(affected);
+
+        try {
+            const deliveryResult = await fulfillDigitalDeliveryForPaidOrder({
+                outTradeNo: cleanOutTradeNo,
+                orderId: orders[0].id,
+            });
+            if (deliveryResult?.newlyFullyDelivered?.length) {
+                for (const row of deliveryResult.newlyFullyDelivered) {
+                    fireSubscribeNotify(
+                        notifyVirtualDeliveryShipped({
+                            orderId: deliveryResult.order_id,
+                            outTradeNo: cleanOutTradeNo,
+                            orderItemId: row.order_item_id,
+                        }),
+                        'virtualDeliveryShipped',
+                    );
+                }
+            }
+        } catch (deliveryErr) {
+            logger.error('digital QR auto delivery failed', {
+                err: deliveryErr,
+                out_trade_no: cleanOutTradeNo,
+            });
+        }
+
         return { ok: true, affected };
     } catch (error) {
         if (ownsConnection) await connection.rollback();
@@ -2051,6 +2083,14 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
             const { releaseReferralCouponByOrderId, cancelBonusGrantsByOrderId } = require('./referralRewardService');
             await releaseReferralCouponByOrderId(orderId, connection);
             await cancelBonusGrantsByOrderId(orderId, connection);
+            try {
+                await voidAssignedPoolCodesForOrder({ orderId, connection });
+            } catch (voidErr) {
+                logger.warn('void digital QR pool codes on refund failed', {
+                    orderId,
+                    err: voidErr?.message || voidErr,
+                });
+            }
         }
 
         await connection.commit();
@@ -2973,6 +3013,7 @@ function processAdminListOrderItem(item, orderTradeState) {
         price: item.price,
         address_id: item.address_id,
         ...mapDigitalItemQrFields(item),
+        delivery_units: Array.isArray(item.delivery_units) ? item.delivery_units : [],
         address: item.address_id ? {
             id: item.address_id,
             receiver_name: item.receiver_name,
@@ -3006,6 +3047,8 @@ function processAdminListOrderItem(item, orderTradeState) {
                 tradeState: orderTradeState,
                 qrCodeUrl: item.delivery_qr_code_url,
                 qrCodeAt: item.delivery_qr_code_at,
+                deliveryUnits: item.delivery_units,
+                quantity: item.quantity,
             }),
         };
     } else if (item.type === 'artwork') {
@@ -3082,6 +3125,19 @@ async function fetchAdminOrderItemsByOrderIds(orderIds) {
         bucket.push(item);
         itemsByOrderId.set(item.order_id, bucket);
     }
+
+    const digitalItemIds = (orderItems || [])
+        .filter((item) => item.type === 'digital')
+        .map((item) => item.id);
+    const unitsByItemId = await loadDeliveryUnitsByOrderItemIds(digitalItemIds);
+    for (const [, bucket] of itemsByOrderId) {
+        for (const item of bucket) {
+            if (item.type === 'digital') {
+                item.delivery_units = unitsByItemId.get(Number(item.id)) || [];
+            }
+        }
+    }
+
     return itemsByOrderId;
 }
 
@@ -3139,7 +3195,7 @@ async function fetchFulfillmentContextByOrderIds(orderIds) {
     const placeholders = orderIds.map(() => '?').join(', ');
 
     const [itemRows] = await db.query(
-        `SELECT order_id, type, delivery_qr_code_url, delivery_qr_code_at
+        `SELECT id, order_id, type, quantity, delivery_qr_code_url, delivery_qr_code_at
          FROM order_items
          WHERE order_id IN (${placeholders})
          ORDER BY id ASC`,
@@ -3154,13 +3210,23 @@ async function fetchFulfillmentContextByOrderIds(orderIds) {
         orderIds,
     );
 
+    const digitalItemIds = (itemRows || [])
+        .filter((row) => row.type === 'digital')
+        .map((row) => row.id);
+    const unitsByItemId = await loadDeliveryUnitsByOrderItemIds(digitalItemIds);
+
     const itemsByOrderId = new Map();
     for (const row of itemRows || []) {
         const bucket = itemsByOrderId.get(row.order_id) || [];
         bucket.push({
+            id: row.id,
             type: row.type,
+            quantity: row.quantity,
             delivery_qr_code_url: row.delivery_qr_code_url,
             delivery_qr_code_at: row.delivery_qr_code_at,
+            delivery_units: row.type === 'digital'
+                ? (unitsByItemId.get(Number(row.id)) || [])
+                : [],
         });
         itemsByOrderId.set(row.order_id, bucket);
     }
@@ -3188,8 +3254,10 @@ function resolveFulfillmentForOrder(order, fulfillmentContext, refundStatus) {
         ? ctx.items
         : (order.items || []).map((item) => ({
             type: item.type,
+            quantity: item.quantity,
             delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
             delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
+            delivery_units: item.delivery_units || [],
         }));
 
     const effectiveRefundStatus = refundStatus
@@ -3572,8 +3640,10 @@ async function adminOrders(req) {
             const fulfillmentStatus = resolveFulfillmentForOrder(order, {
                 items: items.map((item) => ({
                     type: item.type,
+                    quantity: item.quantity,
                     delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
                     delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
+                    delivery_units: item.delivery_units || [],
                 })),
                 shipment: fulfillmentCtx?.shipment || null,
             }, refundStatus);
@@ -3922,9 +3992,27 @@ function mapShipmentRowFromDb(row) {
     };
 }
 
-function buildDigitalItemFulfillment({ tradeState, tradeStateDesc, qrCodeUrl, qrCodeAt }) {
+function buildDigitalItemFulfillment({
+    tradeState,
+    tradeStateDesc,
+    qrCodeUrl,
+    qrCodeAt,
+    deliveryUnits = null,
+    quantity = 1,
+}) {
     const state = tradeState || 'UNKNOWN';
-    const hasQrCode = Boolean(qrCodeUrl && String(qrCodeUrl).trim());
+    const qty = Number(quantity) > 0 ? Number(quantity) : 1;
+    const units = Array.isArray(deliveryUnits) ? deliveryUnits : [];
+    const filledUnits = units.filter((u) => hasDeliveryQrCode(u.qr_code_url));
+    const filledCount = filledUnits.length;
+    const requiredCount = units.length > 0 ? units.length : qty;
+    const allDelivered = units.length > 0
+        ? filledCount >= requiredCount
+        : Boolean(qrCodeUrl && String(qrCodeUrl).trim());
+    const isPartial = units.length > 0 && filledCount > 0 && !allDelivered;
+    const primaryUrl = filledUnits[0]?.qr_code_url || qrCodeUrl || null;
+    const primaryAt = filledUnits[0]?.delivered_at || qrCodeAt || null;
+    const hasQrCode = Boolean(primaryUrl && String(primaryUrl).trim());
     const isPaid = state === 'SUCCESS';
 
     let status = 'unknown';
@@ -3934,17 +4022,27 @@ function buildDigitalItemFulfillment({ tradeState, tradeStateDesc, qrCodeUrl, qr
     if (state === 'NOTPAY') {
         status = 'awaiting_payment';
         statusLabel = '待支付';
-        hint = '支付成功后，管理员将上传藏品二维码。';
+        hint = '支付成功后，将自动或由管理员交付藏品二维码。';
     } else if (state === 'PAYERROR') {
         status = 'payment_failed';
         statusLabel = '支付失败';
         hint = tradeStateDesc || '支付未完成，请重新下单或联系客服。';
     } else if (state === 'SUCCESS') {
-        status = hasQrCode ? 'delivered' : 'awaiting_qr_code';
-        statusLabel = hasQrCode ? '已交付' : '待上传二维码';
-        hint = hasQrCode
-            ? '请使用下方二维码完成数字藏品领取。'
-            : '支付成功，管理员正在准备交付二维码，请稍后查看。';
+        if (allDelivered) {
+            status = 'delivered';
+            statusLabel = '已交付';
+            hint = requiredCount > 1
+                ? `已交付全部 ${requiredCount} 个领取码，请使用下方二维码完成领取。`
+                : '请使用下方二维码完成数字藏品领取。';
+        } else if (isPartial) {
+            status = 'awaiting_qr_code';
+            statusLabel = '部分已交付';
+            hint = `已交付 ${filledCount}/${requiredCount} 个领取码，其余准备中，请稍后查看。`;
+        } else {
+            status = 'awaiting_qr_code';
+            statusLabel = '待上传二维码';
+            hint = '支付成功，商家正在准备交付二维码，请稍后查看。';
+        }
     } else if (state === 'CLOSED') {
         status = 'closed';
         statusLabel = '已关闭';
@@ -3963,8 +4061,17 @@ function buildDigitalItemFulfillment({ tradeState, tradeStateDesc, qrCodeUrl, qr
         type: 'digital_qr_code',
         status,
         status_label: statusLabel,
-        qr_code_url: isPaid && hasQrCode ? String(qrCodeUrl).trim() : null,
-        qr_code_uploaded_at: hasQrCode ? toIsoOrNull(qrCodeAt) : null,
+        qr_code_url: isPaid && hasQrCode ? String(primaryUrl).trim() : null,
+        qr_code_uploaded_at: hasQrCode ? toIsoOrNull(primaryAt) : null,
+        delivery_units: units.map((u) => ({
+            id: u.id,
+            unit_index: u.unit_index,
+            qr_code_url: isPaid && hasDeliveryQrCode(u.qr_code_url) ? String(u.qr_code_url).trim() : null,
+            source: u.source || null,
+            delivered_at: u.delivered_at ? toIsoOrNull(u.delivered_at) : null,
+        })),
+        delivered_count: isPaid ? filledCount : 0,
+        required_count: requiredCount,
         hint,
     };
 }
@@ -4209,6 +4316,16 @@ async function orderDetailForActor(req, options = {}) {
             [internalOrderId]
         );
 
+        const digitalItemIds = (orderItems || [])
+            .filter((row) => row.type === 'digital')
+            .map((row) => row.id);
+        const unitsByItemId = await loadDeliveryUnitsByOrderItemIds(digitalItemIds);
+        for (const row of orderItems || []) {
+            if (row.type === 'digital') {
+                row.delivery_units = unitsByItemId.get(Number(row.id)) || [];
+            }
+        }
+
         let itemsSubtotalYuan = 0;
         const items = (orderItems || []).map((row) => {
             const qty = Number(row.quantity) > 0 ? Number(row.quantity) : 1;
@@ -4264,6 +4381,8 @@ async function orderDetailForActor(req, options = {}) {
                     tradeStateDesc: effectiveTradeStateDesc,
                     qrCodeUrl: row.delivery_qr_code_url,
                     qrCodeAt: row.delivery_qr_code_at,
+                    deliveryUnits: row.delivery_units,
+                    quantity: qty,
                 })
                 : null;
 
@@ -4274,6 +4393,7 @@ async function orderDetailForActor(req, options = {}) {
             return {
                 ...base,
                 ...mapDigitalItemQrFields(row),
+                delivery_units: row.type === 'digital' ? (row.delivery_units || []) : undefined,
                 business_ids: {
                     right_id: row.right_id != null ? row.right_id : null,
                     digital_artwork_id: row.digital_artwork_id != null ? row.digital_artwork_id : null,
@@ -4526,8 +4646,10 @@ async function orderDetailForActor(req, options = {}) {
                 tradeState: effectiveTradeState,
                 items: items.map((item) => ({
                     type: item.type,
+                    quantity: item.quantity,
                     delivery_qr_code_url: item.delivery_qr_code_url || item.qr_code_url,
                     delivery_qr_code_at: item.delivery_qr_code_at || item.qr_code_uploaded_at,
+                    delivery_units: item.delivery_units || item.fulfillment?.digital?.delivery_units || [],
                 })),
                 shipment: primaryShipment
                     ? {
@@ -4782,13 +4904,6 @@ async function verifyBuyerConfirmReceipt(req) {
     }
 
     return adminResult(200, result.body);
-}
-
-function isValidQrCodeUrl(raw) {
-    if (raw == null || typeof raw !== 'string') return false;
-    const url = raw.trim();
-    if (!url || url.length > 512) return false;
-    return /^https?:\/\//i.test(url);
 }
 
 async function fetchWxPayOrderByOutTradeNo(outTradeNo) {
@@ -5252,7 +5367,10 @@ async function uploadDigitalItemQrCode(req) {
 
         const orderId = parseInt(String(req.params.orderId), 10);
         const itemId = parseInt(String(req.params.itemId), 10);
-        const { qr_code_url: qrCodeUrl } = req.body || {};
+        const body = req.body || {};
+        const qrCodeUrl = body.qr_code_url;
+        const qrCodeUrls = body.qr_code_urls;
+        const unitIndex = body.unit_index != null ? Number(body.unit_index) : null;
 
         if (!orderId || Number.isNaN(orderId) || orderId <= 0) {
             return adminResult(400, { success: false, error: '无效的订单 ID' });
@@ -5260,11 +5378,6 @@ async function uploadDigitalItemQrCode(req) {
         if (!itemId || Number.isNaN(itemId) || itemId <= 0) {
             return adminResult(400, { success: false, error: '无效的订单项 ID' });
         }
-        if (!isValidQrCodeUrl(qrCodeUrl)) {
-            return adminResult(400, { success: false, error: '请提供有效的二维码图片 URL（http/https）' });
-        }
-
-        const cleanUrl = String(qrCodeUrl).trim();
 
         const [orders] = await db.query(
             `SELECT id, out_trade_no, transaction_id, trade_type, trade_state, trade_state_desc, success_time
@@ -5280,49 +5393,51 @@ async function uploadDigitalItemQrCode(req) {
             return adminResult(400, { success: false, error: '仅支付成功的订单可上传交付二维码' });
         }
 
-        const [items] = await db.query(
-            `SELECT id, type, digital_artwork_id, delivery_qr_code_url
-             FROM order_items
-             WHERE id = ? AND order_id = ?
-             LIMIT 1`,
-            [itemId, orderId]
-        );
-        if (!items.length) {
-            return adminResult(404, { success: false, error: '订单项不存在' });
-        }
-        if (items[0].type !== 'digital') {
-            return adminResult(400, { success: false, error: '仅数字艺术品订单项支持上传二维码' });
-        }
+        const fillResult = await manualFillDeliveryUnits({
+            orderId,
+            orderItemId: itemId,
+            qrCodeUrl,
+            qrCodeUrls,
+            unitIndex: Number.isFinite(unitIndex) && unitIndex > 0 ? unitIndex : null,
+        });
 
-        await db.query(
-            'UPDATE order_items SET delivery_qr_code_url = ?, delivery_qr_code_at = NOW() WHERE id = ? AND order_id = ?',
-            [cleanUrl, itemId, orderId]
-        );
+        if (fillResult.error) {
+            return adminResult(fillResult.status || 400, {
+                success: false,
+                error: fillResult.error,
+            });
+        }
 
         const fulfillment = buildDigitalItemFulfillment({
             tradeState: 'SUCCESS',
-            qrCodeUrl: cleanUrl,
+            qrCodeUrl: fillResult.sync?.primaryUrl || null,
             qrCodeAt: new Date(),
+            deliveryUnits: fillResult.delivery_units,
+            quantity: fillResult.delivery_units?.length || 1,
         });
 
-        fireSubscribeNotify(
-            notifyVirtualDeliveryShipped({
-                orderId,
-                outTradeNo: orders[0].out_trade_no,
-                orderItemId: itemId,
-            }),
-            'virtualDeliveryShipped',
-        );
+        if (fillResult.sync?.allDelivered) {
+            fireSubscribeNotify(
+                notifyVirtualDeliveryShipped({
+                    orderId,
+                    outTradeNo: orders[0].out_trade_no,
+                    orderItemId: itemId,
+                }),
+                'virtualDeliveryShipped',
+            );
+        }
 
         return adminResult(200, {
             success: true,
-            message: '二维码已保存',
+            message: fillResult.sync?.allDelivered ? '二维码已保存' : '部分二维码已保存',
             data: {
                 order_id: orderId,
                 order_item_id: itemId,
-                digital_artwork_id: items[0].digital_artwork_id,
                 qr_code_url: fulfillment.qr_code_url,
                 qr_code_uploaded_at: fulfillment.qr_code_uploaded_at,
+                delivery_units: fulfillment.delivery_units,
+                delivered_count: fulfillment.delivered_count,
+                required_count: fulfillment.required_count,
                 fulfillment,
             },
         });

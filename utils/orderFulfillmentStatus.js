@@ -80,6 +80,16 @@ function hasQrCode(url) {
   return Boolean(url && String(url).trim())
 }
 
+function isDigitalItemFullyDelivered(item) {
+  if (!item) return false
+  const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1
+  if (Array.isArray(item.delivery_units) && item.delivery_units.length > 0) {
+    const filled = item.delivery_units.filter((u) => hasQrCode(u.qr_code_url)).length
+    return filled >= Math.max(qty, item.delivery_units.length)
+  }
+  return hasQrCode(item.delivery_qr_code_url)
+}
+
 function mapPathActionToStatus(actionType) {
   const t = Number(actionType)
   if (!t) return null
@@ -110,7 +120,7 @@ function resolvePhysicalGroupStatus({ tradeState, shipment }) {
 function resolveDigitalGroupStatus({ tradeState, digitalItems }) {
   if (tradeState !== 'SUCCESS') return null
   if (!digitalItems.length) return null
-  const allDelivered = digitalItems.every((item) => hasQrCode(item.delivery_qr_code_url))
+  const allDelivered = digitalItems.every((item) => isDigitalItemFullyDelivered(item))
   if (allDelivered) return FULFILLMENT_STATUS.DELIVERED
   return FULFILLMENT_STATUS.AWAITING_DELIVERY
 }
@@ -448,6 +458,8 @@ module.exports = {
   STATUS_LABELS,
   ACTIVE_REFUND_STATUSES,
   COMPLETED_REFUND_STATUSES,
+  hasQrCode,
+  isDigitalItemFullyDelivered,
   pickEffectiveRefundRow,
   mapRefundRowToStatus,
   mapPathActionToStatus,

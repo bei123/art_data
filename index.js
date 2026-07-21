@@ -54,6 +54,7 @@ const { loadExhibitionCandidates } = require('./services/artworkVisualSearchServ
 const exhibitionsService = require('./services/exhibitionsService');
 const { ensureOrderItemsQrCodeColumns } = require('./utils/orderItemsSchema');
 const { ensureOrderShipmentsTable } = require('./utils/orderShipmentsSchema');
+const { ensureDigitalQrPoolSchema } = require('./utils/digitalQrPoolSchema');
 const { ensureDigitalArtworkIdColumns } = require('./utils/digitalArtworkResolver');
 const { ensureOrdersShippingColumns, ensureOrderInventoryReservedColumn } = require('./utils/ordersSchema');
 const { ensureReferralSchema } = require('./utils/referralSchema');
@@ -440,6 +441,8 @@ app.get(
         COALESCE(da.title, dae.title) as artwork_title,
         COALESCE(da.image_url, dae.image_url) as artwork_image,
         o.trade_state as order_trade_state,
+        oi.id as order_item_id,
+        oi.quantity as order_item_quantity,
         oi.delivery_qr_code_url,
         oi.delivery_qr_code_at
       FROM digital_identity_purchases dip
@@ -453,13 +456,29 @@ app.get(
       LIMIT ? OFFSET ?
     `, [accessUserId, pageSize, offset])
 
+      const { loadDeliveryUnitsByOrderItemIds } = require('./services/digitalQrDeliveryService')
+      const itemIds = (purchases || []).map((row) => row.order_item_id).filter(Boolean)
+      const unitsByItemId = await loadDeliveryUnitsByOrderItemIds(itemIds)
+
       const result = (purchases || []).map((row) => {
         const isPaid = row.order_trade_state === 'SUCCESS'
-        const qrCodeUrl = isPaid && row.delivery_qr_code_url ? row.delivery_qr_code_url : null
+        const units = unitsByItemId.get(Number(row.order_item_id)) || []
+        const filled = units.filter((u) => u.qr_code_url)
+        const qrCodeUrl = isPaid
+          ? (filled[0]?.qr_code_url || row.delivery_qr_code_url || null)
+          : null
         return {
           ...row,
           qr_code_url: qrCodeUrl,
-          qr_code_uploaded_at: qrCodeUrl ? row.delivery_qr_code_at : null,
+          qr_code_uploaded_at: qrCodeUrl ? (filled[0]?.delivered_at || row.delivery_qr_code_at) : null,
+          delivery_units: isPaid
+            ? units.map((u) => ({
+                unit_index: u.unit_index,
+                qr_code_url: u.qr_code_url || null,
+                source: u.source || null,
+                delivered_at: u.delivered_at || null,
+              }))
+            : [],
         }
       })
 
@@ -511,6 +530,9 @@ ensureOrderItemsQrCodeColumns().catch((err) => {
 });
 ensureOrderShipmentsTable().catch((err) => {
   logger.warn('order_shipments table ensure failed', { err: err.message });
+});
+ensureDigitalQrPoolSchema().catch((err) => {
+  logger.warn('digital QR pool schema ensure failed', { err: err.message });
 });
 ensureDigitalArtworkIdColumns().catch((err) => {
   logger.warn('digital_artwork_id column ensure failed', { err: err.message });

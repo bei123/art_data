@@ -561,13 +561,78 @@
                       数字藏品交付二维码
                     </div>
                     <p class="mb-3 text-xs text-muted-foreground leading-relaxed">
-                      用户微信支付成功后，请上传藏品领取二维码；保存后用户可在订单详情与购买记录中查看。
+                      支付成功后优先从码池自动领取（一码一单位）；码不足时可在此手动补传。数量 {{ item.quantity || 1 }}。
                     </p>
                     <div v-if="!isOrderPaid(selectedOrder)" class="text-sm text-muted-foreground">
                       订单尚未支付成功，暂不可上传。
                     </div>
                     <template v-else>
-                      <div v-if="item.qr_code_url || item.delivery_qr_code_url" class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+                      <div
+                        v-if="getDigitalDeliveryUnits(item).length"
+                        class="mb-3 space-y-2"
+                      >
+                        <div
+                          v-for="unit in getDigitalDeliveryUnits(item)"
+                          :key="unit.id || unit.unit_index"
+                          class="flex flex-col gap-2 rounded-md border border-border bg-background p-2 sm:flex-row sm:items-start"
+                        >
+                          <div
+                            v-if="unit.qr_code_url"
+                            class="size-24 shrink-0 overflow-hidden rounded-md border border-border p-1"
+                          >
+                            <img
+                              :src="getImageUrl(unit.qr_code_url)"
+                              :alt="`交付码 ${unit.unit_index}`"
+                              class="size-full object-contain"
+                            >
+                          </div>
+                          <div
+                            v-else
+                            class="flex size-24 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground"
+                          >
+                            待交付
+                          </div>
+                          <div class="min-w-0 flex-1 text-xs text-muted-foreground">
+                            <div class="font-medium text-foreground">
+                              单位 #{{ unit.unit_index }}
+                              <Badge v-if="unit.source" variant="outline" class="ml-1">
+                                {{ unit.source === 'pool' ? '码池' : '手动' }}
+                              </Badge>
+                            </div>
+                            <div v-if="unit.delivered_at" class="mt-1 tabular-nums">
+                              {{ unit.delivered_at }}
+                            </div>
+                            <div class="mt-2">
+                              <input
+                                :id="`qr-upload-${item.id}-${unit.unit_index}`"
+                                type="file"
+                                accept="image/*"
+                                class="sr-only"
+                                :disabled="qrUploadingItemId === `${item.id}-${unit.unit_index}`"
+                                @change="(e) => handleDigitalQrUpload(item, e, unit.unit_index)"
+                              >
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                :disabled="qrUploadingItemId === `${item.id}-${unit.unit_index}`"
+                                @click="triggerQrFileInput(`${item.id}-${unit.unit_index}`)"
+                              >
+                                <Loader2
+                                  v-if="qrUploadingItemId === `${item.id}-${unit.unit_index}`"
+                                  class="mr-1.5 size-3.5 animate-spin"
+                                  aria-hidden="true"
+                                />
+                                {{ unit.qr_code_url ? '重新上传' : '手动上传' }}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        v-else-if="item.qr_code_url || item.delivery_qr_code_url"
+                        class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start"
+                      >
                         <div class="size-28 shrink-0 overflow-hidden rounded-md border border-border bg-background p-1">
                           <img
                             :src="getImageUrl(item.qr_code_url || item.delivery_qr_code_url)"
@@ -576,7 +641,7 @@
                           >
                         </div>
                         <div class="text-xs text-muted-foreground">
-                          <div>已上传</div>
+                          <div>已上传（旧数据）</div>
                           <div v-if="item.qr_code_uploaded_at || item.delivery_qr_code_at" class="mt-1 tabular-nums">
                             {{ item.qr_code_uploaded_at || item.delivery_qr_code_at }}
                           </div>
@@ -603,7 +668,9 @@
                             class="mr-1.5 size-3.5 animate-spin"
                             aria-hidden="true"
                           />
-                          {{ item.qr_code_url || item.delivery_qr_code_url ? '重新上传二维码' : '上传二维码' }}
+                          {{ getDigitalDeliveryUnits(item).some((u) => !u.qr_code_url) || !(item.qr_code_url || item.delivery_qr_code_url)
+                            ? '批量补传空槽'
+                            : '重新上传二维码' }}
                         </Button>
                       </div>
                     </template>
@@ -1986,6 +2053,14 @@ function triggerQrFileInput(itemId) {
   if (input) input.click()
 }
 
+function getDigitalDeliveryUnits(item) {
+  if (!item) return []
+  const fromItem = Array.isArray(item.delivery_units) ? item.delivery_units : []
+  if (fromItem.length) return fromItem
+  const fromFulfillment = item.fulfillment?.delivery_units || item.fulfillment?.digital?.delivery_units
+  return Array.isArray(fromFulfillment) ? fromFulfillment : []
+}
+
 function syncOrderItemQrCode(orderId, itemId, payload) {
   const patchItem = (item) => {
     if (!item || item.id !== itemId) return item
@@ -1995,6 +2070,7 @@ function syncOrderItemQrCode(orderId, itemId, payload) {
       delivery_qr_code_url: payload.qr_code_url,
       qr_code_uploaded_at: payload.qr_code_uploaded_at,
       delivery_qr_code_at: payload.qr_code_uploaded_at,
+      delivery_units: payload.delivery_units || item.delivery_units,
       fulfillment: payload.fulfillment || item.fulfillment,
     }
   }
@@ -2015,11 +2091,12 @@ function syncOrderItemQrCode(orderId, itemId, payload) {
   })
 }
 
-async function handleDigitalQrUpload(item, event) {
+async function handleDigitalQrUpload(item, event, unitIndex = null) {
   const file = event?.target?.files?.[0]
   if (!file || !selectedOrder.value || !item?.id) return
 
-  qrUploadingItemId.value = item.id
+  const uploadKey = unitIndex != null ? `${item.id}-${unitIndex}` : item.id
+  qrUploadingItemId.value = uploadKey
   try {
     const processedFile = await uploadImageToWebpLimit5MB(file)
     if (!processedFile) return
@@ -2036,9 +2113,13 @@ async function handleDigitalQrUpload(item, event) {
       return
     }
 
+    const body = unitIndex != null
+      ? { qr_code_url: uploadedUrl, unit_index: unitIndex }
+      : { qr_code_url: uploadedUrl }
+
     const saveRes = await axios.patch(
       `/wx/pay/admin/orders/${selectedOrder.value.id}/items/${item.id}/qr-code`,
-      { qr_code_url: uploadedUrl }
+      body
     )
 
     if (!saveRes?.success) {
@@ -2050,10 +2131,11 @@ async function handleDigitalQrUpload(item, event) {
     syncOrderItemQrCode(selectedOrder.value.id, item.id, {
       qr_code_url: saved.qr_code_url,
       qr_code_uploaded_at: saved.qr_code_uploaded_at,
+      delivery_units: saved.delivery_units,
       fulfillment: saved.fulfillment,
     })
     await refreshSelectedOrderDetail(selectedOrder.value.id)
-    ElMessage.success('二维码已保存，用户可在订单中查看')
+    ElMessage.success(saveRes.message || '二维码已保存，用户可在订单中查看')
   } catch (error) {
     console.error('上传数字藏品二维码失败:', error)
     ElMessage.error(error.response?.data?.error || '上传二维码失败')

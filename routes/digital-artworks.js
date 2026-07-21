@@ -19,6 +19,17 @@ const {
   resolveWespaceBasicAuthorization,
   externalAuthNotConfiguredBody,
 } = require('../utils/externalApiAuth');
+const {
+  listPoolCodes,
+  addPoolCodes,
+  voidPoolCode,
+  backfillAwaitingDigitalDelivery,
+  getPoolStats,
+} = require('../services/digitalQrDeliveryService');
+const {
+  fireSubscribeNotify,
+  notifyVirtualDeliveryShipped,
+} = require('../services/subscribeMessageNotify');
 
 // 外部API配置
 const EXTERNAL_API_CONFIG = {
@@ -241,6 +252,113 @@ router.get('/admin/:id/wespace-details', ...requireAdmin, async (req, res) => {
     res.status(500).json({ error: '读取失败' });
   }
 });
+
+function notifyBackfillDeliveries(fullyDeliveredItems) {
+  for (const row of fullyDeliveredItems || []) {
+    if (!row?.order_id || !row?.order_item_id || !row?.out_trade_no) continue
+    fireSubscribeNotify(
+      notifyVirtualDeliveryShipped({
+        orderId: row.order_id,
+        outTradeNo: row.out_trade_no,
+        orderItemId: row.order_item_id,
+      }),
+      'virtualDeliveryShipped',
+    )
+  }
+}
+
+/**
+ * 数字艺术品领取码库存池
+ * GET /api/digital-artworks/admin/:id/qr-codes
+ */
+router.get('/admin/:id/qr-codes', ...requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!id) return res.status(400).json({ error: '无效的作品ID' })
+    const result = await listPoolCodes(id, {
+      status: req.query.status || null,
+      page: req.query.page,
+      pageSize: req.query.pageSize,
+    })
+    return res.json({ success: true, ...result })
+  } catch (error) {
+    logger.error('list digital QR pool failed', { err: error })
+    return res.status(500).json({ error: '获取领取码库存失败' })
+  }
+})
+
+/**
+ * 批量入库领取码
+ * POST /api/digital-artworks/admin/:id/qr-codes
+ * body: { qr_code_urls: string[] }
+ */
+router.post('/admin/:id/qr-codes', ...requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!id) return res.status(400).json({ error: '无效的作品ID' })
+    const urls = req.body?.qr_code_urls || req.body?.urls || []
+    const result = await addPoolCodes(id, urls)
+    if (result.error) {
+      return res.status(result.status || 400).json({ success: false, error: result.error })
+    }
+    notifyBackfillDeliveries(result.backfill?.fullyDeliveredItems)
+    return res.json({
+      success: true,
+      inserted: result.inserted,
+      skipped: result.skipped,
+      stats: result.stats,
+      backfill: result.backfill
+        ? {
+            assigned_count: result.backfill.assignedCount || 0,
+            fully_delivered_count: (result.backfill.fullyDeliveredItems || []).length,
+          }
+        : null,
+    })
+  } catch (error) {
+    logger.error('add digital QR pool codes failed', { err: error })
+    return res.status(500).json({ error: '入库领取码失败' })
+  }
+})
+
+/**
+ * 作废未分配领取码
+ * DELETE /api/digital-artworks/admin/:id/qr-codes/:codeId
+ */
+router.delete('/admin/:id/qr-codes/:codeId', ...requireAdmin, async (req, res) => {
+  try {
+    const result = await voidPoolCode(req.params.codeId)
+    if (result.error) {
+      return res.status(result.status || 400).json({ success: false, error: result.error })
+    }
+    const stats = await getPoolStats(String(req.params.id || '').trim())
+    return res.json({ success: true, stats })
+  } catch (error) {
+    logger.error('void digital QR pool code failed', { err: error })
+    return res.status(500).json({ error: '作废领取码失败' })
+  }
+})
+
+/**
+ * 手动触发码池回填待发货订单
+ * POST /api/digital-artworks/admin/:id/qr-codes/backfill
+ */
+router.post('/admin/:id/qr-codes/backfill', ...requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!id) return res.status(400).json({ error: '无效的作品ID' })
+    const result = await backfillAwaitingDigitalDelivery(id)
+    notifyBackfillDeliveries(result.fullyDeliveredItems)
+    return res.json({
+      success: true,
+      assigned_count: result.assignedCount || 0,
+      fully_delivered_count: (result.fullyDeliveredItems || []).length,
+      stats: await getPoolStats(id),
+    })
+  } catch (error) {
+    logger.error('backfill digital QR delivery failed', { err: error })
+    return res.status(500).json({ error: '回填交付失败' })
+  }
+})
 
 // 获取数字艺术品列表（公开接口：从缓存表读取）
 router.get('/', async (req, res) => {
