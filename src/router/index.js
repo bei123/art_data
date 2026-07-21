@@ -44,7 +44,7 @@ const routes = [
         name: 'Institutions',
         component: () => import('@/views/Institutions.vue'),
         meta: {
-          title: '机构管理',
+          title: '机构',
           requiresAuth: true
         }
       },
@@ -58,7 +58,7 @@ const routes = [
         name: 'DigitalClaimCopy',
         component: () => import('@/views/DigitalClaimCopy.vue'),
         meta: {
-          title: '领取说明配置',
+          title: '领取说明',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -83,7 +83,7 @@ const routes = [
         name: 'Exhibitions',
         component: () => import('@/views/Exhibitions.vue'),
         meta: {
-          title: '展览管理',
+          title: '展览',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -117,7 +117,7 @@ const routes = [
         name: 'Merchants',
         component: () => import('@/views/Merchants.vue'),
         meta: {
-          title: '商家管理',
+          title: '商家',
           requiresAuth: true
         }
       },
@@ -145,7 +145,7 @@ const routes = [
         name: 'Orders',
         component: () => import('@/views/Orders.vue'),
         meta: {
-          title: '订单管理',
+          title: '订单',
           requiresAuth: true
         }
       },
@@ -154,7 +154,7 @@ const routes = [
         name: 'SubscribeMessageTemplates',
         component: () => import('@/views/SubscribeMessageTemplates.vue'),
         meta: {
-          title: '订阅消息模板',
+          title: '订阅消息',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -164,7 +164,7 @@ const routes = [
         name: 'ReferralCommissions',
         component: () => import('@/views/ReferralCommissions.vue'),
         meta: {
-          title: '推荐佣金明细',
+          title: '佣金明细',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -174,7 +174,7 @@ const routes = [
         name: 'CommissionRules',
         component: () => import('@/views/CommissionRules.vue'),
         meta: {
-          title: '佣金比例规则',
+          title: '佣金规则',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -184,7 +184,7 @@ const routes = [
         name: 'ReferralWithdrawals',
         component: () => import('@/views/ReferralWithdrawals.vue'),
         meta: {
-          title: '推荐官提现',
+          title: '提现审批',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -194,7 +194,7 @@ const routes = [
         name: 'ReferralCoupons',
         component: () => import('@/views/ReferralCoupons.vue'),
         meta: {
-          title: '微信代金券',
+          title: '代金券',
           requiresAuth: true,
           roles: ['admin']
         }
@@ -234,7 +234,7 @@ const routes = [
         name: 'ReferralReconciliation',
         component: () => import('@/views/ReferralReconciliation.vue'),
         meta: {
-          title: '推荐对账',
+          title: '对账',
           requiresAuth: true,
           roles: ['admin']
         }

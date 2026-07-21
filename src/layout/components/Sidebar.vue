@@ -3,16 +3,50 @@
     class="flex h-full w-52 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-2 text-sidebar-foreground"
     aria-label="主导航"
   >
-    <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-      <RouterLink
-        v-for="item in visibleNavItems"
-        :key="item.path"
-        :to="item.path"
-        :class="navLinkClass(item.path)"
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      <div
+        v-for="group in visibleNavGroups"
+        :key="group.id"
+        class="flex flex-col gap-0.5"
       >
-        <component :is="item.icon" class="size-4 shrink-0 opacity-80" aria-hidden="true" />
-        <span class="truncate">{{ item.label }}</span>
-      </RouterLink>
+        <button
+          v-if="group.collapsible"
+          type="button"
+          class="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[11px] font-medium tracking-wide text-sidebar-foreground/55 outline-none transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+          :aria-expanded="isGroupExpanded(group.id)"
+          :aria-controls="`nav-group-${group.id}`"
+          @click="toggleGroup(group.id)"
+        >
+          <span class="truncate uppercase">{{ group.label }}</span>
+          <ChevronDown
+            class="size-3.5 shrink-0 opacity-70 transition-transform"
+            :class="{ '-rotate-90': !isGroupExpanded(group.id) }"
+            aria-hidden="true"
+          />
+        </button>
+        <p
+          v-else
+          class="px-2.5 py-1 text-[11px] font-medium tracking-wide text-sidebar-foreground/55 uppercase"
+        >
+          {{ group.label }}
+        </p>
+
+        <div
+          v-show="!group.collapsible || isGroupExpanded(group.id)"
+          :id="`nav-group-${group.id}`"
+          class="flex flex-col gap-0.5"
+        >
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.path"
+            :to="item.path"
+            :class="navLinkClass(item.path)"
+          >
+            <component :is="item.icon" class="size-4 shrink-0 opacity-80" aria-hidden="true" />
+            <span class="truncate">{{ item.label }}</span>
+          </RouterLink>
+        </div>
+      </div>
     </div>
 
     <div class="mt-2 shrink-0 border-t border-sidebar-border pt-2">
@@ -40,33 +74,16 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { ChevronDown, Loader2, LogOut } from 'lucide-vue-next'
 import { showPageSuccess } from '@/utils/appMessage'
-import {
-  Building2,
-  FileText,
-  FolderTree,
-  Image,
-  Images,
-  LayoutDashboard,
-  Loader2,
-  LogOut,
-  HandCoins,
-  MessageSquare,
-  Store,
-  User,
-  UserX,
-  Wallet,
-  Share2,
-  ClipboardCheck,
-  TicketPercent,
-} from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { useUserStore } from '@/stores/user'
 import { userMatchesRole } from '@/utils/roles'
 import { logoutCurrentUser } from '@/utils/sessionLogout'
 import { cn } from '@/lib/utils'
+import { ADMIN_NAV_GROUPS, REFERRAL_NAV_STORAGE_KEY } from '@/config/admin-nav'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -78,44 +95,78 @@ const displayName = computed(() => {
   return String(u.username || u.name || u.nickname || u.email || '').trim()
 })
 
-const navItems = [
-  { path: '/', label: '仪表盘', icon: LayoutDashboard },
-  { path: '/original-artworks', label: '原作管理', icon: Image },
-  { path: '/artists', label: '艺术家管理', icon: User },
-  { path: '/institutions', label: '机构管理', icon: Building2 },
-  { path: '/digital-artworks', label: '数字艺术品', icon: Images },
-  { path: '/digital-claim-copy', label: '领取说明', icon: FileText, role: 'admin' },
-  { path: '/physical-categories', label: '实物分类', icon: FolderTree },
-  { path: '/rights', label: '权益管理', icon: FileText },
-  { path: '/exhibitions', label: '展览管理', icon: FileText, role: 'admin' },
-  { path: '/banners', label: '轮播图管理', icon: Image },
-  { path: '/merchants', label: '商家管理', icon: Store },
-  { path: '/refund-approval', label: '退款审批', icon: Wallet, role: 'admin' },
-  { path: '/referral/commissions', label: '推荐佣金', icon: HandCoins, role: 'admin' },
-  { path: '/referral/commission-rules', label: '佣金规则', icon: HandCoins, role: 'admin' },
-  { path: '/referral/withdrawals', label: '推荐官提现', icon: Wallet, role: 'admin' },
-  { path: '/referral/coupons', label: '微信代金券', icon: TicketPercent, role: 'admin' },
-  { path: '/referral/advisor-applications', label: '艺术顾问', icon: User, role: 'admin' },
-  { path: '/referral/vip-early-access', label: 'VIP优先购', icon: HandCoins, role: 'admin' },
-  { path: '/referral/share-events', label: '分享记录', icon: Share2, role: 'admin' },
-  { path: '/referral/reconciliation', label: '推荐对账', icon: ClipboardCheck, role: 'admin' },
-  { path: '/wx-users', label: '小程序用户', icon: UserX, role: 'admin' },
-  { path: '/orders', label: '订单管理', icon: FileText },
-  { path: '/subscribe-message/templates', label: '订阅消息', icon: MessageSquare, role: 'admin' },
-]
-
-const visibleNavItems = computed(() =>
-  navItems.filter((item) => !item.role || hasRole(item.role)),
-)
-
 function hasRole(role) {
   return userMatchesRole(userStore.userInfo, role)
 }
+
+function filterItems(items) {
+  return (items || []).filter((item) => !item.role || hasRole(item.role))
+}
+
+const visibleNavGroups = computed(() =>
+  ADMIN_NAV_GROUPS
+    .filter((group) => !group.role || hasRole(group.role))
+    .map((group) => ({
+      ...group,
+      items: filterItems(group.items),
+    }))
+    .filter((group) => group.items.length > 0)
+)
 
 function isNavActive(path) {
   const p = route.path
   if (path === '/') return p === '/' || p === ''
   return p === path || p.startsWith(`${path}/`)
+}
+
+function groupContainsActiveRoute(group) {
+  return (group.items || []).some((item) => isNavActive(item.path))
+}
+
+function readStoredReferralExpanded() {
+  try {
+    const raw = localStorage.getItem(REFERRAL_NAV_STORAGE_KEY)
+    if (raw === '1') return true
+    if (raw === '0') return false
+  } catch {
+    // ignore
+  }
+  return null
+}
+
+function writeStoredReferralExpanded(expanded) {
+  try {
+    localStorage.setItem(REFERRAL_NAV_STORAGE_KEY, expanded ? '1' : '0')
+  } catch {
+    // ignore
+  }
+}
+
+const referralExpanded = ref(readStoredReferralExpanded() ?? false)
+
+const referralGroup = computed(() =>
+  visibleNavGroups.value.find((group) => group.id === 'referral') || null
+)
+
+watch(
+  () => [route.path, referralGroup.value],
+  () => {
+    const group = referralGroup.value
+    if (group && groupContainsActiveRoute(group))
+      referralExpanded.value = true
+  },
+  { immediate: true }
+)
+
+function isGroupExpanded(groupId) {
+  if (groupId !== 'referral') return true
+  return referralExpanded.value
+}
+
+function toggleGroup(groupId) {
+  if (groupId !== 'referral') return
+  referralExpanded.value = !referralExpanded.value
+  writeStoredReferralExpanded(referralExpanded.value)
 }
 
 function navLinkClass(path) {
