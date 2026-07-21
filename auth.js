@@ -9,10 +9,15 @@ const {
   resolveAuthFromRequest,
 } = require('./utils/sessionAuth');
 const { revokeWxRefreshTokensForUser, revokeWxAccessSession } = require('./utils/wxSessionTokens');
-const { hashSessionToken } = require('./utils/sessionTokenHash');
+const {
+  issueAdminTokenPair,
+  refreshAdminAccessToken,
+  revokeAdminRefreshTokensForUser,
+  revokeAdminAccessSession,
+} = require('./utils/adminSessionTokens');
 const { appendClientErrorDetail } = require('./utils/clientErrorDetail');
 
-// 生成JWT token
+// 生成JWT token（兼容旧调用；新登录走 issueAdminTokenPair）
 const generateToken = (userId) => {
   return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '24h' });
 };
@@ -237,16 +242,11 @@ const register = async (req, res) => {
       [username, email, passwordHash, roles[0].id, 'active']
     );
 
-    // 生成token
-    const token = generateToken(result.insertId);
-
-    const tokenHash = hashSessionToken(token);
-
-    // 创建用户会话
-    await connection.query(
-      'INSERT INTO user_sessions (user_id, token, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
-      [result.insertId, token, tokenHash]
-    );
+    // 生成 access + refresh
+    const tokenPair = await issueAdminTokenPair({
+      userId: result.insertId,
+      connection,
+    });
 
     // 提交事务
     await connection.commit();
@@ -261,7 +261,12 @@ const register = async (req, res) => {
         userId: result.insertId,
         username,
         email,
-        token
+        token: tokenPair.token,
+        refreshToken: tokenPair.refreshToken,
+        expires_at: tokenPair.expires_at,
+        expiresIn: tokenPair.expiresIn,
+        refresh_expires_at: tokenPair.refresh_expires_at,
+        refreshExpiresIn: tokenPair.refreshExpiresIn,
       }
     });
   } catch (error) {
@@ -322,21 +327,16 @@ const login = async (req, res) => {
       return res.status(403).json({ error: '账户已被禁用' });
     }
 
-    // 生成token
-    const token = generateToken(user.id);
+    // 生成 access + refresh
+    const tokenPair = await issueAdminTokenPair({
+      userId: user.id,
+      connection,
+    });
 
     // 更新最后登录时间
     await connection.query(
       'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
       [user.id]
-    );
-
-    const tokenHash = hashSessionToken(token);
-
-    // 创建会话记录
-    await connection.query(
-      'INSERT INTO user_sessions (user_id, token, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))',
-      [user.id, token, tokenHash]
     );
 
     await connection.commit();
@@ -345,7 +345,12 @@ const login = async (req, res) => {
       success: true,
       message: '登录成功',
       data: {
-        token,
+        token: tokenPair.token,
+        refreshToken: tokenPair.refreshToken,
+        expires_at: tokenPair.expires_at,
+        expiresIn: tokenPair.expiresIn,
+        refresh_expires_at: tokenPair.refresh_expires_at,
+        refreshExpiresIn: tokenPair.refreshExpiresIn,
         user: {
           id: user.id,
           username: user.username,
@@ -403,6 +408,35 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
+// 刷新 access token
+const refresh = async (req, res) => {
+  try {
+    const { refreshToken: refreshTokenValue } = req.body || {};
+    const result = await refreshAdminAccessToken(refreshTokenValue);
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        token: result.token,
+        refreshToken: result.refreshToken,
+        expires_at: result.expires_at,
+        expiresIn: result.expiresIn,
+        refresh_expires_at: result.refresh_expires_at,
+        refreshExpiresIn: result.refreshExpiresIn,
+      },
+    });
+  } catch (error) {
+    console.error('刷新 token 失败:', error);
+    return res.status(500).json(appendClientErrorDetail({
+      success: false,
+      error: '刷新登录状态失败',
+    }, error));
+  }
+};
+
 // 退出登录
 const logout = async (req, res) => {
   try {
@@ -411,15 +445,13 @@ const logout = async (req, res) => {
       if (req.user?.is_wx_user) {
         await revokeWxAccessSession(token);
       } else {
-        const tokenHash = hashSessionToken(token);
-        await query(
-          'DELETE FROM user_sessions WHERE token = ? OR token_hash = ?',
-          [token, tokenHash]
-        );
+        await revokeAdminAccessSession(token);
       }
     }
     if (req.user?.is_wx_user && req.user?.id) {
       await revokeWxRefreshTokensForUser(req.user.id);
+    } else if (req.user?.id && !req.user?.is_wx_user) {
+      await revokeAdminRefreshTokensForUser(req.user.id);
     }
     res.json({ message: '退出成功' });
   } catch (error) {
@@ -442,6 +474,8 @@ module.exports = {
   resolveAuthFromRequest,
   register,
   login,
+  refresh,
   getCurrentUser,
-  logout
+  logout,
+  generateToken,
 }; 

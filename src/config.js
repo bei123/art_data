@@ -65,8 +65,10 @@ export const CONFIG = {
   requestTimeout: 30000,
   // Token相关配置
   token: {
-    // token过期时间（小时）
+    // access token 过期时间（小时）；与服务端 ADMIN_ACCESS_TOKEN_EXPIRES_IN 默认 24h 对齐
     expiryHours: 24,
+    // refresh token 有效天数（展示用）；与服务端 ADMIN_REFRESH_TOKEN_TTL_DAYS 默认 30 对齐
+    refreshExpiryDays: 30,
     // 过期前提醒时间（分钟）
     warningMinutes: 5,
     // 检查间隔（秒）

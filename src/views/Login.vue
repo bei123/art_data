@@ -28,7 +28,10 @@
           <AlertTitle>登录说明</AlertTitle>
           <AlertDescription class="space-y-1">
             <p>请使用管理员分配的账号登录本系统。</p>
-            <p>登录状态约 {{ tokenExpiryHours }} 小时内有效，过期后需重新登录。</p>
+            <p>
+              访问令牌约 {{ tokenExpiryHours }} 小时有效；系统会自动续期（最长约
+              {{ refreshExpiryDays }} 天），过期后需重新登录。
+            </p>
             <p>若无法登录，请联系系统管理员重置密码。</p>
           </AlertDescription>
         </Alert>
@@ -169,6 +172,7 @@ const router = useRouter()
 const route = useRoute()
 const isLogin = ref(true)
 const tokenExpiryHours = CONFIG.token.expiryHours
+const refreshExpiryDays = CONFIG.token.refreshExpiryDays || 30
 
 const sessionExpiredHint = computed(
   () => isLogin.value && String(route.query.reason || '') === 'session_expired'
@@ -300,10 +304,9 @@ const handleSubmit = async () => {
         formError.value = '登录失败：服务器返回数据异常，请稍后重试'
         return
       }
-      localStorage.setItem('token', token)
-      const expiryTime = Date.now() + (CONFIG.token.expiryHours * 60 * 60 * 1000)
-      localStorage.setItem('tokenExpiry', expiryTime.toString())
       localStorage.setItem('user', JSON.stringify(user))
+      const { saveAuthTokens } = await import('@/utils/tokenManager')
+      saveAuthTokens(body.data)
       userStore.setUserInfo(user)
       resetTokenExpiryNotifications()
       await router.replace('/')

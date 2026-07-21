@@ -1,7 +1,14 @@
 import axios from 'axios';
 import { getApiClientBaseUrl, CONFIG } from '../config';
 import { ElMessage } from 'element-plus';
-import { checkAndHandleTokenExpiry, clearUserDataAndRedirect } from './tokenManager';
+import {
+  checkAndHandleTokenExpiry,
+  clearUserDataAndRedirect,
+  getAccessToken,
+  hasUsableRefreshToken,
+  isTokenExpired,
+} from './tokenManager';
+import { refreshAdminAccessToken } from './authRefresh';
 import { applyApiSignToAxiosConfig } from './apiSign';
 
 /** 仅开发环境或显式 VITE_DEBUG_HTTP=true 时打印完整请求/响应（避免生产泄露数据与行为） */
@@ -21,20 +28,39 @@ const instance = axios.create({
   withCredentials: true
 });
 
+function isAuthPublicEndpoint(url = '') {
+  return (
+    url.includes('/auth/login') ||
+    url.includes('/auth/register') ||
+    url.includes('/auth/refresh')
+  )
+}
+
 // 请求拦截器
 instance.interceptors.request.use(
   async config => {
     const url = config?.url || ''
-    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/register')
+    const skipAuthRefresh = Boolean(config?.skipAuthRefresh)
+    const isAuthEndpoint = isAuthPublicEndpoint(url)
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
 
-    // 仅当存在token且不是认证接口时，才检查过期
-    if (!isAuthEndpoint && token) {
-      if (checkAndHandleTokenExpiry()) {
-        return Promise.reject(new Error('Token expired'))
+    if (!isAuthEndpoint && !skipAuthRefresh) {
+      if ((!token || isTokenExpired()) && hasUsableRefreshToken()) {
+        try {
+          const nextToken = await refreshAdminAccessToken()
+          config.headers.Authorization = `Bearer ${nextToken}`
+        } catch {
+          return Promise.reject(new Error('Token refresh failed'))
+        }
+      } else if (token) {
+        if (checkAndHandleTokenExpiry()) {
+          return Promise.reject(new Error('Token expired'))
+        }
+        config.headers.Authorization = `Bearer ${token}`
       }
-      config.headers.Authorization = `Bearer ${token}`;
+    } else if (!isAuthEndpoint && token) {
+      config.headers.Authorization = `Bearer ${token}`
     }
 
     await applyApiSignToAxiosConfig(config);
@@ -86,7 +112,7 @@ instance.interceptors.response.use(
 
     return response.data;
   },
-  error => {
+  async error => {
     if (logHttpDebug) {
       console.error('响应错误:', {
         message: error.message,
@@ -107,10 +133,27 @@ instance.interceptors.response.use(
       console.error('[api]', method, url, status ?? error.message);
     }
 
-    const skipGlobalError = Boolean(error.config?.skipGlobalError)
-    const url = String(error.config?.url || '')
-    const isAuthEndpoint =
-      url.includes('/auth/login') || url.includes('/auth/register')
+    const config = error.config || {}
+    const skipGlobalError = Boolean(config.skipGlobalError)
+    const skipAuthRefresh = Boolean(config.skipAuthRefresh)
+    const url = String(config.url || '')
+    const isAuthEndpoint = isAuthPublicEndpoint(url)
+
+    if (error.response?.status === 401 && !isAuthEndpoint && !skipAuthRefresh && !config._retry) {
+      if (hasUsableRefreshToken()) {
+        config._retry = true
+        try {
+          const nextToken = await refreshAdminAccessToken()
+          config.headers = config.headers || {}
+          config.headers.Authorization = `Bearer ${nextToken}`
+          return instance.request(config)
+        } catch {
+          return Promise.reject(error)
+        }
+      }
+      clearUserDataAndRedirect()
+      return Promise.reject(error)
+    }
 
     if (error.response) {
       const { status, data } = error.response;
@@ -137,4 +180,4 @@ instance.interceptors.response.use(
   }
 );
 
-export default instance; 
+export default instance;

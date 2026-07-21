@@ -277,6 +277,30 @@
         }
       }
     },
+    "/api/auth/refresh": {
+      "post": {
+        "operationId": "postAuthRefresh",
+        "summary": "POST /api/auth/refresh",
+        "tags": [
+          "auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WxRefreshTokenBody"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/me": {
       "get": {
         "operationId": "getAuthMe",

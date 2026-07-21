@@ -261,6 +261,22 @@ const sslOptions = {
 
 app.use('/api/auth/login', loginLimiter);
 
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.ADMIN_REFRESH_RATE_LIMIT_PER_15MIN || '60', 10) || 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  handler: (req, res) => {
+    applyCorsHeaders(req, res);
+    res.status(429).json({
+      error: '刷新登录状态过于频繁，请稍后再试',
+      code: 'REFRESH_RATE_LIMIT',
+      request_id: req.requestId || null,
+    });
+  },
+});
+
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: parseInt(process.env.AUTH_REGISTER_RATE_LIMIT_PER_HOUR || '3', 10),
@@ -294,6 +310,8 @@ app.post('/api/auth/login', [
   body('username').notEmpty().withMessage('请输入用户名'),
   body('password').notEmpty().withMessage('请输入密码')
 ], auth.login);
+
+app.post('/api/auth/refresh', refreshLimiter, auth.refresh);
 
 app.get('/api/auth/me', auth.authenticateToken, auth.getCurrentUser);
 
@@ -616,6 +634,10 @@ ensureAllSessionTokenHashColumns().catch((err) => {
 });
 ensureAllSessionStorageSchemas().catch((err) => {
   logger.warn('session storage schema ensure failed', { err: err?.message || err });
+});
+const { ensureAdminRefreshTokensSchema } = require('./utils/adminRefreshTokensSchema');
+ensureAdminRefreshTokensSchema().catch((err) => {
+  logger.warn('admin refresh tokens schema ensure failed', { err: err?.message || err });
 });
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS服务器运行在端口 ${PORT}，PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL}`);

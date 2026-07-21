@@ -277,28 +277,41 @@ function hydrateUserFromStorage() {
 }
 
 router.beforeEach((to, from, next) => {
-  const tokenExpiry = localStorage.getItem('tokenExpiry')
-
   const isExpired = () => {
     const token = localStorage.getItem('token')
+    const tokenExpiry = localStorage.getItem('tokenExpiry')
     if (!token || !tokenExpiry) return true
     const expiryTime = parseInt(tokenExpiry, 10)
     return Number.isFinite(expiryTime) && Date.now() >= expiryTime
   }
 
+  const hasUsableRefreshToken = () => {
+    const refreshToken = localStorage.getItem('refreshToken')
+    if (!refreshToken) return false
+    const refreshExpiry = localStorage.getItem('refreshTokenExpiry')
+    if (!refreshExpiry) return true
+    const expiryTime = parseInt(refreshExpiry, 10)
+    if (!Number.isFinite(expiryTime)) return true
+    return Date.now() < expiryTime
+  }
+
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth !== false)
 
   if (isExpired()) {
-    localStorage.removeItem('token')
-    localStorage.removeItem('tokenExpiry')
-    localStorage.removeItem('user')
-    if (to.path !== '/login') {
-      next({ path: '/login', query: { reason: 'session_expired' } })
-      return
+    if (!hasUsableRefreshToken()) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('tokenExpiry')
+      localStorage.removeItem('refreshToken')
+      localStorage.removeItem('refreshTokenExpiry')
+      localStorage.removeItem('user')
+      if (to.path !== '/login') {
+        next({ path: '/login', query: { reason: 'session_expired' } })
+        return
+      }
     }
   }
 
-  if (requiresAuth && !localStorage.getItem('token')) {
+  if (requiresAuth && !localStorage.getItem('token') && !hasUsableRefreshToken()) {
     next({ path: '/login', query: { reason: 'auth_required' } })
     return
   }

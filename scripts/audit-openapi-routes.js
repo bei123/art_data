@@ -47,6 +47,7 @@ const INDEX_ROUTES = [
   ['post', '/api/upload'],
   ['post', '/api/auth/register'],
   ['post', '/api/auth/login'],
+  ['post', '/api/auth/refresh'],
   ['get', '/api/auth/me'],
   ['post', '/api/auth/logout'],
   ['get', '/api/digital-identity/purchases/:user_id'],
