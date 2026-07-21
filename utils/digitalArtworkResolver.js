@@ -253,16 +253,51 @@ async function getColumnType(tableName, columnName) {
   return rows[0]?.COLUMN_TYPE?.toLowerCase() || null
 }
 
+async function dropForeignKeysOnColumn(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT CONSTRAINT_NAME
+     FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?
+       AND REFERENCED_TABLE_NAME IS NOT NULL`,
+    [tableName, columnName]
+  )
+  for (const row of rows || []) {
+    const name = row.CONSTRAINT_NAME
+    if (!name) continue
+    try {
+      await db.query(`ALTER TABLE \`${tableName}\` DROP FOREIGN KEY \`${name}\``)
+      logger.info('foreign key dropped', { table: tableName, column: columnName, constraint: name })
+    } catch (err) {
+      logger.warn('drop foreign key failed', {
+        table: tableName,
+        column: columnName,
+        constraint: name,
+        err: err.message,
+      })
+    }
+  }
+}
+
 async function ensureDigitalArtworkIdColumns() {
   if (idColumnsEnsured) return
 
-  const tables = ['order_items', 'cart_items']
+  // digital_identity_purchases 曾 FK 到 digital_artworks(id)；外部 Wespace ID 需可写入
+  try {
+    await dropForeignKeysOnColumn('digital_identity_purchases', 'digital_artwork_id')
+  } catch (err) {
+    logger.warn('digital_identity_purchases fk ensure failed', { err: err.message })
+  }
+
+  const tables = ['order_items', 'cart_items', 'digital_identity_purchases']
   for (const table of tables) {
     try {
       const columnType = await getColumnType(table, 'digital_artwork_id')
       if (!columnType) continue
       if (columnType.includes('varchar(64)')) continue
 
+      await dropForeignKeysOnColumn(table, 'digital_artwork_id')
       await db.query(
         `ALTER TABLE ${table} MODIFY COLUMN digital_artwork_id VARCHAR(64) NULL`
       )

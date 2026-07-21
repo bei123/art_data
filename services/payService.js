@@ -208,13 +208,13 @@ async function applyOrderItemsInventoryDelta({ orderItems, mode, connection = nu
 
 async function recordDigitalIdentityPurchases({ userId, orderItems, connection = null }) {
     const runner = connection || db;
-    const digitalItems = (orderItems || []).filter((item) => item.type === 'digital');
+    const digitalItems = (orderItems || []).filter((item) => item.type === 'digital' && item.digital_artwork_id != null);
     if (!digitalItems.length || !userId) return;
 
     for (const item of digitalItems) {
         await runner.query(
             'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
-            [userId, item.digital_artwork_id, 0, item.order_id]
+            [userId, String(item.digital_artwork_id), 0, item.order_id]
         );
     }
 }
