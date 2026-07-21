@@ -235,13 +235,66 @@ async function clearInventoryRelatedCaches({ rightIds = [], artworkIds = [], dig
     }
 }
 
+/** 支付成功后尝试码池自动发货（幂等；失败不影响支付/库存） */
+async function tryAutoDigitalQrDelivery({ outTradeNo, orderId = null }) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+
+    try {
+        const deliveryResult = await fulfillDigitalDeliveryForPaidOrder({
+            outTradeNo: cleanOutTradeNo,
+            orderId,
+        });
+        if (deliveryResult?.skipped) {
+            logger.info('digital QR auto delivery skipped', {
+                out_trade_no: cleanOutTradeNo,
+                reason: deliveryResult.reason,
+            });
+            return deliveryResult;
+        }
+
+        const newly = deliveryResult?.newlyFullyDelivered || [];
+        const assignedTotal = (deliveryResult?.items || []).reduce(
+            (sum, row) => sum + (row.assigned?.length || 0),
+            0
+        );
+        logger.info('digital QR auto delivery done', {
+            out_trade_no: cleanOutTradeNo,
+            order_id: deliveryResult?.order_id || orderId,
+            assigned: assignedTotal,
+            fully_delivered: newly.length,
+        });
+
+        for (const row of newly) {
+            fireSubscribeNotify(
+                notifyVirtualDeliveryShipped({
+                    orderId: deliveryResult.order_id,
+                    outTradeNo: cleanOutTradeNo,
+                    orderItemId: row.order_item_id,
+                }),
+                'virtualDeliveryShipped',
+            );
+        }
+        return deliveryResult;
+    } catch (deliveryErr) {
+        logger.error('digital QR auto delivery failed', {
+            err: deliveryErr,
+            out_trade_no: cleanOutTradeNo,
+        });
+        return { ok: false, error: deliveryErr?.message || String(deliveryErr) };
+    }
+}
+
 async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
 
     const inventoryKey = `${REDIS_PAY_INVENTORY_FULFILLED_PREFIX}${cleanOutTradeNo}`;
     const alreadyFulfilled = await redisClient.get(inventoryKey);
-    if (alreadyFulfilled) return { skipped: true, reason: 'already_fulfilled' };
+    if (alreadyFulfilled) {
+        await tryAutoDigitalQrDelivery({ outTradeNo: cleanOutTradeNo });
+        return { skipped: true, reason: 'already_fulfilled' };
+    }
 
     const ownsConnection = !options.connection;
     const connection = options.connection || await db.getConnection();
@@ -284,29 +337,10 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
         await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
         await clearInventoryRelatedCaches(affected);
 
-        try {
-            const deliveryResult = await fulfillDigitalDeliveryForPaidOrder({
-                outTradeNo: cleanOutTradeNo,
-                orderId: orders[0].id,
-            });
-            if (deliveryResult?.newlyFullyDelivered?.length) {
-                for (const row of deliveryResult.newlyFullyDelivered) {
-                    fireSubscribeNotify(
-                        notifyVirtualDeliveryShipped({
-                            orderId: deliveryResult.order_id,
-                            outTradeNo: cleanOutTradeNo,
-                            orderItemId: row.order_item_id,
-                        }),
-                        'virtualDeliveryShipped',
-                    );
-                }
-            }
-        } catch (deliveryErr) {
-            logger.error('digital QR auto delivery failed', {
-                err: deliveryErr,
-                out_trade_no: cleanOutTradeNo,
-            });
-        }
+        await tryAutoDigitalQrDelivery({
+            outTradeNo: cleanOutTradeNo,
+            orderId: orders[0].id,
+        });
 
         return { ok: true, affected };
     } catch (error) {
@@ -1736,6 +1770,12 @@ async function payNotify(req) {
                 }
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                 logger.info('支付回调处理完成', { out_trade_no });
+
+                // 支付回调主路径内联扣库存，需在此触发码池自动发货
+                await tryAutoDigitalQrDelivery({
+                    outTradeNo: out_trade_no,
+                    orderId: orders[0]?.id || null,
+                });
 
                 await applyPromotionDetailSideEffects(promotionDetail, {
                     transactionId: transaction_id || null,
