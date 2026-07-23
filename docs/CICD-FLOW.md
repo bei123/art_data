@@ -7,7 +7,7 @@
 | 仓库 | 产物 | Jenkins Job |
 |------|------|-------------|
 | `art_data` | API 进程 + 管理台 `dist/` | CI · Deploy · Rollback · Release · Audit |
-| `art_wx` | 小程序体验版 | 独立流水线 |
+| `art_wx` | 小程序体验版 | `art_wx-ci` · `art_wx-deploy` |
 | `art_vision` | 识图服务（可选） | 独立部署 |
 
 ## 主路径

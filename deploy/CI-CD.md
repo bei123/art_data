@@ -8,7 +8,7 @@
 | 仓库 | 职责 | 触发 |
 |------|------|------|
 | `bei123/art_data` | API + 管理台静态 | `main` push → Jenkins Deploy |
-| `bei123/art_wx` | 微信小程序体验版 | 见 art_wx 自身发布文档（可仍用 Actions） |
+| `bei123/art_wx` | 微信小程序体验版 | Jenkins：`art_wx-ci` / `art_wx-deploy`（见 art_wx `deploy/CI-CD.md`） |
 
 > 原 GitHub Actions 工作流已归档至 [`.github/workflows-archived/`](../.github/workflows-archived/)。**勿与 Jenkins 同时自动部署生产。**
 
@@ -138,7 +138,7 @@ npm run build
 
 ### art_wx
 
-见 art_wx 仓库发布文档（与本仓库 Jenkins 独立）。
+同一 Jenkins 实例上独立 Folder：`art_wx-ci` + `art_wx-deploy`。细则见 [art_wx/deploy/CI-CD.md](https://github.com/bei123/art_wx/blob/main/deploy/CI-CD.md)。
 
 ---
 
