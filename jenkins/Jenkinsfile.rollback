@@ -132,15 +132,30 @@ pipeline {
     always {
       script {
         def status = currentBuild.currentResult?.toLowerCase() ?: 'unknown'
-        sh """
-          export DEPLOY_STATUS='${status}'
-          export DEPLOY_PROJECT=art_data-rollback
-          export DEPLOY_VERSION='${params.REF}'
-          export BUILD_URL='${env.BUILD_URL ?: ''}'
-          export JOB_NAME='${env.JOB_NAME ?: 'Rollback Production'}'
-          export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
-          node deploy/notify-deploy.mjs || true
-        """
+        try {
+          withCredentials([string(credentialsId: 'art-data-wecom-webhook', variable: 'WECOM_WEBHOOK_URL')]) {
+            sh """
+              export DEPLOY_STATUS='${status}'
+              export DEPLOY_PROJECT=art_data-rollback
+              export DEPLOY_VERSION='${params.REF}'
+              export BUILD_URL='${env.BUILD_URL ?: ''}'
+              export JOB_NAME='${env.JOB_NAME ?: 'Rollback Production'}'
+              export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+              node deploy/notify-deploy.mjs || true
+            """
+          }
+        } catch (err) {
+          echo "WeCom credential bind failed: ${err.message}; notify without binding"
+          sh """
+            export DEPLOY_STATUS='${status}'
+            export DEPLOY_PROJECT=art_data-rollback
+            export DEPLOY_VERSION='${params.REF}'
+            export BUILD_URL='${env.BUILD_URL ?: ''}'
+            export JOB_NAME='${env.JOB_NAME ?: 'Rollback Production'}'
+            export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+            node deploy/notify-deploy.mjs || true
+          """
+        }
       }
     }
   }

@@ -62,9 +62,24 @@
 | `BT_NODE_PROJECT_NAME` | `art_data` | 宝塔 Node 项目名 |
 | `API_BASE_URL` | `https://api.wx.2000gallery.art` | smoke |
 | `ADMIN_BASE_URL` | `https://wx.ht.2000gallery.art` | smoke |
-| `WECOM_WEBHOOK_URL` | — | 企微通知 |
+| `WECOM_WEBHOOK_URL` | — | 企微通知（**不推荐**只放 Folder Properties，Pipeline 经常读不到） |
 | `WECHAT_OA_APPID` / `SECRET` / `TEMPLATE_ID` / `TOUSER` | — | 公众号模板通知 |
 | `WECHAT_OA_TEMPLATE_DATA_JSON` | — | 可选自定义模板字段 |
+
+### 企业微信通知（推荐用 Credentials）
+
+Folder Properties 里的 `WECOM_WEBHOOK_URL` **经常不会**注入到 Pipeline 的 `sh` 环境，日志会一直是 `no WeCom or WeChat OA channel configured, skip`。
+
+请改成：
+
+1. **Manage Jenkins → Credentials → Add Credentials**
+2. Kind：**Secret text**
+3. ID：`art-data-wecom-webhook`（必须一致）
+4. Secret：企微群机器人 Webhook 整段 URL  
+   `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...`
+5. 保存后 **push 含新 Jenkinsfile 的 main**，再跑一次 Deploy
+
+日志应出现：`notify-deploy: WeCom sent`。
 
 Deploy 参数：
 

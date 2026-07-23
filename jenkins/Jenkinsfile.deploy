@@ -202,16 +202,43 @@ pipeline {
     always {
       script {
         def status = currentBuild.currentResult?.toLowerCase() ?: 'unknown'
-        // WECOM_WEBHOOK_URL / WECHAT_OA_*：在 Job 或 Folder 环境变量 / Credentials Binding 中注入
-        sh """
-          export DEPLOY_STATUS='${status}'
-          export DEPLOY_PROJECT=art_data
-          export DEPLOY_VERSION='${env.DEPLOY_MODE ?: ''}'
-          export BUILD_URL='${env.BUILD_URL ?: ''}'
-          export JOB_NAME='${env.JOB_NAME ?: 'Deploy Production'}'
-          export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
-          node deploy/notify-deploy.mjs || true
-        """
+        // Prefer Credentials ID art-data-wecom-webhook (Folder Properties often do NOT inject into Pipeline env)
+        try {
+          withCredentials([string(credentialsId: 'art-data-wecom-webhook', variable: 'WECOM_WEBHOOK_URL')]) {
+            sh """
+              export DEPLOY_STATUS='${status}'
+              export DEPLOY_PROJECT=art_data
+              export DEPLOY_VERSION='${env.DEPLOY_MODE ?: ''}'
+              export BUILD_URL='${env.BUILD_URL ?: ''}'
+              export JOB_NAME='${env.JOB_NAME ?: 'Deploy Production'}'
+              export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+              node deploy/notify-deploy.mjs || true
+            """
+          }
+        } catch (org.jenkinsci.plugins.credentialsbinding.impl.CredentialNotFoundException e) {
+          echo "Credential art-data-wecom-webhook not found; trying env WECOM_WEBHOOK_URL if set"
+          sh """
+            export DEPLOY_STATUS='${status}'
+            export DEPLOY_PROJECT=art_data
+            export DEPLOY_VERSION='${env.DEPLOY_MODE ?: ''}'
+            export BUILD_URL='${env.BUILD_URL ?: ''}'
+            export JOB_NAME='${env.JOB_NAME ?: 'Deploy Production'}'
+            export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+            node deploy/notify-deploy.mjs || true
+          """
+        } catch (err) {
+          // Some Jenkins versions throw a different type when credential is missing
+          echo "WeCom credential bind failed (${err.class.simpleName}): ${err.message}; notify without binding"
+          sh """
+            export DEPLOY_STATUS='${status}'
+            export DEPLOY_PROJECT=art_data
+            export DEPLOY_VERSION='${env.DEPLOY_MODE ?: ''}'
+            export BUILD_URL='${env.BUILD_URL ?: ''}'
+            export JOB_NAME='${env.JOB_NAME ?: 'Deploy Production'}'
+            export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+            node deploy/notify-deploy.mjs || true
+          """
+        }
       }
     }
   }
