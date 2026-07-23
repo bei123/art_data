@@ -93,7 +93,6 @@ pipeline {
           )
         ]) {
           sh '''
-            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
             bash deploy/jenkins/setup-ssh.sh
             bash deploy/jenkins/rsync-admin.sh
           '''
@@ -113,7 +112,6 @@ pipeline {
           string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')
         ]) {
           sh '''
-            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
             bash deploy/jenkins/setup-ssh.sh
             NEED_BACKEND_RESTART=true \
             BACKEND_REF="${REF}" \

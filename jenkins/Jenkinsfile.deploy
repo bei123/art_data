@@ -132,7 +132,7 @@ pipeline {
           )
         ]) {
           sh '''
-            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
+            # Use SSH_KEY_FILE path only — never cat/export key content (leaks in Jenkins console)
             bash deploy/jenkins/setup-ssh.sh
             bash deploy/jenkins/rsync-admin.sh
           '''
@@ -152,7 +152,6 @@ pipeline {
           string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')
         ]) {
           sh '''
-            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
             bash deploy/jenkins/setup-ssh.sh
             REF_TARGET="${REF:-}"
             if [ -z "$REF_TARGET" ]; then
