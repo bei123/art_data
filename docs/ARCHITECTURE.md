@@ -1,6 +1,6 @@
 # 系统架构图 / 物理架构图
 
-形态：**单机宝塔 ECS + GitHub Actions SSH 部署**（宝塔 Node 项目，非 PM2）。管理台为静态文件，API 为同机 HTTPS 进程；小程序无服务端进程。
+形态：**单机宝塔 ECS + Jenkins SSH 部署**（宝塔 Node 项目，非 PM2）。管理台为静态文件，API 为同机 HTTPS 进程；小程序无服务端进程。
 
 相关：[`BUSINESS-FLOWS.md`](./BUSINESS-FLOWS.md) · [`SEQUENCES.md`](./SEQUENCES.md) · [`COMPONENTS.md`](./COMPONENTS.md) · [`NETWORK.md`](./NETWORK.md) · [发布流程](../deploy/CI-CD.md) · [流水线图](./CICD-FLOW.md)
 
@@ -76,7 +76,7 @@ flowchart TB
 flowchart TB
   subgraph Internet[公网]
     User[用户 / 微信客户端]
-    GH[GitHub Actions]
+    JK[Jenkins]
   end
 
   subgraph Aliyun[阿里云]
@@ -106,7 +106,7 @@ flowchart TB
   API --> DB
   API --> RD
   API -.->|内网 token| GPU
-  GH -->|SSH git + rsync + 重启宝塔 Node| ECS
+  JK -->|SSH git + rsync + 重启宝塔 Node| ECS
   BT --> API
 ```
 
@@ -118,7 +118,7 @@ flowchart TB
 | MySQL / Redis | 同机 `localhost`（模板） | 3306 / **6379**（DB=2） |
 | OSS | `OSS_REGION`（如杭州）；ECS 可走 `-internal` endpoint | 公网域 `wx.oss…` |
 | art_vision | `ART_VISION_BASE_URL` 默认 `http://127.0.0.1:3100` | **3100**，勿对公网开放 |
-| Actions | Deploy：build → rsync 管理台 → SSH 同步 API → 重启 → smoke | Runner `ubuntu-latest` |
+| Jenkins | Deploy：build → rsync 管理台 → SSH 同步 API → 重启 → smoke | 自建 Agent |
 
 | 域名 | 用途 | 回源 |
 |------|------|------|
@@ -151,8 +151,8 @@ flowchart TB
 | 制品 | 仓库 | 部署 | 说明 |
 |------|------|------|------|
 | API 进程 | `art_data` | 宝塔 `node index.js` | 内嵌全部定时任务 |
-| 管理台静态 | `art_data` `vite build` → `dist/` | Actions rsync | Nginx 纯静态 |
-| 小程序 | `art_wx` | Actions 上传体验版 → 人工提审 | 无服务器进程 |
+| 管理台静态 | `art_data` `vite build` → `dist/` | Jenkins rsync | Nginx 纯静态 |
+| 小程序 | `art_wx` | 上传体验版 → 人工提审 | 无服务器进程 |
 | 识图 | `art_vision` | 同机或 GPU 机 | 可选；失败 dHash 回退 |
 
 发布顺序：可选先 `art_vision` → **先** `art_data` Deploy + smoke → **再** `art_wx` 体验版 → 微信正式版。详见 [deploy/CI-CD.md](../deploy/CI-CD.md)。

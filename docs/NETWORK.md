@@ -24,7 +24,7 @@ flowchart TB
   subgraph Private[内网 / 运维]
     VIS[art_vision :3100]
     SSH[SSH 部署]
-    GH[GitHub Actions Runner]
+    JK[Jenkins Agent]
   end
 
   U --> ESA
@@ -36,7 +36,7 @@ flowchart TB
   NODE --> SQL
   NODE --> RD
   NODE -.->|INTERNAL_TOKEN| VIS
-  GH -->|SSH| SSH
+  JK -->|SSH| SSH
   SSH --> BT
   BT --> NODE
 ```
@@ -60,7 +60,7 @@ flowchart TB
 | 6379 | Redis DB=2 | **否** | localhost |
 | 3100 | art_vision | **否** | 内网 + token |
 | 宝塔面板端口 | 面板 | 强限制 / VPN | 运维面 |
-| 22 | SSH | 白名单 / 密钥 | Actions 部署 |
+| 22 | SSH | 白名单 / 密钥 | Jenkins 部署 |
 
 ## 信任控制点
 

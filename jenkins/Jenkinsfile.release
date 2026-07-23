@@ -1,0 +1,101 @@
+// art_data Release — build admin dist archives for a v* tag
+// Jenkins: Multibranch or Pipeline triggered on tag v*
+// Script Path: jenkins/Jenkinsfile.release
+// Optional: GitHub publish via gh CLI + GITHUB_TOKEN credential
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    timeout(time: 30, unit: 'MINUTES')
+  }
+
+  environment {
+    VITE_PUBLIC_API_BASE_URL = "${env.VITE_PUBLIC_API_BASE_URL ?: 'https://api.wx.2000gallery.art'}"
+    VITE_OSS_PUBLIC_ORIGIN = "${env.VITE_OSS_PUBLIC_ORIGIN ?: 'https://wx.oss.2000gallery.art'}"
+    VITE_API_SIGN_KEY = "${env.VITE_API_SIGN_KEY ?: 'admin-web'}"
+  }
+
+  tools {
+    nodejs 'node-24'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Install') {
+      steps {
+        withCredentials([string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')]) {
+          sh 'npm ci'
+        }
+      }
+    }
+
+    stage('Test') {
+      steps {
+        sh '''
+          export NODE_ENV=test
+          export DB_PASSWORD=ci-test-db-password
+          export JWT_SECRET=ci-test-jwt-secret-key-at-least-32-characters
+          export OSS_ACCESS_KEY_ID=ci-test-oss-access-key-id
+          export OSS_ACCESS_KEY_SECRET=ci-test-oss-access-key-secret
+          export OSS_BUCKET=ci-test-bucket
+          export OSS_REGION=oss-cn-hangzhou
+          npm run test
+        '''
+      }
+    }
+
+    stage('Build') {
+      steps {
+        withCredentials([string(credentialsId: 'art-data-vite-api-sign-secret', variable: 'VITE_API_SIGN_SECRET')]) {
+          sh 'export NODE_ENV=production && npm run build'
+        }
+      }
+    }
+
+    stage('Archive') {
+      steps {
+        sh '''
+          tar -czf art-data-admin-dist.tar.gz dist/
+          zip -r art-data-admin-dist.zip dist/
+        '''
+        archiveArtifacts artifacts: 'art-data-admin-dist.tar.gz,art-data-admin-dist.zip,dist/**', fingerprint: true
+      }
+    }
+
+    stage('GitHub Release (optional)') {
+      when {
+        expression {
+          return fileExists('/usr/bin/gh') || sh(script: 'command -v gh', returnStatus: true) == 0
+        }
+      }
+      steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+          withCredentials([string(credentialsId: 'art-data-github-token', variable: 'GH_TOKEN')]) {
+            sh '''
+              TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+              if [ -z "$TAG" ]; then
+                echo "Not on an exact tag, skip gh release"
+                exit 0
+              fi
+              gh release create "$TAG" \
+                art-data-admin-dist.tar.gz \
+                art-data-admin-dist.zip \
+                --generate-notes \
+                --title "$TAG" || gh release upload "$TAG" \
+                art-data-admin-dist.tar.gz \
+                art-data-admin-dist.zip \
+                --clobber
+            '''
+          }
+        }
+      }
+    }
+  }
+}

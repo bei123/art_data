@@ -1,0 +1,149 @@
+// art_data Rollback Production
+// Jenkins: Pipeline job, Script Path: jenkins/Jenkinsfile.rollback
+// Build with Parameters: REF = tag or commit SHA
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+  }
+
+  parameters {
+    string(
+      name: 'REF',
+      defaultValue: '',
+      description: 'Git tag or commit SHA to rollback to (e.g. v1.0.0)'
+    )
+  }
+
+  environment {
+    ADMIN_DEPLOY_PATH = "${env.ADMIN_DEPLOY_PATH ?: '/www/wwwroot/wx.ht.2000gallery.art/'}"
+    BACKEND_DEPLOY_PATH = "${env.BACKEND_DEPLOY_PATH ?: '/www/wwwroot/art_data'}"
+    BT_NODE_PROJECT_NAME = "${env.BT_NODE_PROJECT_NAME ?: 'art_data'}"
+    API_BASE_URL = "${env.API_BASE_URL ?: 'https://api.wx.2000gallery.art'}"
+    ADMIN_BASE_URL = "${env.ADMIN_BASE_URL ?: 'https://wx.ht.2000gallery.art'}"
+    VITE_PUBLIC_API_BASE_URL = "${env.VITE_PUBLIC_API_BASE_URL ?: 'https://api.wx.2000gallery.art'}"
+    VITE_OSS_PUBLIC_ORIGIN = "${env.VITE_OSS_PUBLIC_ORIGIN ?: 'https://wx.oss.2000gallery.art'}"
+    VITE_API_SIGN_KEY = "${env.VITE_API_SIGN_KEY ?: 'admin-web'}"
+  }
+
+  tools {
+    nodejs 'node-24'
+  }
+
+  stages {
+    stage('Validate') {
+      steps {
+        script {
+          if (!params.REF?.trim()) {
+            error('REF is required for rollback')
+          }
+        }
+      }
+    }
+
+    stage('Checkout') {
+      steps {
+        checkout([$class: 'GitSCM',
+          branches: [[name: params.REF.trim()]],
+          userRemoteConfigs: scm.userRemoteConfigs,
+          extensions: [[$class: 'CloneOption', depth: 0, noTags: false, shallow: false]]
+        ])
+        sh 'chmod +x deploy/*.sh deploy/jenkins/*.sh'
+      }
+    }
+
+    stage('Install & test') {
+      steps {
+        withCredentials([string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')]) {
+          sh 'npm ci'
+          sh '''
+            export NODE_ENV=test
+            export DB_PASSWORD=ci-test-db-password
+            export JWT_SECRET=ci-test-jwt-secret-key-at-least-32-characters
+            export OSS_ACCESS_KEY_ID=ci-test-oss-access-key-id
+            export OSS_ACCESS_KEY_SECRET=ci-test-oss-access-key-secret
+            export OSS_BUCKET=ci-test-bucket
+            export OSS_REGION=oss-cn-hangzhou
+            npm run test
+          '''
+        }
+      }
+    }
+
+    stage('Build admin') {
+      steps {
+        withCredentials([string(credentialsId: 'art-data-vite-api-sign-secret', variable: 'VITE_API_SIGN_SECRET')]) {
+          sh 'export NODE_ENV=production && npm run build'
+        }
+      }
+    }
+
+    stage('Deploy admin static') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'art-data-ssh-host', variable: 'SSH_HOST'),
+          sshUserPrivateKey(
+            credentialsId: 'art-data-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'SSH_USER'
+          )
+        ]) {
+          sh '''
+            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
+            bash deploy/jenkins/setup-ssh.sh
+            bash deploy/jenkins/rsync-admin.sh
+          '''
+        }
+      }
+    }
+
+    stage('Deploy backend at REF') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'art-data-ssh-host', variable: 'SSH_HOST'),
+          sshUserPrivateKey(
+            credentialsId: 'art-data-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'SSH_USER'
+          ),
+          string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')
+        ]) {
+          sh '''
+            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
+            bash deploy/jenkins/setup-ssh.sh
+            NEED_BACKEND_RESTART=true \
+            BACKEND_REF="${REF}" \
+            bash deploy/jenkins/sync-backend.sh
+          '''
+        }
+      }
+    }
+
+    stage('Smoke') {
+      steps {
+        sh 'sleep 10 && bash deploy/smoke-test.sh'
+      }
+    }
+  }
+
+  post {
+    always {
+      script {
+        def status = currentBuild.currentResult?.toLowerCase() ?: 'unknown'
+        sh """
+          export DEPLOY_STATUS='${status}'
+          export DEPLOY_PROJECT=art_data-rollback
+          export DEPLOY_VERSION='${params.REF}'
+          export BUILD_URL='${env.BUILD_URL ?: ''}'
+          export JOB_NAME='${env.JOB_NAME ?: 'Rollback Production'}'
+          export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+          node deploy/notify-deploy.mjs || true
+        """
+      }
+    }
+  }
+}

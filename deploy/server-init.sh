@@ -80,30 +80,32 @@ cd "$BACKEND_DIR"
 echo "==> npm ci --omit=dev"
 npm ci --omit=dev
 
-# 9. Deploy SSH key for GitHub Actions
-DEPLOY_KEY="$HOME/.ssh/github_actions_deploy"
+# 9. Deploy SSH key for Jenkins
+DEPLOY_KEY="$HOME/.ssh/jenkins_deploy"
 if [ -f "$DEPLOY_KEY" ]; then
   check_ok "Deploy key already exists: $DEPLOY_KEY"
+elif [ -f "$HOME/.ssh/github_actions_deploy" ]; then
+  check_ok "Legacy GitHub Actions deploy key present: $HOME/.ssh/github_actions_deploy (reuse or rotate for Jenkins)"
 else
-  echo "==> Generating deploy SSH key for GitHub Actions"
-  ssh-keygen -t ed25519 -C "github-actions-deploy-art_data" -f "$DEPLOY_KEY" -N ""
+  echo "==> Generating deploy SSH key for Jenkins"
+  ssh-keygen -t ed25519 -C "jenkins-deploy-art_data" -f "$DEPLOY_KEY" -N ""
   cat "${DEPLOY_KEY}.pub" >> "$HOME/.ssh/authorized_keys"
   chmod 600 "$HOME/.ssh/authorized_keys"
   echo ""
-  echo "Add this private key to GitHub Secret SSH_PRIVATE_KEY:"
+  echo "Add this private key to Jenkins credential art-data-ssh:"
   echo "----------------------------------------"
   cat "$DEPLOY_KEY"
   echo "----------------------------------------"
 fi
 
 # 10. Make deploy scripts executable
-chmod +x "$BACKEND_DIR"/deploy/*.sh 2>/dev/null || true
+chmod +x "$BACKEND_DIR"/deploy/*.sh "$BACKEND_DIR"/deploy/jenkins/*.sh 2>/dev/null || true
 
 echo ""
 echo "=== Server init complete ==="
 echo "Next steps:"
-echo "  1. GitHub repo → Settings → Secrets: SSH_HOST, SSH_USER=root, SSH_PRIVATE_KEY"
-echo "  2. GitHub repo → Settings → Environments → production (optional vars)"
+echo "  1. Jenkins Credentials: art-data-ssh, art-data-ssh-host, art-data-node-auth-token, art-data-vite-api-sign-secret"
+echo "  2. Create jobs per deploy/CI-CD.md (CI / Deploy / Rollback / Release / Audit)"
 echo "  3. Test restart: cd $BACKEND_DIR && bash deploy/restart-baota-node.sh"
 echo "  4. Test smoke:   bash deploy/smoke-test.sh"
-echo "  5. Push deploy workflows to main (triggers first auto-deploy)"
+echo "  5. Wire main-branch webhook to art_data-deploy (first auto-deploy)"

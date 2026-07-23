@@ -1,13 +1,13 @@
 # CI/CD 流水线
 
-操作细则与 Secrets 见 [deploy/CI-CD.md](../deploy/CI-CD.md)。本文只给流程图。
+操作细则与 Credentials 见 [deploy/CI-CD.md](../deploy/CI-CD.md)。本文只给流程图。
 
 ## 仓库分工
 
-| 仓库 | 产物 | Workflow |
-|------|------|----------|
-| `art_data` | API 进程 + 管理台 `dist/` | CI · Deploy Production · Rollback · Release |
-| `art_wx` | 小程序体验版 | Deploy WeChat Preview |
+| 仓库 | 产物 | Jenkins Job |
+|------|------|-------------|
+| `art_data` | API 进程 + 管理台 `dist/` | CI · Deploy · Rollback · Release · Audit |
+| `art_wx` | 小程序体验版 | 独立流水线 |
 | `art_vision` | 识图服务（可选） | 独立部署 |
 
 ## 主路径
@@ -18,7 +18,7 @@ flowchart TB
   B -->|lint · test · build| C{CI 绿灯?}
   C -->|否| A
   C -->|是| D[merge main]
-  D --> E[Deploy Production]
+  D --> E[Jenkins Deploy Production]
   E --> F{变更检测}
   F -->|仅文档/无关| G[跳过构建重启]
   F -->|前端| H[vite build + rsync 管理台]
@@ -54,13 +54,13 @@ sequenceDiagram
 
 ## Deploy 步骤（art_data）
 
-1. Checkout · 检测 FE/BE 路径变更（`workflow_dispatch` 默认可 `force_full`）
+1. Checkout · 检测 FE/BE 路径变更（手动可勾选 `FORCE_FULL`）
 2. 前端有变更：`npm ci` + `vite build` → rsync → `ADMIN_DEPLOY_PATH`
-3. 后端有变更：SSH 同步代码 · `npm ci`（堆限制见 `install-backend-deps.sh`）· 宝塔 Node 重启
+3. 后端有变更：SSH 同步代码 · `npm ci` · 宝塔 Node 重启
 4. Smoke：`API_BASE_URL` / `ADMIN_BASE_URL`
-5. 通知：`WECOM_WEBHOOK_URL` / 公众号模板
+5. 通知：`WECOM_WEBHOOK_URL` / 公众号模板（链接为 Jenkins `BUILD_URL`）
 
-回滚：Workflow `Rollback` → 恢复管理台静态；API 需按手册处理 git/宝塔。
+回滚：Jenkins Job `art_data-rollback` → 输入 tag 或 commit SHA。
 
 ## 与架构文档
 

@@ -15,12 +15,17 @@ export function buildDeployContext(env = process.env) {
   const status = trim(env.DEPLOY_STATUS || 'unknown')
   const project = trim(env.DEPLOY_PROJECT || 'art_data')
   const version = trim(env.DEPLOY_VERSION)
-  const ref = trim(env.GITHUB_SHA).slice(0, 7)
-  const repo = trim(env.GITHUB_REPOSITORY)
+  const ref = trim(env.GIT_COMMIT || env.GITHUB_SHA).slice(0, 7)
+  const repo = trim(env.GITHUB_REPOSITORY || env.JOB_NAME)
   const serverUrl = trim(env.GITHUB_SERVER_URL || 'https://github.com')
   const runId = trim(env.GITHUB_RUN_ID)
-  const workflow = trim(env.GITHUB_WORKFLOW)
-  const runUrl = runId && repo ? `${serverUrl}/${repo}/actions/runs/${runId}` : ''
+  const workflow = trim(env.JOB_NAME || env.GITHUB_WORKFLOW)
+  const jenkinsUrl = trim(env.BUILD_URL)
+  const actionsUrl = runId && trim(env.GITHUB_REPOSITORY)
+    ? `${serverUrl}/${trim(env.GITHUB_REPOSITORY)}/actions/runs/${runId}`
+    : ''
+  const runUrl = jenkinsUrl || actionsUrl
+  const logLabel = jenkinsUrl ? '查看 Jenkins 日志' : '查看 Actions 日志'
   const time = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
   const emoji = status === 'success' ? '✅' : status === 'failure' ? '❌' : '⚠️'
   const statusLabel = status === 'success' ? '成功' : status === 'failure' ? '失败' : status
@@ -33,7 +38,7 @@ export function buildDeployContext(env = process.env) {
   ]
   if (version) markdownLines.push(`> 版本：**${version}**`)
   markdownLines.push(`> 时间：${time}`)
-  if (runUrl) markdownLines.push(`> [查看 Actions 日志](${runUrl})`)
+  if (runUrl) markdownLines.push(`> [${logLabel}](${runUrl})`)
 
   return {
     status,

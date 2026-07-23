@@ -1,0 +1,219 @@
+// art_data Deploy Production
+// Jenkins: Pipeline job, Script Path: jenkins/Jenkinsfile.deploy
+// Trigger: GitHub push to main (Generic Webhook / GitHub plugin) or Build with Parameters
+// Credentials (secret text / SSH / username): see deploy/CI-CD.md
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+  }
+
+  parameters {
+    string(
+      name: 'REF',
+      defaultValue: '',
+      description: 'Deploy commit SHA or tag (empty = current branch HEAD / triggered SHA)'
+    )
+    booleanParam(
+      name: 'FORCE_FULL',
+      defaultValue: false,
+      description: 'Force full deploy (build + restart). Leave unchecked on push to detect FE/BE from git diff; check for manual full deploy.'
+    )
+  }
+
+  environment {
+    ADMIN_DEPLOY_PATH = "${env.ADMIN_DEPLOY_PATH ?: '/www/wwwroot/wx.ht.2000gallery.art/'}"
+    BACKEND_DEPLOY_PATH = "${env.BACKEND_DEPLOY_PATH ?: '/www/wwwroot/art_data'}"
+    BT_NODE_PROJECT_NAME = "${env.BT_NODE_PROJECT_NAME ?: 'art_data'}"
+    API_BASE_URL = "${env.API_BASE_URL ?: 'https://api.wx.2000gallery.art'}"
+    ADMIN_BASE_URL = "${env.ADMIN_BASE_URL ?: 'https://wx.ht.2000gallery.art'}"
+    VITE_PUBLIC_API_BASE_URL = "${env.VITE_PUBLIC_API_BASE_URL ?: 'https://api.wx.2000gallery.art'}"
+    VITE_OSS_PUBLIC_ORIGIN = "${env.VITE_OSS_PUBLIC_ORIGIN ?: 'https://wx.oss.2000gallery.art'}"
+    VITE_API_SIGN_KEY = "${env.VITE_API_SIGN_KEY ?: 'admin-web'}"
+  }
+
+  tools {
+    nodejs 'node-24'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        script {
+          def ref = params.REF?.trim()
+          if (ref) {
+            checkout([$class: 'GitSCM',
+              branches: [[name: ref]],
+              userRemoteConfigs: scm.userRemoteConfigs,
+              extensions: [[$class: 'CloneOption', depth: 0, noTags: false, shallow: false]]
+            ])
+          } else {
+            checkout scm
+          }
+        }
+        sh 'chmod +x deploy/*.sh deploy/jenkins/*.sh'
+      }
+    }
+
+    stage('Detect changes') {
+      steps {
+        script {
+          def forceFull = params.FORCE_FULL
+          // Push-triggered builds with empty REF: detect vs previous commit
+          def before = ''
+          if (!forceFull && !params.REF?.trim()) {
+            before = sh(script: 'git rev-parse HEAD^ 2>/dev/null || true', returnStdout: true).trim()
+          }
+          sh """
+            FORCE_FULL=${forceFull} \
+            BEFORE='${before}' \
+            AFTER=\$(git rev-parse HEAD) \
+            OUTPUT_FILE=deploy-changes.env \
+            bash deploy/detect-changes.sh
+          """
+          env.DEPLOY_FRONTEND = sh(script: "grep '^frontend=' deploy-changes.env | cut -d= -f2", returnStdout: true).trim()
+          env.DEPLOY_BACKEND = sh(script: "grep '^backend=' deploy-changes.env | cut -d= -f2", returnStdout: true).trim()
+          env.DEPLOY_MODE = sh(script: "grep '^mode=' deploy-changes.env | cut -d= -f2", returnStdout: true).trim()
+          echo "Deploy mode=${env.DEPLOY_MODE} frontend=${env.DEPLOY_FRONTEND} backend=${env.DEPLOY_BACKEND}"
+        }
+      }
+    }
+
+    stage('Install & test') {
+      when {
+        expression { env.DEPLOY_FRONTEND == 'true' || env.DEPLOY_BACKEND == 'true' }
+      }
+      steps {
+        withCredentials([string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')]) {
+          sh 'npm ci'
+          sh '''
+            export NODE_ENV=test
+            export DB_PASSWORD=ci-test-db-password
+            export JWT_SECRET=ci-test-jwt-secret-key-at-least-32-characters
+            export OSS_ACCESS_KEY_ID=ci-test-oss-access-key-id
+            export OSS_ACCESS_KEY_SECRET=ci-test-oss-access-key-secret
+            export OSS_BUCKET=ci-test-bucket
+            export OSS_REGION=oss-cn-hangzhou
+            npm run test
+          '''
+        }
+      }
+    }
+
+    stage('Build admin') {
+      when {
+        expression { env.DEPLOY_FRONTEND == 'true' }
+      }
+      steps {
+        withCredentials([string(credentialsId: 'art-data-vite-api-sign-secret', variable: 'VITE_API_SIGN_SECRET')]) {
+          sh '''
+            export NODE_ENV=production
+            npm run build
+          '''
+        }
+      }
+    }
+
+    stage('Deploy admin static') {
+      when {
+        expression { env.DEPLOY_FRONTEND == 'true' }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'art-data-ssh-host', variable: 'SSH_HOST'),
+          sshUserPrivateKey(
+            credentialsId: 'art-data-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'SSH_USER'
+          )
+        ]) {
+          sh '''
+            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
+            bash deploy/jenkins/setup-ssh.sh
+            bash deploy/jenkins/rsync-admin.sh
+          '''
+        }
+      }
+    }
+
+    stage('Sync backend') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'art-data-ssh-host', variable: 'SSH_HOST'),
+          sshUserPrivateKey(
+            credentialsId: 'art-data-ssh',
+            keyFileVariable: 'SSH_KEY_FILE',
+            usernameVariable: 'SSH_USER'
+          ),
+          string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')
+        ]) {
+          sh '''
+            export SSH_PRIVATE_KEY="$(cat "$SSH_KEY_FILE")"
+            bash deploy/jenkins/setup-ssh.sh
+            REF_TARGET="${REF:-}"
+            if [ -z "$REF_TARGET" ]; then
+              REF_TARGET=origin/main
+            fi
+            NEED_BACKEND_RESTART="${DEPLOY_BACKEND}" \
+            BACKEND_REF="$REF_TARGET" \
+            bash deploy/jenkins/sync-backend.sh
+          '''
+        }
+      }
+    }
+
+    stage('Smoke') {
+      when {
+        expression { env.DEPLOY_FRONTEND == 'true' || env.DEPLOY_BACKEND == 'true' }
+      }
+      steps {
+        sh '''
+          if [ "${DEPLOY_BACKEND}" = "true" ]; then sleep 5; fi
+          bash deploy/smoke-test.sh
+        '''
+      }
+    }
+
+    stage('Nginx reload (Baota)') {
+      when {
+        expression { env.DEPLOY_FRONTEND == 'true' || env.DEPLOY_BACKEND == 'true' }
+      }
+      steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+          withCredentials([
+            string(credentialsId: 'art-data-bt-panel-url', variable: 'BT_PANEL_URL'),
+            string(credentialsId: 'art-data-bt-api-key', variable: 'BT_API_KEY')
+          ]) {
+            sh '''
+              export BT_API_ACTION=ServiceAdmin
+              export BT_API_PARAMS='{"name":"nginx","type":"reload"}'
+              node deploy/bt-api-call.mjs
+            '''
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      script {
+        def status = currentBuild.currentResult?.toLowerCase() ?: 'unknown'
+        // WECOM_WEBHOOK_URL / WECHAT_OA_*：在 Job 或 Folder 环境变量 / Credentials Binding 中注入
+        sh """
+          export DEPLOY_STATUS='${status}'
+          export DEPLOY_PROJECT=art_data
+          export DEPLOY_VERSION='${env.DEPLOY_MODE ?: ''}'
+          export BUILD_URL='${env.BUILD_URL ?: ''}'
+          export JOB_NAME='${env.JOB_NAME ?: 'Deploy Production'}'
+          export GIT_COMMIT=\$(git rev-parse HEAD 2>/dev/null || true)
+          node deploy/notify-deploy.mjs || true
+        """
+      }
+    }
+  }
+}

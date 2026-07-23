@@ -1,0 +1,52 @@
+// art_data weekly audit (OpenAPI + npm audit)
+// Jenkins: Pipeline job, Script Path: jenkins/Jenkinsfile.audit
+// Trigger: cron H 2 * * 1 (Monday ~02:00) or manual
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    timeout(time: 20, unit: 'MINUTES')
+  }
+
+  triggers {
+    cron('H 2 * * 1')
+  }
+
+  tools {
+    nodejs 'node-24'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Install') {
+      steps {
+        withCredentials([string(credentialsId: 'art-data-node-auth-token', variable: 'NODE_AUTH_TOKEN')]) {
+          sh 'npm ci'
+        }
+      }
+    }
+
+    stage('OpenAPI audit') {
+      steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+          sh 'npm run audit:openapi'
+        }
+      }
+    }
+
+    stage('Dependency audit') {
+      steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+          sh 'npm run audit:deps'
+        }
+      }
+    }
+  }
+}

@@ -34,7 +34,7 @@
 ### 工程化
 
 - ESLint、Vitest
-- GitHub Actions（CI + 自动部署）
+- Jenkins（CI + 自动部署）
 - 宝塔 Node 项目托管（生产）
 
 ---
@@ -204,24 +204,24 @@ npm run ci            # lint + test + build
 npm run audit:openapi # 校验 OpenAPI 与路由一致性
 ```
 
-GitHub Actions：
+Jenkins：
 
-| Workflow | 触发 | 说明 |
-|----------|------|------|
-| `CI` | PR / push `main` | lint、测试、构建 |
-| `Deploy Production` | push `main` | rsync 管理台 + 后端拉取 + 宝塔重启 + 冒烟 |
-| `Rollback` | 手动 | 回滚管理台静态资源 |
+| Job | 触发 | 说明 |
+|-----|------|------|
+| `art_data-ci` | PR / 分支 push | lint、测试、构建 |
+| `art_data-deploy` | push `main` / 手动 | rsync 管理台 + 后端同步 + 宝塔重启 + 冒烟 |
+| `art_data-rollback` | 手动 | 回滚管理台 + API 至指定 ref |
 
 ---
 
 ## 部署（概要）
 
-生产环境：**单机宝塔** + GitHub Actions SSH 部署。
+生产环境：**单机宝塔** + Jenkins SSH 部署。
 
 ```text
 feature/* → PR → CI 绿灯 → merge main
-  → Deploy Production
-  → rsync 管理台 dist/ + SSH 后端 git pull + 宝塔 Node 重启
+  → Jenkins Deploy
+  → rsync 管理台 dist/ + SSH 后端 git sync + 宝塔 Node 重启
   → smoke-test（API / CORS / 管理台首页）
 ```
 
@@ -234,7 +234,8 @@ feature/* → PR → CI 绿灯 → merge main
 
 生产 ECS 上 `npm ci` 默认限制 Node 堆为 **512MB**（见 `deploy/install-backend-deps.sh`，可通过 `DEPLOY_NPM_CI_HEAP_MB` 覆盖）。
 
-完整 Secrets、冒烟、回滚与通知配置见 **[deploy/CI-CD.md](./deploy/CI-CD.md)**。
+完整 Credentials、冒烟、回滚与通知配置见 **[deploy/CI-CD.md](./deploy/CI-CD.md)**。  
+Jenkins 逐步配置清单见 **[deploy/JENKINS-SETUP.md](./deploy/JENKINS-SETUP.md)**。
 
 快速验收：
 
