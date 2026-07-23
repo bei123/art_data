@@ -23,10 +23,27 @@ async function callBaotaApi({ panelUrl, apiKey, route, params }) {
     ...params,
   })
 
-  const response = await fetch(`${panelUrl.replace(/\/$/, '')}${route}`, {
+  const base = panelUrl.replace(/\/$/, '')
+  const url = `${base}${route}`
+
+  // Baota panels usually use self-signed TLS. Agent `curl -k` works; Node fetch fails
+  // with opaque "fetch failed" unless verification is relaxed.
+  // Set BT_PANEL_TLS_INSECURE=false to enforce certificate verification.
+  let dispatcher
+  if (process.env.BT_PANEL_TLS_INSECURE !== 'false') {
+    try {
+      const { Agent } = await import('node:undici')
+      dispatcher = new Agent({ connect: { rejectUnauthorized: false } })
+    } catch {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+    }
+  }
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    ...(dispatcher ? { dispatcher } : {}),
   })
 
   const text = await response.text()
@@ -69,5 +86,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(error.message)
+  if (error.cause) console.error('cause:', error.cause)
   process.exit(1)
 })
