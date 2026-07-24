@@ -39,7 +39,14 @@ function getPaymentPendingSendAtMs(createdAt) {
 }
 
 function isSubscribeUserRefused(result) {
-  return result?.body?.errcode === 43101
+  return Number(result?.body?.errcode) === 43101
+}
+
+/** 永久性失败：保留去重键，禁止自动重试（再推也无意义） */
+function isSubscribePermanentFailure(result) {
+  const errcode = Number(result?.body?.errcode ?? result?.error?.errcode)
+  // 43101 用户拒收；43004 需订阅；40003 openid 无效
+  return errcode === 43101 || errcode === 43004 || errcode === 40003
 }
 
 function clipText(value, maxLen) {
@@ -450,13 +457,17 @@ async function dispatchSubscribeMessage({
       errcode: result.body?.errcode,
       error: result.body?.error,
     }
+    const permanent = isSubscribePermanentFailure(result)
     if (isSubscribeUserRefused(result)) {
       logger.info('订阅消息未送达（用户未订阅或已拒绝）', logPayload)
+    } else if (permanent) {
+      logger.warn('订阅消息永久失败，不再自动重试', logPayload)
     } else {
       logger.warn('订阅消息发送失败', logPayload)
     }
-    if (redisKey) await redisClient.del(redisKey)
-    return { ok: false, error: result.body }
+    // 仅瞬时失败释放去重键；永久失败保留，避免支付回调/同步补发反复推送
+    if (redisKey && !permanent) await redisClient.del(redisKey)
+    return { ok: false, permanent, error: result.body }
   }
 
   logger.info('订阅消息已发送', { scene, orderId, outTradeNo, userId })

@@ -374,17 +374,19 @@ async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, 
             outTradeNo: cleanOutTradeNo,
             errcode: paidResult.error?.errcode,
             error: paidResult.error?.error || paidResult.error?.errmsg || paidResult.error,
+            permanent: Boolean(paidResult.permanent),
         });
     } else {
         logger.info('支付成功订阅消息已发送', { outTradeNo: cleanOutTradeNo });
     }
 
-    if (
-        scheduleRetry
+    const shouldRetryPaidNotify = scheduleRetry
         && PAID_NOTIFY_RETRY_MS > 0
         && paidResult?.ok !== true
         && !paidResult?.skipped
-    ) {
+        && !paidResult?.permanent;
+
+    if (shouldRetryPaidNotify) {
         setTimeout(async () => {
             try {
                 if (await hasPaymentSuccessNotifySent(cleanOutTradeNo)) return;
@@ -399,6 +401,7 @@ async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, 
                         outTradeNo: cleanOutTradeNo,
                         errcode: retryResult?.error?.errcode,
                         error: retryResult?.error?.error || retryResult?.error?.errmsg || retryResult?.error,
+                        permanent: Boolean(retryResult?.permanent),
                     });
                 }
             } catch (err) {
@@ -423,6 +426,15 @@ async function tryEmitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionI
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
     if (await hasPaymentSuccessNotifySent(cleanOutTradeNo)) {
+        // 支付订阅已结算（成功或永久失败），仍确保虚拟发货卡片走一遍（内部有去重）
+        fireSubscribeNotify(
+            notifyVirtualDeliveryAfterPayment({
+                outTradeNo: cleanOutTradeNo,
+                transactionId,
+                payTime,
+            }),
+            'virtualDeliveryAfterPayment',
+        );
         return { skipped: true, reason: 'already_sent' };
     }
     logger.info('补尝试发送支付成功订阅消息', { outTradeNo: cleanOutTradeNo, source });
@@ -1639,10 +1651,11 @@ async function payNotify(req) {
                 await cancelPaymentPendingReminder(out_trade_no_early).catch((err) => {
                     logger.warn('重复回调取消待付款提醒失败', { outTradeNo: out_trade_no_early, err: err?.message || err });
                 });
-                await emitPaymentSuccessSubscribeNotifies({
+                await tryEmitPaymentSuccessSubscribeNotifies({
                     outTradeNo: out_trade_no_early,
                     transactionId: callbackData.transaction_id,
                     payTime: callbackData.success_time,
+                    source: 'pay_notify_duplicate',
                 }).catch((err) => {
                     logger.warn('重复回调补发支付成功通知失败', { outTradeNo: out_trade_no_early, err: err?.message || err });
                 });
@@ -5267,7 +5280,7 @@ async function syncOrderTradeStateFromWechat(orderRow) {
     }
 
     if (wxState === 'SUCCESS' && orderRow?.out_trade_no) {
-        if (didSync || dbState === 'NOTPAY') {
+        if (didSync || dbState === 'NOTPAY' || dbState === 'PAYERROR' || dbState === 'USERPAYING') {
             await cancelPaymentPendingReminder(orderRow.out_trade_no).catch((err) => {
                 logger.warn('同步支付成功时取消待付款提醒失败', {
                     outTradeNo: orderRow.out_trade_no,
@@ -5275,26 +5288,16 @@ async function syncOrderTradeStateFromWechat(orderRow) {
                 });
             });
         }
-        if (didSync) {
+        // 仅在「本地尚未 SUCCESS → 刚同步为 SUCCESS」时发通知。
+        // 禁止 sync_retry_unsent：打开历史订单/去重键过期会反复推送。
+        if (didSync && dbState !== 'SUCCESS' && dbState !== 'REFUND') {
             await tryEmitPaymentSuccessSubscribeNotifies({
                 outTradeNo: orderRow.out_trade_no,
                 transactionId: wxPay.transaction_id,
                 payTime: wxPay.success_time,
-                source: 'sync_did_sync',
+                source: 'sync_became_paid',
             }).catch((err) => {
                 logger.warn('同步支付成功通知失败', {
-                    outTradeNo: orderRow.out_trade_no,
-                    err: err?.message || err,
-                });
-            });
-        } else if (!(await hasPaymentSuccessNotifySent(orderRow.out_trade_no))) {
-            await tryEmitPaymentSuccessSubscribeNotifies({
-                outTradeNo: orderRow.out_trade_no,
-                transactionId: wxPay.transaction_id,
-                payTime: wxPay.success_time,
-                source: 'sync_retry_unsent',
-            }).catch((err) => {
-                logger.warn('同步补发支付成功通知失败', {
                     outTradeNo: orderRow.out_trade_no,
                     err: err?.message || err,
                 });
