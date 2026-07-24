@@ -3,6 +3,7 @@ const logger = require('./logger')
 const {
   createEmptyRedisMetrics,
   buildRedisMetricsSnapshot,
+  recordRedisGetResult,
 } = require('./redisMetricsSnapshot')
 
 function parseRedisDatabase() {
@@ -68,19 +69,43 @@ redisClient.on('reconnecting', () => {
 const METRICS_SAMPLE_LIMIT = 1000
 const METRICS_LOG_INTERVAL_MS = parseInt(process.env.REDIS_METRICS_LOG_INTERVAL_MS || '300000', 10)
 
-const redisMetrics = createEmptyRedisMetrics()
+const redisMetrics = {
+  window: createEmptyRedisMetrics(),
+  lifetime: createEmptyRedisMetrics(),
+}
+
+function forEachMetricsBucket(fn) {
+  fn(redisMetrics.window)
+  fn(redisMetrics.lifetime)
+}
 
 function recordResponseTime(ms) {
-  redisMetrics.responseTimes.push(ms)
-  if (redisMetrics.responseTimes.length > METRICS_SAMPLE_LIMIT) {
-    redisMetrics.responseTimes.splice(0, redisMetrics.responseTimes.length - METRICS_SAMPLE_LIMIT)
-  }
+  forEachMetricsBucket((bucket) => {
+    bucket.responseTimes.push(ms)
+    if (bucket.responseTimes.length > METRICS_SAMPLE_LIMIT) {
+      bucket.responseTimes.splice(0, bucket.responseTimes.length - METRICS_SAMPLE_LIMIT)
+    }
+  })
 }
 
 function incrementCommand(category, ms = null) {
-  const bucket = redisMetrics.commandCounts[category] != null ? category : 'other'
-  redisMetrics.commandCounts[bucket] += 1
+  forEachMetricsBucket((bucket) => {
+    const target = bucket.commandCounts[category] != null ? category : 'other'
+    bucket.commandCounts[target] += 1
+  })
   if (ms != null) recordResponseTime(ms)
+}
+
+function incrementErrors() {
+  forEachMetricsBucket((bucket) => {
+    bucket.errors += 1
+  })
+}
+
+function recordGetOutcome(key, hasValue) {
+  forEachMetricsBucket((bucket) => {
+    recordRedisGetResult(bucket, key, hasValue)
+  })
 }
 
 const originalGet = redisClient.get.bind(redisClient)
@@ -95,14 +120,13 @@ redisClient.get = async function getWithMetrics(key) {
     const result = await originalGet(key)
     const elapsed = Date.now() - startTime
     incrementCommand('get', elapsed)
-    if (result) redisMetrics.cacheHits += 1
-    else redisMetrics.cacheMisses += 1
+    recordGetOutcome(key, Boolean(result))
     if (elapsed > 100) {
       logger.warn('Redis 慢查询 GET', { ms: elapsed, key })
     }
     return result
   } catch (error) {
-    redisMetrics.errors += 1
+    incrementErrors()
     logger.error('Redis GET 错误', { key, err: error?.message || error })
     throw error
   }
@@ -120,7 +144,7 @@ redisClient.set = async function setWithMetrics(...args) {
     }
     return result
   } catch (error) {
-    redisMetrics.errors += 1
+    incrementErrors()
     logger.error('Redis SET 错误', { err: error?.message || error })
     throw error
   }
@@ -138,7 +162,7 @@ redisClient.setEx = async function setExWithMetrics(key, ttl, value) {
     }
     return result
   } catch (error) {
-    redisMetrics.errors += 1
+    incrementErrors()
     logger.error('Redis SETEX 错误', { key, err: error?.message || error })
     throw error
   }
@@ -169,7 +193,7 @@ redisClient.del = async function delWithMetrics(...args) {
     }
     return result
   } catch (error) {
-    redisMetrics.errors += 1
+    incrementErrors()
     logger.error('Redis DEL 错误', { keyCount: keyList.length, err: error?.message || error })
     throw error
   }
@@ -196,7 +220,7 @@ redisClient.scanDelByPattern = async function scanDelByPattern(pattern, options 
       }
     } while (cursor !== '0')
   } catch (error) {
-    redisMetrics.errors += 1
+    incrementErrors()
     logger.error('Redis scanDelByPattern 失败', { pattern, err: error?.message || error })
     if (!options.swallowError) throw error
   }
@@ -215,13 +239,16 @@ redisClient.setNxEx = async function setNxEx(key, ttlSec, value = '1') {
 
 /**
  * 读缓存降级：Redis 不可用时返回 null，不抛错
+ * 走带指标的 get，业务缓存（含 search）会计入 cache_hit_rate
  */
 redisClient.safeGet = async function safeGet(key) {
   try {
     if (!redisClient.isOpen) await redisClient.connect()
-    return await originalGet(key)
+    return await redisClient.get(key)
   } catch (error) {
-    redisMetrics.safeGetFallbacks += 1
+    forEachMetricsBucket((bucket) => {
+      bucket.safeGetFallbacks += 1
+    })
     logger.warn('Redis safeGet 失败，降级为 miss', { key, err: error?.message || error })
     return null
   }
@@ -247,15 +274,29 @@ async function assertRedisOperational() {
 redisClient.assertRedisOperational = assertRedisOperational
 redisClient.createRedisUnavailableError = createRedisUnavailableError
 
+function replaceMetricsBucket(target, source) {
+  Object.assign(target, source)
+  target.commandCounts = { ...source.commandCounts }
+  target.responseTimes = [...(source.responseTimes || [])]
+}
+
 redisClient.getMetrics = function getMetrics() {
-  return buildRedisMetricsSnapshot(redisMetrics)
+  const windowSnapshot = buildRedisMetricsSnapshot(redisMetrics.window)
+  const lifetimeSnapshot = buildRedisMetricsSnapshot(redisMetrics.lifetime)
+  return {
+    ...windowSnapshot,
+    scope: 'window',
+    lifetime: lifetimeSnapshot,
+  }
+}
+
+redisClient.resetWindowMetrics = function resetWindowMetrics() {
+  replaceMetricsBucket(redisMetrics.window, createEmptyRedisMetrics())
 }
 
 redisClient.resetMetrics = function resetMetrics() {
-  const fresh = createEmptyRedisMetrics()
-  Object.assign(redisMetrics, fresh)
-  redisMetrics.commandCounts = { ...fresh.commandCounts }
-  redisMetrics.responseTimes = []
+  replaceMetricsBucket(redisMetrics.window, createEmptyRedisMetrics())
+  replaceMetricsBucket(redisMetrics.lifetime, createEmptyRedisMetrics())
 }
 
 const zsetMethods = ['zAdd', 'zRem', 'zRemRangeByScore', 'zRangeByScore']
@@ -271,6 +312,7 @@ for (const methodName of zsetMethods) {
 if (process.env.NODE_ENV !== 'test' && METRICS_LOG_INTERVAL_MS > 0) {
   setInterval(() => {
     logger.info('Redis 性能统计', redisClient.getMetrics())
+    redisClient.resetWindowMetrics()
   }, METRICS_LOG_INTERVAL_MS)
 }
 

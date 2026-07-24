@@ -97,5 +97,6 @@ module.exports = {
   isVirtualDeliveryNotifyEnabled,
   getVirtualDeliveryNotifyType,
   getVirtualDeliveryDefaultProductImg,
+  getSubscribeOrderPagePath,
   buildSubscribeOrderPage,
 }

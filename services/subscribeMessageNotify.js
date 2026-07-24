@@ -10,6 +10,7 @@ const {
   isVirtualDeliveryNotifyEnabled,
   getVirtualDeliveryNotifyType,
   getVirtualDeliveryDefaultProductImg,
+  getSubscribeOrderPagePath,
   buildSubscribeOrderPage,
 } = require('../config/wxSubscribeTemplates')
 const { sendSubscribeMessageDirect, setUserNotifyDirect } = require('./subscribeMessageService')
@@ -147,11 +148,13 @@ function parsePayTimeSec(dateInput) {
 }
 
 function buildDigitalItemPageQuery({ orderId, outTradeNo, itemId }) {
+  const base = getSubscribeOrderPagePath()
   const params = new URLSearchParams()
   if (outTradeNo) params.set('out_trade_no', outTradeNo)
   if (orderId != null) params.set('id', String(orderId))
   if (itemId != null) params.set('item_id', String(itemId))
-  return params.toString()
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
 }
 
 function buildVirtualDeliveryProductList(digitalItems, { orderId, outTradeNo }) {
@@ -209,10 +212,21 @@ function buildVirtualDeliveryCheckJson({ payAmountFen, payTimeSec }) {
 
 function isNotifyCodeNotReady(result) {
   const errmsg = String(result?.body?.errmsg || result?.body?.error || '')
-  const errcode = result?.body?.errcode
-  if (errmsg.includes('notify_code')) return true
+  const errcode = Number(result?.body?.errcode)
+  // 85437: notify_code 不存在（微信支付单号校验有时延）；85449: 更新锁，稍后重试
+  if (errcode === 85437 || errcode === 85449) return true
   if (errcode === 894020 || errcode === 40001) return false
+  if (errmsg.includes('notify_code') && /不存在|not exist|not found|invalid/i.test(errmsg)) return true
   return /不存在|not exist|not found/i.test(errmsg)
+}
+
+/** 未先激活卡片就更新到已发货等状态时的常见错误 */
+function isVirtualDeliveryNeedActivateFirst(result) {
+  const errcode = Number(result?.error?.errcode ?? result?.body?.errcode)
+  // 85433: 缺少/非法 check_json（未激活却用 transaction_id 当 notify_code）
+  // 85437: notify_code 尚不可用
+  // 85439: 状态不合法（如直接以 status=4 激活）
+  return errcode === 85433 || errcode === 85437 || errcode === 85439
 }
 
 async function markSubscribeSentOnce(redisKey) {
@@ -1027,6 +1041,7 @@ async function resendSubscribeNotify(req) {
 /**
  * 数字艺术品支付成功 — 激活「购物（虚拟发货）服务动态」卡片（备货中）
  * notify_code 使用微信支付订单号 transaction_id
+ * 微信支付单号校验有时延，默认允许按 VIRTUAL_DELIVERY_NOTIFY_RETRY_MS 重试一次
  */
 async function notifyVirtualDeliveryPreparing({
   outTradeNo,
@@ -1034,7 +1049,7 @@ async function notifyVirtualDeliveryPreparing({
   transactionId,
   payTime,
   force = false,
-  allowRetry = false,
+  allowRetry = true,
 }) {
   const ctx = await loadOrderNotifyContext({ outTradeNo, orderId })
   if (!ctx) return { skipped: true, reason: 'order_not_found' }
@@ -1077,6 +1092,7 @@ async function notifyVirtualDeliveryPreparing({
 /**
  * 数字艺术品交付二维码已上传 — 更新服务卡片为「已发货 / 部分发货」
  * 用户点击卡片进入订单详情页查看领取二维码
+ * 若卡片尚未激活（支付后自动发货早于激活），会先激活再更新
  */
 async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId, force = false }) {
   const ctx = await loadOrderNotifyContext({ orderId, outTradeNo })
@@ -1090,6 +1106,8 @@ async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId, 
   if (!digitalItems.length) return { skipped: true, reason: 'no_digital_item' }
 
   const deliveredCount = digitalItems.filter((item) => item.delivery_qr_code_url).length
+  if (deliveredCount <= 0) return { skipped: true, reason: 'no_delivered_item' }
+
   const totalCount = digitalItems.length
   const allDelivered = deliveredCount >= totalCount
   const curStatus = allDelivered ? 4 : 3
@@ -1106,7 +1124,7 @@ async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId, 
     ? `subscribe:virtual:delivered:${ctx.orderId}`
     : `subscribe:virtual:partial:${ctx.orderId}:${deliveredCount}:${orderItemId || 'all'}`
 
-  return dispatchVirtualDeliveryNotify({
+  const shipOnce = () => dispatchVirtualDeliveryNotify({
     scene: allDelivered ? 'virtualDeliveryShipped' : 'virtualDeliveryPartial',
     redisKey,
     openid: ctx.openid,
@@ -1114,6 +1132,64 @@ async function notifyVirtualDeliveryShipped({ orderId, outTradeNo, orderItemId, 
     contentJson,
     orderId: ctx.orderId,
     outTradeNo: ctx.outTradeNo,
+    force,
+  })
+
+  let result = await shipOnce()
+  if (!result.ok && !result.skipped && isVirtualDeliveryNeedActivateFirst(result)) {
+    logger.info('虚拟发货已发货更新前先激活服务卡片', {
+      orderId: ctx.orderId,
+      outTradeNo: ctx.outTradeNo,
+      errcode: result.error?.errcode,
+    })
+    const preparing = await notifyVirtualDeliveryPreparing({
+      orderId: ctx.orderId,
+      outTradeNo: ctx.outTradeNo,
+      allowRetry: true,
+      force: true,
+    })
+    if (preparing.ok || preparing.skipped) {
+      if (redisKey) await redisClient.del(redisKey)
+      result = await shipOnce()
+    }
+  }
+
+  return result
+}
+
+/**
+ * 支付成功后：先激活备货中卡片，若码池已自动发货再更新为已发货
+ * （微信 status=3/4 不可用于首次激活，必须先 cur_status=1/2）
+ */
+async function notifyVirtualDeliveryAfterPayment({
+  outTradeNo,
+  orderId,
+  transactionId,
+  payTime,
+  force = false,
+}) {
+  const preparing = await notifyVirtualDeliveryPreparing({
+    outTradeNo,
+    orderId,
+    transactionId,
+    payTime,
+    force,
+    allowRetry: true,
+  })
+
+  if (
+    preparing.skipped
+    && (preparing.reason === 'no_digital_item'
+      || preparing.reason === 'order_not_found'
+      || preparing.reason === 'missing_transaction_id')
+  ) {
+    return preparing
+  }
+
+  // 激活失败时仍尝试已发货：notifyVirtualDeliveryShipped 内会先补激活再更新
+  return notifyVirtualDeliveryShipped({
+    outTradeNo,
+    orderId,
     force,
   })
 }
@@ -1136,6 +1212,7 @@ module.exports = {
   notifyOrderShipped,
   notifyVirtualDeliveryPreparing,
   notifyVirtualDeliveryShipped,
+  notifyVirtualDeliveryAfterPayment,
   getResendScenes,
   resendSubscribeNotify,
   fireSubscribeNotify,

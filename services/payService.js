@@ -83,7 +83,7 @@ const {
     cancelPaymentPendingReminder,
     notifyOrderCancelled,
     notifyRefundSuccess,
-    notifyVirtualDeliveryPreparing,
+    notifyVirtualDeliveryAfterPayment,
     notifyVirtualDeliveryShipped,
     hasPaymentSuccessNotifySent,
 } = require('./subscribeMessageNotify');
@@ -236,7 +236,7 @@ async function clearInventoryRelatedCaches({ rightIds = [], artworkIds = [], dig
 }
 
 /** 支付成功后尝试码池自动发货（幂等；失败不影响支付/库存） */
-async function tryAutoDigitalQrDelivery({ outTradeNo, orderId = null }) {
+async function tryAutoDigitalQrDelivery({ outTradeNo, orderId = null, notifyShipped = true }) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
 
@@ -265,15 +265,18 @@ async function tryAutoDigitalQrDelivery({ outTradeNo, orderId = null }) {
             fully_delivered: newly.length,
         });
 
-        for (const row of newly) {
-            fireSubscribeNotify(
-                notifyVirtualDeliveryShipped({
-                    orderId: deliveryResult.order_id,
-                    outTradeNo: cleanOutTradeNo,
-                    orderItemId: row.order_item_id,
-                }),
-                'virtualDeliveryShipped',
-            );
+        // 支付回调路径应先激活「备货中」再更新「已发货」，此处可跳过，由 AfterPayment 统一处理
+        if (notifyShipped) {
+            for (const row of newly) {
+                fireSubscribeNotify(
+                    notifyVirtualDeliveryShipped({
+                        orderId: deliveryResult.order_id,
+                        outTradeNo: cleanOutTradeNo,
+                        orderItemId: row.order_item_id,
+                    }),
+                    'virtualDeliveryShipped',
+                );
+            }
         }
         return deliveryResult;
     } catch (deliveryErr) {
@@ -405,12 +408,12 @@ async function emitPaymentSuccessSubscribeNotifies({ outTradeNo, transactionId, 
     }
 
     fireSubscribeNotify(
-        notifyVirtualDeliveryPreparing({
+        notifyVirtualDeliveryAfterPayment({
             outTradeNo: cleanOutTradeNo,
             transactionId,
             payTime,
         }),
-        'virtualDeliveryPreparing',
+        'virtualDeliveryAfterPayment',
     );
 
     return paidResult;
@@ -1772,9 +1775,11 @@ async function payNotify(req) {
                 logger.info('支付回调处理完成', { out_trade_no });
 
                 // 支付回调主路径内联扣库存，需在此触发码池自动发货
+                // 服务卡片「已发货」通知延后到 AfterPayment（先激活备货中）
                 await tryAutoDigitalQrDelivery({
                     outTradeNo: out_trade_no,
                     orderId: orders[0]?.id || null,
+                    notifyShipped: false,
                 });
 
                 await applyPromotionDetailSideEffects(promotionDetail, {
