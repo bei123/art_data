@@ -20,7 +20,7 @@ function isWespaceUsnBindingEnforced() {
   return String(raw).toLowerCase() === 'true' || raw === '1'
 }
 
-async function assertUsnOwnedByWxUser(userId, usn) {
+async function assertUsnOwnedByWxUser(userId, usn, { force = false } = {}) {
   const requested = String(usn || '').trim()
   if (!requested) {
     return {
@@ -30,7 +30,7 @@ async function assertUsnOwnedByWxUser(userId, usn) {
     }
   }
 
-  if (!isWespaceUsnBindingEnforced()) {
+  if (!force && !isWespaceUsnBindingEnforced()) {
     return { ok: true, usn: requested }
   }
 

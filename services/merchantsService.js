@@ -45,9 +45,9 @@ async function getPublicMerchantsList(query) {
     return adminResult(400, { error: '每页数量必须在1-100之间' });
   }
 
-  const validStatuses = ['active', 'inactive', 'pending'];
+  const validStatuses = ['active'];
   if (status && !validStatuses.includes(status)) {
-    return adminResult(400, { error: '无效的状态参数' });
+    return adminResult(400, { error: '公开列表仅支持 status=active' });
   }
   if (search && typeof search === 'string' && search.length > 100) {
     return adminResult(400, { error: '搜索关键词长度不能超过100个字符' });
@@ -55,13 +55,9 @@ async function getPublicMerchantsList(query) {
 
   const offset = (cleanPage - 1) * cleanLimit;
 
-  let whereClause = 'WHERE 1=1';
+  let whereClause = "WHERE status = 'active'";
   const params = [];
 
-  if (status) {
-    whereClause += ' AND status = ?';
-    params.push(status);
-  }
   if (search) {
     whereClause += ' AND (name LIKE ? OR description LIKE ?)';
     params.push(`%${search}%`, `%${search}%`);

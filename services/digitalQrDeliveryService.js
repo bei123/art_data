@@ -169,7 +169,7 @@ async function claimPoolCodesForEmptyUnits({ digitalArtworkId, emptyUnits, conne
     )
     if (!claimResult?.affectedRows) continue
 
-    await connection.query(
+    const [unitResult] = await connection.query(
       `UPDATE order_item_delivery_units
        SET qr_code_url = ?,
            source = 'pool',
@@ -178,6 +178,19 @@ async function claimPoolCodesForEmptyUnits({ digitalArtworkId, emptyUnits, conne
        WHERE id = ? AND (qr_code_url IS NULL OR qr_code_url = '')`,
       [code.qr_code_url, code.id, unit.id]
     )
+    if (!unitResult?.affectedRows) {
+      // 单元已被占用：归还码池，避免 orphan assigned
+      await connection.query(
+        `UPDATE digital_artwork_qr_codes
+         SET status = 'available',
+             order_item_id = NULL,
+             delivery_unit_id = NULL,
+             assigned_at = NULL
+         WHERE id = ? AND status = 'assigned'`,
+        [code.id]
+      )
+      continue
+    }
 
     assigned.push({
       unit_id: unit.id,
@@ -223,8 +236,18 @@ async function fulfillDigitalDeliveryForPaidOrder({ outTradeNo, orderId, connect
     let resolvedOrderId = orderId
     if (!resolvedOrderId) {
       const [orders] = await connection.query(
-        'SELECT id, trade_state FROM orders WHERE out_trade_no = ? LIMIT 1',
+        'SELECT id, trade_state FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE',
         [String(outTradeNo || '').trim()]
+      )
+      if (!orders.length || orders[0].trade_state !== 'SUCCESS') {
+        if (ownsConnection) await connection.rollback()
+        return { skipped: true, reason: 'not_success' }
+      }
+      resolvedOrderId = orders[0].id
+    } else {
+      const [orders] = await connection.query(
+        'SELECT id, trade_state FROM orders WHERE id = ? LIMIT 1 FOR UPDATE',
+        [resolvedOrderId]
       )
       if (!orders.length || orders[0].trade_state !== 'SUCCESS') {
         if (ownsConnection) await connection.rollback()
@@ -443,6 +466,7 @@ async function manualFillDeliveryUnits({
 
     const fillCount = Math.min(urls.length, targets.length)
     for (let i = 0; i < fillCount; i += 1) {
+      const prevPoolId = targets[i].pool_code_id
       await connection.query(
         `UPDATE order_item_delivery_units
          SET qr_code_url = ?,
@@ -452,6 +476,14 @@ async function manualFillDeliveryUnits({
          WHERE id = ?`,
         [urls[i], targets[i].id]
       )
+      if (prevPoolId) {
+        await connection.query(
+          `UPDATE digital_artwork_qr_codes
+           SET status = 'void'
+           WHERE id = ? AND status = 'assigned'`,
+          [prevPoolId]
+        )
+      }
     }
 
     const sync = await syncOrderItemCompatQrColumns(orderItemId, connection)

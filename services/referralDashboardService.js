@@ -206,12 +206,23 @@ async function detectWalletPendingMismatches() {
 }
 
 async function detectOrdersMissingCommission() {
+  // 降噪：排除自荐、无计佣明细、以及系统未配置任何有效费率规则的订单
   const [rows] = await db.query(
     `SELECT o.id AS order_id, o.out_trade_no, o.referrer_id, o.success_time
      FROM orders o
+     INNER JOIN order_items oi
+       ON oi.order_id = o.id
+      AND oi.type IN ('right', 'artwork', 'digital')
+      AND oi.price > 0
      LEFT JOIN commission_ledger cl ON cl.order_id = o.id
      WHERE o.trade_state = 'SUCCESS'
        AND o.referrer_id IS NOT NULL
+       AND o.referrer_id <> o.user_id
+       AND EXISTS (
+         SELECT 1 FROM commission_rate_rules r
+         WHERE r.is_active = 1
+           AND r.product_type = oi.type
+       )
      GROUP BY o.id, o.out_trade_no, o.referrer_id, o.success_time
      HAVING COUNT(cl.id) = 0
      ORDER BY o.success_time DESC
@@ -253,22 +264,112 @@ async function detectWithdrawnTotalMismatches() {
   }))
 }
 
+async function detectWalletAvailableMismatches() {
+  // 只告警「钱包多于账本」：少算可能来自欠款冲抵（不改 ledger），属预期噪音
+  const [rows] = await db.query(
+    `SELECT t.user_id, t.wallet_available, t.debt_balance, t.expected_available
+     FROM (
+       SELECT uw.user_id,
+              uw.available_balance AS wallet_available,
+              uw.debt_balance AS debt_balance,
+              COALESCE(cl.settlable_sum, 0) + COALESCE(bg.bonus_sum, 0) AS expected_available
+       FROM user_wallets uw
+       LEFT JOIN (
+         SELECT user_id, SUM(commission_amount) AS settlable_sum
+         FROM commission_ledger
+         WHERE status = 'settlable'
+         GROUP BY user_id
+       ) cl ON cl.user_id = uw.user_id
+       LEFT JOIN (
+         SELECT user_id, SUM(amount) AS bonus_sum
+         FROM referral_bonus_grants
+         WHERE status = 'settlable'
+         GROUP BY user_id
+       ) bg ON bg.user_id = uw.user_id
+     ) t
+     WHERE (t.wallet_available - t.expected_available) > ?
+     ORDER BY (t.wallet_available - t.expected_available) DESC
+     LIMIT 50`,
+    [MONEY_TOLERANCE]
+  )
+
+  return (rows || []).map((row) => ({
+    type: 'wallet_available_overage',
+    user_id: row.user_id,
+    wallet_available_yuan: roundMoney(row.wallet_available),
+    debt_balance_yuan: roundMoney(row.debt_balance),
+    expected_available_yuan: roundMoney(row.expected_available),
+    overage_yuan: roundMoney(parseMoney(row.wallet_available) - parseMoney(row.expected_available)),
+  }))
+}
+
+async function detectReferralBindingCycles() {
+  const [rows] = await db.query(
+    `SELECT id, referrer_id, referee_id
+     FROM referral_bindings
+     ORDER BY id ASC
+     LIMIT 5000`
+  )
+  const byReferee = new Map()
+  for (const row of rows || []) {
+    byReferee.set(Number(row.referee_id), Number(row.referrer_id))
+  }
+
+  const issues = []
+  const seenComponent = new Set()
+  for (const refereeId of byReferee.keys()) {
+    if (seenComponent.has(refereeId)) continue
+    const path = []
+    const indexOf = new Map()
+    let current = refereeId
+    for (let depth = 0; depth < 64; depth += 1) {
+      if (!current || !byReferee.has(current)) break
+      if (indexOf.has(current)) {
+        const cycleStart = indexOf.get(current)
+        const cycle = path.slice(cycleStart)
+        cycle.push(current)
+        for (const id of path) seenComponent.add(id)
+        issues.push({
+          type: 'referral_binding_cycle',
+          cycle_user_ids: cycle,
+        })
+        break
+      }
+      indexOf.set(current, path.length)
+      path.push(current)
+      current = byReferee.get(current)
+    }
+    if (issues.length >= 50) break
+  }
+  return issues
+}
+
 async function runReferralReconciliation() {
   await ensureReferralReconciliationSchema()
   await ensureReferralSchema()
   await ensureCommissionSchema()
   await ensureReferralRewardsSchema()
 
-  const [pendingIssues, missingCommissionIssues, withdrawnIssues] = await Promise.all([
+  const [
+    pendingIssues,
+    missingCommissionIssues,
+    withdrawnIssues,
+    availableIssues,
+    cycleIssues,
+  ] = await Promise.all([
     detectWalletPendingMismatches(),
     detectOrdersMissingCommission(),
     detectWithdrawnTotalMismatches(),
+    detectWalletAvailableMismatches(),
+    detectReferralBindingCycles(),
   ])
 
   const issues = [
     ...pendingIssues,
     ...missingCommissionIssues,
     ...withdrawnIssues,
+    ...availableIssues,
+    ...cycleIssues,
   ]
 
   const overview = await getReferralOverviewStats()

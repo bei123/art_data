@@ -147,7 +147,7 @@ async function getPublicRightsList(query) {
   const cleanLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const cleanSort = ['id', 'title', 'price', 'created_at', 'updated_at'].includes(sort) ? sort : 'created_at';
   const cleanOrder = ['asc', 'desc'].includes(String(order).toLowerCase()) ? String(order).toLowerCase() : 'desc';
-  const cleanStatus = status && ['onsale', 'sold', 'draft'].includes(status) ? status : null;
+  const cleanStatus = status && ['onsale', 'sold'].includes(status) ? status : null;
   const cleanCategoryId = category_id && !Number.isNaN(parseInt(category_id, 10)) ? parseInt(category_id, 10) : null;
 
   const offset = (cleanPage - 1) * cleanLimit;
@@ -163,7 +163,7 @@ async function getPublicRightsList(query) {
       return adminResult(200, JSON.parse(cache));
     }
 
-    let whereClause = 'WHERE 1=1';
+    let whereClause = "WHERE r.status IN ('onsale', 'sold')";
     const params = [];
 
     if (cleanStatus) {
@@ -772,7 +772,7 @@ async function getPublicRightDetail(rawId, userId = null) {
             FROM rights r
             LEFT JOIN physical_categories c ON r.category_id = c.id
             LEFT JOIN artists a ON r.artist_id = a.id
-            WHERE r.id = ?
+            WHERE r.id = ? AND r.status IN ('onsale', 'sold')
         `,
         [id]
       );

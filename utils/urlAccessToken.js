@@ -30,16 +30,30 @@ function claimsMatch(decoded, expected) {
   return true
 }
 
-async function isSessionSidActive(userId, sid) {
-  const sessionTables = ['user_sessions', 'wx_user_sessions']
+function resolveSessionTablesForPrincipal(principal) {
+  if (principal === 'wx') return ['wx_user_sessions']
+  if (principal === 'admin') return ['user_sessions']
+  return ['user_sessions', 'wx_user_sessions']
+}
+
+/**
+ * @returns {{ active: boolean, principal: 'wx'|'admin'|null }}
+ */
+async function isSessionSidActive(userId, sid, principal = null) {
+  const sessionTables = resolveSessionTablesForPrincipal(principal)
   for (const table of sessionTables) {
     const [sessions] = await query(
       `SELECT token FROM ${table} WHERE user_id = ? AND expires_at > NOW()`,
       [userId]
     )
-    if (sessions?.some((row) => sessionTokenSid(row.token) === sid)) return true
+    if (sessions?.some((row) => sessionTokenSid(row.token) === sid)) {
+      return {
+        active: true,
+        principal: table === 'wx_user_sessions' ? 'wx' : 'admin',
+      }
+    }
   }
-  return false
+  return { active: false, principal: null }
 }
 
 /**
@@ -54,13 +68,17 @@ async function mintUrlAccessToken(sessionToken, { purpose, claims = {} }) {
   const verified = await verifyActiveSessionToken(sessionToken)
   if (!verified.ok) return verified
 
+  const principal = verified.principal || (verified.openid ? 'wx' : 'admin')
   const access = jwt.sign(
     {
+      // claims 先展开，安全字段后写，禁止被覆盖
+      ...claims,
       tokenType: 'url_access',
       purpose,
       userId: verified.userId,
+      principal,
+      openid: verified.openid || undefined,
       sid: sessionTokenSid(sessionToken),
-      ...claims,
     },
     JWT_SECRET,
     { expiresIn: URL_ACCESS_TTL_SECONDS }
@@ -71,6 +89,7 @@ async function mintUrlAccessToken(sessionToken, { purpose, claims = {} }) {
     access,
     expiresIn: URL_ACCESS_TTL_SECONDS,
     userId: verified.userId,
+    principal,
   }
 }
 
@@ -99,14 +118,29 @@ async function verifyUrlAccessToken(accessToken, { purpose, claims = {} }) {
       return { ok: false, status: 403, error: 'access 与请求资源不匹配' }
     }
 
-    const sidActive = await isSessionSidActive(Number(decoded.userId), decoded.sid)
-    if (!sidActive) {
+    const hintPrincipal = decoded.principal
+      || (decoded.openid ? 'wx' : null)
+
+    const sidCheck = await isSessionSidActive(
+      Number(decoded.userId),
+      decoded.sid,
+      hintPrincipal,
+    )
+    if (!sidCheck.active) {
       return { ok: false, status: 401, error: '登录已失效，请重新登录' }
+    }
+
+    // 以会话表匹配结果为准，绝不把未知身份默认成 admin
+    const principal = hintPrincipal || sidCheck.principal
+    if (!principal) {
+      return { ok: false, status: 401, error: '无效的 access' }
     }
 
     return {
       ok: true,
       userId: Number(decoded.userId),
+      principal,
+      openid: decoded.openid || null,
       claims: decoded,
     }
   } catch (error) {

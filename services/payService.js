@@ -342,7 +342,8 @@ async function tryAutoDigitalQrDelivery({ outTradeNo, orderId = null, notifyShip
 }
 
 /**
- * 支付成功金钱副作用（消费额/佣金/首单奖励）— Redis NX 幂等，notify 与 sync 共用
+ * 支付成功金钱副作用（消费额/佣金/首单奖励）— Redis NX 幂等，notify 与 sync 共用。
+ * 占槽后若业务失败必须释放，以便重试；外层事务回滚时由调用方根据 claimedSettlementKey 释放。
  */
 async function settlePaidOrderSideEffects({
     outTradeNo,
@@ -379,8 +380,10 @@ async function settlePaidOrderSideEffects({
             }
         }
 
-        if (ownsConnection) await runner.commit();
-        return { ok: true };
+        if (ownsConnection) {
+          await runner.commit();
+        }
+        return { ok: true, claimedSettlementKey: true };
     } catch (err) {
         if (ownsConnection) await runner.rollback();
         await releasePaidOrderSettlementSlot(cleanOutTradeNo);
@@ -390,10 +393,12 @@ async function settlePaidOrderSideEffects({
     }
 }
 
-/** 支付成功库存履约 — setNxEx 原子占槽 + 订单行 FOR UPDATE */
+/** 支付成功库存履约 — DB inventory_state CAS + Redis 辅助占槽 */
 async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+
+    await ensureOrderInventoryReservedColumn();
 
     const inventoryKey = buildPayInventoryFulfilledKey(cleanOutTradeNo);
     const acquired = await redisClient.setNxEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
@@ -415,7 +420,8 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
         if (ownsConnection) await connection.beginTransaction();
 
         const [orders] = await connection.query(
-            'SELECT id, user_id, trade_state, inventory_reserved FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE',
+            `SELECT id, user_id, trade_state, inventory_reserved, inventory_state
+             FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE`,
             [cleanOutTradeNo]
         );
         if (!orders.length || orders[0].trade_state !== 'SUCCESS') {
@@ -424,13 +430,35 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
             return { skipped: true, reason: 'not_success' };
         }
 
+        const inventoryState = String(orders[0].inventory_state || 'none');
+        if (inventoryState === 'fulfilled' || inventoryState === 'restored') {
+            if (ownsConnection) await connection.commit();
+            if (!options.skipDelivery) {
+                await tryAutoDigitalQrDelivery({
+                    outTradeNo: cleanOutTradeNo,
+                    orderId: orders[0].id,
+                    notifyShipped: options.notifyShipped !== false,
+                });
+            }
+            return { skipped: true, reason: 'already_fulfilled_db', orderId: orders[0].id };
+        }
+
         const orderItems = await loadOrderItemsForInventory(cleanOutTradeNo, connection);
         let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
-        if (Number(orders[0].inventory_reserved) === 1) {
-            await connection.query(
-                'UPDATE orders SET inventory_reserved = 0 WHERE id = ?',
+        const isReserved = inventoryState === 'reserved' || Number(orders[0].inventory_reserved) === 1;
+
+        if (isReserved) {
+            const [claim] = await connection.query(
+                `UPDATE orders
+                 SET inventory_reserved = 0, inventory_state = 'fulfilled'
+                 WHERE id = ? AND (inventory_reserved = 1 OR inventory_state = 'reserved')`,
                 [orders[0].id]
             );
+            if (!claim?.affectedRows) {
+                if (ownsConnection) await connection.rollback();
+                await releaseInventoryFulfillmentSlot(cleanOutTradeNo);
+                return { skipped: true, reason: 'reserve_claim_lost' };
+            }
             for (const item of orderItems) {
                 if (item.type === 'right' && item.right_id) affected.rightIds.push(item.right_id);
                 if (item.type === 'artwork' && item.artwork_id) affected.artworkIds.push(item.artwork_id);
@@ -438,6 +466,12 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
             }
         } else {
             affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
+            await connection.query(
+                `UPDATE orders
+                 SET inventory_reserved = 0, inventory_state = 'fulfilled'
+                 WHERE id = ? AND inventory_state IN ('none', '')`,
+                [orders[0].id]
+            );
         }
         await recordDigitalIdentityPurchases({
             outTradeNo: cleanOutTradeNo,
@@ -929,11 +963,19 @@ function buyerUserIdFromReq(req) {
 }
 
 async function assertWxBuyerForPay(req, openid, connection = null) {
+    if (!req.user?.is_wx_user || !req.user?.openid) {
+        return { error: adminResult(403, { error: '仅小程序用户可操作' }) };
+    }
+
     const buyerId = buyerUserIdFromReq(req);
     if (!buyerId) return { error: adminResult(401, { error: '请先登录' }) };
 
     const cleanOpenid = typeof openid === 'string' ? openid.trim() : '';
     if (!cleanOpenid) return { error: adminResult(400, { error: '缺少有效的openid' }) };
+
+    if (String(req.user.openid) !== cleanOpenid) {
+        return { error: adminResult(403, { error: 'openid 与当前登录用户不一致' }) };
+    }
 
     const runner = connection || db;
     const [wxRows] = await runner.query(
@@ -1007,6 +1049,10 @@ async function releaseOverlappingPendingInventoryBeforeReserve({
 }
 
 async function loadOrderForBuyer(req, outTradeNo, connection = null) {
+    if (!req.user?.is_wx_user || !req.user?.openid) {
+        return { error: adminResult(403, { success: false, error: '仅小程序用户可操作' }) };
+    }
+
     const buyerId = buyerUserIdFromReq(req);
     if (!buyerId) return { error: adminResult(401, { success: false, error: '请先登录' }) };
 
@@ -1877,10 +1923,11 @@ async function payNotify(req) {
                     referrerId: orders[0]?.referrer_id,
                     connection,
                 });
-                didClaimSettlement = Boolean(settleResult?.ok);
+                didClaimSettlement = Boolean(settleResult?.claimedSettlementKey);
 
                 await connection.commit();
                 committed = true;
+                didClaimSettlement = false;
 
                 if (fulfillResult?.ok && fulfillResult.affected) {
                     await clearInventoryRelatedCaches(fulfillResult.affected);
@@ -2046,17 +2093,6 @@ async function refund(req) {
         const cleanOutTradeNo = owned.cleanOutTradeNo;
         const order = owned.order;
 
-        const [existingRefunds] = await db.query(
-            `SELECT id, status FROM refund_requests
-             WHERE out_trade_no = ? AND status IN (?, ?, ?, ?)`,
-            [cleanOutTradeNo, ...BLOCKING_REFUND_STATUSES]
-        );
-        if (existingRefunds.length) {
-            return adminResult(400, {
-                error: `该订单已有进行中的退款（${existingRefunds[0].status}），请勿重复发起`,
-            });
-        }
-
         const amountResolved = await resolveRefundAmountCentsForOrder(order);
         if (amountResolved.error) {
             return adminResult(amountResolved.status || 400, { error: amountResolved.error });
@@ -2069,6 +2105,28 @@ async function refund(req) {
         await connection.beginTransaction();
 
         try {
+            const [lockedOrders] = await connection.query(
+                'SELECT id, out_trade_no, trade_state FROM orders WHERE id = ? FOR UPDATE',
+                [order.id]
+            );
+            if (!lockedOrders.length || lockedOrders[0].trade_state !== 'SUCCESS') {
+                await connection.rollback();
+                return adminResult(400, { error: '仅支付成功的订单可申请退款' });
+            }
+
+            const [existingRefunds] = await connection.query(
+                `SELECT id, status FROM refund_requests
+                 WHERE out_trade_no = ? AND status IN (?, ?, ?, ?)
+                 FOR UPDATE`,
+                [cleanOutTradeNo, ...BLOCKING_REFUND_STATUSES]
+            );
+            if (existingRefunds.length) {
+                await connection.rollback();
+                return adminResult(400, {
+                    error: `该订单已有进行中的退款（${existingRefunds[0].status}），请勿重复发起`,
+                });
+            }
+
             const [refundResult] = await connection.query(
                 `INSERT INTO refund_requests (
             out_trade_no,
@@ -2208,29 +2266,53 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
         return { alreadyDone: true };
     }
 
+    await ensureOrderInventoryReservedColumn();
+
     const connection = await db.getConnection();
     await connection.beginTransaction();
     try {
+        const [refundRows] = await connection.query(
+            `SELECT id, status FROM refund_requests WHERE out_refund_no = ? LIMIT 1 FOR UPDATE`,
+            [out_refund_no]
+        );
+        if (refundRows[0]?.status === 'SUCCESS') {
+            await connection.commit();
+            await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
+            return { alreadyDone: true };
+        }
+
         const [orderRows] = await connection.query(
-            'SELECT id, inventory_reserved FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE',
+            `SELECT id, user_id, inventory_reserved, inventory_state, actual_fee, payment_total, total_fee
+             FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE`,
             [out_trade_no]
         );
         const orderId = orderRows[0]?.id;
-        const hasReservedInventory = Number(orderRows[0]?.inventory_reserved) === 1;
+        const userId = orderRows[0]?.user_id;
+        const inventoryState = String(orderRows[0]?.inventory_state || 'none');
+        const hasReservedInventory = inventoryState === 'reserved'
+            || Number(orderRows[0]?.inventory_reserved) === 1;
 
         const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${out_trade_no}`;
-        const inventoryDone = await redisClient.get(inventoryKey);
+        const inventoryDone = inventoryState === 'restored'
+            || Boolean(await redisClient.get(inventoryKey));
         let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
         let didRestoreInventory = false;
 
         if (!inventoryDone) {
-            const payFulfilled = await redisClient.safeGet(buildPayInventoryFulfilledKey(out_trade_no));
+            const payFulfilled = inventoryState === 'fulfilled'
+                || Boolean(await redisClient.safeGet(buildPayInventoryFulfilledKey(out_trade_no)));
 
             if (hasReservedInventory && orderId) {
                 // 支付履约未确认预扣：只释放预扣，禁止再 restore（否则库存翻倍）
                 const { releaseOrderInventoryIfReserved } = require('../utils/orderInventoryReserve');
                 const released = await releaseOrderInventoryIfReserved(orderId, connection);
                 affected = released?.affected || affected;
+                await connection.query(
+                    `UPDATE orders
+                     SET inventory_reserved = 0, inventory_state = 'restored'
+                     WHERE id = ?`,
+                    [orderId]
+                );
                 didRestoreInventory = true;
                 logger.info('退款释放未确认的库存预扣', { out_trade_no, orderId });
             } else if (payFulfilled) {
@@ -2238,9 +2320,23 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
                 affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
                 const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
                 await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+                await connection.query(
+                    `UPDATE orders
+                     SET inventory_reserved = 0, inventory_state = 'restored'
+                     WHERE id = ? AND inventory_state IN ('fulfilled', 'none', '')`,
+                    [orderId]
+                );
                 didRestoreInventory = true;
             } else {
                 // 无预扣且无支付履约：库存从未扣减，跳过回滚，仅打标防重入
+                if (orderId) {
+                    await connection.query(
+                        `UPDATE orders
+                         SET inventory_reserved = 0, inventory_state = 'restored'
+                         WHERE id = ? AND inventory_state IN ('none', '')`,
+                        [orderId]
+                    );
+                }
                 logger.info('退款跳过库存回滚：无预扣且无支付履约标记', { out_trade_no });
                 didRestoreInventory = true;
             }
@@ -2250,12 +2346,31 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
             await updateRefundAmountSnapshot(out_refund_no, amount, connection);
         }
 
-        await connection.query(
-            `UPDATE refund_requests SET status = 'SUCCESS', wx_refund_id = ? WHERE out_refund_no = ?`,
+        const [refundClaim] = await connection.query(
+            `UPDATE refund_requests SET status = 'SUCCESS', wx_refund_id = ?
+             WHERE out_refund_no = ? AND status IN ('APPROVED', 'PROCESSING', 'PENDING')`,
             [wx_refund_id, out_refund_no]
         );
+        if (!refundClaim?.affectedRows) {
+            const currentStatus = refundRows[0]?.status || null;
+            if (currentStatus === 'SUCCESS') {
+                await connection.rollback();
+                await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
+                return { alreadyDone: true };
+            }
+            await connection.rollback();
+            await releasePayCallbackProcessingSlot(callbackKey);
+            const err = new Error(`退款状态不可完成：${currentStatus || 'missing'}`);
+            err.code = 'REFUND_STATUS_NOT_CLAIMABLE';
+            throw err;
+        }
+
         await connection.query(
-            `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款', inventory_reserved = 0 WHERE out_trade_no = ?`,
+            `UPDATE orders
+             SET trade_state = 'REFUND', trade_state_desc = '已退款', inventory_reserved = 0,
+                 inventory_state = IF(inventory_state = 'restored', 'restored',
+                   IF(inventory_state IN ('fulfilled', 'reserved'), 'restored', inventory_state))
+             WHERE out_trade_no = ? AND trade_state = 'SUCCESS'`,
             [out_trade_no]
         );
 
@@ -2271,6 +2386,15 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
                     orderId,
                     err: voidErr?.message || voidErr,
                 });
+            }
+
+            if (userId) {
+                const { onRefundSuccess } = require('./userTierService');
+                const spendYuan = parseFloat(orderRows[0].actual_fee)
+                    || parseFloat(orderRows[0].payment_total)
+                    || parseFloat(orderRows[0].total_fee)
+                    || 0;
+                await onRefundSuccess(userId, spendYuan, connection);
             }
         }
 
@@ -2297,7 +2421,8 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
 
 async function markRefundFailed({ out_refund_no, wx_refund_id }) {
     await db.query(
-        `UPDATE refund_requests SET status = 'FAILED', wx_refund_id = COALESCE(?, wx_refund_id) WHERE out_refund_no = ?`,
+        `UPDATE refund_requests SET status = 'FAILED', wx_refund_id = COALESCE(?, wx_refund_id)
+         WHERE out_refund_no = ? AND status IN ('APPROVED', 'PROCESSING', 'PENDING')`,
         [wx_refund_id || null, out_refund_no]
     );
 }
@@ -2386,9 +2511,9 @@ async function refundApprove(req) {
         await connection.beginTransaction();
 
         try {
-            // 获取退款申请信息
+            // 获取退款申请信息（行锁）
             const [refunds] = await connection.query(
-                'SELECT * FROM refund_requests WHERE id = ? AND status = "PENDING"',
+                'SELECT * FROM refund_requests WHERE id = ? AND status = "PENDING" FOR UPDATE',
                 [cleanRefundId]
             );
 
@@ -2400,19 +2525,40 @@ async function refundApprove(req) {
             const refund = refunds[0];
 
             if (approve) {
-                await connection.query(
-                    'UPDATE refund_requests SET status = "APPROVED", approved_at = NOW() WHERE id = ?',
+                const [claimResult] = await connection.query(
+                    'UPDATE refund_requests SET status = "APPROVED", approved_at = NOW() WHERE id = ? AND status = "PENDING"',
                     [cleanRefundId]
                 );
+                if (!claimResult || claimResult.affectedRows !== 1) {
+                    await connection.rollback();
+                    return adminResult(409, { error: '退款申请已被其他操作处理' });
+                }
 
                 const [orderRows] = await connection.query(
                     `SELECT id, out_trade_no, transaction_id, trade_state, actual_fee, total_fee, payment_total
-                     FROM orders WHERE out_trade_no = ? LIMIT 1`,
+                     FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE`,
                     [refund.out_trade_no]
                 );
                 if (!orderRows.length) {
                     await connection.rollback();
                     return adminResult(404, { error: '关联订单不存在，无法退款' });
+                }
+                if (orderRows[0].trade_state !== 'SUCCESS') {
+                    await connection.rollback();
+                    return adminResult(400, { error: '仅支付成功的订单可退款' });
+                }
+
+                const [otherBlocking] = await connection.query(
+                    `SELECT id, status FROM refund_requests
+                     WHERE out_trade_no = ? AND id <> ? AND status IN (?, ?, ?, ?)
+                     LIMIT 1`,
+                    [refund.out_trade_no, cleanRefundId, ...BLOCKING_REFUND_STATUSES]
+                );
+                if (otherBlocking.length) {
+                    await connection.rollback();
+                    return adminResult(400, {
+                        error: `该订单已有进行中的退款（${otherBlocking[0].status}）`,
+                    });
                 }
 
                 const amountResolved = await resolveRefundAmountCentsForOrder(orderRows[0], connection);
@@ -2471,8 +2617,9 @@ async function refundApprove(req) {
                     const mergedAmount = buildStoredRefundAmount(storedAmount, response.data?.amount);
 
                     if (wxStatus === 'SUCCESS') {
+                        // 先提交 PROCESSING/APPROVED 态由 completeRefundSuccess 做侧效与 SUCCESS CAS，避免先标 SUCCESS 后侧效失败
                         await connection.query(
-                            'UPDATE refund_requests SET status = "SUCCESS", wx_refund_id = ?, amount = ? WHERE id = ?',
+                            'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ?, amount = ? WHERE id = ? AND status = "APPROVED"',
                             [wxRefundId, JSON.stringify(mergedAmount), cleanRefundId]
                         );
                         await connection.commit();
@@ -2495,7 +2642,7 @@ async function refundApprove(req) {
 
                     if (wxStatus === 'CLOSED' || wxStatus === 'ABNORMAL') {
                         await connection.query(
-                            'UPDATE refund_requests SET status = "FAILED", wx_refund_id = ?, amount = ? WHERE id = ?',
+                            'UPDATE refund_requests SET status = "FAILED", wx_refund_id = ?, amount = ? WHERE id = ? AND status = "APPROVED"',
                             [wxRefundId, JSON.stringify(mergedAmount), cleanRefundId]
                         );
                         await connection.commit();
@@ -2509,7 +2656,7 @@ async function refundApprove(req) {
                     }
 
                     await connection.query(
-                        'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ?, amount = ? WHERE id = ?',
+                        'UPDATE refund_requests SET status = "PROCESSING", wx_refund_id = ?, amount = ? WHERE id = ? AND status = "APPROVED"',
                         [wxRefundId, JSON.stringify(mergedAmount), cleanRefundId]
                     );
 
@@ -2530,10 +2677,14 @@ async function refundApprove(req) {
                 });
             } else {
                 // 拒绝退款申请
-                await connection.query(
-                    'UPDATE refund_requests SET status = "REJECTED", reject_reason = ?, rejected_at = NOW() WHERE id = ?',
+                const [rejectResult] = await connection.query(
+                    'UPDATE refund_requests SET status = "REJECTED", reject_reason = ?, rejected_at = NOW() WHERE id = ? AND status = "PENDING"',
                     [cleanRejectReason, cleanRefundId]
                 );
+                if (!rejectResult || rejectResult.affectedRows !== 1) {
+                    await connection.rollback();
+                    return adminResult(409, { error: '退款申请已被其他操作处理' });
+                }
 
                 await connection.commit();
                 return adminResult(200, {
@@ -2589,18 +2740,6 @@ async function adminOrderRefund(req) {
 
         const order = orders[0];
 
-        const [existingRefunds] = await db.query(
-            `SELECT id, status FROM refund_requests
-             WHERE out_trade_no = ? AND status IN (?, ?, ?, ?)`,
-            [order.out_trade_no, ...BLOCKING_REFUND_STATUSES]
-        );
-        if (existingRefunds.length) {
-            return adminResult(400, {
-                success: false,
-                error: `该订单已有进行中的退款（${existingRefunds[0].status}），请勿重复发起`,
-            });
-        }
-
         const amountResolved = await resolveRefundAmountCentsForOrder(order);
         if (amountResolved.error) {
             return adminResult(amountResolved.status || 400, { success: false, error: amountResolved.error });
@@ -2613,6 +2752,29 @@ async function adminOrderRefund(req) {
         const connection = await db.getConnection();
         await connection.beginTransaction();
         try {
+            const [lockedOrders] = await connection.query(
+                'SELECT id, out_trade_no, trade_state FROM orders WHERE id = ? FOR UPDATE',
+                [orderId]
+            );
+            if (!lockedOrders.length || lockedOrders[0].trade_state !== 'SUCCESS') {
+                await connection.rollback();
+                return adminResult(400, { success: false, error: '仅支付成功的订单可退款' });
+            }
+
+            const [existingRefunds] = await connection.query(
+                `SELECT id, status FROM refund_requests
+                 WHERE out_trade_no = ? AND status IN (?, ?, ?, ?)
+                 FOR UPDATE`,
+                [order.out_trade_no, ...BLOCKING_REFUND_STATUSES]
+            );
+            if (existingRefunds.length) {
+                await connection.rollback();
+                return adminResult(400, {
+                    success: false,
+                    error: `该订单已有进行中的退款（${existingRefunds[0].status}），请勿重复发起`,
+                });
+            }
+
             const [refundResult] = await connection.query(
                 `INSERT INTO refund_requests (
                     out_trade_no,
@@ -3505,6 +3667,10 @@ async function listOrders(req) {
             return adminResult(400, {
                 error: '无效的订单状态类型，支持的类型：all, pending, completed, cancelled, closed, refunding, refunded, NOTPAY, SUCCESS, CLOSED, REVOKED, REFUND',
             });
+        }
+
+        if (!req.user?.is_wx_user || !req.user?.openid) {
+            return adminResult(403, { error: '仅小程序用户可查看订单' });
         }
 
         const authUserId = req.user?.id;
@@ -5482,16 +5648,20 @@ async function finalizeLocalUnpaidOrderClose({
     notifyReason = stateDesc,
 }) {
     const { releaseReferralCouponByOrderId } = require('./referralRewardService');
+    let closed = false
     if (orderId) {
-        await releaseClosedOrderInventory(orderId);
-        await db.query(
+        const [closeResult] = await db.query(
             `UPDATE orders SET trade_state = 'CLOSED', trade_state_desc = ?, updated_at = NOW()
              WHERE id = ? AND trade_state IN ('NOTPAY', 'PAYERROR')`,
             [stateDesc, orderId]
         );
-        await releaseReferralCouponByOrderId(orderId);
+        closed = Boolean(closeResult?.affectedRows)
+        if (closed) {
+            await releaseClosedOrderInventory(orderId);
+            await releaseReferralCouponByOrderId(orderId);
+        }
     }
-    if (outTradeNo) {
+    if (closed && outTradeNo) {
         cancelPaymentPendingReminder(outTradeNo).catch((err) => {
             logger.warn('取消待付款提醒排期失败', { outTradeNo, err: err?.message || err });
         });
@@ -5500,6 +5670,7 @@ async function finalizeLocalUnpaidOrderClose({
             'orderCancelled',
         );
     }
+    return { closed }
 }
 
 async function autoCloseUnpaidOrderRow(orderRow) {

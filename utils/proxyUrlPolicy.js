@@ -21,6 +21,7 @@ function isPrivateOrReservedIp(ip) {
     if (a === 172 && b >= 16 && b <= 31) return true
     if (a === 192 && b === 168) return true
     if (a === 169 && b === 254) return true
+    if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
     if (a >= 224) return true
     return false
   }
@@ -110,6 +111,8 @@ async function assertResolvedHostIsPublic(hostname) {
 }
 
 function createProxyRedirectGuard() {
+  // axios/follow-redirects 不会 await beforeRedirect；当前 Node 亦无 lookupSync。
+  // 因此调用方应设 maxRedirects: 0。此 guard 仅作同步 hostname 白名单兜底。
   return (options) => {
     const check = validateProxyTargetUrl(options.href)
     if (!check.ok) {

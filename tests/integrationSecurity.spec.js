@@ -152,15 +152,22 @@ describe('wx route auth', () => {
     expect(source).toMatch(/router\.get\('\/userPhone', \.\.\.wxAuthenticated/)
     expect(source).toMatch(/router\.post\('\/setPassword', \.\.\.wxAuthenticated/)
   })
+
+  it('wxAuthenticated rejects non-wx principals', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'utils/wxRouteAuth.js'), 'utf8')
+    expect(source).toMatch(/requireWxUser/)
+    expect(source).toMatch(/is_wx_user/)
+    expect(source).toMatch(/仅小程序用户可访问/)
+  })
 })
 
 describe('digital-artworks wespace proxy auth', () => {
-  it('requires login on wespace proxy routes', () => {
+  it('requires wx login on wespace proxy routes', () => {
     const source = fs.readFileSync(path.join(process.cwd(), 'routes/digital-artworks.js'), 'utf8')
-    expect(source).toMatch(/router\.get\('\/order\/product-list', authenticateToken/)
-    expect(source).toMatch(/router\.post\('\/order\/purchase', authenticateToken/)
-    expect(source).toMatch(/router\.post\('\/goods\/ver\/list\/v3', authenticateToken/)
-    expect(source).toMatch(/router\.post\('\/goods\/ver\/details', authenticateToken/)
+    expect(source).toMatch(/router\.get\('\/order\/product-list', \.\.\.wxAuthenticated/)
+    expect(source).toMatch(/router\.post\('\/order\/purchase', \.\.\.wxAuthenticated/)
+    expect(source).toMatch(/router\.post\('\/goods\/ver\/list\/v3', \.\.\.wxAuthenticated/)
+    expect(source).toMatch(/router\.post\('\/goods\/ver\/details', \.\.\.wxAuthenticated/)
   })
 })
 

@@ -241,11 +241,11 @@ async function markSubscribeSentOnce(redisKey) {
     await redisClient.assertRedisOperational()
     return await redisClient.setNxEx(redisKey, SUBSCRIBE_SENT_TTL_SEC, '1')
   } catch (err) {
-    logger.warn('订阅消息去重 Redis 不可用，跳过去重', {
+    logger.warn('订阅消息去重 Redis 不可用，拒绝发送以防重复推送', {
       redisKey,
       err: err?.message || err,
     })
-    return true
+    return false
   }
 }
 
@@ -256,8 +256,18 @@ function buildPaymentSuccessNotifySentKey(outTradeNo) {
 async function hasPaymentSuccessNotifySent(outTradeNo) {
   const clean = String(outTradeNo || '').trim()
   if (!clean) return false
-  const state = await redisClient.safeGet(buildPaymentSuccessNotifySentKey(clean))
-  return Boolean(state)
+  try {
+    await redisClient.assertRedisOperational()
+    const state = await redisClient.get(buildPaymentSuccessNotifySentKey(clean))
+    return Boolean(state)
+  } catch (err) {
+    // Redis 不可用时视为已发送，阻断补发刷屏；恢复后由人工/延迟重试再补
+    logger.warn('查询支付成功通知去重键失败，按已发送处理', {
+      outTradeNo: clean,
+      err: err?.message || err,
+    })
+    return true
+  }
 }
 
 async function loadOrderNotifyContext({ orderId, outTradeNo }) {

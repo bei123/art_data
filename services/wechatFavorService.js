@@ -120,12 +120,16 @@ function clampMaxCouponsPerUser(value, maxCoupons) {
   return n
 }
 
-function buildOutRequestNo({ prefix = 'F', userId = 0, stockId = '' } = {}) {
+function buildOutRequestNo({ prefix = 'F', userId = 0, stockId = '', deterministic = false } = {}) {
   const mch = getStockCreatorMchid() || '0'
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const nonce = crypto.randomBytes(4).toString('hex')
   const uid = userId ? String(userId) : '0'
   const sid = stockId ? String(stockId).slice(-8) : '0'
+  // 欢迎券等需幂等：固定 out_request_no，依赖微信侧同号重试
+  if (deterministic) {
+    return `${mch}${prefix}${uid}${sid}`.slice(0, 128)
+  }
+  const nonce = crypto.randomBytes(4).toString('hex')
   return `${mch}${day}${prefix}${uid}${sid}${nonce}`.slice(0, 128)
 }
 

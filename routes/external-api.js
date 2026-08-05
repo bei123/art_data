@@ -200,7 +200,7 @@ router.get('/user/get-mobile-verification-code', async (req, res) => {
       });
     }
 
-    const authorization = resolveWespaceBasicAuthorization(req);
+    const authorization = resolveWespaceBasicAuthorization(req, { allowEnvFallback: true });
     if (!authorization) {
       return res.status(503).json(externalAuthNotConfiguredBody());
     }
@@ -303,7 +303,7 @@ router.post('/user/login', async (req, res) => {
       });
     }
 
-    const authorization = resolveWespaceBasicAuthorization(req);
+    const authorization = resolveWespaceBasicAuthorization(req, { allowEnvFallback: true });
     if (!authorization) {
       return res.status(503).json(externalAuthNotConfiguredBody());
     }
@@ -739,7 +739,7 @@ router.post('/user/register', async (req, res) => {
       });
     }
 
-    const authorization = resolveWespaceBasicAuthorization(req);
+    const authorization = resolveWespaceBasicAuthorization(req, { allowEnvFallback: true });
     if (!authorization) {
       return res.status(503).json(externalAuthNotConfiguredBody());
     }

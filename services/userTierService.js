@@ -60,9 +60,19 @@ async function getUserTierProfile(userId, connection = db) {
 }
 
 async function setUserTier(userId, nextTier, connection = db) {
+  if (nextTier === USER_TIERS.ART_ADVISOR) {
+    await connection.query(
+      'UPDATE wx_users SET user_tier = ?, tier_upgraded_at = NOW(), updated_at = NOW() WHERE id = ?',
+      [nextTier, userId]
+    )
+    return
+  }
+  // 艺术顾问不可被普通升级路径降级覆盖
   await connection.query(
-    'UPDATE wx_users SET user_tier = ?, tier_upgraded_at = NOW(), updated_at = NOW() WHERE id = ?',
-    [nextTier, userId]
+    `UPDATE wx_users
+     SET user_tier = ?, tier_upgraded_at = NOW(), updated_at = NOW()
+     WHERE id = ? AND (user_tier IS NULL OR user_tier <> ?)`,
+    [nextTier, userId, USER_TIERS.ART_ADVISOR]
   )
 }
 
@@ -130,6 +140,43 @@ async function onPaymentSuccess(userId, amountYuan, connection = db) {
   }
 }
 
+/**
+ * 退款成功：扣减累计消费；VIP 若低于门槛则降回推荐官（艺术顾问不降级；推荐官身份不因退款撤销）
+ */
+async function onRefundSuccess(userId, amountYuan, connection = db) {
+  const refundAmount = parseMoney(amountYuan)
+  if (!userId || refundAmount <= 0) return { ok: false, reason: 'invalid_input' }
+
+  await connection.query(
+    `UPDATE wx_users
+     SET total_spent = GREATEST(COALESCE(total_spent, 0) - ?, 0), updated_at = NOW()
+     WHERE id = ?`,
+    [refundAmount, userId]
+  )
+
+  const row = await fetchWxUserTierRow(userId, connection)
+  if (!row) return { ok: true, demoted: false, reason: 'user_not_found' }
+
+  const currentTier = row.user_tier || USER_TIERS.NORMAL
+  if (currentTier === USER_TIERS.ART_ADVISOR) {
+    return { ok: true, demoted: false, reason: 'art_advisor_locked', tier: currentTier }
+  }
+
+  const totalSpent = parseMoney(row.total_spent)
+  if (currentTier === USER_TIERS.VIP_COLLECTOR && totalSpent < VIP_SPEND_THRESHOLD_YUAN) {
+    await connection.query(
+      `UPDATE wx_users
+       SET user_tier = ?, updated_at = NOW()
+       WHERE id = ? AND user_tier = ?`,
+      [USER_TIERS.RECOMMENDER, userId, USER_TIERS.VIP_COLLECTOR]
+    )
+    logger.info('user demoted from vip_collector after refund', { userId, totalSpent })
+    return { ok: true, demoted: true, tier: USER_TIERS.RECOMMENDER }
+  }
+
+  return { ok: true, demoted: false, tier: currentTier }
+}
+
 module.exports = {
   USER_TIERS,
   VIP_SPEND_THRESHOLD_YUAN,
@@ -139,5 +186,6 @@ module.exports = {
   tryUpgradeToRecommender,
   recalculateVipTier,
   onPaymentSuccess,
+  onRefundSuccess,
   isRecommenderOrAbove,
 }

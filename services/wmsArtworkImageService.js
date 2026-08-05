@@ -384,7 +384,7 @@ async function httpGetImageBufferOnce(url, headers) {
     headers,
     responseType: 'arraybuffer',
     timeout: 90000,
-    maxRedirects: 10,
+    maxRedirects: 0,
     maxContentLength: OUTBOUND_IMAGE_MAX_BYTES,
     maxBodyLength: OUTBOUND_IMAGE_MAX_BYTES,
     decompress: true,
@@ -519,6 +519,14 @@ async function fetchWmsImageBufferOnce(cookie, imageRef, variant) {
     }
     if (!isSignedQiniuUrl(ref)) {
       try {
+        const { hostname } = new URL(ref)
+        const { assertResolvedHostIsPublic } = require('../utils/proxyUrlPolicy')
+        const dnsCheck = await assertResolvedHostIsPublic(hostname)
+        if (!dnsCheck.ok) {
+          const err = new Error(dnsCheck.message || 'WMS 图片目标不可访问')
+          err.code = 'WMS_IMAGE_HOST_BLOCKED'
+          throw err
+        }
         return await httpGetImageBuffer(ref, cdnImageGetHeaders())
       } catch (e) {
         if (!relFromAbs) throw e

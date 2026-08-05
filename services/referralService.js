@@ -229,6 +229,16 @@ async function attributeReferral({ refereeId, code, referrerId, source = 'link',
     return { ok: true, status: 200, skipped: true, reason: 'self_referral' }
   }
 
+  const cycleCheck = await wouldCreateReferralCycle(refereeId, resolvedReferrerId, connection)
+  if (cycleCheck.cycle) {
+    return {
+      ok: false,
+      status: 400,
+      error: '不能互相归因推荐关系',
+      reason: 'circular_referral',
+    }
+  }
+
   const [refereeRows] = await connection.query('SELECT id FROM wx_users WHERE id = ? LIMIT 1', [refereeId])
   if (!refereeRows.length) {
     return { ok: false, status: 404, error: '用户不存在' }
@@ -301,93 +311,117 @@ async function bindReferral({ refereeId, code, referrerId, source = 'link', conn
     return { ok: true, status: 200, skipped: true, reason: 'self_referral' }
   }
 
-  const cycleCheck = await wouldCreateReferralCycle(refereeId, resolvedReferrerId, connection)
-  if (cycleCheck.cycle) {
-    const isMutual =
-      Array.isArray(cycleCheck.path) &&
-      cycleCheck.path.length >= 1 &&
-      Number(cycleCheck.path[0]) === Number(resolvedReferrerId) &&
-      cycleCheck.path.includes(Number(refereeId))
-    logger.info('referral binding rejected circular referral', {
-      refereeId,
-      referrerId: resolvedReferrerId,
-      chain: cycleCheck.path || [],
-      mutual: isMutual,
-    })
-    return {
-      ok: false,
-      status: 400,
-      error: isMutual
-        ? '对方已是您的下级（或在您的推荐链上），不能互相绑定为推荐人'
-        : '不能互相绑定为推荐人',
-      reason: 'circular_referral',
-      chain: cycleCheck.path || undefined,
-    }
-  }
-
-  const [refereeRows] = await connection.query('SELECT id FROM wx_users WHERE id = ? LIMIT 1', [refereeId])
-  if (!refereeRows.length) {
-    return { ok: false, status: 404, error: '用户不存在' }
-  }
-
-  const existingBinding = await getBindingByRefereeId(refereeId, connection)
-  if (existingBinding) {
-    return {
-      ok: false,
-      status: 409,
-      error: '已绑定推荐关系，不可修改',
-      binding: formatBinding(existingBinding),
-    }
-  }
-
-  const expiresAt = computeBindingExpiresAt()
+  const ownsConnection = !connection || connection === db
+  const runner = ownsConnection ? await db.getConnection() : connection
 
   try {
-    await connection.query(
-      `INSERT INTO referral_bindings (referrer_id, referee_id, source, expires_at)
-       VALUES (?, ?, ?, ?)`,
-      [resolvedReferrerId, refereeId, normalizedSource, expiresAt]
+    if (ownsConnection) await runner.beginTransaction()
+
+    const lockIds = [Number(refereeId), Number(resolvedReferrerId)].sort((a, b) => a - b)
+    await runner.query(
+      'SELECT id FROM wx_users WHERE id IN (?, ?) FOR UPDATE',
+      lockIds,
     )
-  } catch (err) {
-    if (!isDuplicateKeyError(err)) throw err
 
-    const racedBinding = await getBindingByRefereeId(refereeId, connection)
-    if (!racedBinding) throw err
-
-    if (Number(racedBinding.referrer_id) === Number(resolvedReferrerId)) {
-      logger.info('referral binding already exists (idempotent)', {
+    const cycleCheck = await wouldCreateReferralCycle(refereeId, resolvedReferrerId, runner)
+    if (cycleCheck.cycle) {
+      if (ownsConnection) await runner.rollback()
+      const isMutual =
+        Array.isArray(cycleCheck.path) &&
+        cycleCheck.path.length >= 1 &&
+        Number(cycleCheck.path[0]) === Number(resolvedReferrerId) &&
+        cycleCheck.path.includes(Number(refereeId))
+      logger.info('referral binding rejected circular referral', {
         refereeId,
         referrerId: resolvedReferrerId,
-        source: normalizedSource,
+        chain: cycleCheck.path || [],
+        mutual: isMutual,
       })
       return {
-        ok: true,
-        status: 200,
-        binding: formatBinding(racedBinding),
-        alreadyBound: true,
+        ok: false,
+        status: 400,
+        error: isMutual
+          ? '对方已是您的下级（或在您的推荐链上），不能互相绑定为推荐人'
+          : '不能互相绑定为推荐人',
+        reason: 'circular_referral',
+        chain: cycleCheck.path || undefined,
       }
     }
 
-    return {
-      ok: false,
-      status: 409,
-      error: '已绑定推荐关系，不可修改',
-      binding: formatBinding(racedBinding),
+    const [refereeRows] = await runner.query('SELECT id FROM wx_users WHERE id = ? LIMIT 1', [refereeId])
+    if (!refereeRows.length) {
+      if (ownsConnection) await runner.rollback()
+      return { ok: false, status: 404, error: '用户不存在' }
     }
-  }
 
-  const binding = await getBindingByRefereeId(refereeId, connection)
+    const existingBinding = await getBindingByRefereeId(refereeId, runner)
+    if (existingBinding) {
+      if (ownsConnection) await runner.rollback()
+      return {
+        ok: false,
+        status: 409,
+        error: '已绑定推荐关系，不可修改',
+        binding: formatBinding(existingBinding),
+      }
+    }
 
-  logger.info('referral binding created', {
-    refereeId,
-    referrerId: resolvedReferrerId,
-    source: normalizedSource,
-  })
+    const expiresAt = computeBindingExpiresAt()
 
-  return {
-    ok: true,
-    status: 200,
-    binding: formatBinding(binding),
+    try {
+      await runner.query(
+        `INSERT INTO referral_bindings (referrer_id, referee_id, source, expires_at)
+         VALUES (?, ?, ?, ?)`,
+        [resolvedReferrerId, refereeId, normalizedSource, expiresAt]
+      )
+    } catch (err) {
+      if (!isDuplicateKeyError(err)) throw err
+
+      const racedBinding = await getBindingByRefereeId(refereeId, runner)
+      if (!racedBinding) throw err
+
+      if (ownsConnection) await runner.rollback()
+
+      if (Number(racedBinding.referrer_id) === Number(resolvedReferrerId)) {
+        logger.info('referral binding already exists (idempotent)', {
+          refereeId,
+          referrerId: resolvedReferrerId,
+          source: normalizedSource,
+        })
+        return {
+          ok: true,
+          status: 200,
+          binding: formatBinding(racedBinding),
+          alreadyBound: true,
+        }
+      }
+
+      return {
+        ok: false,
+        status: 409,
+        error: '已绑定推荐关系，不可修改',
+        binding: formatBinding(racedBinding),
+      }
+    }
+
+    const binding = await getBindingByRefereeId(refereeId, runner)
+    if (ownsConnection) await runner.commit()
+
+    logger.info('referral binding created', {
+      refereeId,
+      referrerId: resolvedReferrerId,
+      source: normalizedSource,
+    })
+
+    return {
+      ok: true,
+      status: 200,
+      binding: formatBinding(binding),
+    }
+  } catch (err) {
+    if (ownsConnection) await runner.rollback()
+    throw err
+  } finally {
+    if (ownsConnection) runner.release()
   }
 }
 

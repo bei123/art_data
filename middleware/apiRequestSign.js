@@ -132,7 +132,8 @@ function createApiRequestSignMiddleware(deps = {}) {
         err: nonceResult.error?.message || String(nonceResult.error),
       })
 
-      if (strictRedis && requestEnforced) {
+      // 强制验签或 STRICT_REDIS 时拒绝，避免 nonce 窗口 fail-open
+      if (strictRedis || requestEnforced) {
         return respondSignError(req, res, 503, {
           error: '签名服务暂时不可用',
           code: 'SIGN_SERVICE_UNAVAILABLE',

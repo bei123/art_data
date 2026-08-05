@@ -180,6 +180,10 @@ function mapOriginalArtworkSearchRows(rows, includeHidden) {
         : '',
     };
     if (includeHidden) item = attachAdminWmsImageFields(item);
+    else {
+      const { stripWmsFieldsForPublic } = require('./wmsArtworkImageService');
+      item = stripWmsFieldsForPublic(item);
+    }
     return item;
   });
 }

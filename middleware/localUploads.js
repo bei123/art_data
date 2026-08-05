@@ -37,7 +37,8 @@ async function isAuthorizedLocalUpload(req, relativePath) {
       purpose: 'local_upload',
       claims: { filePath: relativePath },
     })
-    if (verified.ok) return true
+    // 仅后台 admin principal 可凭 URL access 读本地上传
+    if (verified.ok && verified.principal === 'admin') return true
   }
 
   const bearer = extractBearerToken(req.headers.authorization)
@@ -45,6 +46,8 @@ async function isAuthorizedLocalUpload(req, relativePath) {
 
   const verified = await verifyActiveSessionToken(bearer)
   if (!verified.ok) return false
+  // 微信用户会话不得按 users.id 查后台角色（ID 空间冲突可提权）
+  if (verified.principal === 'wx' || verified.openid) return false
 
   const { query } = require('../db')
   const [users] = await query(

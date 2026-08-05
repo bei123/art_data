@@ -122,7 +122,14 @@ async function refreshWxAccessToken(refreshToken) {
     return { ok: false, status: 401, error: '用户不存在' }
   }
 
-  await query('UPDATE wx_refresh_tokens SET revoked_at = NOW() WHERE id = ?', [record.id])
+  const [revokeResult] = await query(
+    `UPDATE wx_refresh_tokens SET revoked_at = NOW()
+     WHERE id = ? AND revoked_at IS NULL`,
+    [record.id]
+  )
+  if (!revokeResult?.affectedRows) {
+    return { ok: false, status: 401, error: 'refreshToken 已失效，请重新登录' }
+  }
 
   const pair = await issueWxTokenPair({
     userId: users[0].id,

@@ -150,16 +150,36 @@ async function adjustWalletBalances(
   connection = db,
 ) {
   await ensureWallet(userId, connection)
-  await connection.query(
+  // 禁止 GREATEST 静默钳制：余额不足时失败，避免账本与钱包漂移被掩盖
+  const [result] = await connection.query(
     `UPDATE user_wallets
-     SET pending_balance = GREATEST(pending_balance + ?, 0),
-         available_balance = GREATEST(available_balance + ?, 0),
-         debt_balance = GREATEST(COALESCE(debt_balance, 0) + ?, 0),
-         total_earned = GREATEST(total_earned + ?, 0),
+     SET pending_balance = pending_balance + ?,
+         available_balance = available_balance + ?,
+         debt_balance = COALESCE(debt_balance, 0) + ?,
+         total_earned = total_earned + ?,
          updated_at = NOW()
-     WHERE user_id = ?`,
-    [pendingDelta, availableDelta, debtDelta, earnedDelta, userId]
+     WHERE user_id = ?
+       AND pending_balance + ? >= 0
+       AND available_balance + ? >= 0
+       AND COALESCE(debt_balance, 0) + ? >= 0
+       AND total_earned + ? >= 0`,
+    [
+      pendingDelta,
+      availableDelta,
+      debtDelta,
+      earnedDelta,
+      userId,
+      pendingDelta,
+      availableDelta,
+      debtDelta,
+      earnedDelta,
+    ]
   )
+  if (!result || result.affectedRows !== 1) {
+    const err = new Error('钱包余额不足或状态不一致，无法调整')
+    err.code = 'WALLET_BALANCE_INSUFFICIENT'
+    throw err
+  }
 }
 
 /**
@@ -210,18 +230,21 @@ async function clawbackWithdrawnAmount(
   await ensureWallet(userId, connection)
 
   const [rows] = await connection.query(
-    `SELECT available_balance, COALESCE(debt_balance, 0) AS debt_balance
+    `SELECT available_balance, COALESCE(debt_balance, 0) AS debt_balance,
+            total_earned
      FROM user_wallets WHERE user_id = ? FOR UPDATE`,
     [userId]
   )
   const available = parseMoney(rows[0]?.available_balance)
+  const earned = parseMoney(rows[0]?.total_earned)
   const offset = roundMoney(Math.min(available, amount))
   const debtAdd = roundMoney(amount - offset)
+  const earnedDelta = -Math.min(earned, amount)
 
   await adjustWalletBalances(userId, {
     availableDelta: -offset,
     debtDelta: debtAdd,
-    earnedDelta: -amount,
+    earnedDelta,
   }, connection)
 
   await connection.query(
@@ -238,6 +261,68 @@ async function clawbackWithdrawnAmount(
       String(reason || 'order_refund').slice(0, 64),
     ]
   )
+
+  return { offset, debtAdd }
+}
+
+/**
+ * 取消 pending/settlable 佣金：优先扣对应余额，不足记欠款（不阻断退款主路径）
+ */
+async function clawbackLedgerAmount(
+  userId,
+  amountYuan,
+  {
+    fromPending = false,
+    orderId = null,
+    sourceType = 'commission',
+    sourceId = null,
+    reason = 'order_refund',
+    connection = db,
+  } = {},
+) {
+  const amount = parseMoney(amountYuan)
+  if (amount <= 0) return { offset: 0, debtAdd: 0 }
+
+  await ensureCommissionSchema()
+  await ensureWallet(userId, connection)
+
+  const [rows] = await connection.query(
+    `SELECT pending_balance, available_balance, COALESCE(debt_balance, 0) AS debt_balance,
+            total_earned
+     FROM user_wallets WHERE user_id = ? FOR UPDATE`,
+    [userId]
+  )
+  const pending = parseMoney(rows[0]?.pending_balance)
+  const available = parseMoney(rows[0]?.available_balance)
+  const earned = parseMoney(rows[0]?.total_earned)
+  const pool = fromPending ? pending : available
+  const offset = roundMoney(Math.min(pool, amount))
+  const debtAdd = roundMoney(amount - offset)
+  const earnedDelta = -Math.min(earned, amount)
+
+  await adjustWalletBalances(userId, {
+    pendingDelta: fromPending ? -offset : 0,
+    availableDelta: fromPending ? 0 : -offset,
+    debtDelta: debtAdd,
+    earnedDelta,
+  }, connection)
+
+  if (debtAdd > 0) {
+    await connection.query(
+      `INSERT INTO wallet_debt_events
+       (user_id, order_id, source_type, source_id, amount, offset_from_available, reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        orderId || null,
+        sourceType,
+        sourceId || null,
+        debtAdd,
+        offset,
+        String(reason || 'order_refund').slice(0, 64),
+      ]
+    )
+  }
 
   return { offset, debtAdd }
 }
@@ -503,7 +588,8 @@ async function cancelCommissionsByOrderId(orderId, connection = db) {
   const [rows] = await connection.query(
     `SELECT id, user_id, commission_amount, status
      FROM commission_ledger
-     WHERE order_id = ? AND status IN ('pending', 'settlable', 'withdrawn')`,
+     WHERE order_id = ? AND status IN ('pending', 'settlable', 'withdrawn')
+     FOR UPDATE`,
     [orderId]
   )
 
@@ -513,10 +599,17 @@ async function cancelCommissionsByOrderId(orderId, connection = db) {
   let debtAdded = 0
   for (const row of rows) {
     const amount = parseMoney(row.commission_amount)
-    if (row.status === 'pending') {
-      await adjustWalletBalances(row.user_id, { pendingDelta: -amount, earnedDelta: -amount }, connection)
-    } else if (row.status === 'settlable') {
-      await adjustWalletBalances(row.user_id, { availableDelta: -amount, earnedDelta: -amount }, connection)
+    if (row.status === 'pending' || row.status === 'settlable') {
+      // 退款完成不可因钱包漂移整体失败：不足部分记欠款
+      const claw = await clawbackLedgerAmount(row.user_id, amount, {
+        fromPending: row.status === 'pending',
+        orderId,
+        sourceType: 'commission',
+        sourceId: row.id,
+        reason: 'order_refund',
+        connection,
+      })
+      debtAdded = roundMoney(debtAdded + claw.debtAdd)
     } else if (row.status === 'withdrawn') {
       const claw = await clawbackWithdrawnAmount(row.user_id, amount, {
         orderId,
@@ -575,6 +668,16 @@ async function settlePendingCommissions({ limit = 50 } = {}) {
         [row.id]
       )
       if (!locked.length || locked[0].status !== 'pending') {
+        await connection.rollback()
+        continue
+      }
+
+      const stillEligible = await isCommissionSettleEligible(
+        { ...row, status: locked[0].status },
+        connection,
+        contextByOrderId,
+      )
+      if (!stillEligible) {
         await connection.rollback()
         continue
       }

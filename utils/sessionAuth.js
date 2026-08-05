@@ -54,7 +54,8 @@ async function verifyActiveSessionToken(token) {
     return {
       ok: true,
       userId: Number(decoded.userId),
-      openid: decoded.openid,
+      openid: decoded.openid || null,
+      principal: decoded.openid ? 'wx' : 'admin',
       token,
     }
   } catch (error) {

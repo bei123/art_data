@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
-const { authenticateToken } = require('../auth');
+const { wxAuthenticated } = require('../utils/wxRouteAuth');
 const svc = require('../services/cartService');
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', ...wxAuthenticated, async (req, res) => {
   try {
     const userId = req.user.id;
     const r = await svc.getCartList(userId);
@@ -15,7 +15,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', ...wxAuthenticated, async (req, res) => {
   try {
     const userId = req.user.id;
     const r = await svc.addCartItem(userId, req.body);
@@ -26,7 +26,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ...wxAuthenticated, async (req, res) => {
   try {
     const userId = req.user.id;
     const r = await svc.updateCartItemQuantity(userId, req.params.id, req.body);
@@ -37,7 +37,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ...wxAuthenticated, async (req, res) => {
   try {
     const userId = req.user.id;
     const r = await svc.deleteCartItem(userId, req.params.id);
@@ -48,7 +48,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/', authenticateToken, async (req, res) => {
+router.delete('/', ...wxAuthenticated, async (req, res) => {
   try {
     const userId = req.user.id;
     const r = await svc.clearCart(userId);

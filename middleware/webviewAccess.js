@@ -4,8 +4,30 @@ const { validateProxyTargetUrl } = require('../utils/proxyUrlPolicy')
 const db = require('../db')
 const logger = require('../utils/logger')
 
-async function attachUserFromUserId(req, userId) {
-  const [users] = await db.query('SELECT * FROM users WHERE id = ?', [userId])
+async function attachUserFromUserId(req, userId, principal = null) {
+  const id = Number(userId)
+  if (!id || Number.isNaN(id)) return false
+
+  // 按 principal 只查对应表，避免 users.id / wx_users.id 撞号挂错身份
+  if (principal === 'wx') {
+    const [wxUsers] = await db.query(
+      'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
+      [id]
+    )
+    if (!wxUsers.length) return false
+    req.user = { ...wxUsers[0], is_wx_user: true }
+    return true
+  }
+
+  if (principal === 'admin') {
+    const [users] = await db.query('SELECT * FROM users WHERE id = ?', [id])
+    if (!users.length) return false
+    req.user = users[0]
+    return true
+  }
+
+  // 旧 access 无 principal：优先 admin users，再 wx（与历史行为一致，但新签发已带 principal）
+  const [users] = await db.query('SELECT * FROM users WHERE id = ?', [id])
   if (users.length > 0) {
     req.user = users[0]
     return true
@@ -13,7 +35,7 @@ async function attachUserFromUserId(req, userId) {
 
   const [wxUsers] = await db.query(
     'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
-    [userId]
+    [id]
   )
   if (wxUsers.length > 0) {
     req.user = { ...wxUsers[0], is_wx_user: true }
@@ -91,7 +113,7 @@ async function authenticateWebviewAccess(req, res, next) {
       })
     }
 
-    const loaded = await attachUserFromUserId(req, verified.userId)
+    const loaded = await attachUserFromUserId(req, verified.userId, verified.principal)
     if (!loaded) {
       return res.status(401).json({
         code: 401,
@@ -113,4 +135,5 @@ async function authenticateWebviewAccess(req, res, next) {
 
 module.exports = {
   authenticateWebviewAccess,
+  attachUserFromUserId,
 }

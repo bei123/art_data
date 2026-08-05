@@ -93,6 +93,7 @@ function isDigitalItemFullyDelivered(item) {
 function mapPathActionToStatus(actionType) {
   const t = Number(actionType)
   if (!t) return null
+  if (t === 400001) return FULFILLMENT_STATUS.CANCELLED
   if (t === 300003) return FULFILLMENT_STATUS.RECEIVED
   if (t === 200001 || t === 300002 || t === 300004) return FULFILLMENT_STATUS.IN_TRANSIT
   if (t === 100001 || t === 100002 || t === 100003) return FULFILLMENT_STATUS.SHIPPED

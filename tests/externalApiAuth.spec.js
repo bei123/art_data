@@ -26,14 +26,16 @@ describe('externalApiAuth', () => {
     expect(resolveWespaceBasicAuthorization(req)).toBe('Basic from-header');
   });
 
-  it('resolveWespaceBasicAuthorization falls back to env', () => {
+  it('resolveWespaceBasicAuthorization falls back to env only without req', () => {
     process.env.VERIFICATION_CODE_AUTHORIZATION = 'Basic from-env';
-    expect(resolveWespaceBasicAuthorization({ headers: {} })).toBe('Basic from-env');
+    expect(resolveWespaceBasicAuthorization({ headers: {} })).toBe(null);
     expect(resolveWespaceBasicAuthorization()).toBe('Basic from-env');
+    expect(resolveWespaceBasicAuthorization({ headers: {} }, { allowEnvFallback: true })).toBe('Basic from-env');
   });
 
   it('resolveWespaceBasicAuthorization returns null when unset', () => {
     expect(resolveWespaceBasicAuthorization({ headers: {} })).toBe(null);
+    expect(resolveWespaceBasicAuthorization()).toBe(null);
   });
 
   it('resolveExternalBearerAuthorization normalizes token', () => {

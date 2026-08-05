@@ -243,6 +243,20 @@ async function ensureWithdrawalUserConfirmColumns() {
       )
       logger.info('withdrawal_requests.wx_package_info column added')
     }
+
+    const [allocRows] = await db.query(
+      `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'withdrawal_requests'
+         AND COLUMN_NAME = 'allocation_json'
+       LIMIT 1`
+    )
+    if (!allocRows.length) {
+      await db.query(
+        'ALTER TABLE withdrawal_requests ADD COLUMN allocation_json JSON NULL AFTER amount'
+      )
+      logger.info('withdrawal_requests.allocation_json column added')
+    }
   } catch (err) {
     logger.warn('ensureWithdrawalUserConfirmColumns failed', { err: err.message })
   }

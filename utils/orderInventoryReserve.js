@@ -115,6 +115,17 @@ async function releaseOverlappingUserPendingInventory({
     const released = await releaseOrderInventoryIfReserved(order.id, connection)
     if (!released.released) continue
 
+    // 重叠预扣释放后必须关掉旧未支付单，否则可再支付导致二次扣库存
+    await queryWithConnection(
+      connection,
+      `UPDATE orders
+       SET trade_state = 'CLOSED',
+           trade_state_desc = '因重复下单释放库存预扣而关闭',
+           updated_at = NOW()
+       WHERE id = ? AND trade_state IN ('NOTPAY', 'PAYERROR')`,
+      [order.id]
+    )
+
     affected.rightIds.push(...(released.affected.rightIds || []))
     affected.artworkIds.push(...(released.affected.artworkIds || []))
     affected.digitalIds.push(...(released.affected.digitalIds || []))
@@ -267,25 +278,53 @@ async function reserveOrderItemsInventory({ orderItems, connection = null }) {
 async function releaseOrderInventoryIfReserved(orderId, connection = null) {
   await ensureOrderInventoryReservedColumn()
 
-  const [[order]] = await queryWithConnection(
-    connection,
-    'SELECT id, inventory_reserved FROM orders WHERE id = ? LIMIT 1',
-    [orderId]
-  )
-  if (Number(order?.inventory_reserved) !== 1) {
-    return { released: false, affected: { rightIds: [], artworkIds: [], digitalIds: [] } }
+  const ownsConnection = !connection
+  const runner = connection || (await db.getConnection())
+
+  try {
+    if (ownsConnection) await runner.beginTransaction()
+
+    const [rows] = await queryWithConnection(
+      runner,
+      `SELECT id, inventory_reserved, inventory_state
+       FROM orders WHERE id = ? LIMIT 1 FOR UPDATE`,
+      [orderId]
+    )
+    const order = rows?.[0]
+    const isReserved = Number(order?.inventory_reserved) === 1
+      || String(order?.inventory_state || '') === 'reserved'
+    if (!order || !isReserved) {
+      if (ownsConnection) await runner.rollback()
+      return { released: false, affected: { rightIds: [], artworkIds: [], digitalIds: [] } }
+    }
+
+    // 先回补库存，再清标记，避免中途崩溃导致「标记已清、库存未回」
+    const items = await loadOrderItemsByOrderId(orderId, runner)
+    const affected = await releaseOrderItemsInventory({ orderItems: items, connection: runner })
+
+    const [claimResult] = await queryWithConnection(
+      runner,
+      `UPDATE orders
+       SET inventory_reserved = 0,
+           inventory_state = 'none'
+       WHERE id = ?
+         AND (inventory_reserved = 1 OR inventory_state = 'reserved')`,
+      [orderId]
+    )
+    if (!claimResult?.affectedRows) {
+      if (ownsConnection) await runner.rollback()
+      return { released: false, affected: { rightIds: [], artworkIds: [], digitalIds: [] } }
+    }
+
+    if (ownsConnection) await runner.commit()
+    logger.info('order inventory reservation released', { orderId })
+    return { released: true, affected }
+  } catch (err) {
+    if (ownsConnection) await runner.rollback()
+    throw err
+  } finally {
+    if (ownsConnection) runner.release()
   }
-
-  const items = await loadOrderItemsByOrderId(orderId, connection)
-  const affected = await releaseOrderItemsInventory({ orderItems: items, connection })
-  await queryWithConnection(
-    connection,
-    'UPDATE orders SET inventory_reserved = 0 WHERE id = ?',
-    [orderId]
-  )
-
-  logger.info('order inventory reservation released', { orderId })
-  return { released: true, affected }
 }
 
 function mapPricedItemsToReserveRows(orderId, pricedCartItems) {
@@ -306,7 +345,10 @@ async function reserveInventoryForPendingOrder({ orderId, pricedCartItems, conne
   const affected = await reserveOrderItemsInventory({ orderItems, connection })
   await queryWithConnection(
     connection,
-    'UPDATE orders SET inventory_reserved = 1 WHERE id = ?',
+    `UPDATE orders
+     SET inventory_reserved = 1,
+         inventory_state = 'reserved'
+     WHERE id = ?`,
     [orderId]
   )
 

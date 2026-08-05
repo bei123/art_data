@@ -55,6 +55,12 @@ async function resolveWxSession(req, { extendedError = false } = {}) {
       : { error: auth.error }
     return { ok: false, result: adminResult(auth.status, body) }
   }
+  if (auth.principal !== 'wx' || !auth.openid) {
+    const body = extendedError
+      ? { code: 403, status: false, message: '仅小程序用户可访问' }
+      : { error: '仅小程序用户可访问' }
+    return { ok: false, result: adminResult(403, body) }
+  }
   return {
     ok: true,
     token: auth.token,
@@ -163,12 +169,10 @@ const { code } = req.body;
         // 2. 在你自己的数据库查找或注册用户（表名改为 wx_users）
         let [users] = await db.query('SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE openid = ?', [openid]);
         let user;
-        let isNewUser = false;
 
         if (users.length === 0) {
             // 没有则注册，只插入必要字段
             const [result] = await db.query('INSERT INTO wx_users (openid, session_key) VALUES (?, ?)', [openid, session_key]);
-            isNewUser = true;
             user = {
                 id: result.insertId,
                 openid,
@@ -191,11 +195,9 @@ const { code } = req.body;
         const referralAttribution = await tryAttributeReferralOnLogin(user.id, req.body);
         const tier = await getUserTierProfile(user.id);
 
-        let welcomeCoupon = null;
-        if (isNewUser) {
-            const { tryGrantNewUserWelcomeCoupon } = require('./referralRewardService');
-            welcomeCoupon = await tryGrantNewUserWelcomeCoupon(user.id);
-        }
+        // 新用户首次发券失败后，后续登录继续重试（内部已按 sent/used 幂等）
+        const { tryGrantNewUserWelcomeCoupon } = require('./referralRewardService');
+        const welcomeCoupon = await tryGrantNewUserWelcomeCoupon(user.id);
 
         // 4. 返回用户信息和 token, 过滤掉敏感字段
         return adminResult(200, {

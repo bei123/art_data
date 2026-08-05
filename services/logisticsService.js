@@ -156,11 +156,19 @@ async function loadShippableOrderContext(internalOrderId) {
 
   const [refundBlocking] = await db.query(
     `SELECT COUNT(*) AS c FROM refund_requests
-     WHERE out_trade_no = ? AND status IN ('APPROVED', 'PROCESSING')`,
+     WHERE out_trade_no = ? AND status IN ('PENDING', 'APPROVED', 'PROCESSING', 'SUCCESS')`,
     [orderRow.out_trade_no]
   )
   if (refundBlocking && refundBlocking[0] && Number(refundBlocking[0].c) > 0) {
-    return { error: adminResult(400, { error: '订单存在进行中或已同意的退款，暂不可发货' }) }
+    return { error: adminResult(400, { error: '订单存在退款申请或已退款，暂不可发货' }) }
+  }
+
+  const [activeShipments] = await db.query(
+    `SELECT id FROM order_shipments WHERE order_id = ? AND status = 'active' LIMIT 1`,
+    [internalOrderId]
+  )
+  if (activeShipments && activeShipments.length > 0) {
+    return { error: adminResult(400, { error: '订单已有有效运单，请先取消后再发货', shipment_id: activeShipments[0].id }) }
   }
 
   const [physicalItems] = await db.query(
@@ -427,12 +435,10 @@ async function addOrder(req) {
     const { orderRow, receiver, cargoDefault, shippingMetrics } = shipCtx
     const packageMetrics = applyShippingMetricsOverrides(shippingMetrics, b)
 
-    const sfOrderIdRaw = b.sf_order_id != null && String(b.sf_order_id).trim() !== ''
-      ? String(b.sf_order_id).trim()
-      : String(orderRow.out_trade_no || '').trim()
+    const sfOrderIdRaw = String(orderRow.out_trade_no || '').trim()
     const sfOrderId = clipUtf8(sfOrderIdRaw, 64)
     if (!sfOrderId) {
-      return adminResult(400, { error: '无法生成客户订单号 orderId，请传 sf_order_id' })
+      return adminResult(400, { error: '订单缺少商户订单号，无法向顺丰下单' })
     }
 
     const cargo = b.cargo && typeof b.cargo === 'object' ? b.cargo : cargoDefault
@@ -512,6 +518,18 @@ async function addOrder(req) {
 
     const filterAssessment = assessCreateOrderResponse(sfResult.msgData)
     if (!filterAssessment.ok) {
+      try {
+        await updateOrder(buildCancelOrderPayload({
+          orderId: sfOrderId,
+          remark: 'filter_not_deliverable',
+        }))
+      } catch (cancelErr) {
+        logger.warn('addOrder filter fail 后取消顺丰运单失败', {
+          err: cancelErr?.message || cancelErr,
+          orderId: sfOrderId,
+          waybill_id: waybillId,
+        })
+      }
       return adminResult(422, {
         error: filterAssessment.error,
         order_id: sfOrderId,
@@ -556,11 +574,34 @@ async function addOrder(req) {
         ]
       )
       shipmentId = insertResult?.insertId || null
+      if (!shipmentId) {
+        shipment_persisted = false
+      }
     } catch (dbErr) {
       shipment_persisted = false
       logger.error('addOrder 顺丰已成功但写入 order_shipments 失败', {
         err: dbErr,
         internalOrderId,
+        waybill_id: waybillId,
+      })
+    }
+
+    if (!shipment_persisted) {
+      try {
+        await updateOrder(buildCancelOrderPayload({
+          orderId: sfOrderId,
+          remark: 'shipment_persist_failed',
+        }))
+      } catch (cancelErr) {
+        logger.warn('addOrder 落库失败后取消顺丰运单失败', {
+          err: cancelErr?.message || cancelErr,
+          orderId: sfOrderId,
+          waybill_id: waybillId,
+        })
+      }
+      return adminResult(500, {
+        error: '顺丰下单成功但本地运单落库失败，已尝试取消顺丰运单',
+        order_id: sfOrderId,
         waybill_id: waybillId,
       })
     }

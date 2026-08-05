@@ -15,6 +15,12 @@ function verifyWechatpaySignature({ serial, signature, timestamp, nonce, body })
   // 签名探测流量：带此前缀的签名必然验签失败，应按失败应答（4xx/5xx）等待微信重试真实通知
   if (String(signature).startsWith('WECHATPAY/SIGNTEST/')) return false
 
+  const ts = Number(timestamp)
+  if (!Number.isFinite(ts)) return false
+  const skewSec = Math.abs(Math.floor(Date.now() / 1000) - ts)
+  const maxSkewSec = Math.max(60, parseInt(process.env.WX_PAY_NOTIFY_MAX_SKEW_SEC || '300', 10) || 300)
+  if (skewSec > maxSkewSec) return false
+
   const publicKey = getWechatpayPublicKey(serial)
   if (!publicKey) return false
 

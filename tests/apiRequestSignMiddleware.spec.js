@@ -284,7 +284,7 @@ describe('apiRequestSign middleware', () => {
     expect(res.body.code).toBe('REPLAY_DETECTED')
   })
 
-  it('degrades when redis is unavailable and strict mode is off', async () => {
+  it('returns 503 when redis is unavailable while enforce mode is on', async () => {
     const redis = {
       setNxEx: vi.fn().mockRejectedValue(new Error('redis down')),
     }
@@ -302,17 +302,18 @@ describe('apiRequestSign middleware', () => {
 
     await middleware(req, res, next)
 
-    expect(next).toHaveBeenCalledOnce()
-    expect(req.apiSign?.nonceSkipped).toBe(true)
+    expect(next).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(503)
+    expect(res.body.code).toBe('SIGN_SERVICE_UNAVAILABLE')
   })
 
-  it('returns 503 when redis is unavailable in strict mode', async () => {
+  it('returns 503 when redis is unavailable in strict mode even if enforce is soft', async () => {
     const redis = {
       setNxEx: vi.fn().mockRejectedValue(new Error('redis down')),
     }
     const middleware = createApiRequestSignMiddleware({
       enabled: true,
-      enforced: true,
+      enforced: false,
       strictRedis: true,
       clients: TEST_CLIENTS,
       redis,

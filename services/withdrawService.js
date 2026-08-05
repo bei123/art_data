@@ -119,15 +119,17 @@ async function hasActiveWithdrawal(userId, connection = db) {
 async function allocateSettlableForWithdraw(userId, amountYuan, connection) {
   let remaining = parseMoney(amountYuan)
   const allocated = { commissionIds: [], bonusIds: [] }
+  const target = remaining
 
   const [commissions] = await connection.query(
     `SELECT id, commission_amount FROM commission_ledger
      WHERE user_id = ? AND status = 'settlable'
-     ORDER BY id ASC
+     ORDER BY commission_amount ASC, id ASC
      FOR UPDATE`,
     [userId]
   )
 
+  // 先装能整行装下的小额，尽量凑满目标金额
   for (const row of commissions || []) {
     if (remaining <= 0) break
     const itemAmount = parseMoney(row.commission_amount)
@@ -145,7 +147,7 @@ async function allocateSettlableForWithdraw(userId, amountYuan, connection) {
   const [bonuses] = await connection.query(
     `SELECT id, amount FROM referral_bonus_grants
      WHERE user_id = ? AND status = 'settlable'
-     ORDER BY id ASC
+     ORDER BY amount ASC, id ASC
      FOR UPDATE`,
     [userId]
   )
@@ -164,14 +166,46 @@ async function allocateSettlableForWithdraw(userId, amountYuan, connection) {
     remaining = roundMoney(remaining - itemAmount)
   }
 
-  if (remaining > 0.01) {
+  const packedAmount = roundMoney(target - remaining)
+  if (packedAmount <= 0.01) {
     return { ok: false, error: '当前佣金明细暂不支持该金额提现，请尝试更低金额或联系客服' }
   }
 
-  return { ok: true, allocated }
+  // 无法精确凑满时，按可装明细金额提现（避免余额被卡死）
+  return {
+    ok: true,
+    allocated,
+    amount: packedAmount,
+    shortfall: remaining > 0.01 ? remaining : 0,
+  }
 }
 
-async function restoreWithdrawAllocation(userId, amountYuan, connection) {
+async function restoreWithdrawAllocation(userId, amountYuan, connection, allocation = null) {
+  const commissionIds = Array.isArray(allocation?.commissionIds) ? allocation.commissionIds : []
+  const bonusIds = Array.isArray(allocation?.bonusIds) ? allocation.bonusIds : []
+
+  // 优先按申请时锁定的明细回滚，避免误恢复历史成功提现的佣金行
+  if (commissionIds.length || bonusIds.length) {
+    if (commissionIds.length) {
+      await connection.query(
+        `UPDATE commission_ledger
+         SET status = 'settlable', updated_at = NOW()
+         WHERE user_id = ? AND status = 'withdrawn' AND id IN (?)`,
+        [userId, commissionIds]
+      )
+    }
+    if (bonusIds.length) {
+      await connection.query(
+        `UPDATE referral_bonus_grants
+         SET status = 'settlable', updated_at = NOW()
+         WHERE user_id = ? AND status = 'withdrawn' AND id IN (?)`,
+        [userId, bonusIds]
+      )
+    }
+    return
+  }
+
+  // 兼容旧单：无 allocation_json 时按金额从新到旧回滚，且单行金额不得超过剩余
   let remaining = parseMoney(amountYuan)
 
   const [commissions] = await connection.query(
@@ -185,6 +219,7 @@ async function restoreWithdrawAllocation(userId, amountYuan, connection) {
   for (const row of commissions || []) {
     if (remaining <= 0) break
     const itemAmount = parseMoney(row.commission_amount)
+    if (itemAmount <= 0 || itemAmount > remaining + 0.0001) continue
     await connection.query(
       `UPDATE commission_ledger SET status = 'settlable', updated_at = NOW() WHERE id = ?`,
       [row.id]
@@ -203,11 +238,35 @@ async function restoreWithdrawAllocation(userId, amountYuan, connection) {
   for (const row of bonuses || []) {
     if (remaining <= 0) break
     const itemAmount = parseMoney(row.amount)
+    if (itemAmount <= 0 || itemAmount > remaining + 0.0001) continue
     await connection.query(
       `UPDATE referral_bonus_grants SET status = 'settlable', updated_at = NOW() WHERE id = ?`,
       [row.id]
     )
     remaining = roundMoney(remaining - itemAmount)
+  }
+}
+
+/** 误 fail 后退回的明细，在微信实际 SUCCESS 时重新标为 withdrawn */
+async function reclaimWithdrawAllocation(userId, connection, allocation = null) {
+  const commissionIds = Array.isArray(allocation?.commissionIds) ? allocation.commissionIds : []
+  const bonusIds = Array.isArray(allocation?.bonusIds) ? allocation.bonusIds : []
+
+  if (commissionIds.length) {
+    await connection.query(
+      `UPDATE commission_ledger
+       SET status = 'withdrawn', updated_at = NOW()
+       WHERE user_id = ? AND status = 'settlable' AND id IN (?)`,
+      [userId, commissionIds]
+    )
+  }
+  if (bonusIds.length) {
+    await connection.query(
+      `UPDATE referral_bonus_grants
+       SET status = 'withdrawn', updated_at = NOW()
+       WHERE user_id = ? AND status = 'settlable' AND id IN (?)`,
+      [userId, bonusIds]
+    )
   }
 }
 
@@ -242,7 +301,7 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
     await repayDebtFromAvailable(userId, connection)
 
     const [walletRows] = await connection.query(
-      'SELECT available_balance FROM user_wallets WHERE user_id = ? FOR UPDATE',
+      'SELECT available_balance, debt_balance FROM user_wallets WHERE user_id = ? FOR UPDATE',
       [userId]
     )
     const available = parseMoney(walletRows[0]?.available_balance)
@@ -311,16 +370,42 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
       return adminResult(409, { error: allocation.error })
     }
 
+    const withdrawAmount = parseMoney(allocation.amount || validation.amount)
+    if (MIN_WITHDRAW_YUAN > 0 && withdrawAmount < MIN_WITHDRAW_YUAN) {
+      await connection.rollback()
+      return adminResult(400, {
+        error: `可凑明细仅 ${withdrawAmount} 元，低于最低提现 ${MIN_WITHDRAW_YUAN} 元`,
+      })
+    }
+
+    if (USER_DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayUserTotal + withdrawAmount > USER_DAILY_WITHDRAW_LIMIT_YUAN) {
+      await connection.rollback()
+      const remain = roundMoney(USER_DAILY_WITHDRAW_LIMIT_YUAN - todayUserTotal)
+      return adminResult(400, {
+        error: remain > 0
+          ? `今日剩余可提现 ${remain} 元`
+          : `您今日提现已达上限 ${USER_DAILY_WITHDRAW_LIMIT_YUAN} 元`,
+      })
+    }
+    if (MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN > 0 && todayMerchantTotal + withdrawAmount > MERCHANT_DAILY_WITHDRAW_LIMIT_YUAN) {
+      await connection.rollback()
+      return adminResult(400, { error: '商户今日转账额度已用尽，请明日再试' })
+    }
+
     await adjustWalletBalances(userId, {
-      availableDelta: -validation.amount,
+      availableDelta: -withdrawAmount,
       earnedDelta: 0,
     }, connection)
 
     const outBillNo = generateOutBillNo(userId)
+    const allocationJson = JSON.stringify({
+      commissionIds: allocation.allocated?.commissionIds || [],
+      bonusIds: allocation.allocated?.bonusIds || [],
+    })
     const [insertResult] = await connection.query(
-      `INSERT INTO withdrawal_requests (user_id, amount, status, out_bill_no)
-       VALUES (?, ?, 'pending', ?)`,
-      [userId, validation.amount, outBillNo]
+      `INSERT INTO withdrawal_requests (user_id, amount, allocation_json, status, out_bill_no)
+       VALUES (?, ?, ?, 'pending', ?)`,
+      [userId, withdrawAmount, allocationJson, outBillNo]
     )
 
     await connection.commit()
@@ -335,12 +420,14 @@ async function requestWithdraw(userId, { amountYuan, withdrawAll = false } = {})
     return adminResult(200, {
       success: true,
       withdrawal_id: withdrawalId,
-      amount_yuan: validation.amount,
+      amount_yuan: withdrawAmount,
+      requested_amount_yuan: validation.amount,
+      amount_adjusted: Math.abs(withdrawAmount - validation.amount) > 0.01,
       status: transferResult.status || 'pending',
       need_user_confirm: Boolean(transferResult.needUserConfirm),
       manual_review: transferResult.manualReview || !shouldTransferOnUserRequest(),
       awaiting_admin_approval: !shouldTransferOnUserRequest() && isTransferConfigured(),
-      withdraw_cap_yuan: validation.amount,
+      withdraw_cap_yuan: withdrawAmount,
       limits: getWithdrawPolicy(),
     })
   } catch (err) {
@@ -365,7 +452,7 @@ async function completeWithdrawalSuccess(withdrawalId, { transferBillNo, wxState
     await connection.beginTransaction()
 
     const [rows] = await connection.query(
-      `SELECT id, user_id, amount, status FROM withdrawal_requests WHERE id = ? FOR UPDATE`,
+      `SELECT id, user_id, amount, status, allocation_json FROM withdrawal_requests WHERE id = ? FOR UPDATE`,
       [withdrawalId]
     )
     const row = rows[0]
@@ -376,6 +463,68 @@ async function completeWithdrawalSuccess(withdrawalId, { transferBillNo, wxState
     if (row.status === 'success') {
       await connection.commit()
       return { ok: true, status: 'success', alreadyDone: true }
+    }
+
+    // 本地曾误判失败并退回余额：微信实际 SUCCESS 时追回余额与明细，避免双花
+    if (row.status === 'failed') {
+      const amount = parseMoney(row.amount)
+      let allocation = null
+      try {
+        allocation = row.allocation_json
+          ? (typeof row.allocation_json === 'string' ? JSON.parse(row.allocation_json) : row.allocation_json)
+          : null
+      } catch {
+        allocation = null
+      }
+
+      const [walletRows] = await connection.query(
+        `SELECT available_balance FROM user_wallets WHERE user_id = ? FOR UPDATE`,
+        [row.user_id]
+      )
+      const available = parseMoney(walletRows[0]?.available_balance)
+      const offset = roundMoney(Math.min(available, amount))
+      const debtAdd = roundMoney(amount - offset)
+      await adjustWalletBalances(row.user_id, {
+        availableDelta: -offset,
+        debtDelta: debtAdd,
+      }, connection)
+      if (debtAdd > 0) {
+        await connection.query(
+          `INSERT INTO wallet_debt_events
+           (user_id, order_id, source_type, source_id, amount, offset_from_available, reason)
+           VALUES (?, NULL, 'withdrawal', ?, ?, ?, ?)`,
+          [row.user_id, withdrawalId, debtAdd, offset, 'wx_success_after_local_fail']
+        )
+      }
+      await reclaimWithdrawAllocation(row.user_id, connection, allocation)
+
+      await connection.query(
+        `UPDATE withdrawal_requests
+         SET status = 'success',
+             wx_transfer_id = COALESCE(?, wx_transfer_id),
+             wx_state = ?,
+             wx_package_info = COALESCE(?, wx_package_info),
+             fail_reason = NULL,
+             processed_at = NOW(),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [transferBillNo || null, wxState || 'SUCCESS', packageInfo || null, withdrawalId]
+      )
+      await connection.query(
+        `UPDATE user_wallets
+         SET total_withdrawn = total_withdrawn + ?, updated_at = NOW()
+         WHERE user_id = ?`,
+        [amount, row.user_id]
+      )
+      await connection.commit()
+      logger.warn('completeWithdrawalSuccess recovered after local failed', { withdrawalId })
+      return { ok: true, status: 'success', recoveredFromFailed: true }
+    }
+
+    if (row.status === 'cancelled') {
+      await connection.rollback()
+      logger.warn('completeWithdrawalSuccess rejected cancelled withdrawal', { withdrawalId })
+      return { ok: false, status: row.status, error: 'withdrawal_cancelled', alert: true }
     }
 
     await connection.query(
@@ -431,14 +580,15 @@ async function applyWechatBillToWithdrawal(withdrawalId, bill) {
   }
 
   const packageInfo = bill.packageInfo || null
-  await db.query(
+  const [updateResult] = await db.query(
     `UPDATE withdrawal_requests
      SET status = ?,
          wx_transfer_id = COALESCE(?, wx_transfer_id),
          wx_state = ?,
          wx_package_info = COALESCE(?, wx_package_info),
          updated_at = NOW()
-     WHERE id = ?`,
+     WHERE id = ?
+       AND status NOT IN ('success', 'failed', 'cancelled')`,
     [
       mappedStatus,
       bill.transferBillNo || null,
@@ -447,6 +597,20 @@ async function applyWechatBillToWithdrawal(withdrawalId, bill) {
       withdrawalId,
     ]
   )
+
+  if (!updateResult?.affectedRows) {
+    const [rows] = await db.query(
+      'SELECT status FROM withdrawal_requests WHERE id = ? LIMIT 1',
+      [withdrawalId]
+    )
+    return {
+      ok: true,
+      status: rows[0]?.status || mappedStatus,
+      needUserConfirm: false,
+      skipped: true,
+      reason: 'terminal_or_missing',
+    }
+  }
 
   return {
     ok: true,
@@ -615,11 +779,11 @@ async function failWithdrawal(withdrawalId, reason) {
     await connection.beginTransaction()
 
     const [rows] = await connection.query(
-      `SELECT id, user_id, amount, status FROM withdrawal_requests WHERE id = ? FOR UPDATE`,
+      `SELECT id, user_id, amount, status, allocation_json FROM withdrawal_requests WHERE id = ? FOR UPDATE`,
       [withdrawalId]
     )
     const row = rows[0]
-    if (!row || row.status === 'success' || row.status === 'cancelled') {
+    if (!row || row.status === 'success' || row.status === 'cancelled' || row.status === 'failed') {
       await connection.rollback()
       return
     }
@@ -634,7 +798,16 @@ async function failWithdrawal(withdrawalId, reason) {
     await adjustWalletBalances(row.user_id, {
       availableDelta: parseMoney(row.amount),
     }, connection)
-    await restoreWithdrawAllocation(row.user_id, row.amount, connection)
+
+    let allocation = null
+    try {
+      allocation = row.allocation_json
+        ? (typeof row.allocation_json === 'string' ? JSON.parse(row.allocation_json) : row.allocation_json)
+        : null
+    } catch {
+      allocation = null
+    }
+    await restoreWithdrawAllocation(row.user_id, row.amount, connection, allocation)
 
     await connection.commit()
   } catch (err) {
@@ -659,9 +832,11 @@ async function approveWithdrawalManually(withdrawalId) {
   if (row.status === 'success') {
     return adminResult(200, { success: true, alreadyDone: true, status: 'success' })
   }
-  if (!['pending', 'failed'].includes(row.status)) {
+  if (!['pending'].includes(row.status)) {
     return adminResult(400, {
-      error: '当前状态不可审核，请使用重试转账或等待用户确认收款',
+      error: row.status === 'failed'
+        ? '已失败提现不可直接标记成功，请用户重新发起提现'
+        : '当前状态不可审核，请使用重试转账或等待用户确认收款',
       status: row.status,
     })
   }
@@ -693,7 +868,7 @@ async function approveWithdrawalManually(withdrawalId) {
       await connection.rollback()
       return adminResult(200, { success: true, alreadyDone: true, status: 'success' })
     }
-    if (!['pending', 'failed'].includes(locked.status)) {
+    if (locked.status !== 'pending') {
       await connection.rollback()
       return adminResult(400, { error: '当前状态不可确认打款', status: locked.status })
     }
@@ -931,7 +1106,17 @@ async function handleTransferNotify(req) {
 
   try {
     const result = await applyTransferNotifyBill(bill, { notifyId })
+    // cancelled+SUCCESS 需告警但不死循环；其余业务失败仍 500 重试
     if (!result.ok && !result.ignored) {
+      if (result.alert || result.error === 'withdrawal_cancelled') {
+        logger.error('transfer notify needs ops attention', {
+          notifyId,
+          outBillNo: bill.outBillNo,
+          state: bill.state,
+          error: result.error,
+        })
+        return notifySuccessResult()
+      }
       logger.error('transfer notify business failed', {
         notifyId,
         outBillNo: bill.outBillNo,

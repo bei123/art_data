@@ -91,21 +91,32 @@ async function validateItemExists(itemId, itemType, connection = null) {
       case 'artwork': {
         const id = parseInt(itemId, 10);
         if (Number.isNaN(id) || id <= 0) return false;
-        const [result] = await q('SELECT id FROM original_artworks WHERE id = ?', [id]);
+        const [result] = await q(
+          'SELECT id FROM original_artworks WHERE id = ? AND is_public_eff = 1',
+          [id]
+        );
         return result && result.length > 0;
       }
       case 'digital_art': {
         const sid = String(itemId).trim();
         if (!sid) return false;
+        // legacy digital_artworks 无 is_hidden 列；隐藏态只对 external 表生效
         const [legacy] = await q('SELECT id FROM digital_artworks WHERE id = ?', [sid]);
         if (legacy && legacy.length > 0) return true;
-        const [ext] = await q(`SELECT id FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE} WHERE id = ?`, [sid]);
+        const [ext] = await q(
+          `SELECT id FROM ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
+           WHERE id = ? AND (is_hidden IS NULL OR is_hidden = 0)`,
+          [sid]
+        );
         return ext && ext.length > 0;
       }
       case 'copyright_item': {
         const id = parseInt(itemId, 10);
         if (Number.isNaN(id) || id <= 0) return false;
-        const [result] = await q('SELECT id FROM rights WHERE id = ?', [id]);
+        const [result] = await q(
+          "SELECT id FROM rights WHERE id = ? AND status IN ('onsale', 'sold')",
+          [id]
+        );
         return result && result.length > 0;
       }
       default:

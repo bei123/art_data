@@ -144,7 +144,14 @@ async function refreshAdminAccessToken(refreshToken) {
     return { ok: false, status: 403, error: '账户已被禁用' }
   }
 
-  await query('UPDATE user_refresh_tokens SET revoked_at = NOW() WHERE id = ?', [record.id])
+  const [revokeResult] = await query(
+    `UPDATE user_refresh_tokens SET revoked_at = NOW()
+     WHERE id = ? AND revoked_at IS NULL`,
+    [record.id]
+  )
+  if (!revokeResult?.affectedRows) {
+    return { ok: false, status: 401, error: 'refreshToken 已失效，请重新登录' }
+  }
 
   const pair = await issueAdminTokenPair({ userId: users[0].id })
   return { ok: true, ...pair }

@@ -4,6 +4,7 @@ const logger = require('./logger')
 let uniqueIndexEnsured = false
 let shippingColumnsEnsured = false
 let inventoryReservedColumnEnsured = false
+let inventoryStateColumnEnsured = false
 
 const SHIPPING_COLUMNS = [
   {
@@ -101,10 +102,39 @@ async function ensureOrderInventoryReservedColumn() {
   }
 
   inventoryReservedColumnEnsured = true
+  await ensureOrderInventoryStateColumn()
+}
+
+/**
+ * none | reserved | fulfilled | restored
+ * 支付履约与退款回滚的权威状态；inventory_reserved 保留兼容旧逻辑。
+ */
+async function ensureOrderInventoryStateColumn() {
+  if (inventoryStateColumnEnsured) return
+
+  try {
+    if (!(await hasColumn('orders', 'inventory_state'))) {
+      await db.query(
+        `ALTER TABLE orders
+         ADD COLUMN inventory_state VARCHAR(16) NOT NULL DEFAULT 'none'
+         COMMENT '库存占用状态 none|reserved|fulfilled|restored'`
+      )
+      logger.info('orders.inventory_state column added')
+      await db.query(
+        `UPDATE orders SET inventory_state = 'reserved'
+         WHERE inventory_reserved = 1 AND inventory_state = 'none'`
+      )
+    }
+    inventoryStateColumnEnsured = true
+  } catch (err) {
+    logger.warn('ensureOrderInventoryStateColumn failed', { err: err.message })
+    // 失败不置位，下次重试；调用方在支付/退款路径会再次 ensure
+  }
 }
 
 module.exports = {
   ensureOrdersOutTradeNoUnique,
   ensureOrdersShippingColumns,
   ensureOrderInventoryReservedColumn,
+  ensureOrderInventoryStateColumn,
 }

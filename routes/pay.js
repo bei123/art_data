@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const { authenticateToken, assertSelfOrAdmin, requireAdmin } = require('../auth');
+const { wxAuthenticated } = require('../utils/wxRouteAuth');
 const svc = require('../services/payService');
 const checkoutPricing = require('../services/checkoutPricing');
 
-router.post('/checkout/preview', authenticateToken, async (req, res) => {
+router.post('/checkout/preview', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await checkoutPricing.checkoutPreview(req);
     return res.status(r.status).json(r.body);
@@ -15,7 +16,7 @@ router.post('/checkout/preview', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/unifiedorder', authenticateToken, async (req, res) => {
+router.post('/unifiedorder', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.unifiedOrder(req);
     return res.status(r.status).json(r.body);
@@ -25,7 +26,7 @@ router.post('/unifiedorder', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/singleorder', authenticateToken, async (req, res) => {
+router.post('/singleorder', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.singleOrder(req);
     return res.status(r.status).json(r.body);
@@ -45,7 +46,7 @@ router.post('/notify', async (req, res) => {
   }
 });
 
-router.post('/close', authenticateToken, async (req, res) => {
+router.post('/close', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.closeOrder(req);
     return res.status(r.status).json(r.body);
@@ -55,7 +56,7 @@ router.post('/close', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/refund', authenticateToken, async (req, res) => {
+router.post('/refund', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.refund(req);
     return res.status(r.status).json(r.body);
@@ -105,7 +106,7 @@ router.post('/refund/notify', async (req, res) => {
   }
 });
 
-router.post('/sign', authenticateToken, async (req, res) => {
+router.post('/sign', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.signPay(req);
     return res.status(r.status).json(r.body);
@@ -115,7 +116,7 @@ router.post('/sign', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/query', authenticateToken, async (req, res) => {
+router.get('/query', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.queryOrder(req);
     return res.status(r.status).json(r.body);
@@ -126,7 +127,7 @@ router.get('/query', authenticateToken, async (req, res) => {
 });
 
 /** 小程序/用户：本人订单详情；须传商户订单号 ?out_trade_no=；可选 ?include_wechat_path=1 拉微信轨迹 */
-router.get('/orders/detail', authenticateToken, async (req, res) => {
+router.get('/orders/detail', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.buyerOrderDetail(req);
     return res.status(r.status).json(r.body);
@@ -137,7 +138,7 @@ router.get('/orders/detail', authenticateToken, async (req, res) => {
 });
 
 /** 小程序：确认收货组件回调后二次校验（服务端调用微信 getOrder） */
-router.post('/orders/confirm-receipt/verify', authenticateToken, async (req, res) => {
+router.post('/orders/confirm-receipt/verify', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.verifyBuyerConfirmReceipt(req);
     return res.status(r.status).json(r.body);
@@ -148,7 +149,7 @@ router.post('/orders/confirm-receipt/verify', authenticateToken, async (req, res
 });
 
 /** 小程序订单列表：JWT 识别用户，支持 status 分页 */
-router.get('/orders', authenticateToken, async (req, res) => {
+router.get('/orders', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.listOrders(req);
     return res.status(r.status).json(r.body);
@@ -215,7 +216,7 @@ router.patch('/admin/orders/:orderId/items/:itemId/qr-code', ...requireAdmin, as
   }
 });
 
-router.get('/check-repayable', authenticateToken, async (req, res) => {
+router.get('/check-repayable', ...wxAuthenticated, async (req, res) => {
   try {
     const r = await svc.checkRepayable(req);
     return res.status(r.status).json(r.body);

@@ -48,7 +48,7 @@ async function getUserOpenid(userId, connection = db) {
 async function hasWelcomeFavorGrant(userId, connection = db) {
   const [rows] = await connection.query(
     `SELECT id FROM wx_favor_coupon_grants
-     WHERE user_id = ? AND source = ? AND status = 'sent'
+     WHERE user_id = ? AND source = ? AND status IN ('sent', 'used')
      LIMIT 1`,
     [userId, NEW_USER_COUPON_SOURCE]
   )
@@ -84,8 +84,8 @@ async function recordFavorGrant({
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        coupon_id = COALESCE(VALUES(coupon_id), coupon_id),
-       status = VALUES(status),
-       error_message = VALUES(error_message),
+       status = IF(status IN ('sent', 'used'), status, VALUES(status)),
+       error_message = IF(status IN ('sent', 'used'), error_message, VALUES(error_message)),
        updated_at = NOW()`,
     [
       userId,
@@ -121,11 +121,27 @@ async function sendFavorCouponToUser({
     return { ok: false, error: '用户未绑定微信 openid' }
   }
 
+  const isWelcome = source === NEW_USER_COUPON_SOURCE
   const outRequestNo = buildOutRequestNo({
-    prefix: source === NEW_USER_COUPON_SOURCE ? 'W' : 'A',
+    prefix: isWelcome ? 'W' : 'A',
     userId,
     stockId: template.stock_id,
+    deterministic: isWelcome,
   })
+
+  // 欢迎券：先占位写入；确定性 out_request_no + uk_out_request_no 保证重试/并发幂等
+  if (isWelcome) {
+    await recordFavorGrant({
+      userId,
+      templateId: template.id,
+      stockId: template.stock_id,
+      couponId: null,
+      outRequestNo,
+      source,
+      status: 'failed',
+      errorMessage: 'pending_send',
+    }, connection)
+  }
 
   const sent = await sendCoupon({
     openid,
@@ -996,7 +1012,7 @@ async function handleFavorCouponUseNotify(req) {
     return notifySuccessResult()
   }
 
-  // 并发锁：同一 notify / coupon 仅一个处理中
+  // 并发锁：同一 notify / coupon 仅一个处理中；Redis 故障则 5xx 让微信重试
   const lockKey = notifyId
     ? `favor:notify:lock:${notifyId}`
     : `favor:notify:lock:coupon:${couponId}`
@@ -1005,6 +1021,7 @@ async function handleFavorCouponUseNotify(req) {
     lockAcquired = await redisClient.setNxEx(lockKey, 60, 'processing')
   } catch (err) {
     logger.warn('favor notify redis lock failed', { lockKey, err: err.message })
+    return notifyFailResult(503, '服务暂时不可用，请稍后重试')
   }
 
   if (lockAcquired === false) {

@@ -796,17 +796,16 @@ async function getPublicList(query) {
   const sizeNum = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 20));
   const offset = (pageNum - 1) * sizeNum;
 
-  let statusKey = 'all';
-  const where = [];
+  let statusKey = 'published';
+  const where = ["status = 'published'"];
   const params = [];
   if (status) {
     const s = String(status).trim();
-    if (!['draft', 'published'].includes(s)) {
-      return { ok: false, status: 400, error: 'status 仅支持 draft/published' };
+    // 公开接口不允许拉取 draft
+    if (s !== 'published') {
+      return { ok: false, status: 400, error: '公开列表仅支持 published' };
     }
     statusKey = s;
-    where.push('status = ?');
-    params.push(s);
   }
 
   const listCacheKey = buildExhibitionListCacheKey(statusKey, pageNum, sizeNum);
@@ -859,9 +858,18 @@ async function loadPublicExhibitionDetailForApi(rawId) {
   const exhibitionId = parsePositiveInt(rawId);
   if (!exhibitionId) return { ok: false, status: 400, error: '无效的展览ID' };
   const cached = await getCachedExhibitionDetail(exhibitionId);
-  if (cached) return { ok: true, body: cached };
+  if (cached) {
+    if (String(cached.status || '') !== 'published') {
+      try { await redisClient.del(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`); } catch { /* ignore */ }
+    } else {
+      return { ok: true, body: cached };
+    }
+  }
   const detail = await getExhibitionDetail(exhibitionId);
   if (!detail) return { ok: false, status: 404, error: '展览不存在' };
+  if (String(detail.status || '') !== 'published') {
+    return { ok: false, status: 404, error: '展览不存在' };
+  }
   await setCachedExhibitionDetail(exhibitionId, detail);
   return { ok: true, body: detail };
 }
@@ -877,14 +885,17 @@ async function loadPublicExhibitionLivePhotosForApi(rawId) {
   if (!exhibitionId) return { ok: false, status: 400, error: '无效的展览ID' };
   const cached = await getCachedExhibitionDetail(exhibitionId);
   if (cached) {
-    const live_photos = cached.live_photos || [];
-    return { ok: true, body: { live_photos, live_photos_total: cached.live_photos_total ?? live_photos.length } };
-  }
-  if (!(await ensureExhibitionExists(exhibitionId))) {
-    return { ok: false, status: 404, error: '展览不存在' };
+    if (String(cached.status || '') !== 'published') {
+      try { await redisClient.del(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`); } catch { /* ignore */ }
+    } else {
+      const live_photos = cached.live_photos || [];
+      return { ok: true, body: { live_photos, live_photos_total: cached.live_photos_total ?? live_photos.length } };
+    }
   }
   const detail = await getExhibitionDetail(exhibitionId);
-  if (!detail) return { ok: false, status: 404, error: '展览不存在' };
+  if (!detail || String(detail.status || '') !== 'published') {
+    return { ok: false, status: 404, error: '展览不存在' };
+  }
   await setCachedExhibitionDetail(exhibitionId, detail);
   const live_photos = detail.live_photos || [];
   return { ok: true, body: { live_photos, live_photos_total: detail.live_photos_total ?? live_photos.length } };

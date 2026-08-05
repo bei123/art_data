@@ -38,19 +38,21 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = { userId: verified.userId, openid: verified.openid };
 
-    if (decoded.openid) {
+    // 微信 JWT 不得回落到 users 表（users.id 与 wx_users.id 可能撞号）
+    if (decoded.openid || verified.principal === 'wx') {
       const [wxUsers] = await query(
         'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
         [decoded.userId]
       );
 
-      if (wxUsers && wxUsers.length > 0) {
-        if (String(wxUsers[0].openid) !== String(decoded.openid)) {
-          return res.status(403).json({ error: '无效的token' });
-        }
-        req.user = { ...wxUsers[0], is_wx_user: true };
-        return next();
+      if (!wxUsers || wxUsers.length === 0) {
+        return res.status(401).json({ error: '微信用户不存在' });
       }
+      if (decoded.openid && String(wxUsers[0].openid) !== String(decoded.openid)) {
+        return res.status(403).json({ error: '无效的token' });
+      }
+      req.user = { ...wxUsers[0], is_wx_user: true };
+      return next();
     }
 
     const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
@@ -60,17 +62,7 @@ const authenticateToken = async (req, res, next) => {
       return next();
     }
 
-    const [wxUsers] = await query(
-      'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
-      [decoded.userId]
-    );
-
-    if (!wxUsers || wxUsers.length === 0) {
-      return res.status(401).json({ error: '用户不存在' });
-    }
-
-    req.user = { ...wxUsers[0], is_wx_user: true };
-    next();
+    return res.status(401).json({ error: '用户不存在' });
   } catch (error) {
     console.error('authenticateToken', error);
     return res.status(500).json({ error: '认证服务暂时不可用' });
@@ -93,26 +85,19 @@ const optionalAuthenticate = async (req, res, next) => {
 
     const decoded = { userId: verified.userId, openid: verified.openid };
 
-    if (decoded.openid) {
+    if (decoded.openid || verified.principal === 'wx') {
       const [wxUsers] = await query(
         'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
         [decoded.userId]
       );
-      if (wxUsers && wxUsers.length > 0 && String(wxUsers[0].openid) === String(decoded.openid)) {
+      if (wxUsers && wxUsers.length > 0 && (!decoded.openid || String(wxUsers[0].openid) === String(decoded.openid))) {
         req.user = { ...wxUsers[0], is_wx_user: true };
       }
-    }
-
-    if (!req.user) {
+      // 微信 token 不回落挂载 admin users
+    } else {
       const [users] = await query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
       if (users.length > 0) {
         req.user = users[0];
-      } else {
-        const [wxUsers] = await query(
-          'SELECT id, openid, nickname, avatar, phone, created_at, updated_at FROM wx_users WHERE id = ?',
-          [decoded.userId]
-        );
-        if (wxUsers && wxUsers.length > 0) req.user = { ...wxUsers[0], is_wx_user: true };
       }
     }
 

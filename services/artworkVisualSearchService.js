@@ -45,15 +45,57 @@ function decodeBase64Image(raw) {
 
 async function fetchImageBuffer(url) {
   if (!url || typeof url !== 'string') return null
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return null
+
+  const { assertResolvedHostIsPublic } = require('../utils/proxyUrlPolicy')
+  const dnsCheck = await assertResolvedHostIsPublic(parsed.hostname)
+  if (!dnsCheck.ok) {
+    logger.warn('artworkVisualSearch blocked non-public image host', {
+      host: parsed.hostname,
+      message: dnsCheck.message,
+    })
+    return null
+  }
+
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const res = await fetch(url, { signal: controller.signal })
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'error',
+    })
     if (!res.ok) return null
-    const arrayBuffer = await res.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) return null
-    return buffer
+    const contentLength = Number(res.headers.get('content-length') || 0)
+    if (contentLength > MAX_IMAGE_BYTES) return null
+
+    const reader = res.body?.getReader?.()
+    if (!reader) {
+      const arrayBuffer = await res.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) return null
+      return buffer
+    }
+
+    const chunks = []
+    let total = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > MAX_IMAGE_BYTES) {
+        try { reader.cancel() } catch { /* ignore */ }
+        return null
+      }
+      chunks.push(Buffer.from(value))
+    }
+    if (!total) return null
+    return Buffer.concat(chunks, total)
   } catch (err) {
     logger.warn('artworkVisualSearch fetch image failed', {
       url: url.slice(0, 120),

@@ -6,12 +6,24 @@ const { Readable } = require('stream');
 
 class OcrClient {
     static createClient() {
-        // 检查必要的环境变量
-        const accessKeyId = process.env.ALIBABA_CLOUD_ACCESS_KEY_ID || process.env.OSS_ACCESS_KEY_ID;
-        const accessKeySecret = process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET || process.env.OSS_ACCESS_KEY_SECRET;
-        
-        if (!accessKeyId || !accessKeySecret) {
-            throw new Error('缺少阿里云访问密钥配置。请设置 ALIBABA_CLOUD_ACCESS_KEY_ID 和 ALIBABA_CLOUD_ACCESS_KEY_SECRET 环境变量');
+        const ocrId = process.env.ALIBABA_CLOUD_ACCESS_KEY_ID
+        const ocrSecret = process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET
+        const ossId = process.env.OSS_ACCESS_KEY_ID
+        const ossSecret = process.env.OSS_ACCESS_KEY_SECRET
+
+        let accessKeyId
+        let accessKeySecret
+        if (ocrId && ocrSecret) {
+            accessKeyId = ocrId
+            accessKeySecret = ocrSecret
+        } else if (!ocrId && !ocrSecret && ossId && ossSecret) {
+            // 仅当 OCR 密钥整组缺失时，才完整回退到 OSS 密钥对
+            accessKeyId = ossId
+            accessKeySecret = ossSecret
+        } else if (ocrId || ocrSecret) {
+            throw new Error('ALIBABA_CLOUD_ACCESS_KEY_ID / SECRET 须成对配置，禁止与 OSS 密钥混用')
+        } else {
+            throw new Error('缺少阿里云访问密钥配置。请设置 ALIBABA_CLOUD_ACCESS_KEY_ID 和 ALIBABA_CLOUD_ACCESS_KEY_SECRET 环境变量')
         }
         
         // 使用环境变量创建凭证

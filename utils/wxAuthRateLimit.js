@@ -12,9 +12,15 @@ function buildWxRateLimitHandler(code, message) {
   }
 }
 
+function parsePositiveInt(raw, fallback) {
+  const n = parseInt(raw, 10)
+  if (!Number.isFinite(n) || n <= 0) return fallback
+  return n
+}
+
 const wxLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: parseInt(process.env.WX_LOGIN_RATE_LIMIT_PER_15MIN || '30', 10),
+  max: parsePositiveInt(process.env.WX_LOGIN_RATE_LIMIT_PER_15MIN, 30),
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.method === 'OPTIONS',
@@ -23,7 +29,7 @@ const wxLoginLimiter = rateLimit({
 
 const wxRefreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: parseInt(process.env.WX_REFRESH_RATE_LIMIT_PER_15MIN || '60', 10),
+  max: parsePositiveInt(process.env.WX_REFRESH_RATE_LIMIT_PER_15MIN, 60),
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.method === 'OPTIONS',
@@ -32,7 +38,7 @@ const wxRefreshLimiter = rateLimit({
 
 const wxPublicAuxLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parseInt(process.env.WX_PUBLIC_AUX_RATE_LIMIT_PER_MIN || '60', 10),
+  max: parsePositiveInt(process.env.WX_PUBLIC_AUX_RATE_LIMIT_PER_MIN, 60),
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.method === 'OPTIONS',

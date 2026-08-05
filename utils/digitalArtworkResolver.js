@@ -230,11 +230,17 @@ async function adjustDigitalArtworkStock({ connection, id, delta }) {
   )
   if (legacyRestore?.affectedRows > 0) return true
 
+  // 外部无限库存（数量列为 NULL）预扣时是 no-op，回滚也不得把 NULL 写成有限库存
+  const record = await fetchDigitalArtworkById(sid, connection)
+  if (record && record.source === 'external' && resolveDigitalStock(record) === null) {
+    return true
+  }
+
   const [externalRestore] = await queryWithConnection(
     connection,
     `UPDATE ${DIGITAL_ARTWORKS_EXTERNAL_TABLE}
-     SET lv3_goods_number = COALESCE(lv3_goods_number, 0) + ?
-     WHERE id = ?`,
+     SET lv3_goods_number = lv3_goods_number + ?
+     WHERE id = ? AND lv3_goods_number IS NOT NULL`,
     [qty, sid]
   )
   return externalRestore?.affectedRows > 0

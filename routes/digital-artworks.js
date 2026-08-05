@@ -3,7 +3,8 @@ const router = express.Router();
 const logger = require('../utils/logger');
 const { wespaceAxios: axios } = require('../utils/wespaceHttp');
 const db = require('../db');
-const { authenticateToken, requireAdmin } = require('../auth');
+const { authenticateToken, requireAdmin, optionalAuthenticate } = require('../auth');
+const { wxAuthenticated } = require('../utils/wxRouteAuth');
 const { processObjectImages } = require('../utils/image');
 const redisClient = require('../utils/redisClient');
 const { assembleWespaceDetailsFromRow } = require('../utils/digitalArtworksDetailsFields');
@@ -389,7 +390,7 @@ router.get('/public', async (req, res) => {
 });
 
 // 获取数字艺术品详情（公开接口，支持融合外部数据）
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuthenticate, async (req, res) => {
   try {
     const rawId = String(req.params.id || '').trim();
     if (!rawId) {
@@ -561,12 +562,14 @@ router.get('/:id', async (req, res) => {
     // obtainedGoodsId 已由外部缓存表 id 提供；旧表作品仍通过下方 qgList 匹配
 
     // 如果提供了 usn，尝试从外部产品列表接口获取 goods_id（外部表已有 goods_id 时跳过）
+    // 必须登录且 usn 归属当前微信用户，禁止匿名用平台凭据代查他人数据
     if (shouldFuse && usn && typeof usn === 'string' && usn.trim().length > 0 && !obtainedGoodsId) {
-      if (req.user?.id) {
-        const usnCheck = await assertUsnOwnedByWxUser(req.user.id, usn);
-        if (!usnCheck.ok) {
-          return res.status(usnCheck.status).json(usnCheck.body);
-        }
+      if (!req.user?.is_wx_user) {
+        // 匿名/非微信：忽略 usn，不发起融合
+      } else {
+      const usnCheck = await assertUsnOwnedByWxUser(req.user.id, usn, { force: true });
+      if (!usnCheck.ok) {
+        return res.status(usnCheck.status).json(usnCheck.body);
       }
       try {
         const authorization = resolveExternalBearerAuthorization();
@@ -577,7 +580,7 @@ router.get('/:id', async (req, res) => {
         const productListUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/wespace/index/list/V2`;
         const response = await axios.get(productListUrl, {
           params: {
-            usn: usn.trim(),
+            usn: usnCheck.usn,
             newsPageSize: 5,
             publicityPageSize: 5,
             activityPageSize: 6
@@ -617,11 +620,16 @@ router.get('/:id', async (req, res) => {
         logger.error('获取外部产品列表失败（用于获取goods_id）', { err: externalError });
         // 继续执行，不中断请求
       }
+      }
     }
 
     // 如果获取到了 goods_id，使用它调用商品接口获取 goodsVerId
     let targetGoodsVerId = goodsVerId; // 优先使用手动传入的 goodsVerId
-    if (shouldFuse && !targetGoodsVerId && obtainedGoodsId && usn) {
+    if (shouldFuse && !targetGoodsVerId && obtainedGoodsId && usn && req.user?.is_wx_user) {
+      const usnCheck = await assertUsnOwnedByWxUser(req.user.id, usn, { force: true });
+      if (!usnCheck.ok) {
+        return res.status(usnCheck.status).json(usnCheck.body);
+      }
       try {
         const authorization = resolveExternalBearerAuthorization();
         if (!authorization) {
@@ -630,7 +638,7 @@ router.get('/:id', async (req, res) => {
 
         const goodsParam = JSON.stringify({
           goodsId: obtainedGoodsId,
-          buyerUsn: usn.trim(),
+          buyerUsn: usnCheck.usn,
           issueBatch: "1",
           pageSize: "20",
           currentPage: 1
@@ -912,11 +920,11 @@ router.delete('/:id', ...requireAdmin, async (req, res) => {
  * GET /api/digital-artworks/order/product-list
  * 转发到外部接口：GET https://node.wespace.cn/orderApi/wespace/index/list/V2
  */
-router.get('/order/product-list', authenticateToken, async (req, res) => {
+router.get('/order/product-list', ...wxAuthenticated, async (req, res) => {
   try {
     const { newsPageSize, publicityPageSize, activityPageSize, usn } = req.query;
 
-    const usnCheck = await assertUsnOwnedByWxUser(req.user?.id, usn);
+    const usnCheck = await assertUsnOwnedByWxUser(req.user?.id, usn, { force: true });
     if (!usnCheck.ok) {
       return res.status(usnCheck.status).json(usnCheck.body);
     }
@@ -1027,7 +1035,7 @@ router.get('/order/product-list', authenticateToken, async (req, res) => {
  * POST /api/digital-artworks/goods/ver/list/v3
  * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/list/v3
  */
-router.post('/goods/ver/list/v3', authenticateToken, async (req, res) => {
+router.post('/goods/ver/list/v3', ...wxAuthenticated, async (req, res) => {
   try {
     // POST 请求可以从查询参数或请求体中获取 goods 参数
     const goods = req.query?.goods || req.body?.goods;
@@ -1041,13 +1049,30 @@ router.post('/goods/ver/list/v3', authenticateToken, async (req, res) => {
       });
     }
 
+    let goodsPayload = null
+    try {
+      goodsPayload = JSON.parse(goods.trim())
+    } catch {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'goods参数必须是合法 JSON',
+      })
+    }
+    const buyerUsn = goodsPayload?.buyerUsn || goodsPayload?.usn || goodsPayload?.buyer_usn
+    const usnCheck = await assertUsnOwnedByWxUser(req.user.id, buyerUsn, { force: true })
+    if (!usnCheck.ok) {
+      return res.status(usnCheck.status).json(usnCheck.body)
+    }
+    goodsPayload.buyerUsn = usnCheck.usn
+
     const authorization = resolveExternalBearerAuthorization();
     if (!authorization) {
       return res.status(503).json(externalAuthNotConfiguredBody());
     }
 
     const params = {
-      goods: goods.trim()
+      goods: JSON.stringify(goodsPayload),
     };
 
     const goodsDetailUrl = `${EXTERNAL_API_CONFIG.VERIFICATION_CODE_BASE_URL}/orderApi/goods/ver/list/v3`;
@@ -1113,14 +1138,14 @@ router.post('/goods/ver/list/v3', authenticateToken, async (req, res) => {
  * 整合三个外部API：价格查询 -> 统一下单 -> 支付价格查询
  * 前端需提供：usn；Wespace 凭据通过 X-External-Authorization（JWT 仍走 Authorization）
  */
-router.post('/order/purchase', authenticateToken, async (req, res) => {
+router.post('/order/purchase', ...wxAuthenticated, async (req, res) => {
   try {
     const wespaceAuthorization =
       resolveWespaceBasicAuthorization(req)
       || (req.body?.wespace_authorization ? String(req.body.wespace_authorization).trim() : null);
     const { usn, goodsVerId, goodsId, goodsNumber = 1, orderType = '4', addressId = '', payType = '1', ...otherOrderParams } = req.body;
 
-    const usnCheck = await assertUsnOwnedByWxUser(req.user?.id, usn);
+    const usnCheck = await assertUsnOwnedByWxUser(req.user?.id, usn, { force: true });
     if (!usnCheck.ok) {
       return res.status(usnCheck.status).json(usnCheck.body);
     }
@@ -1365,7 +1390,7 @@ router.post('/order/purchase', authenticateToken, async (req, res) => {
  * POST /api/digital-artworks/goods/ver/details
  * 转发到外部接口：POST https://node.wespace.cn/orderApi/goods/ver/details
  */
-router.post('/goods/ver/details', authenticateToken, async (req, res) => {
+router.post('/goods/ver/details', ...wxAuthenticated, async (req, res) => {
   try {
     // POST 请求可以从查询参数或请求体中获取 goods 参数
     const goods = req.query?.goods || req.body?.goods;
@@ -1391,6 +1416,20 @@ router.post('/goods/ver/details', authenticateToken, async (req, res) => {
     } else {
       goodsData = goods;
     }
+
+    if (!goodsData || typeof goodsData !== 'object') {
+      return res.status(400).json({
+        code: 400,
+        status: false,
+        message: 'goods参数必须是合法 JSON 对象',
+      })
+    }
+    const buyerUsn = goodsData.buyerUsn || goodsData.usn || goodsData.buyer_usn
+    const usnCheck = await assertUsnOwnedByWxUser(req.user.id, buyerUsn, { force: true })
+    if (!usnCheck.ok) {
+      return res.status(usnCheck.status).json(usnCheck.body)
+    }
+    goodsData.buyerUsn = usnCheck.usn
 
     const authorization = resolveExternalBearerAuthorization();
     if (!authorization) {

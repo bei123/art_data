@@ -137,10 +137,11 @@ router.get('/proxy', authenticateWebviewAccess, async (req, res) => {
     }
 
     // URL already allowlisted + DNS-checked by resolveSafeProxyRequestUrl.
+    // Do not follow redirects: beforeRedirect cannot await DNS, and Node has no lookupSync.
     // codeql[js/request-forgery]
     const response = await axios.get(safeTargetUrl, {
       headers: requestHeaders,
-      maxRedirects: 5,
+      maxRedirects: 0,
       beforeRedirect: createProxyRedirectGuard(),
       timeout: 30000,
       responseType: 'text',
