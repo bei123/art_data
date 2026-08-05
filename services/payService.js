@@ -97,10 +97,39 @@ const {
 
 const REDIS_PHYSICAL_CATEGORIES_LIST_KEY = 'physical_categories:list';
 const REDIS_PAY_INVENTORY_FULFILLED_PREFIX = 'pay:inventory:fulfilled:';
+const REDIS_PAY_SETTLED_PREFIX = 'pay:settled:side:';
 const REDIS_REFUND_INVENTORY_RESTORED_PREFIX = 'refund:inventory:restored:';
 const INVENTORY_FLAG_EXPIRE_SEC = 60 * 60 * 24 * 90;
 const CALLBACK_PROCESSING_EXPIRE = 120;
 const PAID_NOTIFY_RETRY_MS = parseInt(process.env.WX_SUBSCRIBE_PAID_NOTIFY_RETRY_MS || '8000', 10);
+
+function buildPayInventoryFulfilledKey(outTradeNo) {
+    return `${REDIS_PAY_INVENTORY_FULFILLED_PREFIX}${String(outTradeNo || '').trim()}`;
+}
+
+function buildPaySettledKey(outTradeNo) {
+    return `${REDIS_PAY_SETTLED_PREFIX}${String(outTradeNo || '').trim()}`;
+}
+
+async function releaseInventoryFulfillmentSlot(outTradeNo) {
+    const key = buildPayInventoryFulfilledKey(outTradeNo);
+    if (!String(outTradeNo || '').trim()) return;
+    try {
+        await redisClient.del(key);
+    } catch (err) {
+        logger.warn('释放支付库存履约槽位失败', { key, err: err?.message || err });
+    }
+}
+
+async function releasePaidOrderSettlementSlot(outTradeNo) {
+    const key = buildPaySettledKey(outTradeNo);
+    if (!String(outTradeNo || '').trim()) return;
+    try {
+        await redisClient.del(key);
+    } catch (err) {
+        logger.warn('释放支付结算槽位失败', { key, err: err?.message || err });
+    }
+}
 
 async function acquirePayOrderLock(lockKey) {
     try {
@@ -163,10 +192,15 @@ async function applyOrderItemsInventoryDelta({ orderItems, mode, connection = nu
 
         if (item.type === 'right' && item.right_id) {
             if (mode === 'deduct') {
-                await runner.query(
-                    'UPDATE rights SET remaining_count = GREATEST(remaining_count - ?, 0) WHERE id = ?',
-                    [qty, item.right_id]
+                const [result] = await runner.query(
+                    'UPDATE rights SET remaining_count = remaining_count - ? WHERE id = ? AND remaining_count >= ?',
+                    [qty, item.right_id, qty]
                 );
+                if (!result?.affectedRows) {
+                    const err = new Error(`权益库存不足: right_id=${item.right_id}`);
+                    err.code = 'INVENTORY_INSUFFICIENT';
+                    throw err;
+                }
             } else {
                 await runner.query(
                     'UPDATE rights SET remaining_count = remaining_count + ? WHERE id = ?',
@@ -179,10 +213,15 @@ async function applyOrderItemsInventoryDelta({ orderItems, mode, connection = nu
 
         if (item.type === 'artwork' && item.artwork_id) {
             if (mode === 'deduct') {
-                await runner.query(
-                    'UPDATE original_artworks SET stock = GREATEST(stock - ?, 0) WHERE id = ?',
-                    [qty, item.artwork_id]
+                const [result] = await runner.query(
+                    'UPDATE original_artworks SET stock = stock - ? WHERE id = ? AND stock >= ?',
+                    [qty, item.artwork_id, qty]
                 );
+                if (!result?.affectedRows) {
+                    const err = new Error(`艺术品库存不足: artwork_id=${item.artwork_id}`);
+                    err.code = 'INVENTORY_INSUFFICIENT';
+                    throw err;
+                }
             } else {
                 await runner.query(
                     'UPDATE original_artworks SET stock = stock + ? WHERE id = ?',
@@ -194,11 +233,16 @@ async function applyOrderItemsInventoryDelta({ orderItems, mode, connection = nu
         }
 
         if (item.type === 'digital' && item.digital_artwork_id) {
-            await adjustDigitalArtworkStock({
+            const ok = await adjustDigitalArtworkStock({
                 connection,
                 id: item.digital_artwork_id,
                 delta: mode === 'deduct' ? -qty : qty,
             });
+            if (mode === 'deduct' && !ok) {
+                const err = new Error(`数字艺术品库存不足: digital_artwork_id=${item.digital_artwork_id}`);
+                err.code = 'INVENTORY_INSUFFICIENT';
+                throw err;
+            }
             digitalIds.push(item.digital_artwork_id);
         }
     }
@@ -211,11 +255,20 @@ async function recordDigitalIdentityPurchases({ userId, orderItems, connection =
     const digitalItems = (orderItems || []).filter((item) => item.type === 'digital' && item.digital_artwork_id != null);
     if (!digitalItems.length || !userId) return;
 
-    for (const item of digitalItems) {
-        await runner.query(
-            'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
-            [userId, String(item.digital_artwork_id), 0, item.order_id]
+    const orderIds = [...new Set(digitalItems.map((item) => item.order_id).filter(Boolean))];
+    for (const orderId of orderIds) {
+        const [existing] = await runner.query(
+            'SELECT id FROM digital_identity_purchases WHERE order_id = ? LIMIT 1',
+            [orderId]
         );
+        if (existing.length) continue;
+
+        for (const item of digitalItems.filter((row) => Number(row.order_id) === Number(orderId))) {
+            await runner.query(
+                'INSERT INTO digital_identity_purchases (user_id, digital_artwork_id, discount_amount, purchase_date, order_id) VALUES (?, ?, ?, NOW(), ?)',
+                [userId, String(item.digital_artwork_id), 0, item.order_id]
+            );
+        }
     }
 }
 
@@ -288,14 +341,70 @@ async function tryAutoDigitalQrDelivery({ outTradeNo, orderId = null, notifyShip
     }
 }
 
+/**
+ * 支付成功金钱副作用（消费额/佣金/首单奖励）— Redis NX 幂等，notify 与 sync 共用
+ */
+async function settlePaidOrderSideEffects({
+    outTradeNo,
+    orderId,
+    userId,
+    amountYuan,
+    referrerId = null,
+    connection = null,
+}) {
+    const cleanOutTradeNo = String(outTradeNo || '').trim();
+    if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
+    if (!userId) return { skipped: true, reason: 'missing_user_id' };
+
+    const settleKey = buildPaySettledKey(cleanOutTradeNo);
+    const acquired = await redisClient.setNxEx(settleKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+    if (!acquired) return { skipped: true, reason: 'already_settled' };
+
+    const ownsConnection = !connection;
+    const runner = connection || await db.getConnection();
+
+    try {
+        if (ownsConnection) await runner.beginTransaction();
+
+        await onPaymentSuccess(userId, amountYuan, runner);
+        if (orderId) {
+            await createCommissionsForPaidOrder({ orderId, connection: runner });
+            if (referrerId && Number(referrerId) !== Number(userId)) {
+                const { tryGrantFirstReferralOrderBonus } = require('./referralRewardService');
+                await tryGrantFirstReferralOrderBonus({
+                    referrerId: Number(referrerId),
+                    orderId,
+                    connection: runner,
+                });
+            }
+        }
+
+        if (ownsConnection) await runner.commit();
+        return { ok: true };
+    } catch (err) {
+        if (ownsConnection) await runner.rollback();
+        await releasePaidOrderSettlementSlot(cleanOutTradeNo);
+        throw err;
+    } finally {
+        if (ownsConnection) runner.release();
+    }
+}
+
+/** 支付成功库存履约 — setNxEx 原子占槽 + 订单行 FOR UPDATE */
 async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
     const cleanOutTradeNo = String(outTradeNo || '').trim();
     if (!cleanOutTradeNo) return { skipped: true, reason: 'missing_out_trade_no' };
 
-    const inventoryKey = `${REDIS_PAY_INVENTORY_FULFILLED_PREFIX}${cleanOutTradeNo}`;
-    const alreadyFulfilled = await redisClient.get(inventoryKey);
-    if (alreadyFulfilled) {
-        await tryAutoDigitalQrDelivery({ outTradeNo: cleanOutTradeNo });
+    const inventoryKey = buildPayInventoryFulfilledKey(cleanOutTradeNo);
+    const acquired = await redisClient.setNxEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
+    if (!acquired) {
+        if (!options.skipDelivery) {
+            await tryAutoDigitalQrDelivery({
+                outTradeNo: cleanOutTradeNo,
+                orderId: options.orderId || null,
+                notifyShipped: options.notifyShipped !== false,
+            });
+        }
         return { skipped: true, reason: 'already_fulfilled' };
     }
 
@@ -306,11 +415,12 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
         if (ownsConnection) await connection.beginTransaction();
 
         const [orders] = await connection.query(
-            'SELECT id, user_id, trade_state, inventory_reserved FROM orders WHERE out_trade_no = ? LIMIT 1',
+            'SELECT id, user_id, trade_state, inventory_reserved FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE',
             [cleanOutTradeNo]
         );
         if (!orders.length || orders[0].trade_state !== 'SUCCESS') {
             if (ownsConnection) await connection.rollback();
+            await releaseInventoryFulfillmentSlot(cleanOutTradeNo);
             return { skipped: true, reason: 'not_success' };
         }
 
@@ -336,18 +446,22 @@ async function fulfillPaidOrderInventory(outTradeNo, options = {}) {
             connection,
         });
 
-        if (ownsConnection) await connection.commit();
-        await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
-        await clearInventoryRelatedCaches(affected);
+        if (ownsConnection) {
+            await connection.commit();
+            await clearInventoryRelatedCaches(affected);
+            if (!options.skipDelivery) {
+                await tryAutoDigitalQrDelivery({
+                    outTradeNo: cleanOutTradeNo,
+                    orderId: orders[0].id,
+                    notifyShipped: options.notifyShipped !== false,
+                });
+            }
+        }
 
-        await tryAutoDigitalQrDelivery({
-            outTradeNo: cleanOutTradeNo,
-            orderId: orders[0].id,
-        });
-
-        return { ok: true, affected };
+        return { ok: true, affected, orderId: orders[0].id };
     } catch (error) {
         if (ownsConnection) await connection.rollback();
+        await releaseInventoryFulfillmentSlot(cleanOutTradeNo);
         logger.error('fulfillPaidOrderInventory failed', { err: error, out_trade_no: cleanOutTradeNo });
         throw error;
     } finally {
@@ -1648,6 +1762,12 @@ async function payNotify(req) {
                 'processing'
             );
             if (!callbackAcquired) {
+                const existingState = await redisClient.safeGet(callbackKey);
+                // 首轮仍在处理：勿 ACK SUCCESS，否则微信可能不再重试
+                if (existingState === 'processing') {
+                    logger.info('支付回调处理中，要求微信重试', { outTradeNo: out_trade_no_early });
+                    return adminResult(503, { code: 'FAIL', message: '处理中，请稍后重试' });
+                }
                 await cancelPaymentPendingReminder(out_trade_no_early).catch((err) => {
                     logger.warn('重复回调取消待付款提醒失败', { outTradeNo: out_trade_no_early, err: err?.message || err });
                 });
@@ -1678,7 +1798,9 @@ async function payNotify(req) {
             const connection = await db.getConnection();
             await connection.beginTransaction();
             let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
-            let shouldFulfillInventory = false;
+            let didClaimInventory = false;
+            let didClaimSettlement = false;
+            let committed = false;
             try {
                 const [orders] = await connection.query(
                     'SELECT id, trade_state, user_id, actual_fee, total_fee, discount_amount, referrer_id, referral_coupon_id, inventory_reserved FROM orders WHERE out_trade_no = ? FOR UPDATE',
@@ -1687,12 +1809,12 @@ async function payNotify(req) {
                 if (orders.length > 0 && orders[0].trade_state === 'REFUND') {
                     logger.info('支付回调：订单已退款，忽略 SUCCESS', { out_trade_no });
                     await connection.commit();
+                    committed = true;
                     await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                     return adminResult(200, { code: 'SUCCESS', message: '订单已退款，不再覆盖' });
                 }
 
                 const userId = orders[0]?.user_id;
-                const previousTradeState = orders[0]?.trade_state;
 
                 const payerTotalFen = callbackData.amount?.payer_total;
                 const promotionDetail = callbackData.promotion_detail;
@@ -1734,55 +1856,34 @@ async function payNotify(req) {
                     [transaction_id, trade_type, trade_state, trade_state_desc, success_time ? formatWechatTime(success_time) : null, out_trade_no]
                 );
 
-                const inventoryKey = `${REDIS_PAY_INVENTORY_FULFILLED_PREFIX}${out_trade_no}`;
-                const inventoryDone = await redisClient.get(inventoryKey);
-                if (!inventoryDone) {
-                    const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
-                    if (Number(orders[0]?.inventory_reserved) === 1) {
-                        await connection.query(
-                            'UPDATE orders SET inventory_reserved = 0 WHERE id = ?',
-                            [orders[0].id]
-                        );
-                        for (const item of orderItems) {
-                            if (item.type === 'right' && item.right_id) affected.rightIds.push(item.right_id);
-                            if (item.type === 'artwork' && item.artwork_id) affected.artworkIds.push(item.artwork_id);
-                            if (item.type === 'digital' && item.digital_artwork_id) affected.digitalIds.push(item.digital_artwork_id);
-                        }
-                    } else {
-                        affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'deduct', connection });
-                    }
-                    await recordDigitalIdentityPurchases({
-                        outTradeNo: out_trade_no,
-                        userId,
-                        orderItems,
-                        connection,
+                const fulfillResult = await fulfillPaidOrderInventory(out_trade_no, {
+                    connection,
+                    skipDelivery: true,
+                });
+                didClaimInventory = Boolean(fulfillResult?.ok);
+                if (fulfillResult?.ok && fulfillResult.affected) {
+                    affected = fulfillResult.affected;
+                    logger.info('支付回调库存扣减完成', {
+                        out_trade_no,
+                        rights: affected.rightIds.length,
                     });
-                    shouldFulfillInventory = true;
-                    logger.info('支付回调库存扣减完成', { out_trade_no, rights: affected.rightIds.length, reserved: Number(orders[0]?.inventory_reserved) === 1 });
                 }
 
-                if (userId && previousTradeState !== 'SUCCESS') {
-                    await onPaymentSuccess(userId, settledActualFee, connection);
-                    if (orders[0].id) {
-                        await createCommissionsForPaidOrder({
-                            orderId: orders[0].id,
-                            connection,
-                        });
-                        if (orders[0].referrer_id && Number(orders[0].referrer_id) !== Number(userId)) {
-                            const { tryGrantFirstReferralOrderBonus } = require('./referralRewardService');
-                            await tryGrantFirstReferralOrderBonus({
-                                referrerId: Number(orders[0].referrer_id),
-                                orderId: orders[0].id,
-                                connection,
-                            });
-                        }
-                    }
-                }
+                const settleResult = await settlePaidOrderSideEffects({
+                    outTradeNo: out_trade_no,
+                    orderId: orders[0]?.id || null,
+                    userId,
+                    amountYuan: settledActualFee,
+                    referrerId: orders[0]?.referrer_id,
+                    connection,
+                });
+                didClaimSettlement = Boolean(settleResult?.ok);
 
                 await connection.commit();
-                if (shouldFulfillInventory) {
-                    await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
-                    await clearInventoryRelatedCaches(affected);
+                committed = true;
+
+                if (fulfillResult?.ok && fulfillResult.affected) {
+                    await clearInventoryRelatedCaches(fulfillResult.affected);
                 }
                 await redisClient.setEx(callbackKey, CALLBACK_EXPIRE, '1');
                 logger.info('支付回调处理完成', { out_trade_no });
@@ -1813,7 +1914,11 @@ async function payNotify(req) {
                     message: 'OK'
                 });
             } catch (error) {
-                await connection.rollback();
+                if (!committed) {
+                    await connection.rollback();
+                    if (didClaimInventory) await releaseInventoryFulfillmentSlot(out_trade_no);
+                    if (didClaimSettlement) await releasePaidOrderSettlementSlot(out_trade_no);
+                }
                 await releasePayCallbackProcessingSlot(callbackKey);
                 logger.error('支付回调处理事务失败', { err: error });
                 throw error;
@@ -2107,20 +2212,38 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
     await connection.beginTransaction();
     try {
         const [orderRows] = await connection.query(
-            'SELECT id FROM orders WHERE out_trade_no = ? LIMIT 1',
+            'SELECT id, inventory_reserved FROM orders WHERE out_trade_no = ? LIMIT 1 FOR UPDATE',
             [out_trade_no]
         );
         const orderId = orderRows[0]?.id;
+        const hasReservedInventory = Number(orderRows[0]?.inventory_reserved) === 1;
 
         const inventoryKey = `${REDIS_REFUND_INVENTORY_RESTORED_PREFIX}${out_trade_no}`;
         const inventoryDone = await redisClient.get(inventoryKey);
         let affected = { rightIds: [], artworkIds: [], digitalIds: [] };
+        let didRestoreInventory = false;
 
         if (!inventoryDone) {
-            const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
-            affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
-            const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
-            await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+            const payFulfilled = await redisClient.safeGet(buildPayInventoryFulfilledKey(out_trade_no));
+
+            if (hasReservedInventory && orderId) {
+                // 支付履约未确认预扣：只释放预扣，禁止再 restore（否则库存翻倍）
+                const { releaseOrderInventoryIfReserved } = require('../utils/orderInventoryReserve');
+                const released = await releaseOrderInventoryIfReserved(orderId, connection);
+                affected = released?.affected || affected;
+                didRestoreInventory = true;
+                logger.info('退款释放未确认的库存预扣', { out_trade_no, orderId });
+            } else if (payFulfilled) {
+                const orderItems = await loadOrderItemsForInventory(out_trade_no, connection);
+                affected = await applyOrderItemsInventoryDelta({ orderItems, mode: 'restore', connection });
+                const orderIds = [...new Set(orderItems.map((item) => item.order_id).filter(Boolean))];
+                await removeDigitalIdentityPurchasesByOrderIds(orderIds, connection);
+                didRestoreInventory = true;
+            } else {
+                // 无预扣且无支付履约：库存从未扣减，跳过回滚，仅打标防重入
+                logger.info('退款跳过库存回滚：无预扣且无支付履约标记', { out_trade_no });
+                didRestoreInventory = true;
+            }
         }
 
         if (amount) {
@@ -2132,7 +2255,7 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
             [wx_refund_id, out_refund_no]
         );
         await connection.query(
-            `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款' WHERE out_trade_no = ?`,
+            `UPDATE orders SET trade_state = 'REFUND', trade_state_desc = '已退款', inventory_reserved = 0 WHERE out_trade_no = ?`,
             [out_trade_no]
         );
 
@@ -2153,7 +2276,7 @@ async function completeRefundSuccess({ out_refund_no, out_trade_no, wx_refund_id
 
         await connection.commit();
 
-        if (!inventoryDone) {
+        if (!inventoryDone && didRestoreInventory) {
             await redisClient.setEx(inventoryKey, INVENTORY_FLAG_EXPIRE_SEC, '1');
             await clearInventoryRelatedCaches(affected);
         }
@@ -5288,8 +5411,8 @@ async function syncOrderTradeStateFromWechat(orderRow) {
                 });
             });
         }
-        // 仅在「本地尚未 SUCCESS → 刚同步为 SUCCESS」时发通知。
-        // 禁止 sync_retry_unsent：打开历史订单/去重键过期会反复推送。
+        // 仅在「本地尚未 SUCCESS → 刚同步为 SUCCESS」时发通知与金钱结算。
+        // 禁止对历史 SUCCESS 反复 settle：旧单无 settle 键时会重复累加 total_spent。
         if (didSync && dbState !== 'SUCCESS' && dbState !== 'REFUND') {
             await tryEmitPaymentSuccessSubscribeNotifies({
                 outTradeNo: orderRow.out_trade_no,
@@ -5302,7 +5425,37 @@ async function syncOrderTradeStateFromWechat(orderRow) {
                     err: err?.message || err,
                 });
             });
+
+            try {
+                let settleUserId = orderRow.user_id;
+                let settleAmount = orderRow.actual_fee;
+                let settleReferrerId = orderRow.referrer_id;
+                let settleOrderId = orderRow.id;
+                if (settleUserId == null || settleAmount == null || settleReferrerId === undefined) {
+                    const [freshRows] = await db.query(
+                        'SELECT id, user_id, actual_fee, referrer_id FROM orders WHERE out_trade_no = ? LIMIT 1',
+                        [orderRow.out_trade_no]
+                    );
+                    settleOrderId = freshRows[0]?.id ?? settleOrderId;
+                    settleUserId = freshRows[0]?.user_id ?? settleUserId;
+                    settleAmount = freshRows[0]?.actual_fee ?? settleAmount;
+                    settleReferrerId = freshRows[0]?.referrer_id ?? settleReferrerId;
+                }
+                await settlePaidOrderSideEffects({
+                    outTradeNo: orderRow.out_trade_no,
+                    orderId: settleOrderId,
+                    userId: settleUserId,
+                    amountYuan: settleAmount,
+                    referrerId: settleReferrerId,
+                });
+            } catch (settleErr) {
+                logger.warn('同步支付成功结算副作用失败', {
+                    outTradeNo: orderRow.out_trade_no,
+                    err: settleErr?.message || settleErr,
+                });
+            }
         }
+
         try {
             await fulfillPaidOrderInventory(orderRow.out_trade_no);
         } catch (inventoryErr) {

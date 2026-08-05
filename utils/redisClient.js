@@ -239,12 +239,18 @@ redisClient.setNxEx = async function setNxEx(key, ttlSec, value = '1') {
 
 /**
  * 读缓存降级：Redis 不可用时返回 null，不抛错
- * 走带指标的 get，业务缓存（含 search）会计入 cache_hit_rate
+ * 成功读计入 GET 指标（含 cache_hit_rate）；失败只记 safeGetFallbacks，不抬高 errors
  */
 redisClient.safeGet = async function safeGet(key) {
   try {
     if (!redisClient.isOpen) await redisClient.connect()
-    return await redisClient.get(key)
+    const startTime = Date.now()
+    const result = await originalGet(key)
+    const elapsed = Date.now() - startTime
+    incrementCommand('get', elapsed)
+    recordGetOutcome(key, Boolean(result))
+    if (elapsed > 100) logger.warn('Redis 慢查询 GET', { ms: elapsed, key })
+    return result
   } catch (error) {
     forEachMetricsBucket((bucket) => {
       bucket.safeGetFallbacks += 1

@@ -7,6 +7,7 @@ const PROBE_KEY_PREFIXES = [
   'logistics:path:terminal:',
   'logistics:path:seen:',
   'pay:inventory:fulfilled:',
+  'pay:settled:side:',
   'refund:inventory:restored:',
   'pay:callback:',
   'favor:notify:done:',
