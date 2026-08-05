@@ -270,6 +270,14 @@ async function getCachedExhibitionDetail(exhibitionId) {
   return null;
 }
 
+function getDetailStatus(detail) {
+  return String(detail?.exhibition?.status || detail?.status || '')
+}
+
+function isPublishedExhibitionDetail(detail) {
+  return getDetailStatus(detail) === 'published'
+}
+
 async function setCachedExhibitionDetail(exhibitionId, detail) {
   try {
     await redisClient.setEx(
@@ -859,7 +867,7 @@ async function loadPublicExhibitionDetailForApi(rawId) {
   if (!exhibitionId) return { ok: false, status: 400, error: '无效的展览ID' };
   const cached = await getCachedExhibitionDetail(exhibitionId);
   if (cached) {
-    if (String(cached.status || '') !== 'published') {
+    if (!isPublishedExhibitionDetail(cached)) {
       try { await redisClient.del(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`); } catch { /* ignore */ }
     } else {
       return { ok: true, body: cached };
@@ -867,7 +875,7 @@ async function loadPublicExhibitionDetailForApi(rawId) {
   }
   const detail = await getExhibitionDetail(exhibitionId);
   if (!detail) return { ok: false, status: 404, error: '展览不存在' };
-  if (String(detail.status || '') !== 'published') {
+  if (!isPublishedExhibitionDetail(detail)) {
     return { ok: false, status: 404, error: '展览不存在' };
   }
   await setCachedExhibitionDetail(exhibitionId, detail);
@@ -885,7 +893,7 @@ async function loadPublicExhibitionLivePhotosForApi(rawId) {
   if (!exhibitionId) return { ok: false, status: 400, error: '无效的展览ID' };
   const cached = await getCachedExhibitionDetail(exhibitionId);
   if (cached) {
-    if (String(cached.status || '') !== 'published') {
+    if (!isPublishedExhibitionDetail(cached)) {
       try { await redisClient.del(`${REDIS_EXHIBITION_DETAIL_KEY_PREFIX}${exhibitionId}`); } catch { /* ignore */ }
     } else {
       const live_photos = cached.live_photos || [];
@@ -893,7 +901,7 @@ async function loadPublicExhibitionLivePhotosForApi(rawId) {
     }
   }
   const detail = await getExhibitionDetail(exhibitionId);
-  if (!detail || String(detail.status || '') !== 'published') {
+  if (!detail || !isPublishedExhibitionDetail(detail)) {
     return { ok: false, status: 404, error: '展览不存在' };
   }
   await setCachedExhibitionDetail(exhibitionId, detail);
